@@ -433,11 +433,15 @@ class NotebookParser:
             
             # Add model response if not updated
             if f"model_{slot_num}" not in updated_slots:
+                model_content = f"**[{model_prefix}_{slot_num}]**\n\n{result.get('response', '')}"
+                # Also add reasoning trace if available
+                if include_reasoning and result.get('reasoning_trace'):
+                    model_content += f"\n\n**[reasoning_trace_{slot_num}]**\n\n{result.get('reasoning_trace', '')}"
                 new_cells.append({
                     "cell_type": "markdown",
                     "id": f"auto_model_{slot_num}",
                     "metadata": {},
-                    "source": [f"**[{model_prefix}_{slot_num}]**\n\n{result.get('response', '')}"]
+                    "source": [model_content]
                 })
             
             # Add judge output if not updated
@@ -448,8 +452,21 @@ class NotebookParser:
                     "metadata": {},
                     "source": [f"**[llm_judge_{slot_num}]**\n\n{result.get('judge_output', '')}"]
                 })
+            
+            # Add human judge if not updated (always add if we have a review)
+            if f"human_{slot_num}" not in updated_slots and slot_num in huntid_to_review:
+                review = huntid_to_review[slot_num]
+                judgment = review.get('judgment', 'unknown').upper()
+                notes = review.get('notes', '')
+                human_content = f"**Judgment:** {judgment}\n\n**Notes:** {notes}" if notes else f"**Judgment:** {judgment}"
+                new_cells.append({
+                    "cell_type": "markdown",
+                    "id": f"auto_human_{slot_num}",
+                    "metadata": {},
+                    "source": [f"**[human_judge_{slot_num}]**\n\n{human_content}"]
+                })
         
-        # Add reasoning traces at the end if requested
+        # Add reasoning traces at the end if requested (legacy format)
         if include_reasoning:
             reasoning_content = ["**[reasoning_traces]**\n\n"]
             for result in results:
