@@ -726,6 +726,12 @@ function createResultCard(result, slotIndex) {
     const responseText = result.response || 'No response available';
     const slotNum = slotIndex !== undefined ? slotIndex + 1 : result.hunt_id;
     
+    // Frontend deduplication: hide trace if identical to response
+    let reasoningTrace = result.reasoning_trace || '';
+    if (reasoningTrace && (reasoningTrace === responseText || responseText.includes(reasoningTrace))) {
+        reasoningTrace = ''; // Hide duplicate
+    }
+    
     // Store LLM judge data as JSON in data attribute
     const llmJudgeData = JSON.stringify({
         score: result.judge_score,
@@ -746,16 +752,16 @@ function createResultCard(result, slotIndex) {
         </div>
         <div class="expandable-content">
             <div style="margin-bottom: 1rem;">
-                <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Model Response (qwen_${slotNum}):</label>
+                <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Model Response (${shortModel}_${slotNum}):</label>
                 <div class="code-block" style="max-height: 400px; overflow-y: auto; white-space: pre-wrap;">${escapeHtml(responseText)}</div>
             </div>
             
             <!-- Model Reasoning Trace - VISIBLE for human review -->
-            ${result.reasoning_trace ? `
+            ${reasoningTrace ? `
                 <div style="margin-top: 1rem;">
                     <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">🧠 Model Reasoning Trace:</label>
                     <div class="code-block" style="max-height: 300px; overflow-y: auto; font-size: 0.85rem; background: var(--bg-tertiary);">
-                        ${escapeHtml(result.reasoning_trace)}
+                        ${escapeHtml(reasoningTrace)}
                     </div>
                 </div>
             ` : ''}
