@@ -726,10 +726,23 @@ function createResultCard(result, slotIndex) {
     const responseText = result.response || 'No response available';
     const slotNum = slotIndex !== undefined ? slotIndex + 1 : result.hunt_id;
     
-    // Frontend deduplication: hide trace if identical to response
+    // Frontend deduplication: hide trace if similar to response
     let reasoningTrace = result.reasoning_trace || '';
-    if (reasoningTrace && (reasoningTrace === responseText || responseText.includes(reasoningTrace))) {
-        reasoningTrace = ''; // Hide duplicate
+    const responseClean = responseText.trim().toLowerCase();
+    const traceClean = reasoningTrace.trim().toLowerCase();
+    
+    // Check for duplicates: exact match, containment, or high similarity
+    if (reasoningTrace) {
+        const isDuplicate = (
+            traceClean === responseClean ||
+            responseClean.includes(traceClean) ||
+            traceClean.includes(responseClean) ||
+            // High similarity (>80% overlap by length)
+            (traceClean.length > 50 && Math.min(responseClean.length, traceClean.length) / Math.max(responseClean.length, traceClean.length) > 0.8 && responseClean.substring(0, 100) === traceClean.substring(0, 100))
+        );
+        if (isDuplicate) {
+            reasoningTrace = ''; // Hide duplicate
+        }
     }
     
     // Store LLM judge data as JSON in data attribute
