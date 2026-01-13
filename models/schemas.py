@@ -77,6 +77,7 @@ class HuntSession(BaseModel):
     completed_hunts: int = 0
     breaks_found: int = 0
     status: HuntStatus = HuntStatus.PENDING
+    human_reviews: Dict[str, Any] = {}  # Store human review data
 
 
 class HuntEvent(BaseModel):
