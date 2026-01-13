@@ -328,7 +328,7 @@ async function saveToDrive() {
     // Check pending reviews
     const reviewCount = Object.keys(state.humanReviews || {}).length;
     if (reviewCount < 4) {
-        const proceed = confirm(`Only ${reviewCount}/4 human reviews completed. Save to Drive anyway?`);
+        const proceed = confirm(`Only ${reviewCount}/4 human reviews completed. Save to Colab Notebook anyway?`);
         if (!proceed) return;
     }
     
