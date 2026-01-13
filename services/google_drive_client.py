@@ -49,8 +49,7 @@ class GoogleDriveClient:
     def update_file_content(self, file_id: str, content: str) -> bool:
         """Update file content on Google Drive."""
         if not self.service:
-            logger.error("Drive service not initialized")
-            return False
+            raise Exception("Google Drive not configured. Please check service_account.json exists and is valid.")
             
         try:
             # Create media upload
@@ -70,8 +69,22 @@ class GoogleDriveClient:
             return True
             
         except Exception as e:
-            logger.error(f"Error updating file {file_id}: {e}")
-            raise e
+            error_str = str(e)
+            
+            # Parse common Google API errors for user-friendly messages
+            if "403" in error_str or "forbidden" in error_str.lower():
+                raise Exception(f"Permission denied: The service account doesn't have write access to this notebook. Share the notebook with the service account email (found in service_account.json 'client_email') and give it 'Editor' access.")
+            elif "404" in error_str or "not found" in error_str.lower():
+                raise Exception(f"File not found: The notebook with ID '{file_id}' doesn't exist or has been deleted.")
+            elif "401" in error_str or "unauthorized" in error_str.lower():
+                raise Exception("Authentication failed: The service account credentials are invalid or expired. Please check service_account.json.")
+            elif "invalid_grant" in error_str.lower():
+                raise Exception("Invalid credentials: The service account key may have been revoked. Generate a new key from Google Cloud Console.")
+            elif "quota" in error_str.lower():
+                raise Exception("API quota exceeded: Too many requests. Please wait a few minutes and try again.")
+            else:
+                logger.error(f"Error updating file {file_id}: {e}")
+                raise Exception(f"Failed to save to Colab notebook: {error_str}")
 
 # Global instance
 drive_client = GoogleDriveClient()
