@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Model Hunter - Red Team LLM Models</title>
+    <meta name="description" content="Red-team LLM models with parallel hunts and automated judging">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css?v=5">
+</head>
+
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="container header-content">
+            <div class="logo">
+                <span class="logo-icon">🔥</span>
+                <span class="logo-text">Model Hunter</span>
+            </div>
+            <div class="header-actions">
+                <button class="theme-toggle" id="themeToggle" title="Toggle theme">
+                    🌙
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="container">
+        <!-- Notebook Upload Section -->
+        <section class="section" id="uploadSection">
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">
+                        <span class="card-title-icon">📓</span>
+                        Load Notebook
+                    </h2>
+                </div>
+
+                <div id="uploadTab" class="tab-content">
+                    <div class="url-input-section">
+                        <label for="colabUrlInput">Paste Colab Notebook URL</label>
+                        <div class="url-input-group" style="display: flex; flex-direction: column; gap: 0.75rem;">
+                            <input type="url" id="colabUrlInput"
+                                placeholder="https://colab.research.google.com/drive/..." class="url-input"
+                                style="width: 100%;">
+                            <button type="button" id="fetchUrlBtn" class="btn btn-secondary"
+                                style="width: 100%; justify-content: center;">
+                                📥 Fetch
+                            </button>
+                        </div>
+                        <small style="color: var(--text-muted); margin-top: 0.5rem; display: block;">
+                            Supports: Colab share links, Google Drive links, raw .ipynb URLs
+                        </small>
+                    </div>
+
+                    <div class="upload-divider">
+                        <span>or</span>
+                    </div>
+
+                    <div class="file-upload" id="fileDropzone">
+                        <div class="file-upload-icon">📁</div>
+                        <p class="file-upload-text">
+                            <strong>Click to upload</strong> or drag and drop<br>
+                            .ipynb notebook files<br>
+                            <small style="color: var(--text-muted);">Download from Colab: File → Download → Download
+                                .ipynb</small>
+                        </p>
+                        <input type="file" id="fileInput" accept=".ipynb" hidden>
+                    </div>
+                </div>
+
+                <!-- Notebook Info (shown after load) -->
+                <div id="notebookInfo" class="hidden">
+                    <div class="alert alert-success">
+                        ✅ Notebook loaded successfully!
+                    </div>
+                    <div class="notebook-info">
+                        <div class="info-item">
+                            <div class="info-label">Filename</div>
+                            <div class="info-value" id="infoFilename">-</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">Domain</div>
+                            <div class="info-value" id="infoDomain">-</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">Prompt Length</div>
+                            <div class="info-value" id="infoPromptLength">-</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">Previous Attempts</div>
+                            <div class="info-value" id="infoAttempts">-</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Configuration Section -->
+        <section class="section hidden" id="configSection">
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">
+                        <span class="card-title-icon">⚙️</span>
+                        Hunt Configuration
+                    </h2>
+                </div>
+
+                <div class="config-grid">
+                    <div class="form-group">
+                        <label for="parallelWorkers">Number of Hunts</label>
+                        <input type="number" id="parallelWorkers" min="1" max="16" value="4">
+                        <small
+                            style="color: var(--text-secondary); font-size: 0.8rem; margin-top: 0.25rem; display: block;">Min:
+                            4, Max: 16</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="modelSelect">Model</label>
+                        <select id="modelSelect">
+                            <option value="nvidia/nemotron-3-nano-30b-a3b:free">Nemotron-3-Nano (Fast)</option>
+                            <option value="qwen/qwen3-235b-a22b-thinking-2507">Qwen3-235B (Thinking)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="judgeModel">Judge Model</label>
+                        <select id="judgeModel" disabled>
+                            <option value="gpt-5">GPT-5</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div style="margin-top: 1.5rem; text-align: center;">
+                    <button class="btn btn-primary btn-lg" id="startHuntBtn">
+                        🚀 Start Hunt
+                    </button>
+                </div>
+            </div>
+
+            <!-- Notebook Preview Card -->
+            <div class="card" id="notebookPreviewCard">
+                <div class="card-header">
+                    <h2 class="card-title">
+                        <span class="card-title-icon">📋</span>
+                        Notebook Preview
+                    </h2>
+                </div>
+
+                <div class="tabs" id="previewTabs">
+                    <button class="tab active" data-preview="prompt">Prompt</button>
+                    <button class="tab" data-preview="reference">Response Reference</button>
+                    <button class="tab" data-preview="judge">Judge System Prompt</button>
+                </div>
+
+                <div id="previewContent" class="preview-content">
+                    <div id="previewPrompt" class="preview-panel">
+                        <pre class="code-block" id="promptPreview">Loading...</pre>
+                    </div>
+                    <div id="previewReference" class="preview-panel hidden">
+                        <pre class="code-block" id="referencePreview">Loading...</pre>
+                        <div class="judge-reference-section">
+                            <p style="margin-bottom: 0.75rem; font-size: 0.9rem;">
+                                🔍 <strong>Verify Reference Response:</strong> Run the judge on the original reference
+                                response to ensure it's correct.
+                            </p>
+                            <button class="btn judge-reference-btn" id="judgeReferenceBtn">
+                                ⚖️ Judge Reference Response
+                            </button>
+                            <div id="referenceJudgeResult" class="hidden" style="margin-top: 1rem;"></div>
+                        </div>
+                    </div>
+                    <div id="previewJudge" class="preview-panel hidden">
+                        <pre class="code-block" id="judgePreview">Loading...</pre>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Progress Section -->
+        <section class="section hidden" id="progressSection">
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">
+                        <span class="card-title-icon">📊</span>
+                        Hunt Progress
+                    </h2>
+                    <div class="status" id="huntStatus">
+                        <span class="status-dot running"></span>
+                        <span id="statusText">Running...</span>
+                    </div>
+                </div>
+
+                <div class="progress-container">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+                    </div>
+                    <div class="progress-stats">
+                        <span id="progressText">0 / 0 hunts complete</span>
+                        <span id="progressPercent">0%</span>
+                    </div>
+                </div>
+
+                <div style="margin: 1rem 0;">
+                    <label style="font-size: 0.9rem;">Breaks Found:</label>
+                    <div class="breaks-indicator" id="breaksIndicator">
+                        <!-- Dots will be added dynamically -->
+                    </div>
+                </div>
+
+                <!-- Live Results Table -->
+                <div style="overflow-x: auto;">
+                    <table class="results-table">
+                        <thead>
+                            <tr>
+                                <th>Hunt</th>
+                                <th>Model</th>
+                                <th>Status</th>
+                                <th>Score</th>
+                                <th>Issues</th>
+                            </tr>
+                        </thead>
+                        <tbody id="resultsTableBody">
+                            <!-- Rows added dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- Breaking Results Section -->
+        <section class="section hidden" id="resultsSection">
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">
+                        <span class="card-title-icon">🔴</span>
+                        Model Breaking Responses
+                    </h2>
+
+                </div>
+
+                <div id="breakingResults">
+                    <!-- Results cards added dynamically -->
+                </div>
+
+                <div id="saveDriveContainer" class="hidden"
+                    style="padding: 1.5rem; text-align: center; border-top: 1px solid var(--border);">
+                    <button class="btn btn-primary btn-lg" id="saveDriveBtn">
+                        💾 Save to Drive
+                    </button>
+                    <p style="margin-top: 0.5rem; color: var(--text-muted); font-size: 0.9rem;">
+                        Writes all results and reviews back to your Google Drive notebook.
+                    </p>
+                </div>
+
+                <div id="noBreaksMessage" class="empty-state hidden">
+                    <div class="empty-state-icon">🎉</div>
+                    <p>No breaking responses found. The model held strong!</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- All Results Summary -->
+        <section class="section hidden" id="summarySection">
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">
+                        <span class="card-title-icon">📋</span>
+                        Hunt Summary
+                    </h2>
+                </div>
+
+                <div class="notebook-info">
+                    <div class="info-item">
+                        <div class="info-label">Total Hunts</div>
+                        <div class="info-value" id="summaryTotal">-</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Breaks Found</div>
+                        <div class="info-value" id="summaryBreaks">-</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Success Rate</div>
+                        <div class="info-value" id="summarySuccess">-</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Target Met</div>
+                        <div class="info-value" id="summaryMet">-</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Human Blind Judging Modal -->
+    <div id="blindJudgeModal" class="modal hidden">
+        <div class="modal-backdrop"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>🧑‍⚖️ Human Judgment Required</h3>
+                <span class="modal-subtitle">Judge this response before seeing LLM results</span>
+            </div>
+
+            <div class="modal-body">
+                <div class="judge-section">
+                    <label class="judge-label">Hunt #<span id="judgeHuntId">1</span> - Model Response:</label>
+                    <div class="judge-response-box" id="judgeResponseText">
+                        Loading response...
+                    </div>
+                </div>
+
+                <div class="judge-section">
+                    <label class="judge-label">Your Judgment:</label>
+                    <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.5rem;">
+                        Based on the response reference criteria, does this response PASS or FAIL?
+                    </p>
+                    <div class="judge-buttons">
+                        <button class="btn btn-success btn-lg" id="humanJudgePass">
+                            ✅ PASS (Score 1)
+                        </button>
+                        <button class="btn btn-danger btn-lg" id="humanJudgeFail">
+                            ❌ FAIL (Score 0)
+                        </button>
+                        <button class="btn btn-secondary" id="humanJudgeSkip">
+                            Skip
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Revealed after human judges -->
+                <div id="llmJudgeReveal" class="hidden">
+                    <hr style="margin: 1.5rem 0; border-color: var(--border);">
+                    <div class="judge-comparison">
+                        <div class="comparison-item">
+                            <div class="comparison-label">Your Judgment</div>
+                            <div class="comparison-value" id="humanJudgeResult">-</div>
+                        </div>
+                        <div class="comparison-item">
+                            <div class="comparison-label">LLM Judge (GPT-5)</div>
+                            <div class="comparison-value" id="llmJudgeResult">-</div>
+                        </div>
+                        <div class="comparison-item">
+                            <div class="comparison-label">Match?</div>
+                            <div class="comparison-value" id="judgeMatch">-</div>
+                        </div>
+                    </div>
+                    <button class="btn btn-primary" id="nextHuntBtn" style="margin-top: 1rem; width: 100%;">
+                        Next Hunt →
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toastContainer" style="position: fixed; bottom: 1rem; right: 1rem; z-index: 1000;"></div>
+
+    <script src="/static/app.js?v=30"></script>
+</body>
+
+</html>
