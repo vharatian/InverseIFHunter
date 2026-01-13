@@ -167,12 +167,8 @@ class OpenRouterClient:
         response_text = response_text.strip()
         reasoning_trace = reasoning_trace.strip()
         
-        # Deduplicate: If trace is identical to response OR contained within, mark as duplicate
-        # (not clearing, just marking for UI to handle while export can still show something)
-        if response_text == reasoning_trace:
-            reasoning_trace = "[Reasoning trace same as model response]"
-        elif reasoning_trace and reasoning_trace in response_text and len(reasoning_trace) > 50:
-            reasoning_trace = "[Reasoning trace contained within model response]"
+        # No backend deduplication - frontend handles UI display
+        # Export gets the full original trace
             
         return response_text, reasoning_trace
     
@@ -204,15 +200,8 @@ class OpenRouterClient:
         response_text = message.get("content", "") or ""
         reasoning_trace = message.get("reasoning", "") or message.get("thinking", "") or ""
         
-        # Deduplicate: If trace is identical to response (some models do this), clear it
-        if response_text.strip() == reasoning_trace.strip():
-            reasoning_trace = ""
-        
-        # Also clean up if reasoning is just a subset of response
-        if reasoning_trace and reasoning_trace in response_text and len(reasoning_trace) > 50:
-             # It's likely the model just outputted the thought as part of the content
-             # We can try to strip it from content if we want, or just hide the trace
-             reasoning_trace = ""
+        # No backend deduplication - frontend handles UI display
+        # Export gets the full original trace
 
         return response_text.strip(), reasoning_trace.strip()
     

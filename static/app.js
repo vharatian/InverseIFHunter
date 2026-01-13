@@ -739,20 +739,16 @@ function createResultCard(result, slotIndex) {
         hasTrace: !!reasoningTrace
     });
     
-    // Check for duplicates: exact match, containment, similar start, or indicator messages
+    // Check for duplicates in UI only - export still gets full trace
     if (reasoningTrace && traceClean.length > 0) {
-        const first50Match = responseClean.substring(0, 50) === traceClean.substring(0, 50);
-        const isIndicatorMessage = reasoningTrace.startsWith('[Reasoning trace');
         const isDuplicate = (
-            isIndicatorMessage ||  // Backend marked as duplicate
             traceClean === responseClean ||
             responseClean.includes(traceClean) ||
-            traceClean.includes(responseClean) ||
-            first50Match  // If first 50 chars match, likely duplicate
+            traceClean.includes(responseClean)
         );
         if (isDuplicate) {
-            console.log(`Slot ${slotNum}: Hiding duplicate/indicator trace`);
-            reasoningTrace = ''; // Hide from UI (export still has it)
+            console.log(`Slot ${slotNum}: Hiding duplicate trace in UI (export has full trace)`);
+            reasoningTrace = ''; // Hide from UI only
         }
     }
     
