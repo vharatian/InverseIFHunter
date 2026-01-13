@@ -167,11 +167,12 @@ class OpenRouterClient:
         response_text = response_text.strip()
         reasoning_trace = reasoning_trace.strip()
         
-        # Deduplicate: If trace is identical to response OR contained within, clear it
+        # Deduplicate: If trace is identical to response OR contained within, mark as duplicate
+        # (not clearing, just marking for UI to handle while export can still show something)
         if response_text == reasoning_trace:
-            reasoning_trace = ""
+            reasoning_trace = "[Reasoning trace same as model response]"
         elif reasoning_trace and reasoning_trace in response_text and len(reasoning_trace) > 50:
-            reasoning_trace = ""
+            reasoning_trace = "[Reasoning trace contained within model response]"
             
         return response_text, reasoning_trace
     
