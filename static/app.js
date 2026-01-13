@@ -731,16 +731,25 @@ function createResultCard(result, slotIndex) {
     const responseClean = responseText.trim().toLowerCase();
     const traceClean = reasoningTrace.trim().toLowerCase();
     
-    // Check for duplicates: exact match, containment, or high similarity
-    if (reasoningTrace) {
+    // Debug logging
+    console.log(`Slot ${slotNum} dedup check:`, {
+        responseLen: responseClean.length,
+        traceLen: traceClean.length,
+        first50Match: responseClean.substring(0, 50) === traceClean.substring(0, 50),
+        hasTrace: !!reasoningTrace
+    });
+    
+    // Check for duplicates: exact match, containment, or similar start
+    if (reasoningTrace && traceClean.length > 0) {
+        const first50Match = responseClean.substring(0, 50) === traceClean.substring(0, 50);
         const isDuplicate = (
             traceClean === responseClean ||
             responseClean.includes(traceClean) ||
             traceClean.includes(responseClean) ||
-            // High similarity (>80% overlap by length)
-            (traceClean.length > 50 && Math.min(responseClean.length, traceClean.length) / Math.max(responseClean.length, traceClean.length) > 0.8 && responseClean.substring(0, 100) === traceClean.substring(0, 100))
+            first50Match  // If first 50 chars match, likely duplicate
         );
         if (isDuplicate) {
+            console.log(`Slot ${slotNum}: Hiding duplicate trace`);
             reasoningTrace = ''; // Hide duplicate
         }
     }
