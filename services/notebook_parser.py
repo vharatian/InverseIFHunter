@@ -395,8 +395,12 @@ class NotebookParser:
                     if slot_num in slot_to_result:
                         result = slot_to_result[slot_num]
                         new_content = f"**[{heading}]**\n\n{result.get('response', '')}"
+                        # Also include reasoning trace if available
+                        if result.get('reasoning_trace'):
+                            new_content += f"\n\n**[reasoning_trace_{slot_num}]**\n\n{result.get('reasoning_trace', '')}"
                         cell['source'] = [new_content]
                         updated_slots.add(f"model_{slot_num}")
+                        print(f"DEBUG: Updated model_{slot_num} cell with response + reasoning")
                 
                 # Update LLM judge slots
                 judge_match = self.LLM_JUDGE_PATTERN.match(heading)
@@ -407,6 +411,7 @@ class NotebookParser:
                         new_content = f"**[{heading}]**\n\n{result.get('judge_output', '')}"
                         cell['source'] = [new_content]
                         updated_slots.add(f"judge_{slot_num}")
+                        print(f"DEBUG: Updated judge_{slot_num} cell")
                 
                 # Update human judge slots
                 human_match = self.HUMAN_JUDGE_PATTERN.match(heading) if hasattr(self, 'HUMAN_JUDGE_PATTERN') else re.match(r'human_judge_(\d+)', heading)
@@ -420,6 +425,7 @@ class NotebookParser:
                         new_content = f"**[{heading}]**\n\n{human_content}"
                         cell['source'] = [new_content]
                         updated_slots.add(f"human_{slot_num}")
+                        print(f"DEBUG: Updated human_{slot_num} cell with judgment={judgment}")
                 
                 # Update attempts counter
                 if heading == 'number_of_attempts_made':
@@ -483,10 +489,13 @@ class NotebookParser:
                 })
         
         # Insert new cells before the last cell or at the end
+        print(f"DEBUG: Updated slots: {updated_slots}")
+        print(f"DEBUG: Adding {len(new_cells)} new cells")
         if new_cells:
             cells.extend(new_cells)
         
         notebook['cells'] = cells
+        print(f"DEBUG: Final notebook has {len(cells)} cells")
         return json.dumps(notebook, indent=2)
 
 
