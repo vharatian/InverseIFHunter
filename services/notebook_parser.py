@@ -365,12 +365,14 @@ class NotebookParser:
             slot_num = i + 1
             slot_to_result[slot_num] = result
         
-        # Build mapping from hunt_id to human review
+        # Build mapping from slot number to human review
         huntid_to_review = {}
+        print(f"DEBUG: human_reviews received: {human_reviews}")
         for hunt_id_str, review in human_reviews.items():
             slot_num = review.get('slotNum')
-            if slot_num:
-                huntid_to_review[slot_num] = review
+            if slot_num is not None:
+                huntid_to_review[int(slot_num)] = review
+                print(f"DEBUG: Slot {slot_num} has review: {review.get('judgment')}, notes: {review.get('notes', '')[:30]}...")
         
         # Update existing cells and track which slots we've updated
         updated_slots = set()
