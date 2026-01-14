@@ -66,6 +66,7 @@ const elements = {
     referencePreview: document.getElementById('referencePreview'),
     judgePreview: document.getElementById('judgePreview'),
     judgeReferenceBtn: document.getElementById('judgeReferenceBtn'),
+    saveResponseBtn: document.getElementById('saveReponseBtn'),  // Save & Re-judge button
     referenceJudgeResult: document.getElementById('referenceJudgeResult'),
     
     // Progress
@@ -1365,6 +1366,9 @@ function initEventListeners() {
     
     // Judge reference response button
     elements.judgeReferenceBtn?.addEventListener('click', judgeReferenceResponse);
+    
+    // Save response to Colab & Re-judge button
+    elements.saveResponseBtn?.addEventListener('click', saveAndRejudge);
 }
 
 async function judgeReferenceResponse() {
@@ -1431,7 +1435,98 @@ async function judgeReferenceResponse() {
         showToast(`Error: ${error.message}`, 'error');
     } finally {
         btn.disabled = false;
-        btn.textContent = '⚖️ Judge Reference Response';
+        btn.textContent = '⚖️ Judge Only';
+    }
+}
+
+// Save edited response to Colab and re-judge
+async function saveAndRejudge() {
+    if (!state.sessionId) {
+        showToast('Please load a notebook first', 'error');
+        return;
+    }
+    
+    const btn = elements.saveResponseBtn;
+    const resultDiv = elements.referenceJudgeResult;
+    const newResponse = elements.referencePreview.value;
+    
+    if (!newResponse.trim()) {
+        showToast('Response cannot be empty', 'error');
+        return;
+    }
+    
+    try {
+        btn.disabled = true;
+        btn.textContent = '💾 Saving...';
+        resultDiv.classList.add('hidden');
+        
+        // Step 1: Save to Colab
+        const saveResponse = await fetch(`/api/update-response/${state.sessionId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ response: newResponse })
+        });
+        
+        if (!saveResponse.ok) {
+            const error = await saveResponse.json();
+            throw new Error(error.detail || 'Failed to save to Colab');
+        }
+        
+        showToast('✅ Saved to Colab!', 'success');
+        btn.textContent = '⚖️ Re-judging...';
+        
+        // Step 2: Re-judge
+        const judgeResponse = await fetch(`/api/judge-reference/${state.sessionId}`, {
+            method: 'POST'
+        });
+        
+        if (!judgeResponse.ok) {
+            const error = await judgeResponse.json();
+            throw new Error(error.detail || 'Judge failed');
+        }
+        
+        const data = await judgeResponse.json();
+        
+        // Display result
+        const isPassing = data.is_passing;
+        const scoreClass = isPassing ? 'score-1' : 'score-0';
+        const scoreEmoji = isPassing ? '✅' : '❌';
+        
+        // Update reference validated state
+        state.referenceValidated = isPassing;
+        
+        // Enable/disable Start Hunt based on result
+        if (elements.startHuntBtn) {
+            if (isPassing) {
+                elements.startHuntBtn.disabled = false;
+                elements.startHuntBtn.title = '';
+            } else {
+                elements.startHuntBtn.disabled = true;
+                elements.startHuntBtn.title = 'Reference must pass validation before starting hunt';
+            }
+        }
+        
+        resultDiv.innerHTML = `
+            <div style="padding: 1rem; background: var(--bg-primary); border-radius: 8px; border: 1px solid ${isPassing ? 'var(--success)' : 'var(--danger)'};">
+                <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
+                    <span class="score-badge ${scoreClass}">${scoreEmoji} Score: ${data.score}</span>
+                    <span style="font-weight: 600;">${isPassing ? '✅ Saved & PASSES - Hunt Enabled!' : '❌ Saved but FAILS - Try editing again'}</span>
+                </div>
+                <div style="margin-top: 0.75rem;">
+                    <label style="font-weight: 600; font-size: 0.9rem;">Judge Explanation:</label>
+                    <p style="margin-top: 0.25rem; font-size: 0.9rem; color: var(--text-secondary);">${escapeHtml(data.explanation || 'No explanation provided')}</p>
+                </div>
+            </div>
+        `;
+        resultDiv.classList.remove('hidden');
+        
+        showToast(`Saved & ${isPassing ? 'PASSES' : 'FAILS'} (Score: ${data.score})`, isPassing ? 'success' : 'warning');
+        
+    } catch (error) {
+        showToast(`Error: ${error.message}`, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '💾 Save to Colab & Re-judge';
     }
 }
 

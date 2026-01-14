@@ -145,15 +145,24 @@
                         <pre class="code-block" id="promptPreview">Loading...</pre>
                     </div>
                     <div id="previewReference" class="preview-panel">
-                        <pre class="code-block" id="referencePreview">Loading...</pre>
-                        <div class="judge-reference-section">
-                            <p style="margin-bottom: 0.75rem; font-size: 0.9rem;">
-                                🔍 <strong>Verify Reference Response:</strong> Run the judge on the original reference
-                                response to ensure it's correct.
+                        <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Expected Response
+                            (editable):</label>
+                        <textarea id="referencePreview" class="code-block"
+                            style="width: 100%; min-height: 200px; resize: vertical; font-family: monospace; padding: 0.75rem; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-primary); color: var(--text-primary);">Loading...</textarea>
+
+                        <div class="judge-reference-section" style="margin-top: 1rem;">
+                            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                                <button class="btn btn-primary" id="saveReponseBtn" style="flex: 1;">
+                                    💾 Save to Colab & Re-judge
+                                </button>
+                                <button class="btn btn-secondary" id="judgeReferenceBtn" style="flex: 1;">
+                                    ⚖️ Judge Only
+                                </button>
+                            </div>
+                            <p style="margin-top: 0.75rem; font-size: 0.85rem; color: var(--text-muted);">
+                                ✏️ Edit the response above, then click <strong>Save to Colab & Re-judge</strong> to
+                                update the notebook and verify.
                             </p>
-                            <button class="btn judge-reference-btn" id="judgeReferenceBtn">
-                                ⚖️ Judge Reference Response
-                            </button>
                             <div id="referenceJudgeResult" class="hidden" style="margin-top: 1rem;"></div>
                         </div>
                     </div>
@@ -342,7 +351,7 @@
     <!-- Toast Container -->
     <div id="toastContainer" style="position: fixed; bottom: 1rem; right: 1rem; z-index: 1000;"></div>
 
-    <script src="/static/app.js?v=100"></script>
+    <script src="/static/app.js?v=110"></script>
 </body>
 
 </html>

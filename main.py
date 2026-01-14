@@ -207,6 +207,72 @@ async def update_config(session_id: str, config: HuntConfig):
     return {"success": True, "config": config.model_dump()}
 
 
+class UpdateResponseRequest(BaseModel):
+    response: str
+
+
+@app.post("/api/update-response/{session_id}")
+async def update_response(session_id: str, request: UpdateResponseRequest):
+    """Update the [response] section in the notebook and save to Colab."""
+    session = hunt_engine.get_session(session_id)
+    if not session:
+        raise HTTPException(404, "Session not found")
+    
+    # Get session storage for URL and original content
+    storage = load_session_storage(session_id)
+    if not storage or "url" not in storage:
+        raise HTTPException(400, "No source URL found - cannot save back to Colab")
+    
+    try:
+        # Parse original notebook content
+        original_content = storage.get("original_content", "{}")
+        notebook_data = json.loads(original_content)
+        
+        # Find and update the [response] cell
+        updated = False
+        for cell in notebook_data.get("cells", []):
+            if cell.get("cell_type") == "markdown":
+                source = "".join(cell.get("source", []))
+                if "**[response]**" in source.lower() or "**[response]**" in source:
+                    # Update the cell content, preserving the heading
+                    lines = source.split("\n")
+                    new_source = lines[0] + "\n\n" + request.response
+                    cell["source"] = [new_source]
+                    updated = True
+                    break
+        
+        if not updated:
+            raise HTTPException(400, "Could not find [response] cell in notebook")
+        
+        # Save to Google Drive
+        from services.google_drive_client import drive_client
+        file_id = drive_client.get_file_id_from_url(storage["url"])
+        if not file_id:
+            raise HTTPException(400, "Could not extract file ID from URL")
+        
+        # Convert notebook back to JSON
+        updated_content = json.dumps(notebook_data, indent=2)
+        
+        # Update file on Drive
+        success = drive_client.update_file_content(file_id, updated_content)
+        if not success:
+            raise HTTPException(500, "Failed to update file on Google Drive")
+        
+        # Update session's notebook with new response
+        session.notebook.response = request.response
+        
+        # Update storage with new content
+        storage["original_content"] = updated_content
+        save_session_storage(session_id, storage)
+        
+        return {"success": True, "message": "Response saved to Colab notebook"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Error saving to Colab: {str(e)}")
+
+
 @app.post("/api/judge-reference/{session_id}")
 async def judge_reference(session_id: str):
     """Judge the original reference response to verify it's correct."""
@@ -216,8 +282,9 @@ async def judge_reference(session_id: str):
     
     notebook = session.notebook
     
-    if not notebook.response_reference:
-        raise HTTPException(400, "No reference response available in notebook")
+    # The 'response' is the expected answer to judge
+    if not notebook.response:
+        raise HTTPException(400, "No expected response available in notebook - add a **[response]** cell")
     
     try:
         from services.openai_client import get_openai_judge_client
@@ -225,8 +292,8 @@ async def judge_reference(session_id: str):
         
         judge_result = await judge.judge_response(
             prompt=notebook.prompt,
-            student_response=notebook.response_reference,
-            response_reference=notebook.response_reference,  # Compare to itself
+            student_response=notebook.response,  # Judge the expected response
+            response_reference=notebook.response_reference,  # Against the criteria
             judge_system_prompt=notebook.judge_system_prompt,
             judge_prompt_template=notebook.judge_prompt_template,
             model="gpt-5"
