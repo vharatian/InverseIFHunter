@@ -14,6 +14,7 @@
 const state = {
     sessionId: null,
     notebook: null,
+    referenceValidated: false,  // Must pass reference judge before hunt
     config: {
         parallel_workers: 4,
         target_breaks: 4,
@@ -25,6 +26,7 @@ const state = {
     },
     results: [],
     isHunting: false,
+    humanReviews: {},  // Explicit init
     
     // Blind judging state
     blindJudging: {
@@ -374,6 +376,34 @@ function populatePreviewTabs(notebook) {
     elements.promptPreview.textContent = notebook.prompt || 'No prompt found';
     elements.referencePreview.textContent = notebook.response_reference || 'No reference found';
     elements.judgePreview.textContent = notebook.judge_system_prompt || 'No judge prompt found';
+    
+    // Parse and store criteria from response_reference
+    state.criteria = parseCriteria(notebook.response_reference || '');
+    console.log('Parsed criteria:', state.criteria);
+}
+
+// Parse criteria from response_reference text (looks for JSON array with id/criteria fields)
+function parseCriteria(responseReference) {
+    try {
+        // Try to find JSON array in the response reference
+        const jsonMatch = responseReference.match(/\[\s*\{[^]*?\}\s*\]/);
+        if (jsonMatch) {
+            const criteriaArray = JSON.parse(jsonMatch[0]);
+            if (Array.isArray(criteriaArray)) {
+                return criteriaArray.filter(c => c.id && c.criteria);
+            }
+        }
+    } catch (e) {
+        console.warn('Could not parse criteria from response_reference:', e);
+    }
+    
+    // Fallback: create default criteria if none found
+    return [
+        { id: 'C1', criteria: 'Response meets formatting requirements' },
+        { id: 'C2', criteria: 'Response follows exact instructions' },
+        { id: 'C3', criteria: 'Response avoids violations' },
+        { id: 'C4', criteria: 'Response maintains context' }
+    ];
 }
 
 function initPreviewTabs() {
@@ -786,14 +816,33 @@ function createResultCard(result, slotIndex) {
                 </div>
             ` : ''}
             
-            <!-- Human Review Section -->
+            <!-- Human Review Section with Criteria -->
             <div class="human-review-section" style="margin-top: 1.5rem; padding: 1rem; background: var(--bg-tertiary); border-radius: 8px; border: 1px solid var(--border);">
                 <label style="font-weight: 600; display: block; margin-bottom: 0.75rem;">📝 Human Review (human_judge_${slotNum}):</label>
-                <div class="human-review-buttons" style="display: flex; gap: 0.5rem; margin-bottom: 0.75rem;">
-                    <button class="btn btn-success human-pass-btn" data-hunt-id="${result.hunt_id}" style="flex: 1;">✅ Pass</button>
-                    <button class="btn btn-danger human-fail-btn" data-hunt-id="${result.hunt_id}" style="flex: 1;">❌ Fail</button>
+                
+                <!-- Grading Basis - Per Criterion -->
+                <div class="criteria-grading" data-hunt-id="${result.hunt_id}" style="margin-bottom: 1rem;">
+                    <label style="font-weight: 500; font-size: 0.9rem; display: block; margin-bottom: 0.5rem;">Grading Basis:</label>
+                    ${(state.criteria || []).map(c => `
+                        <div class="criterion-row" data-criterion-id="${c.id}" style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem; margin-bottom: 0.25rem; background: var(--bg-primary); border-radius: 6px; border: 1px solid var(--border);">
+                            <span style="font-weight: 600; min-width: 35px;">${c.id}:</span>
+                            <span style="flex: 1; font-size: 0.85rem; color: var(--text-secondary);" title="${c.criteria}">${c.criteria.substring(0, 60)}${c.criteria.length > 60 ? '...' : ''}</span>
+                            <div class="criterion-buttons" style="display: flex; gap: 0.25rem;">
+                                <button class="btn btn-small criterion-pass" data-hunt-id="${result.hunt_id}" data-criterion="${c.id}" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; background: transparent; border: 1px solid var(--success); color: var(--success);">PASS</button>
+                                <button class="btn btn-small criterion-fail" data-hunt-id="${result.hunt_id}" data-criterion="${c.id}" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; background: transparent; border: 1px solid var(--danger); color: var(--danger);">FAIL</button>
+                            </div>
+                        </div>
+                    `).join('')}
                 </div>
-                <textarea class="human-review-notes" data-hunt-id="${result.hunt_id}" placeholder="Enter your review notes..." style="width: 100%; min-height: 80px; padding: 0.75rem; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-primary); color: var(--text-primary); font-size: 0.9rem; resize: vertical;"></textarea>
+                
+                <!-- Explanation -->
+                <div style="margin-top: 0.75rem;">
+                    <label style="font-weight: 500; font-size: 0.9rem; display: block; margin-bottom: 0.25rem;">Explanation:</label>
+                    <textarea class="human-review-notes" data-hunt-id="${result.hunt_id}" placeholder="Explain your grading decisions (which criteria failed and why)..." style="width: 100%; min-height: 80px; padding: 0.75rem; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-primary); color: var(--text-primary); font-size: 0.9rem; resize: vertical;"></textarea>
+                </div>
+                
+                <!-- Submit Button -->
+                <button class="btn btn-primary submit-human-review-btn" data-hunt-id="${result.hunt_id}" style="margin-top: 0.75rem; width: 100%;">✅ Submit Human Review</button>
                 <div class="human-review-status" data-hunt-id="${result.hunt_id}" style="margin-top: 0.5rem; font-size: 0.85rem; color: var(--text-muted);"></div>
             </div>
             
@@ -824,15 +873,41 @@ function createResultCard(result, slotIndex) {
         card.classList.toggle('open');
     });
     
-    // Human review button handlers
-    card.querySelector('.human-pass-btn').addEventListener('click', (e) => {
-        e.stopPropagation();
-        handleHumanReview(result.hunt_id, 'pass', card, slotNum);
+    // Criterion pass/fail button handlers
+    card.querySelectorAll('.criterion-pass').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const criterion = btn.dataset.criterion;
+            const row = btn.closest('.criterion-row');
+            row.querySelector('.criterion-pass').classList.add('active');
+            row.querySelector('.criterion-pass').style.background = 'var(--success)';
+            row.querySelector('.criterion-pass').style.color = 'white';
+            row.querySelector('.criterion-fail').classList.remove('active');
+            row.querySelector('.criterion-fail').style.background = 'transparent';
+            row.querySelector('.criterion-fail').style.color = 'var(--danger)';
+            row.dataset.grade = 'pass';
+        });
     });
     
-    card.querySelector('.human-fail-btn').addEventListener('click', (e) => {
+    card.querySelectorAll('.criterion-fail').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const criterion = btn.dataset.criterion;
+            const row = btn.closest('.criterion-row');
+            row.querySelector('.criterion-fail').classList.add('active');
+            row.querySelector('.criterion-fail').style.background = 'var(--danger)';
+            row.querySelector('.criterion-fail').style.color = 'white';
+            row.querySelector('.criterion-pass').classList.remove('active');
+            row.querySelector('.criterion-pass').style.background = 'transparent';
+            row.querySelector('.criterion-pass').style.color = 'var(--success)';
+            row.dataset.grade = 'fail';
+        });
+    });
+    
+    // Submit human review button
+    card.querySelector('.submit-human-review-btn').addEventListener('click', (e) => {
         e.stopPropagation();
-        handleHumanReview(result.hunt_id, 'fail', card, slotNum);
+        submitHumanReview(result.hunt_id, card, slotNum);
     });
     
     // Reveal button handler
@@ -890,6 +965,75 @@ function handleHumanReview(huntId, judgment, card, slotNum) {
     }
     
     showToast(`Slot ${slotNum} marked as ${judgment.toUpperCase()}. Click to reveal LLM Judge.`, 'success');
+    
+    // Check if all 4 reviews are done
+    checkAllReviewsComplete();
+}
+
+// New criteria-based human review submission
+function submitHumanReview(huntId, card, slotNum) {
+    const notes = card.querySelector(`.human-review-notes[data-hunt-id="${huntId}"]`).value;
+    const statusEl = card.querySelector(`.human-review-status[data-hunt-id="${huntId}"]`);
+    const criteriaGrading = card.querySelector(`.criteria-grading[data-hunt-id="${huntId}"]`);
+    
+    // Collect grades for each criterion
+    const criterionRows = criteriaGrading.querySelectorAll('.criterion-row');
+    const grading = {};
+    let allGraded = true;
+    let anyFailed = false;
+    
+    criterionRows.forEach(row => {
+        const criterionId = row.dataset.criterionId;
+        const grade = row.dataset.grade;
+        if (!grade) {
+            allGraded = false;
+        } else {
+            grading[criterionId] = grade;
+            if (grade === 'fail') anyFailed = true;
+        }
+    });
+    
+    // Validate all criteria are graded
+    if (!allGraded) {
+        showToast('Please grade all criteria before submitting', 'error');
+        return;
+    }
+    
+    // Determine overall judgment based on criteria
+    const overallJudgment = anyFailed ? 'fail' : 'pass';
+    
+    // Store human review in state with slot info and criteria
+    if (!state.humanReviews) state.humanReviews = {};
+    state.humanReviews[huntId] = {
+        judgment: overallJudgment,
+        grading_basis: grading,  // {C1: 'pass', C2: 'fail', ...}
+        explanation: notes,
+        slotNum: slotNum,
+        timestamp: new Date().toISOString()
+    };
+    
+    // Update UI
+    const submitBtn = card.querySelector('.submit-human-review-btn');
+    submitBtn.disabled = true;
+    submitBtn.textContent = overallJudgment === 'pass' ? '✅ Submitted: PASS' : '❌ Submitted: FAIL';
+    submitBtn.style.background = overallJudgment === 'pass' ? 'var(--success)' : 'var(--danger)';
+    
+    // Show detailed status
+    const gradingDisplay = Object.entries(grading).map(([k, v]) => 
+        `${k}: ${v === 'pass' ? '✅' : '❌'}`
+    ).join(' | ');
+    statusEl.innerHTML = `<strong>${overallJudgment.toUpperCase()}</strong> - ${gradingDisplay}`;
+    statusEl.style.color = overallJudgment === 'pass' ? 'var(--success)' : 'var(--danger)';
+    
+    // Enable reveal button
+    let revealBtn = card.querySelector('.reveal-llm-btn');
+    if (revealBtn) {
+        revealBtn.disabled = false;
+        revealBtn.style.opacity = '1';
+        revealBtn.textContent = '👁️ Reveal LLM Judge';
+    }
+    
+    showToast(`Slot ${slotNum} submitted as ${overallJudgment.toUpperCase()}`, 'success');
     
     // Check if all 4 reviews are done
     checkAllReviewsComplete();
@@ -1250,11 +1394,25 @@ async function judgeReferenceResponse() {
         const scoreClass = isPassing ? 'score-1' : 'score-0';
         const scoreEmoji = isPassing ? '✅' : '❌';
         
+        // Update reference validated state
+        state.referenceValidated = isPassing;
+        
+        // Enable/disable Start Hunt based on result
+        if (elements.startHuntBtn) {
+            if (isPassing) {
+                elements.startHuntBtn.disabled = false;
+                elements.startHuntBtn.title = '';
+            } else {
+                elements.startHuntBtn.disabled = true;
+                elements.startHuntBtn.title = 'Reference must pass validation before starting hunt';
+            }
+        }
+        
         resultDiv.innerHTML = `
             <div style="padding: 1rem; background: var(--bg-primary); border-radius: 8px; border: 1px solid ${isPassing ? 'var(--success)' : 'var(--danger)'};">
                 <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
                     <span class="score-badge ${scoreClass}">${scoreEmoji} Score: ${data.score}</span>
-                    <span style="font-weight: 600;">${isPassing ? 'Reference PASSES' : 'Reference FAILS'}</span>
+                    <span style="font-weight: 600;">${isPassing ? 'Reference PASSES - Hunt Enabled!' : 'Reference FAILS - Fix before hunting'}</span>
                 </div>
                 <div style="margin-top: 0.75rem;">
                     <label style="font-weight: 600; font-size: 0.9rem;">Judge Explanation:</label>
@@ -1283,6 +1441,12 @@ function init() {
     initFileUpload();
     initPreviewTabs();
     initEventListeners();
+    
+    // Disable Start Hunt until reference is validated
+    if (elements.startHuntBtn) {
+        elements.startHuntBtn.disabled = true;
+        elements.startHuntBtn.title = 'Validate the reference response first (click "Judge Reference Response")';
+    }
     
     console.log('🔥 Model Hunter initialized');
 }
