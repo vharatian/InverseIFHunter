@@ -163,6 +163,7 @@ async def fetch_notebook(request: NotebookURLRequest):
                 "metadata": parsed.metadata,
                 "prompt": parsed.prompt,
                 "prompt_length": len(parsed.prompt),
+                "response": parsed.response,  # The expected response from [response] heading
                 "response_reference": parsed.response_reference,
                 "judge_system_prompt": parsed.judge_system_prompt,
                 "judge_prompt_template": parsed.judge_prompt_template,
