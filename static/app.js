@@ -377,7 +377,8 @@ async function saveToDrive() {
 
 function populatePreviewTabs(notebook) {
     elements.promptPreview.textContent = notebook.prompt || 'No prompt found';
-    elements.referencePreview.textContent = notebook.response_reference || 'No reference found';
+    // Show the actual expected response, not the criteria JSON
+    elements.referencePreview.textContent = notebook.response || 'No expected response found';
     elements.judgePreview.textContent = notebook.judge_system_prompt || 'No judge prompt found';
     
     // Parse and store criteria from response_reference
