@@ -828,10 +828,10 @@ function createResultCard(result, slotIndex) {
                 <div class="criteria-grading" data-hunt-id="${result.hunt_id}" style="margin-bottom: 1rem;">
                     <label style="font-weight: 500; font-size: 0.9rem; display: block; margin-bottom: 0.5rem;">Grading Basis:</label>
                     ${(state.criteria || []).map(c => `
-                        <div class="criterion-row" data-criterion-id="${c.id}" style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem; margin-bottom: 0.25rem; background: var(--bg-primary); border-radius: 6px; border: 1px solid var(--border);">
+                        <div class="criterion-row" data-criterion-id="${c.id}" style="display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0.5rem; padding: 0.5rem; margin-bottom: 0.5rem; background: var(--bg-primary); border-radius: 6px; border: 1px solid var(--border);">
                             <span style="font-weight: 600; min-width: 35px;">${c.id}:</span>
-                            <span style="flex: 1; font-size: 0.85rem; color: var(--text-secondary);" title="${c.criteria}">${c.criteria.substring(0, 60)}${c.criteria.length > 60 ? '...' : ''}</span>
-                            <div class="criterion-buttons" style="display: flex; gap: 0.25rem;">
+                            <span style="flex: 1; font-size: 0.85rem; color: var(--text-secondary); word-break: break-word; min-width: 200px;">${escapeHtml(c.criteria)}</span>
+                            <div class="criterion-buttons" style="display: flex; gap: 0.25rem; flex-shrink: 0;">
                                 <button class="btn btn-small criterion-pass" data-hunt-id="${result.hunt_id}" data-criterion="${c.id}" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; background: transparent; border: 1px solid var(--success); color: var(--success);">PASS</button>
                                 <button class="btn btn-small criterion-fail" data-hunt-id="${result.hunt_id}" data-criterion="${c.id}" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; background: transparent; border: 1px solid var(--danger); color: var(--danger);">FAIL</button>
                             </div>

@@ -463,8 +463,23 @@ class NotebookParser:
             if f"human_{slot_num}" not in updated_slots and slot_num in huntid_to_review:
                 review = huntid_to_review[slot_num]
                 judgment = review.get('judgment', 'unknown').upper()
-                notes = review.get('notes', '')
-                human_content = f"**Judgment:** {judgment}\n\n**Notes:** {notes}" if notes else f"**Judgment:** {judgment}"
+                
+                # Format grading basis (C1: PASS, C2: FAIL, etc.)
+                grading_basis = review.get('grading_basis', {})
+                if grading_basis:
+                    grading_lines = [f"{k}: {v.upper()}" for k, v in grading_basis.items()]
+                    grading_str = ", ".join(grading_lines)
+                else:
+                    grading_str = "No criteria grading"
+                
+                # Get explanation (was previously 'notes')
+                explanation = review.get('explanation', '') or review.get('notes', '')
+                
+                # Build human content
+                human_content = f"**Judgment:** {judgment}\n\n**Grading Basis:** {grading_str}"
+                if explanation:
+                    human_content += f"\n\n**Explanation:** {explanation}"
+                    
                 new_cells.append({
                     "cell_type": "markdown",
                     "id": f"auto_human_{slot_num}",
