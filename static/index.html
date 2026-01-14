@@ -135,16 +135,16 @@
                 </div>
 
                 <div class="tabs" id="previewTabs">
-                    <button class="tab active" data-preview="prompt">Prompt</button>
-                    <button class="tab" data-preview="reference">Response Reference</button>
+                    <button class="tab" data-preview="prompt">Prompt</button>
+                    <button class="tab active" data-preview="reference">Response</button>
                     <button class="tab" data-preview="judge">Judge System Prompt</button>
                 </div>
 
                 <div id="previewContent" class="preview-content">
-                    <div id="previewPrompt" class="preview-panel">
+                    <div id="previewPrompt" class="preview-panel hidden">
                         <pre class="code-block" id="promptPreview">Loading...</pre>
                     </div>
-                    <div id="previewReference" class="preview-panel hidden">
+                    <div id="previewReference" class="preview-panel">
                         <pre class="code-block" id="referencePreview">Loading...</pre>
                         <div class="judge-reference-section">
                             <p style="margin-bottom: 0.75rem; font-size: 0.9rem;">
@@ -342,7 +342,7 @@
     <!-- Toast Container -->
     <div id="toastContainer" style="position: fixed; bottom: 1rem; right: 1rem; z-index: 1000;"></div>
 
-    <script src="/static/app.js?v=85"></script>
+    <script src="/static/app.js?v=90"></script>
 </body>
 
 </html>
