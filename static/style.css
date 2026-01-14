@@ -659,7 +659,8 @@ label {
 
 .expandable-card.open .expandable-content {
     padding: 1rem;
-    max-height: 1000px;
+    max-height: 600px;
+    overflow-y: auto;
     border-top: 1px solid var(--border);
 }
 

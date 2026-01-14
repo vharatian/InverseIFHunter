@@ -98,7 +98,7 @@
                 <div class="config-grid">
                     <div class="form-group">
                         <label for="parallelWorkers">Number of Hunts</label>
-                        <input type="number" id="parallelWorkers" min="1" max="16" value="4">
+                        <input type="number" id="parallelWorkers" min="4" max="16" value="4">
                         <small
                             style="color: var(--text-secondary); font-size: 0.8rem; margin-top: 0.25rem; display: block;">Min:
                             4, Max: 16</small>
@@ -152,11 +152,11 @@
 
                         <div class="judge-reference-section" style="margin-top: 1rem;">
                             <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                                <button class="btn btn-primary" id="saveReponseBtn" style="flex: 1;">
-                                    💾 Save to Colab & Re-judge
-                                </button>
                                 <button class="btn btn-secondary" id="judgeReferenceBtn" style="flex: 1;">
                                     ⚖️ Judge Only
+                                </button>
+                                <button class="btn btn-primary" id="saveReponseBtn" style="flex: 1;">
+                                    💾 Save to Colab & Re-judge
                                 </button>
                             </div>
                             <p style="margin-top: 0.75rem; font-size: 0.85rem; color: var(--text-muted);">
@@ -351,7 +351,7 @@
     <!-- Toast Container -->
     <div id="toastContainer" style="position: fixed; bottom: 1rem; right: 1rem; z-index: 1000;"></div>
 
-    <script src="/static/app.js?v=115"></script>
+    <script src="/static/app.js?v=120"></script>
 </body>
 
 </html>

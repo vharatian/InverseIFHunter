@@ -811,14 +811,18 @@ function createResultCard(result, slotIndex) {
             </div>
             
             <!-- Model Reasoning Trace - VISIBLE for human review -->
-            ${reasoningTrace ? `
-                <div style="margin-top: 1rem;">
-                    <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">🧠 Model Reasoning Trace:</label>
+            <div style="margin-top: 1rem;">
+                <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">🧠 Model Reasoning Trace:</label>
+                ${reasoningTrace ? `
                     <div class="code-block" style="max-height: 300px; overflow-y: auto; font-size: 0.85rem; background: var(--bg-tertiary);">
                         ${escapeHtml(reasoningTrace)}
                     </div>
-                </div>
-            ` : ''}
+                ` : `
+                    <div style="padding: 0.75rem; background: var(--bg-tertiary); border-radius: 6px; border: 1px dashed var(--border); color: var(--text-muted); font-style: italic; font-size: 0.85rem;">
+                        ⚠️ No reasoning trace available. The model either doesn't support chain-of-thought reasoning, or the reasoning was empty for this response.
+                    </div>
+                `}
+            </div>
             
             <!-- Human Review Section with Criteria -->
             <div class="human-review-section" style="margin-top: 1.5rem; padding: 1rem; background: var(--bg-tertiary); border-radius: 8px; border: 1px solid var(--border);">

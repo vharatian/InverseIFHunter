@@ -219,7 +219,7 @@ async def update_response(session_id: str, request: UpdateResponseRequest):
         raise HTTPException(404, "Session not found")
     
     # Get session storage for URL and original content
-    storage = load_session_storage(session_id)
+    storage = get_session_storage(session_id)
     if not storage or "url" not in storage:
         raise HTTPException(400, "No source URL found - cannot save back to Colab")
     
