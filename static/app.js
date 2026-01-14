@@ -140,35 +140,38 @@ function initFileUpload() {
     const dropzone = elements.fileDropzone;
     const input = elements.fileInput;
     
-    dropzone.addEventListener('click', () => input.click());
-    
-    dropzone.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        dropzone.classList.add('dragover');
-    });
-    
-    dropzone.addEventListener('dragleave', () => {
-        dropzone.classList.remove('dragover');
-    });
-    
-    dropzone.addEventListener('drop', (e) => {
-        e.preventDefault();
-        dropzone.classList.remove('dragover');
+    // Only setup file upload if elements exist (may have been removed)
+    if (dropzone && input) {
+        dropzone.addEventListener('click', () => input.click());
         
-        const file = e.dataTransfer.files[0];
-        if (file && file.name.endsWith('.ipynb')) {
-            uploadFile(file);
-        } else {
-            showToast('Please upload a .ipynb file', 'error');
-        }
-    });
-    
-    input.addEventListener('change', (e) => {
-        const file = e.target.files[0];
-        if (file) {
-            uploadFile(file);
-        }
-    });
+        dropzone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropzone.classList.add('dragover');
+        });
+        
+        dropzone.addEventListener('dragleave', () => {
+            dropzone.classList.remove('dragover');
+        });
+        
+        dropzone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropzone.classList.remove('dragover');
+            
+            const file = e.dataTransfer.files[0];
+            if (file && file.name.endsWith('.ipynb')) {
+                uploadFile(file);
+            } else {
+                showToast('Please upload a .ipynb file', 'error');
+            }
+        });
+        
+        input.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                uploadFile(file);
+            }
+        });
+    }
     
     // URL Fetch button
     if (elements.fetchUrlBtn) {
