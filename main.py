@@ -515,6 +515,21 @@ async def save_to_drive(session_id: str):
         raise HTTPException(500, f"Drive save failed: {str(e)}")
 
 
+@app.get("/api/results/{session_id}")
+async def get_all_results(session_id: str):
+    """Get ALL results for a session (for selection UI)."""
+    session = hunt_engine.sessions.get(session_id)
+    if not session:
+        return {"count": 0, "results": []}
+    
+    # Return all completed results
+    completed = [r for r in session.results if r.status.value == "completed"]
+    return {
+        "count": len(completed),
+        "results": [r.model_dump() for r in completed]
+    }
+
+
 @app.get("/api/breaking-results/{session_id}")
 async def get_breaking_results(session_id: str):
     """Get only the breaking (score 0) results."""
