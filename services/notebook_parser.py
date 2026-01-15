@@ -420,8 +420,33 @@ class NotebookParser:
                     if slot_num in huntid_to_review:
                         review = huntid_to_review[slot_num]
                         judgment = review.get('judgment', 'unknown').upper()
-                        notes = review.get('notes', '')
-                        human_content = f"**Judgment:** {judgment}\n\n**Notes:** {notes}" if notes else f"**Judgment:** {judgment}"
+                        
+                        # Format grading basis as JSON
+                        grading_basis = review.get('grading_basis', {})
+                        if grading_basis:
+                            grading_json = json.dumps({k: v.upper() for k, v in grading_basis.items()}, indent=0)
+                        else:
+                            grading_json = "{}"
+                        
+                        # Calculate score (count PASS criteria)
+                        pass_count = sum(1 for v in grading_basis.values() if v.upper() == 'PASS')
+                        score = 1 if pass_count > len(grading_basis) / 2 else 0
+                        
+                        # Get explanation
+                        explanation = review.get('explanation', '') or review.get('notes', '')
+                        
+                        # Build human content in required format
+                        human_content = f"""[Grading Basis]:
+
+{grading_json}
+
+[Score]: {score} point(s)
+
+[JSON]: {{"answer_score": {score}}}
+
+[Explanation]:
+
+{explanation}"""
                         new_content = f"**[{heading}]**\n\n{human_content}"
                         cell['source'] = [new_content]
                         updated_slots.add(f"human_{slot_num}")
