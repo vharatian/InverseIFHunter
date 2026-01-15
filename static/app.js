@@ -1097,6 +1097,33 @@ function createResultCard(result, slotIndex) {
         submitHumanReview(result.hunt_id, card, slotNum);
     });
     
+    // Re-enable submit button when user types in textarea or changes criteria
+    const notesTextarea = card.querySelector('.human-review-notes');
+    const submitBtn = card.querySelector('.submit-human-review-btn');
+    
+    // Listen for textarea input to re-enable submit
+    notesTextarea.addEventListener('input', () => {
+        if (submitBtn.disabled && submitBtn.textContent.includes('Submitted')) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = '✅ Submit Human Review';
+            submitBtn.style.background = '';
+        }
+    });
+    
+    // Also re-enable on any criteria button click if already submitted
+    const criteriaRows = card.querySelectorAll('.criteria-rating-row');
+    criteriaRows.forEach(row => {
+        row.querySelectorAll('.criteria-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                if (submitBtn.disabled && submitBtn.textContent.includes('Submitted')) {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = '✅ Submit Human Review';
+                    submitBtn.style.background = '';
+                }
+            });
+        });
+    });
+    
     // Reveal button handler
     card.querySelector('.reveal-llm-btn').addEventListener('click', (e) => {
         e.stopPropagation();
