@@ -64,6 +64,7 @@ const elements = {
     previewTabs: document.getElementById('previewTabs'),
     promptPreview: document.getElementById('promptPreview'),
     referencePreview: document.getElementById('referencePreview'),
+    modelrefPreview: document.getElementById('modelrefPreview'),
     judgePreview: document.getElementById('judgePreview'),
     judgeReferenceBtn: document.getElementById('judgeReferenceBtn'),
     saveResponseBtn: document.getElementById('saveReponseBtn'),  // Save & Re-judge button
@@ -293,8 +294,16 @@ function handleNotebookLoaded(data, isUrl = false) {
     document.getElementById('infoPromptLength').textContent = `${data.notebook.prompt_length} chars`;
     document.getElementById('infoAttempts').textContent = data.notebook.attempts_made || 0;
     
-    // Show config section
+    // Show config section and scroll to it
     elements.configSection.classList.remove('hidden');
+    
+    // Scroll to the notebook preview card where the Judge button is
+    setTimeout(() => {
+        const previewCard = document.getElementById('notebookPreviewCard');
+        if (previewCard) {
+            previewCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    }, 100);
     
     // Populate preview tabs
     populatePreviewTabs(data.notebook);
@@ -331,13 +340,69 @@ function handleNotebookLoaded(data, isUrl = false) {
 async function saveToDrive() {
     if (!state.sessionId) return;
     
-    // Check pending reviews
+    // ===== VALIDATION 1: Check pending reviews =====
     const reviewCount = Object.keys(state.humanReviews || {}).length;
     if (reviewCount < 4) {
-        const proceed = confirm(`Only ${reviewCount}/4 human reviews completed. Save to Colab Notebook anyway?`);
-        if (!proceed) return;
+        showToast(`Only ${reviewCount}/4 human reviews completed. Complete all reviews first.`, 'error');
+        return;
     }
     
+    // ===== VALIDATION 2: Check for valid combination (4 failing OR 3 failing + 1 passing) =====
+    const reviews = Object.values(state.humanReviews || {});
+    const failCount = reviews.filter(r => r.judgment === 'bad' || r.judgment === 'fail').length;
+    const passCount = reviews.filter(r => r.judgment === 'good' || r.judgment === 'pass').length;
+    
+    const validCombination = (failCount === 4) || (failCount === 3 && passCount === 1);
+    if (!validCombination) {
+        showToast(`Invalid combination: ${failCount} fail + ${passCount} pass. Need 4 failing OR 3 failing + 1 passing.`, 'error');
+        alert(
+            `Cannot save: Invalid response combination!\n\n` +
+            `Current: ${failCount} failing + ${passCount} passing\n\n` +
+            `Required: Either 4 failing responses OR 3 failing + 1 passing.\n\n` +
+            `Please adjust your human reviews to meet this requirement.`
+        );
+        return;
+    }
+    
+    // ===== VALIDATION 3: Check for criterion diversity (at least one C has both PASS and FAIL) =====
+    const criteriaVotes = {};  // Track votes per criterion: { C1: { pass: 0, fail: 0 }, ... }
+    
+    for (const review of reviews) {
+        const gradingBasis = review.grading_basis || {};
+        for (const [criterionId, vote] of Object.entries(gradingBasis)) {
+            if (!criteriaVotes[criterionId]) {
+                criteriaVotes[criterionId] = { pass: 0, fail: 0 };
+            }
+            if (vote.toUpperCase() === 'PASS') {
+                criteriaVotes[criterionId].pass++;
+            } else if (vote.toUpperCase() === 'FAIL') {
+                criteriaVotes[criterionId].fail++;
+            }
+        }
+    }
+    
+    // Check if ANY criterion has both a pass AND a fail
+    const hasDiverseCriterion = Object.entries(criteriaVotes).some(
+        ([id, votes]) => votes.pass > 0 && votes.fail > 0
+    );
+    
+    if (!hasDiverseCriterion && Object.keys(criteriaVotes).length > 0) {
+        // Build a summary of votes for the error message
+        const votesSummary = Object.entries(criteriaVotes)
+            .map(([id, v]) => `${id}: ${v.pass} pass, ${v.fail} fail`)
+            .join('\n  ');
+        
+        showToast('Criterion diversity required: At least one criterion must have both PASS and FAIL.', 'error');
+        alert(
+            `Cannot save: Missing criterion diversity!\n\n` +
+            `Requirement: At least one criterion (C1, C2, etc.) must receive both a PASS and a FAIL across the 4 responses.\n\n` +
+            `Current votes:\n  ${votesSummary}\n\n` +
+            `Please review your grading to ensure diverse criteria judgments.`
+        );
+        return;
+    }
+    
+    // ===== All validations passed - proceed with save =====
     const btn = document.getElementById('saveDriveBtn');
     if (!btn) {
         console.error("Save button not found");
@@ -381,27 +446,98 @@ function populatePreviewTabs(notebook) {
     elements.referencePreview.textContent = notebook.response || 'No expected response found';
     elements.judgePreview.textContent = notebook.judge_system_prompt || 'No judge prompt found';
     
+    // Populate Model Reference tab with response_reference (grading criteria)
+    if (elements.modelrefPreview) {
+        elements.modelrefPreview.textContent = notebook.response_reference || 'No model reference criteria found';
+    }
+    
     // Parse and store criteria from response_reference
     state.criteria = parseCriteria(notebook.response_reference || '');
     console.log('Parsed criteria:', state.criteria);
 }
 
-// Parse criteria from response_reference text (looks for JSON array with id/criteria fields)
+// Parse criteria from response_reference text (looks for JSON with criteria fields)
 function parseCriteria(responseReference) {
+    if (!responseReference || !responseReference.trim()) {
+        console.warn('Empty response_reference, using default criteria');
+        return getDefaultCriteria();
+    }
+    
     try {
-        // Try to find JSON array in the response reference
-        const jsonMatch = responseReference.match(/\[\s*\{[^]*?\}\s*\]/);
-        if (jsonMatch) {
-            const criteriaArray = JSON.parse(jsonMatch[0]);
-            if (Array.isArray(criteriaArray)) {
-                return criteriaArray.filter(c => c.id && c.criteria);
+        // Try to parse the entire response as JSON first
+        const trimmed = responseReference.trim();
+        
+        // Method 1: Full JSON object with C1, C2, etc. keys
+        if (trimmed.startsWith('{')) {
+            const data = JSON.parse(trimmed);
+            const criteria = [];
+            
+            // Look for C1, C2, etc. keys
+            for (const key of Object.keys(data)) {
+                if (/^C\d+$/i.test(key)) {
+                    const value = data[key];
+                    if (typeof value === 'string') {
+                        criteria.push({ id: key.toUpperCase(), criteria: value });
+                    } else if (typeof value === 'object' && value !== null) {
+                        // Has description or criteria field
+                        const desc = value.description || value.criteria || value.text || JSON.stringify(value);
+                        criteria.push({ id: key.toUpperCase(), criteria: desc });
+                    }
+                }
+            }
+            
+            if (criteria.length > 0) {
+                console.log('Parsed criteria from JSON object:', criteria);
+                return criteria;
             }
         }
+        
+        // Method 2: JSON array with id/criteria fields
+        const jsonArrayMatch = responseReference.match(/\[\s*\{[\s\S]*?\}\s*\]/);
+        if (jsonArrayMatch) {
+            const criteriaArray = JSON.parse(jsonArrayMatch[0]);
+            if (Array.isArray(criteriaArray)) {
+                const filtered = criteriaArray.filter(c => c.id && c.criteria);
+                if (filtered.length > 0) {
+                    console.log('Parsed criteria from JSON array:', filtered);
+                    return filtered;
+                }
+            }
+        }
+        
+        // Method 3: Look for embedded JSON object  
+        const jsonObjMatch = responseReference.match(/\{[\s\S]*?"C\d+"[\s\S]*?\}/);
+        if (jsonObjMatch) {
+            try {
+                const data = JSON.parse(jsonObjMatch[0]);
+                const criteria = [];
+                for (const key of Object.keys(data)) {
+                    if (/^C\d+$/i.test(key)) {
+                        const value = data[key];
+                        const desc = typeof value === 'string' ? value : 
+                                     (value?.description || value?.criteria || JSON.stringify(value));
+                        criteria.push({ id: key.toUpperCase(), criteria: desc });
+                    }
+                }
+                if (criteria.length > 0) {
+                    console.log('Parsed criteria from embedded JSON:', criteria);
+                    return criteria;
+                }
+            } catch (e) {
+                // Continue to next method
+            }
+        }
+        
     } catch (e) {
         console.warn('Could not parse criteria from response_reference:', e);
     }
     
-    // Fallback: create default criteria if none found
+    // Fallback: create default criteria
+    console.log('Using default criteria fallback');
+    return getDefaultCriteria();
+}
+
+function getDefaultCriteria() {
     return [
         { id: 'C1', criteria: 'Response meets formatting requirements' },
         { id: 'C2', criteria: 'Response follows exact instructions' },
@@ -858,10 +994,19 @@ function createResultCard(result, slotIndex) {
             <div class="llm-judge-section" data-hunt-id="${result.hunt_id}" style="margin-top: 1rem; display: none;" data-llm-judge='${llmJudgeData.replace(/'/g, "&#39;")}'>
                 <div style="padding: 1rem; background: var(--bg-tertiary); border-radius: 8px; border: 1px solid var(--accent-primary);">
                     <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">🤖 LLM Judge (llm_judge_${slotNum}):</label>
-                    <div class="llm-judge-score" style="margin-bottom: 0.5rem;">
+                    <div class="llm-judge-score" style="margin-bottom: 0.75rem;">
                         <span class="score-badge ${scoreClass}">${scoreEmoji} Score: ${score}</span>
                     </div>
+                    
+                    <!-- Criteria Breakdown -->
+                    <div class="llm-criteria-breakdown" style="margin-bottom: 0.75rem;">
+                        <label style="font-weight: 500; font-size: 0.9rem; display: block; margin-bottom: 0.5rem;">📋 Grading Basis:</label>
+                        ${formatLLMCriteria(result.judge_criteria, result.judge_explanation)}
+                    </div>
+                    
+                    <!-- Full Explanation -->
                     <div class="llm-judge-explanation" style="font-size: 0.9rem; color: var(--text-secondary); max-height: 300px; overflow-y: auto; white-space: pre-wrap; background: var(--bg-primary); padding: 0.75rem; border-radius: 6px;">
+                        <label style="font-weight: 500; display: block; margin-bottom: 0.25rem;">📝 Full Explanation:</label>
                         ${escapeHtml(result.judge_explanation || 'No explanation available')}
                     </div>
                 </div>
@@ -1181,6 +1326,148 @@ function clearPreviousResults() {
     console.log('Previous results cleared');
 }
 
+/**
+ * Format LLM Judge criteria breakdown for display
+ * Shows each criterion (C1, C2, etc.) with pass/fail status and explanation
+ */
+function formatLLMCriteria(criteria, fullExplanation) {
+    if (!criteria || Object.keys(criteria).length === 0) {
+        return '<div style="padding: 0.5rem; color: var(--text-muted); font-style: italic;">No criteria breakdown available</div>';
+    }
+    
+    // Try to extract per-criterion explanations from the full explanation
+    const explanationLines = (fullExplanation || '').split('\n');
+    const criteriaExplanations = {};
+    
+    // Try multiple patterns to extract explanations for each criterion
+    for (const [key] of Object.entries(criteria)) {
+        const patterns = [
+            // Pattern: "C1: explanation..." or "C1 - explanation..."
+            new RegExp(`${key}[:\\-]\\s*(.+?)(?=C\\d|$)`, 'gi'),
+            // Pattern: "**C1**: explanation..."
+            new RegExp(`\\*\\*${key}\\*\\*[:\\-]?\\s*(.+?)(?=\\*\\*C\\d|$)`, 'gi'),
+            // Pattern: Line starting with C1
+            new RegExp(`^\\s*${key}[.:\\-]?\\s*(.+)`, 'gim')
+        ];
+        
+        for (const pattern of patterns) {
+            for (const line of explanationLines) {
+                const match = pattern.exec(line);
+                if (match && match[1]) {
+                    criteriaExplanations[key] = match[1].trim().replace(/^\*\*\w+\*\*:?\s*/, '');
+                    break;
+                }
+            }
+            if (criteriaExplanations[key]) break;
+        }
+        
+        // Fallback: look for the criterion in any line
+        if (!criteriaExplanations[key]) {
+            for (const line of explanationLines) {
+                if (line.toUpperCase().includes(key.toUpperCase()) && line.length > key.length + 10) {
+                    // Remove the criterion prefix
+                    criteriaExplanations[key] = line.replace(new RegExp(`^.*${key}[:\\-]?\\s*`, 'i'), '').trim();
+                    break;
+                }
+            }
+        }
+    }
+    
+    // Build HTML for each criterion
+    const criteriaHtml = Object.entries(criteria).map(([key, value]) => {
+        const isPassing = String(value).toUpperCase() === 'PASS';
+        const statusEmoji = isPassing ? '✅' : '❌';
+        const statusText = isPassing ? 'PASS' : 'FAIL';
+        const statusColor = isPassing ? 'var(--success)' : 'var(--danger)';
+        const explanation = criteriaExplanations[key] || '';
+        
+        // Find matching criteria description from state.criteria
+        const criteriaDesc = (state.criteria || []).find(c => c.id === key);
+        const criteriaText = criteriaDesc ? criteriaDesc.criteria : '';
+        
+        return `
+            <div style="display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0.5rem; padding: 0.5rem; margin-bottom: 0.5rem; background: var(--bg-primary); border-radius: 6px; border-left: 3px solid ${statusColor};">
+                <span style="font-weight: 600; min-width: 35px;">${key}:</span>
+                <span style="color: ${statusColor}; font-weight: 600;">${statusEmoji} ${statusText}</span>
+                ${criteriaText ? `<span style="flex: 1; font-size: 0.85rem; color: var(--text-secondary); word-break: break-word;">(${escapeHtml(criteriaText)})</span>` : ''}
+                ${explanation ? `<div style="width: 100%; margin-top: 0.25rem; padding-left: 40px; font-size: 0.85rem; color: var(--text-muted);">${escapeHtml(explanation)}</div>` : ''}
+            </div>
+        `;
+    }).join('');
+    
+    return criteriaHtml;
+}
+
+/**
+ * Update workflow step visual state
+ * @param {number} stepNum - Step number (1-4)
+ * @param {string} state - 'pending', 'active', or 'complete'
+ */
+function updateWorkflowStep(stepNum, stepState) {
+    const stepIds = ['stepJudge', 'stepHunt', 'stepReview', 'stepSave'];
+    const stepEl = document.getElementById(stepIds[stepNum - 1]);
+    if (!stepEl) return;
+    
+    // Reset styles
+    stepEl.style.opacity = stepState === 'pending' ? '0.7' : '1';
+    
+    // Update border color based on state
+    const colors = {
+        pending: 'var(--text-muted)',
+        active: 'var(--warning)',
+        complete: 'var(--success)'
+    };
+    stepEl.style.borderLeftColor = colors[stepState] || colors.pending;
+    
+    // Update the step number color
+    const stepLabel = stepEl.querySelector('span:first-child');
+    if (stepLabel) {
+        stepLabel.style.color = colors[stepState] || colors.pending;
+    }
+    
+    // Add checkmark for complete steps
+    if (stepState === 'complete') {
+        const strongEl = stepEl.querySelector('strong');
+        if (strongEl && !strongEl.textContent.includes('✓')) {
+            strongEl.textContent = '✓ ' + strongEl.textContent;
+        }
+    }
+}
+
+/**
+ * Format judge criteria for the reference judge display (simpler format)
+ * Shows each criterion with pass/fail status
+ */
+function formatJudgeCriteriaDisplay(criteria) {
+    if (!criteria || Object.keys(criteria).length === 0) {
+        return '<div style="padding: 0.5rem; color: var(--text-muted); font-style: italic;">No criteria breakdown available</div>';
+    }
+    
+    const entries = Object.entries(criteria);
+    
+    // Build HTML for each criterion
+    const criteriaHtml = entries.map(([key, value]) => {
+        const isPassing = String(value).toUpperCase() === 'PASS';
+        const statusEmoji = isPassing ? '✅' : '❌';
+        const statusText = isPassing ? 'PASS' : 'FAIL';
+        const statusColor = isPassing ? 'var(--success)' : 'var(--danger)';
+        
+        // Find matching criteria description from state.criteria
+        const criteriaDesc = (state.criteria || []).find(c => c.id === key);
+        const criteriaText = criteriaDesc ? criteriaDesc.criteria : '';
+        
+        return `
+            <div style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem; margin: 0.25rem 0; background: var(--bg-tertiary); border-radius: 6px; border-left: 3px solid ${statusColor};">
+                <span style="font-weight: 600; min-width: 35px;">${key}:</span>
+                <span style="color: ${statusColor}; font-weight: 600;">${statusEmoji} ${statusText}</span>
+                ${criteriaText ? `<span style="flex: 1; font-size: 0.85rem; color: var(--text-secondary);">${escapeHtml(criteriaText)}</span>` : ''}
+            </div>
+        `;
+    }).join('');
+    
+    return criteriaHtml;
+}
+
 function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
@@ -1400,40 +1687,69 @@ async function judgeReferenceResponse() {
         
         const data = await response.json();
         
-        // Display result
-        const isPassing = data.is_passing;
+        // Check if ALL criteria pass (not just overall score)
+        const criteria = data.criteria || {};
+        const criteriaEntries = Object.entries(criteria);
+        const allCriteriaPass = criteriaEntries.length > 0 && 
+            criteriaEntries.every(([key, value]) => String(value).toUpperCase() === 'PASS');
+        
+        // Only enable hunt if ALL criteria pass
+        const isPassing = allCriteriaPass;
         const scoreClass = isPassing ? 'score-1' : 'score-0';
         const scoreEmoji = isPassing ? '✅' : '❌';
         
         // Update reference validated state
         state.referenceValidated = isPassing;
         
-        // Enable/disable Start Hunt based on result
+        // Enable/disable Start Hunt based on result - ONLY if ALL criteria pass
         if (elements.startHuntBtn) {
             if (isPassing) {
                 elements.startHuntBtn.disabled = false;
                 elements.startHuntBtn.title = '';
+                // Hide blocked message and update workflow
+                const blockedMsg = document.getElementById('huntBlockedMsg');
+                if (blockedMsg) blockedMsg.style.display = 'none';
+                updateWorkflowStep(1, 'complete');
+                updateWorkflowStep(2, 'active');
             } else {
                 elements.startHuntBtn.disabled = true;
-                elements.startHuntBtn.title = 'Reference must pass validation before starting hunt';
+                elements.startHuntBtn.title = 'All criteria must pass before starting hunt';
+                // Show blocked message
+                const blockedMsg = document.getElementById('huntBlockedMsg');
+                if (blockedMsg) {
+                    blockedMsg.style.display = 'block';
+                    blockedMsg.textContent = '⚠️ Reference failed validation — fix the criteria issues above';
+                }
             }
         }
+        
+        // Build criteria breakdown HTML
+        const criteriaHtml = formatJudgeCriteriaDisplay(criteria);
         
         resultDiv.innerHTML = `
             <div style="padding: 1rem; background: var(--bg-primary); border-radius: 8px; border: 1px solid ${isPassing ? 'var(--success)' : 'var(--danger)'};">
                 <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
                     <span class="score-badge ${scoreClass}">${scoreEmoji} Score: ${data.score}</span>
-                    <span style="font-weight: 600;">${isPassing ? 'Reference PASSES - Hunt Enabled!' : 'Reference FAILS - Fix before hunting'}</span>
+                    <span style="font-weight: 600;">${isPassing ? 'ALL CRITERIA PASS - Hunt Enabled!' : 'CRITERIA FAILED - Fix before hunting'}</span>
                 </div>
+                
+                <!-- Criteria Breakdown -->
                 <div style="margin-top: 0.75rem;">
-                    <label style="font-weight: 600; font-size: 0.9rem;">Judge Explanation:</label>
-                    <p style="margin-top: 0.25rem; font-size: 0.9rem; color: var(--text-secondary);">${escapeHtml(data.explanation || 'No explanation provided')}</p>
+                    <label style="font-weight: 600; font-size: 0.9rem;">📋 Criteria Breakdown:</label>
+                    ${criteriaHtml}
+                </div>
+                
+                <div style="margin-top: 0.75rem;">
+                    <label style="font-weight: 600; font-size: 0.9rem;">📝 Judge Explanation:</label>
+                    <p style="margin-top: 0.25rem; font-size: 0.9rem; color: var(--text-secondary); white-space: pre-wrap;">${escapeHtml(data.explanation || 'No explanation provided')}</p>
                 </div>
             </div>
         `;
         resultDiv.classList.remove('hidden');
         
-        showToast(`Reference response ${isPassing ? 'PASSES' : 'FAILS'} (Score: ${data.score})`, isPassing ? 'success' : 'warning');
+        const passCount = criteriaEntries.filter(([k, v]) => String(v).toUpperCase() === 'PASS').length;
+        const totalCount = criteriaEntries.length;
+        showToast(`Reference: ${passCount}/${totalCount} criteria pass (${isPassing ? 'HUNT ENABLED' : 'Fix required'})`, isPassing ? 'success' : 'warning');
         
     } catch (error) {
         showToast(`Error: ${error.message}`, 'error');
@@ -1491,40 +1807,58 @@ async function saveAndRejudge() {
         
         const data = await judgeResponse.json();
         
-        // Display result
-        const isPassing = data.is_passing;
+        // Check if ALL criteria pass (not just overall score)
+        const criteria = data.criteria || {};
+        const criteriaEntries = Object.entries(criteria);
+        const allCriteriaPass = criteriaEntries.length > 0 && 
+            criteriaEntries.every(([key, value]) => String(value).toUpperCase() === 'PASS');
+        
+        // Only enable hunt if ALL criteria pass
+        const isPassing = allCriteriaPass;
         const scoreClass = isPassing ? 'score-1' : 'score-0';
         const scoreEmoji = isPassing ? '✅' : '❌';
         
         // Update reference validated state
         state.referenceValidated = isPassing;
         
-        // Enable/disable Start Hunt based on result
+        // Enable/disable Start Hunt based on result - ONLY if ALL criteria pass
         if (elements.startHuntBtn) {
             if (isPassing) {
                 elements.startHuntBtn.disabled = false;
                 elements.startHuntBtn.title = '';
             } else {
                 elements.startHuntBtn.disabled = true;
-                elements.startHuntBtn.title = 'Reference must pass validation before starting hunt';
+                elements.startHuntBtn.title = 'All criteria must pass before starting hunt';
             }
         }
+        
+        // Build criteria breakdown HTML
+        const criteriaHtml = formatJudgeCriteriaDisplay(criteria);
         
         resultDiv.innerHTML = `
             <div style="padding: 1rem; background: var(--bg-primary); border-radius: 8px; border: 1px solid ${isPassing ? 'var(--success)' : 'var(--danger)'};">
                 <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
                     <span class="score-badge ${scoreClass}">${scoreEmoji} Score: ${data.score}</span>
-                    <span style="font-weight: 600;">${isPassing ? '✅ Saved & PASSES - Hunt Enabled!' : '❌ Saved but FAILS - Try editing again'}</span>
+                    <span style="font-weight: 600;">${isPassing ? '✅ Saved & ALL CRITERIA PASS - Hunt Enabled!' : '❌ Saved but CRITERIA FAILED - Edit & try again'}</span>
                 </div>
+                
+                <!-- Criteria Breakdown -->
                 <div style="margin-top: 0.75rem;">
-                    <label style="font-weight: 600; font-size: 0.9rem;">Judge Explanation:</label>
-                    <p style="margin-top: 0.25rem; font-size: 0.9rem; color: var(--text-secondary);">${escapeHtml(data.explanation || 'No explanation provided')}</p>
+                    <label style="font-weight: 600; font-size: 0.9rem;">📋 Criteria Breakdown:</label>
+                    ${criteriaHtml}
+                </div>
+                
+                <div style="margin-top: 0.75rem;">
+                    <label style="font-weight: 600; font-size: 0.9rem;">📝 Judge Explanation:</label>
+                    <p style="margin-top: 0.25rem; font-size: 0.9rem; color: var(--text-secondary); white-space: pre-wrap;">${escapeHtml(data.explanation || 'No explanation provided')}</p>
                 </div>
             </div>
         `;
         resultDiv.classList.remove('hidden');
         
-        showToast(`Saved & ${isPassing ? 'PASSES' : 'FAILS'} (Score: ${data.score})`, isPassing ? 'success' : 'warning');
+        const passCount = criteriaEntries.filter(([k, v]) => String(v).toUpperCase() === 'PASS').length;
+        const totalCount = criteriaEntries.length;
+        showToast(`Saved: ${passCount}/${totalCount} criteria pass (${isPassing ? 'HUNT ENABLED' : 'Fix required'})`, isPassing ? 'success' : 'warning');
         
     } catch (error) {
         showToast(`Error: ${error.message}`, 'error');

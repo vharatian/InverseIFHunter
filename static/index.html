@@ -114,63 +114,104 @@
                         <label for="judgeModel">Judge Model</label>
                         <select id="judgeModel" disabled>
                             <option value="gpt-5">GPT-5</option>
-                        </select>
                     </div>
-                </div>
 
-                <div style="margin-top: 1.5rem; text-align: center;">
-                    <button class="btn btn-primary btn-lg" id="startHuntBtn">
-                        🚀 Start Hunt
-                    </button>
-                </div>
-            </div>
-
-            <!-- Notebook Preview Card -->
-            <div class="card" id="notebookPreviewCard">
-                <div class="card-header">
-                    <h2 class="card-title">
-                        <span class="card-title-icon">📋</span>
-                        Notebook Preview
-                    </h2>
-                </div>
-
-                <div class="tabs" id="previewTabs">
-                    <button class="tab" data-preview="prompt">Prompt</button>
-                    <button class="tab active" data-preview="reference">Response</button>
-                    <button class="tab" data-preview="judge">Judge System Prompt</button>
-                </div>
-
-                <div id="previewContent" class="preview-content">
-                    <div id="previewPrompt" class="preview-panel hidden">
-                        <pre class="code-block" id="promptPreview">Loading...</pre>
-                    </div>
-                    <div id="previewReference" class="preview-panel">
-                        <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Expected Response
-                            (editable):</label>
-                        <textarea id="referencePreview" class="code-block"
-                            style="width: 100%; min-height: 200px; resize: vertical; font-family: monospace; padding: 0.75rem; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-primary); color: var(--text-primary);">Loading...</textarea>
-
-                        <div class="judge-reference-section" style="margin-top: 1rem;">
-                            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                                <button class="btn btn-secondary" id="judgeReferenceBtn" style="flex: 1;">
-                                    ⚖️ Judge Only
-                                </button>
-                                <button class="btn btn-primary" id="saveReponseBtn" style="flex: 1;">
-                                    💾 Save to Colab & Re-judge
-                                </button>
+                    <!-- Workflow Guide -->
+                    <div id="workflowGuide" class="workflow-guide"
+                        style="margin-top: 1.5rem; padding: 1rem; background: linear-gradient(135deg, var(--accent-primary-bg), var(--bg-tertiary)); border-radius: 8px; border: 1px solid var(--accent-primary);">
+                        <h3 style="margin: 0 0 0.75rem; font-size: 1rem; color: var(--accent-primary);">📋 Workflow
+                            Steps</h3>
+                        <div class="workflow-steps" style="display: flex; flex-direction: column; gap: 0.5rem;">
+                            <div class="workflow-step" id="stepJudge"
+                                style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem; background: var(--bg-primary); border-radius: 6px; border-left: 3px solid var(--warning);">
+                                <span style="font-weight: 600; color: var(--warning);">Step 1:</span>
+                                <span>⚖️ <strong>Judge Response First</strong> — Scroll down and click "Judge Only" to
+                                    verify the reference passes all criteria</span>
                             </div>
-                            <p style="margin-top: 0.75rem; font-size: 0.85rem; color: var(--text-muted);">
-                                ✏️ Edit the response above, then click <strong>Save to Colab & Re-judge</strong> to
-                                update the notebook and verify.
-                            </p>
-                            <div id="referenceJudgeResult" class="hidden" style="margin-top: 1rem;"></div>
+                            <div class="workflow-step" id="stepHunt"
+                                style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem; background: var(--bg-primary); border-radius: 6px; border-left: 3px solid var(--text-muted); opacity: 0.7;">
+                                <span style="font-weight: 600; color: var(--text-muted);">Step 2:</span>
+                                <span>🚀 <strong>Start Hunt</strong> — Once reference passes, the Start Hunt button will
+                                    be enabled</span>
+                            </div>
+                            <div class="workflow-step" id="stepReview"
+                                style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem; background: var(--bg-primary); border-radius: 6px; border-left: 3px solid var(--text-muted); opacity: 0.7;">
+                                <span style="font-weight: 600; color: var(--text-muted);">Step 3:</span>
+                                <span>📝 <strong>Human Review</strong> — Review each slot's response and criteria (4
+                                    reviews required)</span>
+                            </div>
+                            <div class="workflow-step" id="stepSave"
+                                style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem; background: var(--bg-primary); border-radius: 6px; border-left: 3px solid var(--text-muted); opacity: 0.7;">
+                                <span style="font-weight: 600; color: var(--text-muted);">Step 4:</span>
+                                <span>💾 <strong>Save to Colab</strong> — Requires: 4 failing OR 3 failing + 1 passing,
+                                    with criterion diversity</span>
+                            </div>
                         </div>
                     </div>
-                    <div id="previewJudge" class="preview-panel hidden">
-                        <pre class="code-block" id="judgePreview">Loading...</pre>
+
+                    <div style="margin-top: 1.5rem; text-align: center;">
+                        <button class="btn btn-primary btn-lg" id="startHuntBtn">
+                            🚀 Start Hunt
+                        </button>
+                        <p id="huntBlockedMsg" style="margin-top: 0.5rem; font-size: 0.85rem; color: var(--warning);">
+                            ⚠️ Judge the reference response first (scroll to Response tab → click "Judge Only")
+                        </p>
                     </div>
                 </div>
-            </div>
+
+                <!-- Notebook Preview Card -->
+                <div class="card" id="notebookPreviewCard">
+                    <div class="card-header">
+                        <h2 class="card-title">
+                            <span class="card-title-icon">📋</span>
+                            Notebook Preview
+                        </h2>
+                    </div>
+
+                    <div class="tabs" id="previewTabs">
+                        <button class="tab" data-preview="prompt">Prompt</button>
+                        <button class="tab active" data-preview="reference">Response</button>
+                        <button class="tab" data-preview="modelref">Model Reference</button>
+                        <button class="tab" data-preview="judge">Judge System Prompt</button>
+                    </div>
+
+                    <div id="previewContent" class="preview-content">
+                        <div id="previewPrompt" class="preview-panel hidden">
+                            <pre class="code-block" id="promptPreview">Loading...</pre>
+                        </div>
+                        <div id="previewReference" class="preview-panel">
+                            <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Expected Response
+                                (editable):</label>
+                            <textarea id="referencePreview" class="code-block"
+                                style="width: 100%; min-height: 200px; resize: vertical; font-family: monospace; padding: 0.75rem; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-primary); color: var(--text-primary);">Loading...</textarea>
+
+                            <div class="judge-reference-section" style="margin-top: 1rem;">
+                                <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                                    <button class="btn btn-secondary" id="judgeReferenceBtn" style="flex: 1;">
+                                        ⚖️ Judge Only
+                                    </button>
+                                    <button class="btn btn-primary" id="saveReponseBtn" style="flex: 1;">
+                                        💾 Save to Colab & Re-judge
+                                    </button>
+                                </div>
+                                <p style="margin-top: 0.75rem; font-size: 0.85rem; color: var(--text-muted);">
+                                    ✏️ Edit the response above, then click <strong>Save to Colab & Re-judge</strong> to
+                                    update the notebook and verify.
+                                </p>
+                                <div id="referenceJudgeResult" class="hidden" style="margin-top: 1rem;"></div>
+                            </div>
+                        </div>
+                        <div id="previewModelref" class="preview-panel hidden">
+                            <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Response Reference
+                                (Grading Criteria):</label>
+                            <pre class="code-block" id="modelrefPreview"
+                                style="white-space: pre-wrap; word-break: break-word;">Loading...</pre>
+                        </div>
+                        <div id="previewJudge" class="preview-panel hidden">
+                            <pre class="code-block" id="judgePreview">Loading...</pre>
+                        </div>
+                    </div>
+                </div>
         </section>
 
         <!-- Progress Section -->
@@ -351,7 +392,7 @@
     <!-- Toast Container -->
     <div id="toastContainer" style="position: fixed; bottom: 1rem; right: 1rem; z-index: 1000;"></div>
 
-    <script src="/static/app.js?v=120"></script>
+    <script src="/static/app.js?v=127"></script>
 </body>
 
 </html>

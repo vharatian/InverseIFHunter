@@ -195,8 +195,18 @@ class HuntEngine:
         try:
             # Step 1: Call the model
             openrouter = get_openrouter_client()
+            
+            # Wrap prompt with explanation request
+            enhanced_prompt = (
+                f"{session.notebook.prompt}\n\n"
+                f"---\n"
+                f"IMPORTANT: After providing your response, also include a section titled "
+                f"'### Explanation' where you explain your reasoning and thought process "
+                f"for arriving at this response. This explanation is mandatory."
+            )
+            
             response, reasoning, error = await openrouter.call_with_retry(
-                prompt=session.notebook.prompt,
+                prompt=enhanced_prompt,
                 model=result.model,
                 max_retries=session.config.max_retries,
                 reasoning_budget_percent=session.config.reasoning_budget_percent
