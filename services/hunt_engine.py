@@ -293,9 +293,9 @@ class HuntEngine:
             
             # Retry judge if score is None (unparsed)
             retry_count = 0
-            while result.judge_score is None and retry_count < 2:
+            while result.judge_score is None and retry_count < 3:
                 retry_count += 1
-                print(f"WARNING: Judge returned None score for Hunt {result.hunt_id}, retrying ({retry_count}/2)...")
+                print(f"WARNING: Judge returned None score for Hunt {result.hunt_id}, retrying ({retry_count}/3)...")
                 judge_result = await judge.judge_response(
                     prompt=session.notebook.prompt,
                     student_response=result.response,
