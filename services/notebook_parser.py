@@ -464,21 +464,34 @@ class NotebookParser:
                 review = huntid_to_review[slot_num]
                 judgment = review.get('judgment', 'unknown').upper()
                 
-                # Format grading basis (C1: PASS, C2: FAIL, etc.)
+                # Format grading basis as JSON
                 grading_basis = review.get('grading_basis', {})
                 if grading_basis:
-                    grading_lines = [f"{k}: {v.upper()}" for k, v in grading_basis.items()]
-                    grading_str = ", ".join(grading_lines)
+                    # Create JSON format for grading
+                    grading_json = json.dumps({k: v.upper() for k, v in grading_basis.items()}, indent=0)
                 else:
-                    grading_str = "No criteria grading"
+                    grading_json = "{}"
                 
-                # Get explanation (was previously 'notes')
+                # Calculate score (FAIL = 0, PASS = 1 per criterion)
+                pass_count = sum(1 for v in grading_basis.values() if v.upper() == 'PASS')
+                total_criteria = len(grading_basis) if grading_basis else 4
+                score = pass_count
+                
+                # Get explanation
                 explanation = review.get('explanation', '') or review.get('notes', '')
                 
-                # Build human content
-                human_content = f"**Judgment:** {judgment}\n\n**Grading Basis:** {grading_str}"
-                if explanation:
-                    human_content += f"\n\n**Explanation:** {explanation}"
+                # Build human content in required format
+                human_content = f"""[Grading Basis]:
+
+{grading_json}
+
+[Score]: {score} point(s)
+
+[JSON]: {{"answer_score": {score}}}
+
+[Explanation]:
+
+{explanation}"""
                     
                 new_cells.append({
                     "cell_type": "markdown",

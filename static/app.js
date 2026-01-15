@@ -485,9 +485,74 @@ function populatePreviewTabs(notebook) {
         elements.modelrefPreview.textContent = notebook.response_reference || 'No model reference criteria found';
     }
     
+    // Validate Model Reference is valid JSON format
+    const modelRefValidation = validateModelReferenceJSON(notebook.response_reference || '');
+    state.modelRefValid = modelRefValidation.valid;
+    
+    if (!modelRefValidation.valid) {
+        showToast('⚠️ Model Reference is not valid JSON format!', 'error');
+        if (elements.modelrefPreview) {
+            elements.modelrefPreview.innerHTML = `
+                <div style="color: var(--danger); margin-bottom: 1rem; padding: 0.75rem; background: var(--danger-bg); border-radius: 8px;">
+                    <strong>❌ Invalid JSON Format</strong><br>
+                    ${escapeHtml(modelRefValidation.error)}
+                </div>
+                <pre style="white-space: pre-wrap; word-break: break-word;">${escapeHtml(notebook.response_reference || 'No content')}</pre>
+            `;
+        }
+        // Disable Start Hunt if Model Reference is invalid
+        if (elements.startHuntBtn) {
+            elements.startHuntBtn.disabled = true;
+            elements.startHuntBtn.title = 'Model Reference must be valid JSON before hunting';
+        }
+    }
+    
     // Parse and store criteria from response_reference
     state.criteria = parseCriteria(notebook.response_reference || '');
     console.log('Parsed criteria:', state.criteria);
+}
+
+// Validate that Model Reference is valid JSON format with criteria
+function validateModelReferenceJSON(responseReference) {
+    if (!responseReference || !responseReference.trim()) {
+        return { valid: false, error: 'Model Reference is empty' };
+    }
+    
+    const trimmed = responseReference.trim();
+    
+    try {
+        // Try to find and parse JSON
+        if (trimmed.startsWith('{')) {
+            const data = JSON.parse(trimmed);
+            // Check for C1, C2, etc. keys
+            const hasValidKeys = Object.keys(data).some(k => /^C\d+$/i.test(k));
+            if (hasValidKeys) {
+                return { valid: true };
+            }
+            return { valid: false, error: 'JSON object must have criteria keys (C1, C2, C3, etc.)' };
+        }
+        
+        // Try to find embedded JSON
+        const jsonMatch = trimmed.match(/\{[\s\S]*?"C\d+"[\s\S]*?\}/);
+        if (jsonMatch) {
+            JSON.parse(jsonMatch[0]);
+            return { valid: true };
+        }
+        
+        // Try array format
+        const arrayMatch = trimmed.match(/\[[\s\S]*?\]/);
+        if (arrayMatch) {
+            const arr = JSON.parse(arrayMatch[0]);
+            if (Array.isArray(arr) && arr.length > 0) {
+                return { valid: true };
+            }
+        }
+        
+        return { valid: false, error: 'No valid JSON structure found. Expected format: {"C1": "...", "C2": "...", ...}' };
+        
+    } catch (e) {
+        return { valid: false, error: `JSON parse error: ${e.message}` };
+    }
 }
 
 // Parse criteria from response_reference text (looks for JSON with criteria fields)
