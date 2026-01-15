@@ -294,16 +294,8 @@ function handleNotebookLoaded(data, isUrl = false) {
     document.getElementById('infoPromptLength').textContent = `${data.notebook.prompt_length} chars`;
     document.getElementById('infoAttempts').textContent = data.notebook.attempts_made || 0;
     
-    // Show config section and scroll to it
+    // Show config section
     elements.configSection.classList.remove('hidden');
-    
-    // Scroll to the notebook preview card where the Judge button is
-    setTimeout(() => {
-        const previewCard = document.getElementById('notebookPreviewCard');
-        if (previewCard) {
-            previewCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
-    }, 100);
     
     // Populate preview tabs
     populatePreviewTabs(data.notebook);
@@ -1398,41 +1390,6 @@ function formatLLMCriteria(criteria, fullExplanation) {
     return criteriaHtml;
 }
 
-/**
- * Update workflow step visual state
- * @param {number} stepNum - Step number (1-4)
- * @param {string} state - 'pending', 'active', or 'complete'
- */
-function updateWorkflowStep(stepNum, stepState) {
-    const stepIds = ['stepJudge', 'stepHunt', 'stepReview', 'stepSave'];
-    const stepEl = document.getElementById(stepIds[stepNum - 1]);
-    if (!stepEl) return;
-    
-    // Reset styles
-    stepEl.style.opacity = stepState === 'pending' ? '0.7' : '1';
-    
-    // Update border color based on state
-    const colors = {
-        pending: 'var(--text-muted)',
-        active: 'var(--warning)',
-        complete: 'var(--success)'
-    };
-    stepEl.style.borderLeftColor = colors[stepState] || colors.pending;
-    
-    // Update the step number color
-    const stepLabel = stepEl.querySelector('span:first-child');
-    if (stepLabel) {
-        stepLabel.style.color = colors[stepState] || colors.pending;
-    }
-    
-    // Add checkmark for complete steps
-    if (stepState === 'complete') {
-        const strongEl = stepEl.querySelector('strong');
-        if (strongEl && !strongEl.textContent.includes('✓')) {
-            strongEl.textContent = '✓ ' + strongEl.textContent;
-        }
-    }
-}
 
 /**
  * Format judge criteria for the reference judge display (simpler format)
@@ -1706,20 +1663,9 @@ async function judgeReferenceResponse() {
             if (isPassing) {
                 elements.startHuntBtn.disabled = false;
                 elements.startHuntBtn.title = '';
-                // Hide blocked message and update workflow
-                const blockedMsg = document.getElementById('huntBlockedMsg');
-                if (blockedMsg) blockedMsg.style.display = 'none';
-                updateWorkflowStep(1, 'complete');
-                updateWorkflowStep(2, 'active');
             } else {
                 elements.startHuntBtn.disabled = true;
                 elements.startHuntBtn.title = 'All criteria must pass before starting hunt';
-                // Show blocked message
-                const blockedMsg = document.getElementById('huntBlockedMsg');
-                if (blockedMsg) {
-                    blockedMsg.style.display = 'block';
-                    blockedMsg.textContent = '⚠️ Reference failed validation — fix the criteria issues above';
-                }
             }
         }
         
