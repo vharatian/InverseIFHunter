@@ -137,6 +137,7 @@
                 <div class="tabs" id="previewTabs">
                     <button class="tab" data-preview="prompt">Prompt</button>
                     <button class="tab active" data-preview="reference">Response</button>
+                    <button class="tab" data-preview="modelref">Model Reference</button>
                     <button class="tab" data-preview="judge">Judge System Prompt</button>
                 </div>
 
@@ -165,6 +166,12 @@
                             </p>
                             <div id="referenceJudgeResult" class="hidden" style="margin-top: 1rem;"></div>
                         </div>
+                    </div>
+                    <div id="previewModelref" class="preview-panel hidden">
+                        <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Response Reference
+                            (Grading Criteria):</label>
+                        <pre class="code-block" id="modelrefPreview"
+                            style="white-space: pre-wrap; word-break: break-word;">Loading...</pre>
                     </div>
                     <div id="previewJudge" class="preview-panel hidden">
                         <pre class="code-block" id="judgePreview">Loading...</pre>
@@ -351,7 +358,7 @@
     <!-- Toast Container -->
     <div id="toastContainer" style="position: fixed; bottom: 1rem; right: 1rem; z-index: 1000;"></div>
 
-    <script src="/static/app.js?v=130"></script>
+    <script src="/static/app.js?v=131"></script>
 </body>
 
 </html>
