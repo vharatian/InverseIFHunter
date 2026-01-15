@@ -1382,12 +1382,7 @@ function createResultCard(result, slotIndex) {
                 </div>
             </div>
             
-            <!-- Reveal Button - Shows after human review -->
-            <div class="reveal-section" data-hunt-id="${result.hunt_id}" style="margin-top: 1rem; text-align: center;">
-                <button class="btn btn-secondary reveal-llm-btn" data-hunt-id="${result.hunt_id}" disabled style="opacity: 0.5;">
-                    🔒 Submit your review first to reveal LLM Judge
-                </button>
-            </div>
+            <!-- Per-card reveal button removed - use main Reveal button at top -->
         </div>
     `;
     
@@ -1460,11 +1455,7 @@ function createResultCard(result, slotIndex) {
         });
     });
     
-    // Reveal button handler
-    card.querySelector('.reveal-llm-btn').addEventListener('click', (e) => {
-        e.stopPropagation();
-        revealLLMJudge(result.hunt_id, card);
-    });
+    // Per-card reveal button removed - using main Reveal button at top
     
     return card;
 }
@@ -1574,14 +1565,6 @@ function submitHumanReview(huntId, card, slotNum) {
     ).join(' | ');
     statusEl.innerHTML = `<strong>${overallJudgment.toUpperCase()}</strong> - ${gradingDisplay}`;
     statusEl.style.color = overallJudgment === 'pass' ? 'var(--success)' : 'var(--danger)';
-    
-    // Enable reveal button
-    let revealBtn = card.querySelector('.reveal-llm-btn');
-    if (revealBtn) {
-        revealBtn.disabled = false;
-        revealBtn.style.opacity = '1';
-        revealBtn.textContent = '👁️ Reveal LLM Judge';
-    }
     
     showToast(`Slot ${slotNum} submitted as ${overallJudgment.toUpperCase()}`, 'success');
     
