@@ -28,6 +28,11 @@ const state = {
     isHunting: false,
     humanReviews: {},  // Explicit init
     
+    // Response selection state (NEW)
+    allResponses: [],       // All hunt responses (accumulated across runs)
+    selectedHuntIds: [],    // IDs of 4 selected responses for review
+    llmRevealed: false,     // Whether LLM judgments have been revealed
+    
     // Blind judging state
     blindJudging: {
         queue: [],           // Queue of results waiting for human judgment
@@ -89,6 +94,18 @@ const elements = {
     
     // Summary
     summarySection: document.getElementById('summarySection'),
+    
+    // Selection Section (NEW)
+    selectionSection: document.getElementById('selectionSection'),
+    selectionGrid: document.getElementById('selectionGrid'),
+    selectionCount: document.getElementById('selectionCount'),
+    confirmSelectionBtn: document.getElementById('confirmSelectionBtn'),
+    
+    // Reveal Button (NEW)
+    revealLLMBtn: document.getElementById('revealLLMBtn'),
+    reviewProgressText: document.getElementById('reviewProgressText'),
+    reviewInstructions: document.getElementById('reviewInstructions'),
+    reviewProgressContainer: document.getElementById('reviewProgressContainer'),
     
     // Blind Judging Modal
     blindJudgeModal: document.getElementById('blindJudgeModal'),
@@ -331,6 +348,12 @@ function handleNotebookLoaded(data, isUrl = false) {
 
 async function saveToDrive() {
     if (!state.sessionId) return;
+    
+    // ===== VALIDATION 0: Check LLM revealed =====
+    if (!state.llmRevealed) {
+        showToast('Complete all reviews and reveal LLM judgments before saving.', 'error');
+        return;
+    }
     
     // ===== VALIDATION 1: Check pending reviews =====
     const reviewCount = Object.keys(state.humanReviews || {}).length;
@@ -924,27 +947,275 @@ function handleHuntComplete(data) {
     elements.huntStatus.querySelector('.status-dot').className = 'status-dot completed';
     elements.statusText.textContent = 'Completed';
     
-    // Show results section immediately (no modal)
+    // Reset reveal state for new hunt
+    state.llmRevealed = false;
+    state.humanReviews = {};
+    
+    // Fetch ALL responses and show selection UI
+    fetchAllResponsesAndShowSelection(completed_hunts, breaks_found);
+}
+
+async function fetchAllResponsesAndShowSelection(completedHunts, breaksFound) {
+    try {
+        // Fetch all results from the session
+        const response = await fetch(`/api/results/${state.sessionId}`);
+        const data = await response.json();
+        
+        // Store all responses (accumulate across runs)
+        const newResponses = data.results || [];
+        state.allResponses = [...state.allResponses, ...newResponses];
+        
+        // Show selection section
+        elements.selectionSection.classList.remove('hidden');
+        elements.summarySection.classList.remove('hidden');
+        
+        // Populate summary
+        document.getElementById('summaryTotal').textContent = completedHunts;
+        document.getElementById('summaryBreaks').textContent = breaksFound;
+        
+        const successRate = completedHunts > 0 ? Math.round((breaksFound / completedHunts) * 100) : 0;
+        document.getElementById('summarySuccess').textContent = `${successRate}% (${breaksFound}/${completedHunts} breaks)`;
+        document.getElementById('summaryMet').textContent = breaksFound >= 3 ? '✅ Yes' : '❌ No';
+        
+        // Display selection cards
+        displaySelectionCards();
+        
+        showToast(
+            breaksFound >= 3
+                ? `🎉 Found ${breaksFound} breaking responses! Select 4 for review.` 
+                : `Hunt complete. Found ${breaksFound} breaks. Select 4 for review.`,
+            breaksFound >= 3 ? 'success' : 'info'
+        );
+    } catch (error) {
+        console.error('Error fetching results:', error);
+        showToast('Error fetching results', 'error');
+    }
+}
+
+function displaySelectionCards() {
+    const grid = elements.selectionGrid;
+    grid.innerHTML = '';
+    
+    // Auto-select: prioritize failures (score 0)
+    const failed = state.allResponses.filter(r => r.judge_score === 0);
+    const passed = state.allResponses.filter(r => r.judge_score >= 1);
+    
+    // Auto-select up to 4: failures first, then passes
+    state.selectedHuntIds = [];
+    const autoSelected = [...failed.slice(0, 4)];
+    if (autoSelected.length < 4) {
+        autoSelected.push(...passed.slice(0, 4 - autoSelected.length));
+    }
+    state.selectedHuntIds = autoSelected.map(r => r.hunt_id);
+    
+    // Create cards for all responses
+    state.allResponses.forEach((result, index) => {
+        const isSelected = state.selectedHuntIds.includes(result.hunt_id);
+        const isFailed = result.judge_score === 0;
+        const shortModel = (result.model || 'unknown').split('/').pop().substring(0, 20);
+        
+        const card = document.createElement('div');
+        card.className = `selection-card ${isSelected ? 'selected' : ''}`;
+        card.dataset.huntId = result.hunt_id;
+        card.style.cssText = `
+            padding: 1rem;
+            border: 2px solid ${isSelected ? 'var(--accent-primary)' : 'var(--border)'};
+            border-radius: 8px;
+            cursor: pointer;
+            background: ${isSelected ? 'rgba(var(--accent-primary-rgb), 0.1)' : 'var(--bg-primary)'};
+            transition: all 0.2s;
+        `;
+        
+        card.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                <span style="font-weight: 600;">Response ${result.hunt_id}</span>
+                <span class="score-badge ${isFailed ? 'fail' : 'pass'}" style="padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.8rem; background: ${isFailed ? 'var(--danger)' : 'var(--success)'}; color: white;">
+                    ${isFailed ? '❌ FAIL' : '✅ PASS'}
+                </span>
+            </div>
+            <div style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.5rem;">
+                Model: ${shortModel}
+            </div>
+            <div style="font-size: 0.8rem; color: var(--text-muted); max-height: 60px; overflow: hidden; text-overflow: ellipsis;">
+                ${escapeHtml((result.response || '').substring(0, 150))}...
+            </div>
+            <div style="text-align: center; margin-top: 0.5rem;">
+                <input type="checkbox" class="selection-checkbox" ${isSelected ? 'checked' : ''} style="transform: scale(1.3);">
+            </div>
+        `;
+        
+        // Click handler
+        card.addEventListener('click', (e) => {
+            if (e.target.type !== 'checkbox') {
+                const checkbox = card.querySelector('.selection-checkbox');
+                checkbox.checked = !checkbox.checked;
+            }
+            toggleResponseSelection(result.hunt_id, card);
+        });
+        
+        grid.appendChild(card);
+    });
+    
+    updateSelectionCount();
+}
+
+function toggleResponseSelection(huntId, card) {
+    const checkbox = card.querySelector('.selection-checkbox');
+    
+    if (checkbox.checked) {
+        // Add to selection (max 4)
+        if (state.selectedHuntIds.length >= 4) {
+            checkbox.checked = false;
+            showToast('Maximum 4 responses allowed. Unselect one first.', 'warning');
+            return;
+        }
+        state.selectedHuntIds.push(huntId);
+        card.classList.add('selected');
+        card.style.borderColor = 'var(--accent-primary)';
+        card.style.background = 'rgba(var(--accent-primary-rgb), 0.1)';
+    } else {
+        // Remove from selection
+        state.selectedHuntIds = state.selectedHuntIds.filter(id => id !== huntId);
+        card.classList.remove('selected');
+        card.style.borderColor = 'var(--border)';
+        card.style.background = 'var(--bg-primary)';
+    }
+    
+    updateSelectionCount();
+}
+
+function updateSelectionCount() {
+    const count = state.selectedHuntIds.length;
+    elements.selectionCount.textContent = `Selected: ${count} / 4`;
+    elements.selectionCount.style.color = count === 4 ? 'var(--success)' : 'var(--text-primary)';
+    elements.confirmSelectionBtn.disabled = count !== 4;
+}
+
+function confirmSelection() {
+    if (state.selectedHuntIds.length !== 4) {
+        showToast('Please select exactly 4 responses', 'error');
+        return;
+    }
+    
+    // Hide selection, show results with blind review
+    elements.selectionSection.classList.add('hidden');
     elements.resultsSection.classList.remove('hidden');
-    elements.summarySection.classList.remove('hidden');
     
-    // Populate breaking results (with criteria MASKED)
-    displayBreakingResults();
+    // Display the selected responses for review (blind mode)
+    displaySelectedForReview();
     
-    // Populate summary
-    document.getElementById('summaryTotal').textContent = completed_hunts;
-    document.getElementById('summaryBreaks').textContent = breaks_found;
+    showToast('Selection confirmed! Complete your human reviews.', 'success');
+}
+
+function displaySelectedForReview() {
+    elements.breakingResults.innerHTML = '';
+    elements.noBreaksMessage.classList.add('hidden');
     
-    const successRate = completed_hunts > 0 ? Math.round((breaks_found / completed_hunts) * 100) : 0;
-    document.getElementById('summarySuccess').textContent = `${successRate}% (${breaks_found}/${completed_hunts} breaks)`;
-    document.getElementById('summaryMet').textContent = breaks_found >= 3 ? '✅ Yes' : '❌ No';
-    
-    showToast(
-        breaks_found >= 3
-            ? `🎉 Found ${breaks_found} model breaking responses!` 
-            : `Hunt complete. Found ${breaks_found} breaks.`,
-        breaks_found >= 3 ? 'success' : 'info'
+    // Get the selected responses from allResponses
+    const selectedResponses = state.allResponses.filter(r => 
+        state.selectedHuntIds.includes(r.hunt_id)
     );
+    
+    if (selectedResponses.length === 0) {
+        elements.noBreaksMessage.classList.remove('hidden');
+        return;
+    }
+    
+    // Create result cards for each selected response (blind mode - LLM hidden)
+    selectedResponses.forEach((result, index) => {
+        const card = createResultCard(result, index);
+        elements.breakingResults.appendChild(card);
+    });
+    
+    // Update review progress
+    updateReviewProgress();
+    
+    // Ensure LLM sections are hidden (blind mode)
+    document.querySelectorAll('.llm-judge-section').forEach(section => {
+        section.style.display = 'none';
+    });
+    
+    // Show save container but keep button disabled until reveal
+    elements.saveDriveContainer.classList.remove('hidden');
+    elements.saveDriveBtn.disabled = true;
+    elements.saveDriveBtn.style.opacity = '0.5';
+}
+
+function updateReviewProgress() {
+    const reviewCount = Object.keys(state.humanReviews).length;
+    const selectedCount = state.selectedHuntIds.length;
+    
+    if (elements.reviewProgressText) {
+        elements.reviewProgressText.textContent = `${reviewCount} / ${selectedCount} completed`;
+        elements.reviewProgressText.style.color = reviewCount === selectedCount ? 'var(--success)' : 'var(--text-primary)';
+    }
+    
+    // Enable reveal button only when all 4 reviews are complete
+    if (elements.revealLLMBtn) {
+        const allComplete = reviewCount >= 4;
+        elements.revealLLMBtn.disabled = !allComplete || state.llmRevealed;
+        
+        if (state.llmRevealed) {
+            elements.revealLLMBtn.textContent = '✅ LLM Judgments Revealed';
+            elements.revealLLMBtn.disabled = true;
+        } else if (allComplete) {
+            elements.revealLLMBtn.textContent = '👁️ Reveal LLM Judgments';
+        }
+    }
+    
+    if (elements.reviewInstructions) {
+        if (state.llmRevealed) {
+            elements.reviewInstructions.textContent = 'Reviews locked. You can now save to Drive.';
+            elements.reviewInstructions.style.color = 'var(--success)';
+        } else if (reviewCount >= 4) {
+            elements.reviewInstructions.textContent = 'All reviews complete! Click "Reveal LLM Judgments" to see AI scores.';
+            elements.reviewInstructions.style.color = 'var(--success)';
+        } else {
+            elements.reviewInstructions.textContent = `Complete all 4 human reviews to reveal LLM judgments and enable saving.`;
+        }
+    }
+}
+
+function revealLLMJudgments() {
+    if (Object.keys(state.humanReviews).length < 4) {
+        showToast('Please complete all 4 human reviews first', 'error');
+        return;
+    }
+    
+    state.llmRevealed = true;
+    
+    // Show all LLM judge sections
+    document.querySelectorAll('.llm-judge-section').forEach(section => {
+        section.style.display = 'block';
+    });
+    
+    // Lock all human review inputs
+    document.querySelectorAll('.human-review-section').forEach(section => {
+        // Disable all buttons
+        section.querySelectorAll('button').forEach(btn => {
+            btn.disabled = true;
+            btn.style.opacity = '0.5';
+        });
+        // Disable all textareas
+        section.querySelectorAll('textarea').forEach(ta => {
+            ta.disabled = true;
+            ta.style.background = 'var(--bg-tertiary)';
+        });
+        // Add locked indicator
+        const lockIndicator = document.createElement('div');
+        lockIndicator.style.cssText = 'padding: 0.5rem; background: var(--warning); color: black; border-radius: 4px; margin-top: 0.5rem; text-align: center; font-weight: 600;';
+        lockIndicator.textContent = '🔒 Review Locked';
+        section.appendChild(lockIndicator);
+    });
+    
+    // Enable save button
+    elements.saveDriveBtn.disabled = false;
+    elements.saveDriveBtn.style.opacity = '1';
+    
+    // Update progress display
+    updateReviewProgress();
+    
+    showToast('LLM Judgments revealed! Reviews are now locked. You can save to Drive.', 'success');
 }
 
 async function displayBreakingResults() {
@@ -1314,6 +1585,9 @@ function submitHumanReview(huntId, card, slotNum) {
     
     showToast(`Slot ${slotNum} submitted as ${overallJudgment.toUpperCase()}`, 'success');
     
+    // Update the progress display (NEW)
+    updateReviewProgress();
+    
     // Check if all 4 reviews are done
     checkAllReviewsComplete();
 }
@@ -1413,16 +1687,21 @@ function clearPreviousResults() {
     // Reset state
     state.results = [];
     state.isHunting = false;
+    state.humanReviews = {};  // Reset human reviews
+    state.allResponses = [];  // Reset accumulated responses
+    state.selectedHuntIds = [];  // Reset selection
+    state.llmRevealed = false;  // Reset reveal state
     state.blindJudging = {
         queue: [],
         currentResult: null,
         humanJudgments: {}
     };
     
-    // Hide progress, results, and summary sections
+    // Hide progress, results, selection, and summary sections
     elements.progressSection?.classList.add('hidden');
     elements.resultsSection?.classList.add('hidden');
     elements.summarySection?.classList.add('hidden');
+    elements.selectionSection?.classList.add('hidden');
     
     // Clear hunt table
     if (elements.huntTableBody) {
@@ -1751,6 +2030,10 @@ function initEventListeners() {
     
     // Save response to Colab & Re-judge button
     elements.saveResponseBtn?.addEventListener('click', saveAndRejudge);
+    
+    // NEW: Selection and Reveal buttons
+    elements.confirmSelectionBtn?.addEventListener('click', confirmSelection);
+    elements.revealLLMBtn?.addEventListener('click', revealLLMJudgments);
 }
 
 async function judgeReferenceResponse() {

@@ -424,7 +424,7 @@ class NotebookParser:
                         # Format grading basis as JSON
                         grading_basis = review.get('grading_basis', {})
                         if grading_basis:
-                            grading_json = json.dumps({k: v.upper() for k, v in grading_basis.items()}, indent=0)
+                            grading_json = json.dumps({k: v.upper() for k, v in grading_basis.items()}, indent=2)
                         else:
                             grading_json = "{}"
                         
@@ -493,7 +493,7 @@ class NotebookParser:
                 grading_basis = review.get('grading_basis', {})
                 if grading_basis:
                     # Create JSON format for grading
-                    grading_json = json.dumps({k: v.upper() for k, v in grading_basis.items()}, indent=0)
+                    grading_json = json.dumps({k: v.upper() for k, v in grading_basis.items()}, indent=2)
                 else:
                     grading_json = "{}"
                 

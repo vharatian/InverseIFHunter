@@ -231,6 +231,40 @@
             </div>
         </section>
 
+        <!-- Response Selection Section (NEW) -->
+        <section class="section hidden" id="selectionSection">
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">
+                        <span class="card-title-icon">✅</span>
+                        Select Responses for Review
+                    </h2>
+                </div>
+
+                <div style="padding: 1rem; background: var(--bg-tertiary); border-radius: 8px; margin-bottom: 1rem;">
+                    <p style="margin: 0; color: var(--text-secondary);">
+                        <strong>Instructions:</strong> Select exactly <strong>4 responses</strong> for human review.
+                        The system has auto-selected based on failures, but you can change the selection.
+                    </p>
+                </div>
+
+                <div id="selectionGrid"
+                    style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem;">
+                    <!-- Selection cards added dynamically -->
+                </div>
+
+                <div
+                    style="margin-top: 1.5rem; text-align: center; padding-top: 1rem; border-top: 1px solid var(--border);">
+                    <div id="selectionCount" style="margin-bottom: 0.75rem; font-weight: 600;">
+                        Selected: 0 / 4
+                    </div>
+                    <button class="btn btn-primary btn-lg" id="confirmSelectionBtn" disabled>
+                        ✅ Confirm Selection & Start Review
+                    </button>
+                </div>
+            </div>
+        </section>
+
         <!-- Breaking Results Section -->
         <section class="section hidden" id="resultsSection">
             <div class="card">
@@ -240,6 +274,25 @@
                         Model Breaking Responses
                     </h2>
 
+                </div>
+
+                <!-- Review Progress & Reveal Button -->
+                <div id="reviewProgressContainer"
+                    style="margin-bottom: 1rem; padding: 1rem; background: var(--bg-tertiary); border-radius: 8px;">
+                    <div
+                        style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+                        <div>
+                            <strong>Human Review Progress:</strong>
+                            <span id="reviewProgressText">0 / 4 completed</span>
+                        </div>
+                        <button class="btn btn-primary" id="revealLLMBtn" disabled>
+                            👁️ Reveal LLM Judgments
+                        </button>
+                    </div>
+                    <p id="reviewInstructions"
+                        style="margin: 0.5rem 0 0 0; font-size: 0.85rem; color: var(--text-muted);">
+                        Complete all 4 human reviews to reveal LLM judgments and enable saving.
+                    </p>
                 </div>
 
                 <div id="breakingResults">
@@ -358,7 +411,7 @@
     <!-- Toast Container -->
     <div id="toastContainer" style="position: fixed; bottom: 1rem; right: 1rem; z-index: 1000;"></div>
 
-    <script src="/static/app.js?v=132"></script>
+    <script src="/static/app.js?v=133"></script>
 </body>
 
 </html>
