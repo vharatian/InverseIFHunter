@@ -339,8 +339,50 @@ async function saveToDrive() {
         return;
     }
     
-    // ===== VALIDATION 2: Check for valid combination (4 failing OR 3 failing + 1 passing) =====
+    // ===== VALIDATION 1b: Check each review has criteria grading and explanation =====
     const reviews = Object.values(state.humanReviews || {});
+    const incompleteReviews = [];
+    
+    for (let i = 0; i < reviews.length; i++) {
+        const review = reviews[i];
+        const reviewNum = i + 1;
+        const issues = [];
+        
+        // Check for criteria grading
+        const gradingBasis = review.grading_basis || {};
+        const gradedCriteria = Object.keys(gradingBasis).filter(k => 
+            gradingBasis[k] && (gradingBasis[k].toUpperCase() === 'PASS' || gradingBasis[k].toUpperCase() === 'FAIL')
+        );
+        
+        if (gradedCriteria.length === 0) {
+            issues.push('missing criteria grading');
+        }
+        
+        // Check for explanation
+        const explanation = (review.explanation || '').trim();
+        if (!explanation || explanation.length < 10) {
+            issues.push('missing or too short explanation');
+        }
+        
+        if (issues.length > 0) {
+            incompleteReviews.push(`Slot ${reviewNum}: ${issues.join(', ')}`);
+        }
+    }
+    
+    if (incompleteReviews.length > 0) {
+        showToast(`${incompleteReviews.length} review(s) incomplete. Add criteria grading and explanation.`, 'error');
+        alert(
+            `Cannot save: Incomplete reviews!\n\n` +
+            `Each review must have:\n` +
+            `• Criteria grading (PASS/FAIL for each criterion)\n` +
+            `• A detailed explanation (at least 10 characters)\n\n` +
+            `Incomplete reviews:\n${incompleteReviews.join('\n')}\n\n` +
+            `Please complete all reviews before saving.`
+        );
+        return;
+    }
+    
+    // ===== VALIDATION 2: Check for valid combination (4 failing OR 3 failing + 1 passing) =====
     const failCount = reviews.filter(r => r.judgment === 'bad' || r.judgment === 'fail').length;
     const passCount = reviews.filter(r => r.judgment === 'good' || r.judgment === 'pass').length;
     
