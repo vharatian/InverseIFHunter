@@ -359,9 +359,14 @@ class OpenAIJudgeClient:
                 failed_criteria.append(f"{c_id}: {reason}")
         
         # Calculate scores
-        # Strict: All must pass
-        is_passing = (pass_count == len(criteria_list))
-        score = 1 if is_passing else 0
+        # Calculate scores based on Fail Rate (Manager Rule)
+        # "75% fail" example -> If Fail Rate >= 50%, Score is 0.
+        fail_count = len(failed_criteria)
+        total_count = len(criteria_list) if criteria_list else 1
+        fail_rate = fail_count / total_count
+        
+        # Threshold: If more than or equal to 50% fail, it's a Fail.
+        score = 1 if fail_rate < 0.5 else 0
         
         explanation = (
             f"Independent Judging Results:\n"
