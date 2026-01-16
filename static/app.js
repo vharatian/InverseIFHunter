@@ -16,9 +16,8 @@ const PROVIDER_MODELS = {
         { id: 'qwen/qwen3-235b-a22b-thinking-2507', name: 'Qwen3-235B (Thinking)' }
     ],
     'fireworks': [
-        { id: 'accounts/fireworks/models/llama-v3-70b-instruct', name: 'Llama 3 70B Instruct' },
-        { id: 'accounts/fireworks/models/mixtral-8x7b-instruct', name: 'Mixtral 8x7B Instruct' },
-        { id: 'accounts/fireworks/models/qwen2p5-72b-instruct', name: 'Qwen 2.5 72B Instruct' }
+        // Only Qwen3 for Fireworks (Nemotron not available on serverless)
+        { id: 'accounts/fireworks/models/qwen3-235b-a22b-thinking', name: 'Qwen3-235B (Thinking)' }
     ]
 };
 // ============== State ==============
@@ -316,7 +315,22 @@ function handleNotebookLoaded(data, isUrl = false) {
     filenameEl.title = filename; // Show full name on hover
     
     // Extract domain from metadata or filename
-    let domain = data.notebook.metadata?.Domain || data.notebook.metadata?.domain || '';
+    let domain = '';
+    if (data.notebook.metadata) {
+        // Try multiple variations of the domain key (case-insensitive)
+        const metadata = data.notebook.metadata;
+        // First try exact matches
+        domain = metadata.Domain || metadata.domain || metadata['Domain'] || metadata['domain'];
+        
+        // If not found, search case-insensitively
+        if (!domain) {
+            const domainKey = Object.keys(metadata).find(key => key.toLowerCase() === 'domain');
+            if (domainKey) {
+                domain = metadata[domainKey];
+            }
+        }
+    }
+    
     if (!domain && filename !== '-') {
         // Try to extract domain from filename pattern like "single_turn_,,,Domain,UseCase_..."
         const parts = filename.split(',');

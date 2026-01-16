@@ -339,18 +339,39 @@ class NotebookParser:
             result.human_judge_slots[heading] = content
     
     def _parse_metadata(self, content: str) -> Dict[str, str]:
-        """Parse metadata section into key-value pairs."""
+        """Parse metadata section into key-value pairs.
+        Handles formats like:
+        - **Key:** Value
+        - **Key:** - Value
+        - Key: Value
+        - Key: - Value
+        - Domain: - Education & Research
+        """
         metadata = {}
         lines = content.split('\n')
         
         for line in lines:
-            # Match pattern: **Key:** - Value or **Key:** Value
-            match = re.match(r'\*\*([^*]+)\*\*:?\s*-?\s*(.+)?', line.strip())
+            line = line.strip()
+            if not line:
+                continue
+            
+            # Pattern 1: **Key:** Value or **Key:** - Value (with bold markers)
+            match = re.match(r'\*\*([^*:]+)\*\*:?\s*-?\s*(.+)', line)
             if match:
                 key = match.group(1).strip()
-                value = match.group(2).strip() if match.group(2) else ''
+                value = match.group(2).strip()
                 if key and value:
                     metadata[key] = value
+                    continue
+            
+            # Pattern 2: Key: Value or Key: - Value (without bold markers)
+            match = re.match(r'^([^:]+):\s*-?\s*(.+)', line)
+            if match:
+                key = match.group(1).strip()
+                value = match.group(2).strip()
+                if key and value:
+                    metadata[key] = value
+                    continue
         
         return metadata
     
