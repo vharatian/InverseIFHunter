@@ -38,7 +38,7 @@ class OpenAIJudgeClient:
         judge_system_prompt: str,
         judge_prompt_template: Optional[str] = None,
         model: str = DEFAULT_MODEL,
-        max_tokens: int = 8192,  # GPT-5 needs more tokens for reasoning + response
+        max_tokens: int = 32768,  # GPT-5 max: 32k tokens for reasoning + response
         temperature: float = 0.1
     ) -> Dict[str, Any]:
         """
