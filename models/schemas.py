@@ -48,6 +48,7 @@ class HuntConfig(BaseModel):
     models: List[str] = Field(default=["nvidia/nemotron-3-nano-30b-a3b-bf16"])
     reasoning_budget_percent: float = Field(default=0.9, ge=0.0, le=1.0)
     max_retries: int = Field(default=3, ge=1)
+    judge_model: str = Field(default="gpt-5")
     custom_judge_system_prompt: Optional[str] = None
     provider: str = Field(default="openrouter")
     independent_judging: bool = Field(default=True)
