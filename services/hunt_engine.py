@@ -193,8 +193,8 @@ class HuntEngine:
             ))
         
         try:
-            # Step 1: Call the model
-            openrouter = get_openrouter_client()
+            # Step 1: Call the model based on provider
+            provider = getattr(session.config, 'provider', 'openrouter')
             
             # Wrap prompt with explanation request
             enhanced_prompt = (
@@ -205,12 +205,24 @@ class HuntEngine:
                 f"for arriving at this response. This explanation is mandatory."
             )
             
-            response, reasoning, error = await openrouter.call_with_retry(
-                prompt=enhanced_prompt,
-                model=result.model,
-                max_retries=session.config.max_retries,
-                reasoning_budget_percent=session.config.reasoning_budget_percent
-            )
+            if provider == 'fireworks':
+                from services.fireworks_client import get_fireworks_client
+                fireworks = get_fireworks_client()
+                response, reasoning, error = await fireworks.call_with_retry(
+                    prompt=enhanced_prompt,
+                    model=result.model,
+                    max_retries=session.config.max_retries
+                    # No reasoning budget for Fireworks currently
+                )
+            else:
+                # Default to OpenRouter
+                openrouter = get_openrouter_client()
+                response, reasoning, error = await openrouter.call_with_retry(
+                    prompt=enhanced_prompt,
+                    model=result.model,
+                    max_retries=session.config.max_retries,
+                    reasoning_budget_percent=session.config.reasoning_budget_percent
+                )
             
             if error:
                 # Model failed to respond after retries = FAILED (not breaking)
@@ -287,7 +299,8 @@ class HuntEngine:
                 response_reference=session.notebook.response_reference,
                 judge_system_prompt=judge_system,
                 judge_prompt_template=session.notebook.judge_prompt_template,
-                model=session.config.judge_model
+                model=session.config.judge_model,
+                independent_judging=getattr(session.config, 'independent_judging', False)
             )
             
             result.judge_score = judge_result.get("score")

@@ -162,17 +162,38 @@
                             4, Max: 16</small>
                     </div>
                     <div class="form-group">
+                        <label for="providerSelect">Provider</label>
+                        <select id="providerSelect">
+                            <option value="openrouter">OpenRouter (Default)</option>
+                            <option value="fireworks">Fireworks AI</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
                         <label for="modelSelect">Model</label>
                         <select id="modelSelect">
+                            <!-- Populated by JS based on provider -->
                             <option value="nvidia/nemotron-3-nano-30b-a3b:free">Nemotron-3-Nano (Fast)</option>
                             <option value="qwen/qwen3-235b-a22b-thinking-2507">Qwen3-235B (Thinking)</option>
                         </select>
                     </div>
+                </div>
+
+                <div class="config-grid" style="margin-top: 1rem;">
                     <div class="form-group">
                         <label for="judgeModel">Judge Model</label>
                         <select id="judgeModel" disabled>
                             <option value="gpt-5">GPT-5</option>
                         </select>
+                        <small
+                            style="display: block; margin-top: 0.5rem; color: var(--text-secondary); font-size: 0.8rem;">
+                            ✓ Independent Criteria Judging Enabled
+                        </small>
+                    </div>
+                    <div class="form-group">
+                        <!-- Spacer for alignment -->
+                    </div>
+                    <div class="form-group">
+                        <!-- Spacer for alignment -->
                     </div>
                 </div>
 

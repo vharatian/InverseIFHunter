@@ -39,7 +39,8 @@ class OpenAIJudgeClient:
         judge_prompt_template: Optional[str] = None,
         model: str = DEFAULT_MODEL,
         max_tokens: int = 32768,  # GPT-5 max: 32k tokens for reasoning + response
-        temperature: float = 0.1
+        temperature: float = 0.1,
+        independent_judging: bool = False
     ) -> Dict[str, Any]:
         """
         Judge a model response using GPT-5.
@@ -67,12 +68,25 @@ class OpenAIJudgeClient:
                 "{response}", student_response
             )
         else:
-            user_prompt = f"""<Question>:{prompt}
+            user_prompt = f"""<original_prompt>
+{prompt}
+</original_prompt>
 
-<Standard Answer>:{response_reference}
+<ground_truth_reference>
+{response_reference}
+</ground_truth_reference>
 
-<Student Answer>:{student_response}"""
+<student_model_response>
+{student_response}
+</student_model_response>"""
         
+        # Dispatch to independent judging if enabled
+        if independent_judging:
+            return await self._judge_independently(
+                prompt, student_response, response_reference, 
+                judge_system_prompt, model
+            )
+
         try:
             # GPT-5 and newer models use 'max_completion_tokens' instead of 'max_tokens'
             # GPT-5 also only supports default temperature (1), so we don't pass it
@@ -290,6 +304,152 @@ class OpenAIJudgeClient:
             return True
         except Exception:
             return False
+
+    async def _judge_independently(
+        self,
+        prompt: str,
+        student_response: str,
+        reference: str,
+        system_prompt: str,
+        model: str
+    ) -> Dict[str, Any]:
+        """
+        Judge response by splitting criteria into independent API calls.
+        """
+        print(f"DEBUG: Starting INDEPENDENT judging mode.")
+        
+        # Step 1: Extract criteria
+        criteria_list = await self._extract_criteria(reference, model)
+        
+        if not criteria_list:
+            print("WARNING: Could not extract independent criteria. Falling back to single-pass.")
+            # Recursive call with flag=False to avoid infinite loop
+            return await self.judge_response(
+                prompt, student_response, reference, system_prompt, 
+                model=model, independent_judging=False
+            )
+            
+        print(f"DEBUG: Extracted {len(criteria_list)} criteria: {[c.get('id') for c in criteria_list]}")
+        
+        # Step 2: Evaluate each criterion independently
+        tasks = []
+        for criterion in criteria_list:
+            tasks.append(self._evaluate_single_criterion(
+                prompt, student_response, criterion, model
+            ))
+            
+        # Run in parallel
+        results = await asyncio.gather(*tasks)
+        
+        # Step 3: Aggregate results
+        final_criteria = {}
+        failed_criteria = []
+        pass_count = 0
+        
+        for res in results:
+            c_id = res['id']
+            status = res['status']
+            reason = res['reason']
+            final_criteria[c_id] = status
+            
+            if status == 'PASS':
+                pass_count += 1
+            else:
+                failed_criteria.append(f"{c_id}: {reason}")
+        
+        # Calculate scores
+        # Strict: All must pass
+        is_passing = (pass_count == len(criteria_list))
+        score = 1 if is_passing else 0
+        
+        explanation = (
+            f"Independent Judging Results:\n"
+            f"- Passing Criteria: {pass_count}/{len(criteria_list)}\n"
+        )
+        if failed_criteria:
+            explanation += "\nFailed Criteria Details:\n" + "\n".join(failed_criteria)
+        else:
+            explanation += "\nAll criteria passed."
+            
+        return {
+            "score": score,
+            "criteria": final_criteria,
+            "explanation": explanation,
+            "raw_output": "Generated via Independent Criteria Judging"
+        }
+
+    async def _extract_criteria(self, reference: str, model: str) -> List[Dict[str, str]]:
+        """Extract criteria list from reference text."""
+        extraction_prompt = f"""
+        Analyze the following Reference Answer text and extract distinct judging criteria.
+        Return a JSON object with a 'criteria' key containing a list of objects, each with 'id' (e.g., C1, C2) and 'description'.
+        
+        Reference Text:
+        {reference}
+        
+        Output JSON only.
+        """
+        
+        try:
+            print(f"DEBUG: Extracting criteria with model {model}...")
+            response = await self.client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": extraction_prompt}],
+                response_format={"type": "json_object"}
+            )
+            content = response.choices[0].message.content
+            data = json.loads(content)
+            return data.get("criteria", [])
+        except Exception as e:
+            print(f"ERROR extracting criteria: {e}")
+            return []
+
+    async def _evaluate_single_criterion(
+        self, 
+        prompt: str, 
+        student_response: str, 
+        criterion: Dict[str, str], 
+        model: str
+    ) -> Dict[str, str]:
+        """Evaluate a single criterion."""
+        c_id = criterion.get('id', 'Unknown')
+        desc = criterion.get('description', '')
+        
+        eval_prompt = f"""
+        TASK: Evaluate if the Student Answer meets this SINGLE criterion.
+        
+        Criterion ({c_id}): {desc}
+        
+        Original Question:
+        {prompt}
+        
+        Student Answer:
+        {student_response}
+        
+        Output JSON:
+        {{
+            "status": "PASS" or "FAIL",
+            "reason": "Brief explanation"
+        }}
+        """
+        
+        try:
+            # print(f"DEBUG: Evaluating criterion {c_id}...")
+            response = await self.client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": eval_prompt}],
+                response_format={"type": "json_object"}
+            )
+            content = response.choices[0].message.content
+            data = json.loads(content)
+            return {
+                "id": c_id,
+                "status": data.get("status", "FAIL").upper(),
+                "reason": data.get("reason", "No reason")
+            }
+        except Exception as e:
+            print(f"ERROR evaluating criterion {c_id}: {e}")
+            return {"id": c_id, "status": "FAIL", "reason": f"Eval Error: {e}"}
 
 
 # Singleton instance

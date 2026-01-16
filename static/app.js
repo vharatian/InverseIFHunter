@@ -9,6 +9,18 @@
  * - Results display
  */
 
+
+const PROVIDER_MODELS = {
+    'openrouter': [
+        { id: 'nvidia/nemotron-3-nano-30b-a3b:free', name: 'Nemotron-3-Nano (Fast)' },
+        { id: 'qwen/qwen3-235b-a22b-thinking-2507', name: 'Qwen3-235B (Thinking)' }
+    ],
+    'fireworks': [
+        { id: 'accounts/fireworks/models/llama-v3-70b-instruct', name: 'Llama 3 70B Instruct' },
+        { id: 'accounts/fireworks/models/mixtral-8x7b-instruct', name: 'Mixtral 8x7B Instruct' },
+        { id: 'accounts/fireworks/models/qwen2p5-72b-instruct', name: 'Qwen 2.5 72B Instruct' }
+    ]
+};
 // ============== State ==============
 
 const state = {
@@ -64,7 +76,9 @@ const elements = {
     huntSection: document.getElementById('configSection'),
     configSection: document.getElementById('configSection'), // Keep both for safety
     parallelWorkers: document.getElementById('parallelWorkers'),
+    providerSelect: document.getElementById('providerSelect'),  // NEW
     modelSelect: document.getElementById('modelSelect'),
+    // independentJudge removed (now mandatory)
     startHuntBtn: document.getElementById('startHuntBtn'),
     
     // Preview
@@ -705,9 +719,11 @@ function getConfig() {
         parallel_workers: huntCount,
         target_breaks: huntCount, // All hunts should run (no early stop based on target)
         models: models,
+        provider: elements.providerSelect ? elements.providerSelect.value : 'openrouter', // NEW
         reasoning_budget_percent: 0.9,
         max_retries: 3, // Hardcoded to 3 retries
         judge_model: 'gpt-5', // Always GPT-5
+        independent_judging: true, // Mandatory per user request
         custom_judge_system_prompt: null
     };
 }
@@ -2318,13 +2334,44 @@ function init() {
     initPreviewTabs();
     initEventListeners();
     
-    // Disable Start Hunt until reference is validated
     if (elements.startHuntBtn) {
         elements.startHuntBtn.disabled = true;
         elements.startHuntBtn.title = 'Validate the reference response first (click "Judge Reference Response")';
     }
+
+    // Initialize provider logic
+    initializeProviderLogic();
     
     console.log('🔥 Model Hunter initialized');
+}
+
+// Initialize Provider/Model selection logic
+function initializeProviderLogic() {
+    if (!elements.providerSelect || !elements.modelSelect) return;
+
+    // Initial population
+    updateModelOptions();
+
+    // Event listener
+    elements.providerSelect.addEventListener('change', updateModelOptions);
+}
+
+function updateModelOptions() {
+    const provider = elements.providerSelect.value;
+    const models = PROVIDER_MODELS[provider] || [];
+    
+    // Clear current options
+    elements.modelSelect.innerHTML = '';
+    
+    // Add new options
+    models.forEach(model => {
+        const option = document.createElement('option');
+        option.value = model.id;
+        option.textContent = model.name;
+        elements.modelSelect.appendChild(option);
+    });
+    
+    console.log(`Updated models for provider: ${provider}`);
 }
 
 // Start app
