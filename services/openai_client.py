@@ -76,6 +76,7 @@ class OpenAIJudgeClient:
         try:
             # GPT-5 and newer models use 'max_completion_tokens' instead of 'max_tokens'
             # GPT-5 also only supports default temperature (1), so we don't pass it
+            print(f"DEBUG: Calling judge model '{model}' with prompt length {len(user_prompt)}...")
             response = await self.client.chat.completions.create(
                 model=model,
                 messages=[
@@ -87,15 +88,28 @@ class OpenAIJudgeClient:
             )
             
             raw_output = response.choices[0].message.content
+            if not raw_output:
+                print(f"WARNING: Judge returned empty content!")
+                return {
+                    "score": None,
+                    "criteria": {},
+                    "explanation": "Judge returned empty response",
+                    "raw_output": "EMPTY RESPONSE FROM GPT-5",
+                    "error": "Empty response"
+                }
+            
+            print(f"DEBUG: Got judge response of length {len(raw_output)}")
             return self._parse_judge_output(raw_output)
             
         except Exception as e:
+            error_msg = f"API Error: {str(e)}"
+            print(f"ERROR: Judge API failed: {error_msg}")
             return {
                 "score": None,
                 "criteria": {},
-                "explanation": "",
-                "raw_output": "",
-                "error": str(e)
+                "explanation": f"Judge failed: {error_msg}",
+                "raw_output": error_msg,
+                "error": error_msg
             }
     
     def _parse_judge_output(self, text: str) -> Dict[str, Any]:
