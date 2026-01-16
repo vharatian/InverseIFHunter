@@ -11,7 +11,8 @@ Features:
 import os
 import re
 import json
-from typing import Dict, Any, Optional
+import asyncio
+from typing import Dict, Any, Optional, List
 from openai import AsyncOpenAI
 from dotenv import load_dotenv
 
