@@ -59,6 +59,40 @@ class OpenAIJudgeClient:
         Returns:
             Dict with: score, criteria, explanation, raw_output
         """
+        # STRICT JSON VALIDATION: Validate response_reference before any LLM calls
+        # This ensures invalid JSON always raises an error, regardless of independent_judging flag
+        if not response_reference or not response_reference.strip():
+            error_msg = "CRITICAL: Reference Answer must be VALID JSON. Error: response_reference is empty or missing"
+            print(error_msg)
+            raise ValueError(error_msg)
+        
+        try:
+            # Try to parse as JSON to validate
+            parsed = json.loads(response_reference.strip())
+            # If it's a dict with "criteria" key, validate that too
+            if isinstance(parsed, dict) and "criteria" in parsed:
+                if not isinstance(parsed["criteria"], list):
+                    raise ValueError("Reference JSON 'criteria' must be a list")
+            # If it's not a dict or list, it's not a valid criteria structure
+            if not isinstance(parsed, (dict, list)):
+                raise ValueError(f"Reference JSON must be a JSON object or array, got {type(parsed).__name__}")
+        except json.JSONDecodeError as e:
+            error_msg = f"CRITICAL: Reference Answer must be VALID JSON. Parse Error: {e}"
+            print(error_msg)
+            raise ValueError(error_msg)
+        except ValueError as e:
+            # Re-raise ValueError as-is (it's already a CRITICAL message)
+            if "CRITICAL" in str(e):
+                raise
+            # Otherwise, wrap it
+            error_msg = f"CRITICAL: Failed to process Reference JSON: {e}"
+            print(error_msg)
+            raise ValueError(error_msg)
+        except Exception as e:
+            error_msg = f"CRITICAL: Failed to process Reference JSON: {e}"
+            print(error_msg)
+            raise ValueError(error_msg)
+        
         # Build the judge prompt
         if judge_prompt_template:
             user_prompt = judge_prompt_template.replace(

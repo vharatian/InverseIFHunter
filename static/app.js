@@ -2208,7 +2208,30 @@ async function judgeReferenceResponse() {
         showToast(`Reference: ${passCount}/${totalCount} criteria pass (${isPassing ? 'HUNT ENABLED' : 'Fix required'})`, isPassing ? 'success' : 'warning');
         
     } catch (error) {
+        // Display error prominently in result div
+        resultDiv.innerHTML = `
+            <div style="padding: 1rem; background: var(--danger-bg); border-radius: 8px; border: 2px solid var(--danger);">
+                <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
+                    <span style="font-size: 1.2rem;">❌</span>
+                    <span style="font-weight: 600; color: var(--danger); font-size: 1rem;">Judge Error</span>
+                </div>
+                <div style="margin-top: 0.75rem;">
+                    <label style="font-weight: 600; font-size: 0.9rem; color: var(--danger);">Error Message:</label>
+                    <p style="margin-top: 0.25rem; font-size: 0.9rem; color: var(--text-primary); white-space: pre-wrap; word-break: break-word;">${escapeHtml(error.message || 'Unknown error occurred')}</p>
+                </div>
+            </div>
+        `;
+        resultDiv.classList.remove('hidden');
+        
+        // Also show toast
         showToast(`Error: ${error.message}`, 'error');
+        
+        // Disable hunt button on error
+        if (elements.startHuntBtn) {
+            elements.startHuntBtn.disabled = true;
+            elements.startHuntBtn.title = 'Fix judge error before starting hunt';
+        }
+        state.referenceValidated = false;
     } finally {
         btn.disabled = false;
         btn.textContent = '⚖️ Judge Only';
