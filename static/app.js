@@ -32,6 +32,8 @@ const state = {
     allResponses: [],       // All hunt responses (accumulated across runs)
     selectedHuntIds: [],    // IDs of 4 selected responses for review
     llmRevealed: false,     // Whether LLM judgments have been revealed
+    accumulatedHuntOffset: 0,  // Track total hunts for progress table numbering
+    currentRunStartOffset: 0,  // Offset at start of current run (for row lookup during run)
     
     // Blind judging state
     blindJudging: {
@@ -809,12 +811,15 @@ async function startHunt() {
 function initProgressUI() {
     const { parallel_workers, target_breaks } = state.config;
     
-    // Reset progress
+    // Save offset at start of THIS run for row lookup during hunt
+    state.currentRunStartOffset = state.accumulatedHuntOffset;
+    
+    // Reset progress for THIS run only
     elements.progressFill.style.width = '0%';
     elements.progressText.textContent = `0 / ${parallel_workers} hunts complete`;
     elements.progressPercent.textContent = '0%';
     
-    // Initialize breaks indicator
+    // Initialize breaks indicator for this run
     elements.breaksIndicator.innerHTML = '';
     for (let i = 0; i < target_breaks; i++) {
         const dot = document.createElement('span');
@@ -823,17 +828,19 @@ function initProgressUI() {
         elements.breaksIndicator.appendChild(dot);
     }
     
-    // Initialize table rows
+    // APPEND table rows (don't clear!) - use offset for proper numbering
     const models = state.config.models;
-    elements.resultsTableBody.innerHTML = '';
+    const offset = state.accumulatedHuntOffset;
+    
     for (let i = 1; i <= parallel_workers; i++) {
+        const globalRowNum = offset + i;
         const model = models[i - 1] || models[0];
         const shortModel = model.split('/').pop().split('-')[0];
         
         const row = document.createElement('tr');
-        row.id = `hunt-row-${i}`;
+        row.id = `hunt-row-${globalRowNum}`;
         row.innerHTML = `
-            <td>${i}</td>
+            <td>${globalRowNum}</td>
             <td class="model-cell" title="${model}">${shortModel}</td>
             <td class="status-cell"><span class="score-badge pending">⏳ Pending</span></td>
             <td class="score-cell">-</td>
@@ -879,8 +886,13 @@ function handleHuntResult(data) {
         state.blindJudging.queue.push(data);
     }
     
-    // Update table row - SHOW score immediately, hide criteria for blind judging
-    const row = document.getElementById(`hunt-row-${hunt_id}`);
+    // Update table row - use offset from START of this run (not updated until complete)
+    // The offset stored in accumulatedHuntOffset is the total BEFORE this run started
+    const globalRowNum = (state.accumulatedHuntOffset - state.config.parallel_workers) + hunt_id + state.config.parallel_workers;
+    // Actually simpler: current offset was set AFTER initProgressUI, so just use:
+    // During a run, acc offset hasn't been updated yet, so we need to track separately
+    const row = document.getElementById(`hunt-row-${state.currentRunStartOffset + hunt_id}`) || 
+                document.getElementById(`hunt-row-${hunt_id}`);
     if (row) {
         // Status
         if (status === 'failed') {
@@ -943,6 +955,9 @@ function handleHuntComplete(data) {
     elements.configSection?.classList.remove('hidden');
     
     const { completed_hunts, breaks_found } = data;
+    
+    // Update accumulated hunt offset for next run
+    state.accumulatedHuntOffset += completed_hunts;
     
     // Update status
     elements.huntStatus.querySelector('.status-dot').className = 'status-dot completed';
@@ -1699,6 +1714,8 @@ function clearPreviousResults() {
     state.allResponses = [];  // Reset accumulated responses
     state.selectedHuntIds = [];  // Reset selection
     state.llmRevealed = false;  // Reset reveal state
+    state.accumulatedHuntOffset = 0;  // Reset hunt offset
+    state.currentRunStartOffset = 0;  // Reset run offset
     state.blindJudging = {
         queue: [],
         currentResult: null,
