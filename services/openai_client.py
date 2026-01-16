@@ -77,6 +77,8 @@ class OpenAIJudgeClient:
             # GPT-5 and newer models use 'max_completion_tokens' instead of 'max_tokens'
             # GPT-5 also only supports default temperature (1), so we don't pass it
             print(f"DEBUG: Calling judge model '{model}' with prompt length {len(user_prompt)}...")
+            print(f"DEBUG: System prompt length: {len(judge_system_prompt)}")
+            
             response = await self.client.chat.completions.create(
                 model=model,
                 messages=[
@@ -87,15 +89,43 @@ class OpenAIJudgeClient:
                 # Note: temperature not supported by GPT-5, using default (1)
             )
             
-            raw_output = response.choices[0].message.content
-            if not raw_output:
-                print(f"WARNING: Judge returned empty content!")
+            # Debug: Print response structure
+            print(f"DEBUG: Response object type: {type(response)}")
+            print(f"DEBUG: Response choices count: {len(response.choices) if response.choices else 0}")
+            
+            if not response.choices or len(response.choices) == 0:
+                print("WARNING: No choices in response!")
                 return {
                     "score": None,
                     "criteria": {},
-                    "explanation": "Judge returned empty response",
-                    "raw_output": "EMPTY RESPONSE FROM GPT-5",
-                    "error": "Empty response"
+                    "explanation": "No choices returned from GPT-5",
+                    "raw_output": f"Response object: {response}",
+                    "error": "No choices"
+                }
+            
+            choice = response.choices[0]
+            print(f"DEBUG: Choice finish_reason: {choice.finish_reason}")
+            print(f"DEBUG: Choice message: {choice.message}")
+            
+            raw_output = choice.message.content
+            if raw_output is None:
+                # Check if there's a refusal
+                if hasattr(choice.message, 'refusal') and choice.message.refusal:
+                    print(f"WARNING: GPT-5 refused: {choice.message.refusal}")
+                    return {
+                        "score": None,
+                        "criteria": {},
+                        "explanation": f"GPT-5 refused: {choice.message.refusal}",
+                        "raw_output": f"REFUSAL: {choice.message.refusal}",
+                        "error": "Refusal"
+                    }
+                print(f"WARNING: Judge returned None content! Choice: {choice}")
+                return {
+                    "score": None,
+                    "criteria": {},
+                    "explanation": f"GPT-5 returned None. Finish reason: {choice.finish_reason}",
+                    "raw_output": f"Finish: {choice.finish_reason}, Message: {choice.message}",
+                    "error": "None content"
                 }
             
             print(f"DEBUG: Got judge response of length {len(raw_output)}")
