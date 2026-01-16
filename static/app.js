@@ -855,7 +855,9 @@ function initProgressUI() {
 }
 
 function updateTableRow(huntId, data) {
-    const row = document.getElementById(`hunt-row-${huntId}`);
+    // Use global row number (offset + huntId)
+    const globalRowNum = state.currentRunStartOffset + huntId;
+    const row = document.getElementById(`hunt-row-${globalRowNum}`);
     if (!row) return;
     
     if (data.model) {
@@ -875,8 +877,18 @@ function updateTableRow(huntId, data) {
 function handleHuntResult(data) {
     const { hunt_id, status, score, is_breaking, error, completed, total, breaks, response } = data;
     
+    // Calculate global row number: offset at run start + hunt_id
+    const globalRowNum = state.currentRunStartOffset + hunt_id;
+    
     // Debug log
-    console.log('Hunt Result:', { hunt_id, status, score, is_breaking, error });
+    console.log('Hunt Result:', { 
+        hunt_id, 
+        status, 
+        score, 
+        is_breaking, 
+        globalRowNum,
+        currentRunStartOffset: state.currentRunStartOffset 
+    });
     
     // Store result with response data
     state.results.push(data);
@@ -886,13 +898,8 @@ function handleHuntResult(data) {
         state.blindJudging.queue.push(data);
     }
     
-    // Update table row - use offset from START of this run (not updated until complete)
-    // The offset stored in accumulatedHuntOffset is the total BEFORE this run started
-    const globalRowNum = (state.accumulatedHuntOffset - state.config.parallel_workers) + hunt_id + state.config.parallel_workers;
-    // Actually simpler: current offset was set AFTER initProgressUI, so just use:
-    // During a run, acc offset hasn't been updated yet, so we need to track separately
-    const row = document.getElementById(`hunt-row-${state.currentRunStartOffset + hunt_id}`) || 
-                document.getElementById(`hunt-row-${hunt_id}`);
+    // Update table row using global row number
+    const row = document.getElementById(`hunt-row-${globalRowNum}`);
     if (row) {
         // Status
         if (status === 'failed') {
