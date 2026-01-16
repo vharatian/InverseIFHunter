@@ -32,9 +32,9 @@ class OpenRouterClient:
         "qwen3": "qwen/qwen3-235b-a22b-thinking-2507",
     }
     
-    # Default max tokens per model (approximate)
+    # Default max tokens per model (actual model capabilities)
     MAX_TOKENS = {
-        "nvidia/nemotron-3-nano-30b-a3b:free": 8192,
+        "nvidia/nemotron-3-nano-30b-a3b:free": 32768,  # 32k actual capability
         "qwen/qwen3-235b-a22b-thinking-2507": 16384,
     }
     

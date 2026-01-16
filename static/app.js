@@ -966,27 +966,45 @@ async function fetchAllResponsesAndShowSelection(completedHunts, breaksFound) {
         const newResponses = data.results || [];
         state.allResponses = [...state.allResponses, ...newResponses];
         
-        // Show selection section
-        elements.selectionSection.classList.remove('hidden');
-        elements.summarySection.classList.remove('hidden');
+        // Count total breaks across all accumulated responses
+        const totalBreaks = state.allResponses.filter(r => r.judge_score === 0).length;
+        const totalPasses = state.allResponses.filter(r => r.judge_score >= 1).length;
         
         // Populate summary
-        document.getElementById('summaryTotal').textContent = completedHunts;
-        document.getElementById('summaryBreaks').textContent = breaksFound;
+        elements.summarySection.classList.remove('hidden');
+        document.getElementById('summaryTotal').textContent = state.allResponses.length;
+        document.getElementById('summaryBreaks').textContent = totalBreaks;
         
-        const successRate = completedHunts > 0 ? Math.round((breaksFound / completedHunts) * 100) : 0;
-        document.getElementById('summarySuccess').textContent = `${successRate}% (${breaksFound}/${completedHunts} breaks)`;
-        document.getElementById('summaryMet').textContent = breaksFound >= 3 ? '✅ Yes' : '❌ No';
+        const successRate = state.allResponses.length > 0 ? Math.round((totalBreaks / state.allResponses.length) * 100) : 0;
+        document.getElementById('summarySuccess').textContent = `${successRate}% (${totalBreaks}/${state.allResponses.length} breaks)`;
+        document.getElementById('summaryMet').textContent = totalBreaks >= 3 ? '✅ Yes' : '❌ No';
         
-        // Display selection cards
+        // VALIDATION: Need at least 3 breaks AND at least 1 pass to proceed
+        const criteriaMetBreaks = totalBreaks >= 3;
+        const criteriaMetDiversity = totalBreaks >= 1 && totalPasses >= 1;
+        const criteriaMet = criteriaMetBreaks && criteriaMetDiversity;
+        
+        if (!criteriaMet) {
+            // Don't show selection - criteria not met
+            elements.selectionSection.classList.add('hidden');
+            let errorMsg = '';
+            if (!criteriaMetBreaks) {
+                errorMsg = `⚠️ Need at least 3 breaks (score 0). Currently have ${totalBreaks}. Run more hunts!`;
+            } else if (!criteriaMetDiversity) {
+                errorMsg = `⚠️ Need at least 1 break AND 1 pass for diversity. Breaks: ${totalBreaks}, Passes: ${totalPasses}`;
+            }
+            showToast(errorMsg, 'warning');
+            alert(`Cannot proceed to human review:\n\n${errorMsg}\n\nPlease run more hunts until criteria is met.`);
+            return;
+        }
+        
+        // Show selection section - criteria met!
+        elements.selectionSection.classList.remove('hidden');
+        
+        // Display selection cards (NO auto-selection)
         displaySelectionCards();
         
-        showToast(
-            breaksFound >= 3
-                ? `🎉 Found ${breaksFound} breaking responses! Select 4 for review.` 
-                : `Hunt complete. Found ${breaksFound} breaks. Select 4 for review.`,
-            breaksFound >= 3 ? 'success' : 'info'
-        );
+        showToast(`✅ Criteria met! ${totalBreaks} breaks, ${totalPasses} passes. Select exactly 4 for review.`, 'success');
     } catch (error) {
         console.error('Error fetching results:', error);
         showToast('Error fetching results', 'error');
@@ -997,17 +1015,8 @@ function displaySelectionCards() {
     const grid = elements.selectionGrid;
     grid.innerHTML = '';
     
-    // Auto-select: prioritize failures (score 0)
-    const failed = state.allResponses.filter(r => r.judge_score === 0);
-    const passed = state.allResponses.filter(r => r.judge_score >= 1);
-    
-    // Auto-select up to 4: failures first, then passes
+    // NO auto-selection - human picks all 4 manually
     state.selectedHuntIds = [];
-    const autoSelected = [...failed.slice(0, 4)];
-    if (autoSelected.length < 4) {
-        autoSelected.push(...passed.slice(0, 4 - autoSelected.length));
-    }
-    state.selectedHuntIds = autoSelected.map(r => r.hunt_id);
     
     // Create cards for all responses
     state.allResponses.forEach((result, index) => {
