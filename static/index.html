@@ -87,6 +87,64 @@
 
         <!-- Configuration Section -->
         <section class="section hidden" id="configSection">
+            <!-- Notebook Preview Card (NOW FIRST) -->
+            <div class="card" id="notebookPreviewCard">
+                <div class="card-header">
+                    <h2 class="card-title">
+                        <span class="card-title-icon">📋</span>
+                        Notebook Preview
+                    </h2>
+                </div>
+
+                <div class="tabs" id="previewTabs">
+                    <button class="tab" data-preview="prompt">Prompt</button>
+                    <button class="tab active" data-preview="reference">Response</button>
+                    <button class="tab" data-preview="modelref">Model Reference</button>
+                    <button class="tab" data-preview="judge">Judge System Prompt</button>
+                </div>
+
+                <div id="previewContent" class="preview-content">
+                    <div id="previewPrompt" class="preview-panel hidden">
+                        <pre class="code-block" id="promptPreview">Loading...</pre>
+                    </div>
+                    <div id="previewReference" class="preview-panel">
+                        <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Expected Response
+                            (editable):</label>
+                        <textarea id="referencePreview" class="code-block"
+                            style="width: 100%; min-height: 200px; resize: vertical; font-family: monospace; padding: 0.75rem; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-primary); color: var(--text-primary);">Loading...</textarea>
+
+                        <div class="judge-reference-section" style="margin-top: 1rem;">
+                            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                                <button class="btn btn-secondary" id="judgeReferenceBtn" style="flex: 1;"
+                                    title="Validates criteria against the expected response - won't modify notebook">
+                                    ⚖️ Judge Only
+                                </button>
+                                <button class="btn btn-primary" id="saveReponseBtn" style="flex: 1;"
+                                    title="Saves edited response to your Colab notebook and then validates it">
+                                    💾 Save to Colab & Re-judge
+                                </button>
+                            </div>
+                            <p style="margin-top: 0.75rem; font-size: 0.85rem; color: var(--text-muted);">
+                                💡 <strong>Judge Only</strong>: Checks if criteria are valid without modifying
+                                notebook.<br>
+                                📝 <strong>Save & Re-judge</strong>: Saves your edits to Colab, then validates.
+                            </p>
+                            <div id="referenceJudgeResult" class="hidden" style="margin-top: 1rem;"></div>
+                        </div>
+                    </div>
+                    <div id="previewModelref" class="preview-panel hidden">
+                        <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Response Reference
+                            (Grading Criteria):</label>
+                        <pre class="code-block" id="modelrefPreview"
+                            style="white-space: pre-wrap; word-break: break-word;">Loading...</pre>
+                    </div>
+                    <div id="previewJudge" class="preview-panel hidden">
+                        <pre class="code-block" id="judgePreview">Loading...</pre>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Hunt Configuration Card (NOW SECOND) -->
             <div class="card">
                 <div class="card-header">
                     <h2 class="card-title">
@@ -122,60 +180,6 @@
                     <button class="btn btn-primary btn-lg" id="startHuntBtn">
                         🚀 Start Hunt
                     </button>
-                </div>
-            </div>
-
-            <!-- Notebook Preview Card -->
-            <div class="card" id="notebookPreviewCard">
-                <div class="card-header">
-                    <h2 class="card-title">
-                        <span class="card-title-icon">📋</span>
-                        Notebook Preview
-                    </h2>
-                </div>
-
-                <div class="tabs" id="previewTabs">
-                    <button class="tab" data-preview="prompt">Prompt</button>
-                    <button class="tab active" data-preview="reference">Response</button>
-                    <button class="tab" data-preview="modelref">Model Reference</button>
-                    <button class="tab" data-preview="judge">Judge System Prompt</button>
-                </div>
-
-                <div id="previewContent" class="preview-content">
-                    <div id="previewPrompt" class="preview-panel hidden">
-                        <pre class="code-block" id="promptPreview">Loading...</pre>
-                    </div>
-                    <div id="previewReference" class="preview-panel">
-                        <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Expected Response
-                            (editable):</label>
-                        <textarea id="referencePreview" class="code-block"
-                            style="width: 100%; min-height: 200px; resize: vertical; font-family: monospace; padding: 0.75rem; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-primary); color: var(--text-primary);">Loading...</textarea>
-
-                        <div class="judge-reference-section" style="margin-top: 1rem;">
-                            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                                <button class="btn btn-secondary" id="judgeReferenceBtn" style="flex: 1;">
-                                    ⚖️ Judge Only
-                                </button>
-                                <button class="btn btn-primary" id="saveReponseBtn" style="flex: 1;">
-                                    💾 Save to Colab & Re-judge
-                                </button>
-                            </div>
-                            <p style="margin-top: 0.75rem; font-size: 0.85rem; color: var(--text-muted);">
-                                ✏️ Edit the response above, then click <strong>Save to Colab & Re-judge</strong> to
-                                update the notebook and verify.
-                            </p>
-                            <div id="referenceJudgeResult" class="hidden" style="margin-top: 1rem;"></div>
-                        </div>
-                    </div>
-                    <div id="previewModelref" class="preview-panel hidden">
-                        <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Response Reference
-                            (Grading Criteria):</label>
-                        <pre class="code-block" id="modelrefPreview"
-                            style="white-space: pre-wrap; word-break: break-word;">Loading...</pre>
-                    </div>
-                    <div id="previewJudge" class="preview-panel hidden">
-                        <pre class="code-block" id="judgePreview">Loading...</pre>
-                    </div>
                 </div>
             </div>
         </section>
@@ -417,7 +421,7 @@
     <!-- Toast Container -->
     <div id="toastContainer" style="position: fixed; bottom: 1rem; right: 1rem; z-index: 1000;"></div>
 
-    <script src="/static/app.js?v=150"></script>
+    <script src="/static/app.js?v=151"></script>
 </body>
 
 </html>
