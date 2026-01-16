@@ -466,10 +466,14 @@ async def save_reviews(session_id: str, request: Request):
 
 
 @app.post("/api/save-to-drive/{session_id}")
-async def save_to_drive(session_id: str):
-    """Save results directly to the Google Drive notebook."""
+async def save_to_drive(session_id: str, request: Request):
+    """Save ONLY SELECTED results to the Google Drive notebook."""
     try:
         from services.google_drive_client import drive_client
+        
+        # Parse request body to get selected hunt IDs
+        body = await request.json()
+        selected_hunt_ids = body.get("selected_hunt_ids", [])
         
         session = hunt_engine.get_session(session_id)
         if not session:
@@ -486,9 +490,19 @@ async def save_to_drive(session_id: str):
         if not file_id:
             raise HTTPException(400, "Could not extract File ID from URL")
             
-        # Generate content
+        # Generate content - FILTER to only selected results
         original_content = storage.get("original_content")
-        results = hunt_engine.export_results(session_id)
+        all_results = hunt_engine.export_results(session_id)
+        
+        # Filter results to only include selected hunt IDs
+        if selected_hunt_ids:
+            results = [r for r in all_results if r.get('hunt_id') in selected_hunt_ids]
+            print(f"DEBUG: Filtering to {len(results)} selected results out of {len(all_results)} total")
+        else:
+            # Fallback: use all if no selection provided
+            results = all_results
+            print(f"WARNING: No selected_hunt_ids provided, saving all {len(results)} results")
+        
         human_reviews = getattr(session, 'human_reviews', {})
         
         modified_content = notebook_parser.export_notebook(

@@ -480,9 +480,13 @@ async function saveToDrive() {
             body: JSON.stringify({ reviews: state.humanReviews || {} })
         });
         
-        // Then save to drive
+        // Then save to drive - ONLY the selected responses
         const response = await fetch(`/api/save-to-drive/${state.sessionId}`, {
-            method: 'POST'
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                selected_hunt_ids: state.selectedHuntIds || [] 
+            })
         });
         
         if (!response.ok) {
