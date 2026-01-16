@@ -385,30 +385,47 @@ class OpenAIJudgeClient:
         }
 
     async def _extract_criteria(self, reference: str, model: str) -> List[Dict[str, str]]:
-        """Extract criteria list from reference text."""
-        extraction_prompt = f"""
-        Analyze the following Reference Answer text and extract distinct judging criteria.
-        Return a JSON object with a 'criteria' key containing a list of objects, each with 'id' (e.g., C1, C2) and 'description'.
-        
-        Reference Text:
-        {reference}
-        
-        Output JSON only.
+        """
+        Extract criteria list from reference text.
+        STRICT MODE: Reference MUST be valid JSON.
         """
         
+        # 1. Try to parse directly as JSON
         try:
-            print(f"DEBUG: Extracting criteria with model {model}...")
-            response = await self.client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": extraction_prompt}],
-                response_format={"type": "json_object"}
-            )
-            content = response.choices[0].message.content
-            data = json.loads(content)
-            return data.get("criteria", [])
+            parsed = json.loads(reference)
+            
+            # Handle {"criteria": [...]} case
+            if isinstance(parsed, dict) and "criteria" in parsed:
+                parsed = parsed["criteria"]
+                
+            if isinstance(parsed, list) and len(parsed) > 0:
+                normalized = []
+                for idx, item in enumerate(parsed):
+                    # Handle [{"id": "...", "description": "..."}] setup
+                    if isinstance(item, dict):
+                        c_id = item.get("id", f"C{idx+1}")
+                        desc = item.get("description", item.get("criteria", str(item)))
+                        normalized.append({"id": c_id, "description": desc})
+                    # Handle ["Criterion 1", "Criterion 2"] setup
+                    elif isinstance(item, str):
+                        normalized.append({"id": f"C{idx+1}", "description": item})
+                
+                if normalized:
+                    print(f"DEBUG: Optimization - Parsed {len(normalized)} criteria directly from JSON reference.")
+                    return normalized
+            else:
+                 # It's valid JSON but not a list (e.g. empty dict, number, bool)
+                 raise ValueError("Reference JSON must be a list of criteria or object with 'criteria' key.")
+
+        except json.JSONDecodeError as e:
+            # STRICT MODE ENACTED: Do not fallback. Warn the user.
+            error_msg = f"CRITICAL: Reference Answer must be VALID JSON. Parse Error: {e}"
+            print(error_msg)
+            # We raise an exception that will bubble up and stop the hunt (or just the judge)
+            # In hunt_engine, this will likely be caught and mark the hunt as FAILED with error.
+            raise ValueError(error_msg)
         except Exception as e:
-            print(f"ERROR extracting criteria: {e}")
-            return []
+             raise ValueError(f"CRITICAL: Failed to process Reference JSON: {e}")
 
     async def _evaluate_single_criterion(
         self, 
