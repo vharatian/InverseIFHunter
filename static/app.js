@@ -557,49 +557,56 @@ function populatePreviewTabs(notebook) {
 }
 
 // Validate that Model Reference is valid JSON format with criteria
+// Only validates the JSON array between [ and ], ignoring any text outside
 function validateModelReferenceJSON(responseReference) {
     if (!responseReference || !responseReference.trim()) {
         return { valid: false, error: 'Model Reference is empty' };
     }
     
-    const trimmed = responseReference.trim();
-    
     try {
-        // Try to find and parse JSON
-        if (trimmed.startsWith('{')) {
-            const data = JSON.parse(trimmed);
-            // Check for C1, C2, etc. keys
-            const hasValidKeys = Object.keys(data).some(k => /^C\d+$/i.test(k));
-            if (hasValidKeys) {
-                return { valid: true };
+        // Extract only the JSON array between [ and ]
+        const arrayMatch = responseReference.match(/\[[\s\S]*?\]/);
+        
+        if (!arrayMatch) {
+            return { valid: false, error: 'Model Reference must contain a JSON array between [ and ] brackets' };
+        }
+        
+        const jsonArrayStr = arrayMatch[0];
+        const arr = JSON.parse(jsonArrayStr);
+        
+        if (!Array.isArray(arr)) {
+            return { valid: false, error: 'Content between [ and ] must be a JSON array' };
+        }
+        
+        if (arr.length === 0) {
+            return { valid: false, error: 'JSON array cannot be empty' };
+        }
+        
+        // Validate each item has id and criteria fields
+        for (let idx = 0; idx < arr.length; idx++) {
+            const item = arr[idx];
+            if (typeof item !== 'object' || item === null) {
+                return { valid: false, error: `Criterion at index ${idx} must be a JSON object` };
             }
-            return { valid: false, error: 'JSON object must have criteria keys (C1, C2, C3, etc.)' };
-        }
-        
-        // Try to find embedded JSON
-        const jsonMatch = trimmed.match(/\{[\s\S]*?"C\d+"[\s\S]*?\}/);
-        if (jsonMatch) {
-            JSON.parse(jsonMatch[0]);
-            return { valid: true };
-        }
-        
-        // Try array format
-        const arrayMatch = trimmed.match(/\[[\s\S]*?\]/);
-        if (arrayMatch) {
-            const arr = JSON.parse(arrayMatch[0]);
-            if (Array.isArray(arr) && arr.length > 0) {
-                return { valid: true };
+            if (!item.id) {
+                return { valid: false, error: `Criterion at index ${idx} is missing 'id' field` };
+            }
+            // Check for criteria1, criteria2, etc. fields
+            const hasCriteria = Object.keys(item).some(key => key.startsWith('criteria') && key !== 'id');
+            if (!hasCriteria) {
+                return { valid: false, error: `Criterion at index ${idx} (id: ${item.id}) is missing a 'criteria' field` };
             }
         }
         
-        return { valid: false, error: 'No valid JSON structure found. Expected format: {"C1": "...", "C2": "...", ...}' };
+        return { valid: true };
         
     } catch (e) {
         return { valid: false, error: `JSON parse error: ${e.message}` };
     }
 }
 
-// Parse criteria from response_reference text (looks for JSON with criteria fields)
+// Parse criteria from response_reference text
+// Only parses the JSON array between [ and ], ignoring any text outside
 function parseCriteria(responseReference) {
     if (!responseReference || !responseReference.trim()) {
         console.warn('Empty response_reference, using default criteria');
@@ -607,48 +614,58 @@ function parseCriteria(responseReference) {
     }
     
     try {
-        // Try to parse the entire response as JSON first
-        const trimmed = responseReference.trim();
+        // Extract only the JSON array between [ and ]
+        const arrayMatch = responseReference.match(/\[[\s\S]*?\]/);
         
-        // Method 1: Full JSON object with C1, C2, etc. keys
-        if (trimmed.startsWith('{')) {
-            const data = JSON.parse(trimmed);
-            const criteria = [];
+        if (!arrayMatch) {
+            console.warn('No JSON array found between [ and ], using default criteria');
+            return getDefaultCriteria();
+        }
+        
+        const jsonArrayStr = arrayMatch[0];
+        const criteriaArray = JSON.parse(jsonArrayStr);
+        
+        if (!Array.isArray(criteriaArray) || criteriaArray.length === 0) {
+            console.warn('JSON array is empty or invalid, using default criteria');
+            return getDefaultCriteria();
+        }
+        
+        // Parse each criterion item
+        const criteria = [];
+        for (let idx = 0; idx < criteriaArray.length; idx++) {
+            const item = criteriaArray[idx];
             
-            // Look for C1, C2, etc. keys
-            for (const key of Object.keys(data)) {
-                if (/^C\d+$/i.test(key)) {
-                    const value = data[key];
-                    if (typeof value === 'string') {
-                        criteria.push({ id: key.toUpperCase(), criteria: value });
-                    } else if (typeof value === 'object' && value !== null) {
-                        // Has description or criteria field
-                        const desc = value.description || value.criteria || value.text || JSON.stringify(value);
-                        criteria.push({ id: key.toUpperCase(), criteria: desc });
-                    }
+            if (typeof item !== 'object' || item === null) {
+                continue;
+            }
+            
+            const c_id = item.id || `C${idx + 1}`;
+            
+            // Look for criteria1, criteria2, etc. fields
+            let criteriaText = null;
+            for (const key of Object.keys(item)) {
+                if (key.startsWith('criteria') && key !== 'id') {
+                    criteriaText = item[key];
+                    break;
                 }
             }
             
-            if (criteria.length > 0) {
-                console.log('Parsed criteria from JSON object:', criteria);
-                return criteria;
+            // Fallback to description or other fields
+            if (!criteriaText) {
+                criteriaText = item.description || item.criteria || item.text || JSON.stringify(item);
+            }
+            
+            if (criteriaText) {
+                criteria.push({ id: c_id, criteria: criteriaText });
             }
         }
         
-        // Method 2: JSON array with id/criteria fields
-        const jsonArrayMatch = responseReference.match(/\[\s*\{[\s\S]*?\}\s*\]/);
-        if (jsonArrayMatch) {
-            const criteriaArray = JSON.parse(jsonArrayMatch[0]);
-            if (Array.isArray(criteriaArray)) {
-                const filtered = criteriaArray.filter(c => c.id && c.criteria);
-                if (filtered.length > 0) {
-                    console.log('Parsed criteria from JSON array:', filtered);
-                    return filtered;
-                }
-            }
+        if (criteria.length > 0) {
+            console.log('Parsed criteria from JSON array:', criteria);
+            return criteria;
         }
         
-        // Method 3: Look for embedded JSON object  
+        // Fallback: Look for embedded JSON object (legacy support)
         const jsonObjMatch = responseReference.match(/\{[\s\S]*?"C\d+"[\s\S]*?\}/);
         if (jsonObjMatch) {
             try {

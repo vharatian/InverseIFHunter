@@ -67,15 +67,24 @@ class OpenAIJudgeClient:
             raise ValueError(error_msg)
         
         try:
+            # Extract only the JSON array between [ and ], ignoring any text outside
+            array_match = re.search(r'\[.*?\]', response_reference, re.DOTALL)
+            
+            if not array_match:
+                raise ValueError("Reference Answer must contain a JSON array between [ and ] brackets")
+            
+            json_array_str = array_match.group(0)
+            
             # Try to parse as JSON to validate
-            parsed = json.loads(response_reference.strip())
-            # If it's a dict with "criteria" key, validate that too
-            if isinstance(parsed, dict) and "criteria" in parsed:
-                if not isinstance(parsed["criteria"], list):
-                    raise ValueError("Reference JSON 'criteria' must be a list")
-            # If it's not a dict or list, it's not a valid criteria structure
-            if not isinstance(parsed, (dict, list)):
-                raise ValueError(f"Reference JSON must be a JSON object or array, got {type(parsed).__name__}")
+            parsed = json.loads(json_array_str)
+            
+            # Must be a list/array
+            if not isinstance(parsed, list):
+                raise ValueError(f"Reference JSON must be a JSON array (list), got {type(parsed).__name__}")
+            
+            if len(parsed) == 0:
+                raise ValueError("Reference JSON array cannot be empty")
+                
         except json.JSONDecodeError as e:
             error_msg = f"CRITICAL: Reference Answer must be VALID JSON. Parse Error: {e}"
             print(error_msg)
@@ -421,42 +430,61 @@ class OpenAIJudgeClient:
     async def _extract_criteria(self, reference: str, model: str) -> List[Dict[str, str]]:
         """
         Extract criteria list from reference text.
-        STRICT MODE: Reference MUST be valid JSON.
+        STRICT MODE: Only extracts and validates the JSON array between [ and ].
+        Ignores any text outside the brackets.
         """
         
-        # 1. Try to parse directly as JSON
+        # Extract only the JSON array between [ and ], ignoring any text outside
+        array_match = re.search(r'\[.*?\]', reference, re.DOTALL)
+        
+        if not array_match:
+            error_msg = "CRITICAL: Reference Answer must contain a JSON array between [ and ] brackets"
+            print(error_msg)
+            raise ValueError(error_msg)
+        
+        json_array_str = array_match.group(0)
+        
+        # Try to parse as JSON
         try:
-            parsed = json.loads(reference)
+            parsed = json.loads(json_array_str)
             
-            # Handle {"criteria": [...]} case
-            if isinstance(parsed, dict) and "criteria" in parsed:
-                parsed = parsed["criteria"]
+            if not isinstance(parsed, list):
+                raise ValueError(f"Reference JSON must be a JSON array (list), got {type(parsed).__name__}")
                 
-            if isinstance(parsed, list) and len(parsed) > 0:
-                normalized = []
-                for idx, item in enumerate(parsed):
-                    # Handle [{"id": "...", "description": "..."}] setup
-                    if isinstance(item, dict):
-                        c_id = item.get("id", f"C{idx+1}")
-                        desc = item.get("description", item.get("criteria", str(item)))
-                        normalized.append({"id": c_id, "description": desc})
-                    # Handle ["Criterion 1", "Criterion 2"] setup
-                    elif isinstance(item, str):
-                        normalized.append({"id": f"C{idx+1}", "description": item})
+            if len(parsed) == 0:
+                raise ValueError("Reference JSON array cannot be empty")
                 
-                if normalized:
-                    print(f"DEBUG: Optimization - Parsed {len(normalized)} criteria directly from JSON reference.")
-                    return normalized
+            normalized = []
+            for idx, item in enumerate(parsed):
+                # Handle [{"id": "C1", "criteria1": "..."}] format
+                if isinstance(item, dict):
+                    c_id = item.get("id", f"C{idx+1}")
+                    # Look for criteria1, criteria2, etc. fields
+                    criteria_text = None
+                    for key in item.keys():
+                        if key.startswith("criteria") and key != "id":
+                            criteria_text = item[key]
+                            break
+                    
+                    # Fallback to description or other fields
+                    if not criteria_text:
+                        criteria_text = item.get("description", item.get("criteria", str(item)))
+                    
+                    normalized.append({"id": c_id, "description": criteria_text})
+                # Handle ["Criterion 1", "Criterion 2"] setup
+                elif isinstance(item, str):
+                    normalized.append({"id": f"C{idx+1}", "description": item})
+            
+            if normalized:
+                print(f"DEBUG: Optimization - Parsed {len(normalized)} criteria directly from JSON array.")
+                return normalized
             else:
-                 # It's valid JSON but not a list (e.g. empty dict, number, bool)
-                 raise ValueError("Reference JSON must be a list of criteria or object with 'criteria' key.")
+                raise ValueError("Reference JSON array must contain at least one valid criterion")
 
         except json.JSONDecodeError as e:
             # STRICT MODE ENACTED: Do not fallback. Warn the user.
             error_msg = f"CRITICAL: Reference Answer must be VALID JSON. Parse Error: {e}"
             print(error_msg)
-            # We raise an exception that will bubble up and stop the hunt (or just the judge)
-            # In hunt_engine, this will likely be caught and mark the hunt as FAILED with error.
             raise ValueError(error_msg)
         except Exception as e:
              raise ValueError(f"CRITICAL: Failed to process Reference JSON: {e}")

@@ -218,46 +218,56 @@ class NotebookParser:
         return result
     
     def _validate_response_reference(self, response_reference: str) -> list:
-        """Validate response_reference is valid JSON with expected structure."""
+        """Validate response_reference is valid JSON with expected structure.
+        Only validates the JSON array between [ and ], ignoring any text outside.
+        """
         errors = []
         
         if not response_reference or not response_reference.strip():
             errors.append("response_reference is missing or empty")
             return errors
         
+        # Extract only the JSON array between [ and ]
+        array_match = re.search(r'\[.*?\]', response_reference, re.DOTALL)
+        
+        if not array_match:
+            errors.append("response_reference must contain a JSON array between [ and ] brackets")
+            return errors
+        
+        json_array_str = array_match.group(0)
+        
         # Try to parse as JSON
         try:
-            data = json.loads(response_reference.strip())
+            data = json.loads(json_array_str)
         except json.JSONDecodeError as e:
-            # If it doesn't look like JSON (doesn't start with {), treat as plain text and allow it
-            stripped = response_reference.strip()
-            if not stripped.startswith('{'):
-                # It's likely just plain text instructions, which is allowed
-                return []
-            
-            # If it starts with {, it was intended as JSON but is invalid
-            snippet = stripped[:20] + "..." if len(stripped) > 20 else stripped
-            errors.append(f"response_reference appears to be invalid JSON. Error: {e}. Content: '{snippet}'")
+            snippet = json_array_str[:50] + "..." if len(json_array_str) > 50 else json_array_str
+            errors.append(f"response_reference contains invalid JSON array. Error: {e}. Content: '{snippet}'")
             return errors
         
-        # Check for expected structure - should be a dict with criteria
-        if not isinstance(data, dict):
-            errors.append("response_reference should be a JSON object (dict), not " + type(data).__name__)
+        # Check for expected structure - should be a list/array
+        if not isinstance(data, list):
+            errors.append(f"response_reference should be a JSON array (list), not {type(data).__name__}")
             return errors
         
-        # Check for criteria fields (C1, C2, etc. or descriptive keys)
+        # Check for criteria fields
         if len(data) == 0:
             errors.append("response_reference appears to be empty - should contain scoring criteria")
+            return errors
         
-        # Validate each criterion has expected fields
-        for key, value in data.items():
-            if isinstance(value, dict):
-                # Check for common expected fields
-                if 'description' not in value and 'criteria' not in value and 'pass' not in value.get('', '').lower():
-                    # Allow flexible structure but log warning
-                    pass
-            elif not isinstance(value, (str, int, float, bool)):
-                errors.append(f"Criterion '{key}' has unexpected value type: {type(value).__name__}")
+        # Validate each criterion has expected fields (id and criteria1/criteria2/etc.)
+        for idx, item in enumerate(data):
+            if not isinstance(item, dict):
+                errors.append(f"Criterion at index {idx} should be a JSON object, not {type(item).__name__}")
+                continue
+            
+            # Check for id field
+            if 'id' not in item:
+                errors.append(f"Criterion at index {idx} is missing 'id' field")
+            
+            # Check for at least one criteria field (criteria1, criteria2, etc.)
+            has_criteria = any(key.startswith('criteria') for key in item.keys() if key != 'id')
+            if not has_criteria:
+                errors.append(f"Criterion at index {idx} (id: {item.get('id', 'unknown')}) is missing a 'criteria' field")
         
         return errors
     
