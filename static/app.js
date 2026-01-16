@@ -1143,13 +1143,22 @@ function displaySelectedForReview() {
     elements.breakingResults.innerHTML = '';
     elements.noBreaksMessage.classList.add('hidden');
     
-    // Get the selected responses from allResponses
+    // DEBUG: Log what we're filtering
+    console.log('displaySelectedForReview called');
+    console.log('selectedHuntIds:', state.selectedHuntIds);
+    console.log('allResponses hunt_ids:', state.allResponses.map(r => r.hunt_id));
+    
+    // Get the selected responses from allResponses - LIMIT TO EXACTLY 4
     const selectedResponses = state.allResponses.filter(r => 
         state.selectedHuntIds.includes(r.hunt_id)
-    );
+    ).slice(0, 4);  // Force max 4 just in case
+    
+    console.log('selectedResponses count:', selectedResponses.length);
+    console.log('selectedResponses hunt_ids:', selectedResponses.map(r => r.hunt_id));
     
     if (selectedResponses.length === 0) {
         elements.noBreaksMessage.classList.remove('hidden');
+        console.warn('No matching responses found!');
         return;
     }
     
