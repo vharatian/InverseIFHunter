@@ -112,17 +112,18 @@ class OpenAIJudgeClient:
                 "{response}", student_response
             )
         else:
-            user_prompt = f"""<original_prompt>
+            user_prompt = f"""#Prompt
+
 {prompt}
-</original_prompt>
 
-<ground_truth_reference>
+# Judge Criteria
+
 {response_reference}
-</ground_truth_reference>
 
-<student_model_response>
+#Student Ideal Answer
+
 {student_response}
-</student_model_response>"""
+"""
         
         # Dispatch to independent judging if enabled
         if independent_judging:
