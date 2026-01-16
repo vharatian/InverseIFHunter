@@ -496,6 +496,8 @@ class NotebookParser:
                 if heading == 'number_of_attempts_made':
                     new_attempts = parsed.attempts_made + len(results)
                     cell['source'] = [f"**[number_of_attempts_made]**:\n\n{new_attempts}"]
+                    updated_slots.add('number_of_attempts_made')
+                    print(f"DEBUG: Updated existing attempts cell to {new_attempts}")
         
         # Add new cells for results that don't have slots
         new_cells = []
@@ -584,6 +586,20 @@ class NotebookParser:
         # Insert new cells before the last cell or at the end
         print(f"DEBUG: Updated slots: {updated_slots}")
         print(f"DEBUG: Adding {len(new_cells)} new cells")
+        
+        # Check if attempts cell was updated (found in notebook)
+        attempts_cell_found = 'number_of_attempts_made' in updated_slots
+        if not attempts_cell_found:
+            # Create attempts cell if it doesn't exist
+            new_attempts = parsed.attempts_made + len(results)
+            new_cells.append({
+                "cell_type": "markdown",
+                "id": "auto_attempts_counter",
+                "metadata": {},
+                "source": [f"**[number_of_attempts_made]**:\n\n{new_attempts}"]
+            })
+            print(f"DEBUG: Created new attempts cell with count={new_attempts}")
+        
         if new_cells:
             cells.extend(new_cells)
         
