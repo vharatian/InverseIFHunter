@@ -26,9 +26,8 @@ class FireworksClient:
     
     # Model configurations
     MODELS = {
-        "llama3": "accounts/fireworks/models/llama-v3-70b-instruct",
-        "mixtral": "accounts/fireworks/models/mixtral-8x7b-instruct",
-        "qwen2.5": "accounts/fireworks/models/qwen2p5-72b-instruct"
+        "qwen3": "accounts/fireworks/models/qwen3-235b-a22b-thinking",  # Qwen3-235B (same as OpenRouter)
+        # Note: Nemotron not available on Fireworks serverless
     }
     
     def __init__(self, api_key: Optional[str] = None):
