@@ -279,7 +279,7 @@ function handleNotebookLoaded(data, isUrl = false) {
     state.notebook = data.notebook;
     
     // Toggle UI sections
-    elements.uploadSection.classList.add('hidden');
+    // Keep URL section visible (don't hide uploadSection)
     elements.huntSection.classList.remove('hidden');
     
     // Handle Save to Drive visibility (Container)
@@ -1001,9 +1001,33 @@ async function fetchAllResponsesAndShowSelection(completedHunts, breaksFound) {
         document.getElementById('summarySuccess').textContent = `${successRate}% (${totalBreaks}/${state.allResponses.length} breaks)`;
         document.getElementById('summaryMet').textContent = totalBreaks >= 3 ? '✅ Yes' : '❌ No';
         
-        // VALIDATION: Need at least 3 breaks AND at least 1 pass to proceed
+        // VALIDATION 1: Need at least 3 breaks
         const criteriaMetBreaks = totalBreaks >= 3;
-        const criteriaMetDiversity = totalBreaks >= 1 && totalPasses >= 1;
+        
+        // VALIDATION 2: Criteria-level diversity - at least 1 criterion has both PASS and FAIL
+        // Build map of criteria grades across all hunts
+        const criteriaGrades = {}; // { C1: ['PASS','FAIL','PASS'], C2: ['FAIL','FAIL'], ... }
+        state.allResponses.forEach(r => {
+            const gradingBasis = r.judge_criteria || r.grading_basis || {};
+            Object.entries(gradingBasis).forEach(([key, val]) => {
+                if (!criteriaGrades[key]) criteriaGrades[key] = [];
+                const grade = String(val || '').toUpperCase();
+                if (grade === 'PASS' || grade === 'FAIL') {
+                    criteriaGrades[key].push(grade);
+                }
+            });
+        });
+        
+        // Check if at least one criterion has BOTH pass and fail
+        const diverseCriteria = Object.entries(criteriaGrades).filter(([key, grades]) => {
+            const hasPass = grades.includes('PASS');
+            const hasFail = grades.includes('FAIL');
+            return hasPass && hasFail;
+        });
+        const criteriaMetDiversity = diverseCriteria.length >= 1;
+        
+        console.log('Criteria diversity check:', { criteriaGrades, diverseCriteria, criteriaMetDiversity });
+        
         const criteriaMet = criteriaMetBreaks && criteriaMetDiversity;
         
         if (!criteriaMet) {
@@ -1013,7 +1037,8 @@ async function fetchAllResponsesAndShowSelection(completedHunts, breaksFound) {
             if (!criteriaMetBreaks) {
                 errorMsg = `⚠️ Need at least 3 breaks (score 0). Currently have ${totalBreaks}. Run more hunts!`;
             } else if (!criteriaMetDiversity) {
-                errorMsg = `⚠️ Need at least 1 break AND 1 pass for diversity. Breaks: ${totalBreaks}, Passes: ${totalPasses}`;
+                const criteriaList = Object.keys(criteriaGrades).join(', ') || 'none found';
+                errorMsg = `⚠️ Need at least 1 criterion with both PASS and FAIL across hunts.\nCriteria found: ${criteriaList}\nRun hunts until at least one criterion has both grades.`;
             }
             showToast(errorMsg, 'warning');
             alert(`Cannot proceed to human review:\n\n${errorMsg}\n\nPlease run more hunts until criteria is met.`);

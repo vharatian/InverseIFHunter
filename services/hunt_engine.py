@@ -213,11 +213,12 @@ class HuntEngine:
             )
             
             if error:
-                # Model failed to respond = score 0 (breaking)
-                result.status = HuntStatus.COMPLETED
-                result.judge_score = 0
-                result.is_breaking = True
-                result.error = f"Model failed: {error}"
+                # Model failed to respond after retries = FAILED (not breaking)
+                # Don't count as a break - just an error
+                result.status = HuntStatus.FAILED
+                result.judge_score = None  # No score, not a break
+                result.is_breaking = False
+                result.error = f"⚠️ Model failed after 3 tries: {error}"
                 result.response = ""
             else:
                 result.response = response
@@ -227,11 +228,11 @@ class HuntEngine:
                 await self._judge_response(session, result)
             
         except Exception as e:
-            # Exception = score 0 (breaking)
-            result.status = HuntStatus.COMPLETED
-            result.judge_score = 0
-            result.is_breaking = True
-            result.error = f"Error: {str(e)}"
+            # Exception = FAILED (not breaking)
+            result.status = HuntStatus.FAILED
+            result.judge_score = None  # No score, not a break
+            result.is_breaking = False
+            result.error = f"⚠️ Error: {str(e)}"
             result.response = ""
         
         # Update session stats atomically using lock
