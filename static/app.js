@@ -1039,8 +1039,8 @@ function displaySelectionCards() {
         card.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
                 <span style="font-weight: 600;">Response ${result.hunt_id}</span>
-                <span class="score-badge ${isFailed ? 'fail' : 'pass'}" style="padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.8rem; background: ${isFailed ? 'var(--danger)' : 'var(--success)'}; color: white;">
-                    ${isFailed ? '❌ FAIL' : '✅ PASS'}
+                <span class="score-badge" style="padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.8rem; background: ${isFailed ? 'var(--success)' : 'var(--danger)'}; color: white;">
+                    ${isFailed ? '✅ BREAK' : '❌ PASS'}
                 </span>
             </div>
             <div style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.5rem;">
@@ -1285,8 +1285,8 @@ function createResultCard(result, slotIndex) {
     
     const shortModel = result.model.split('/').pop();
     const score = result.judge_score ?? 0;
-    const isFailed = score === 0;
-    const scoreEmoji = isFailed ? '🔴' : '🟢';
+    const isFailed = score === 0;  // isFailed means model BROKE (which is success in our case!)
+    const scoreEmoji = isFailed ? '🟢' : '🔴';  // Green = BREAK (good), Red = PASS (bad)
     const scoreClass = isFailed ? 'score-0' : 'score-1';
     const responseText = result.response || 'No response available';
     const slotNum = slotIndex !== undefined ? slotIndex + 1 : result.hunt_id;
