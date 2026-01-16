@@ -299,13 +299,14 @@ async def judge_reference(session_id: str):
             model="gpt-5"
         )
         
+        score = judge_result.get("score")
         return {
             "success": True,
-            "score": judge_result.get("score"),
+            "score": score,
             "explanation": judge_result.get("explanation", ""),
             "criteria": judge_result.get("criteria", {}),
             "raw_output": judge_result.get("raw_output", ""),
-            "is_passing": judge_result.get("score", 0) >= 1
+            "is_passing": (score or 0) >= 1  # Handle None score
         }
     except Exception as e:
         raise HTTPException(500, f"Judge error: {str(e)}")
