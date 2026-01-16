@@ -276,22 +276,19 @@
 
                 </div>
 
-                <!-- Review Progress & Reveal Button -->
+                <!-- Review Progress (top) -->
                 <div id="reviewProgressContainer"
                     style="margin-bottom: 1rem; padding: 1rem; background: var(--bg-tertiary); border-radius: 8px;">
                     <div
-                        style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+                        style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
                         <div>
                             <strong>Human Review Progress:</strong>
-                            <span id="reviewProgressText">0 / 4 completed</span>
+                            <span id="reviewProgressText" style="margin-left: 0.5rem;">0 / 4 completed</span>
                         </div>
-                        <button class="btn btn-primary" id="revealLLMBtn" disabled>
-                            👁️ Reveal LLM Judgments
-                        </button>
                     </div>
                     <p id="reviewInstructions"
                         style="margin: 0.5rem 0 0 0; font-size: 0.85rem; color: var(--text-muted);">
-                        Complete all 4 human reviews to reveal LLM judgments and enable saving.
+                        Complete all 4 human reviews, then scroll down to reveal LLM judgments and save.
                     </p>
                 </div>
 
@@ -301,11 +298,21 @@
 
                 <div id="saveDriveContainer" class="hidden"
                     style="padding: 1.5rem; text-align: center; border-top: 1px solid var(--border);">
-                    <button class="btn btn-primary btn-lg" id="saveDriveBtn">
-                        💾 Save to Colab Notebook
-                    </button>
-                    <p style="margin-top: 0.5rem; color: var(--text-muted); font-size: 0.9rem;">
-                        Writes all results and reviews back to your Google Drive notebook.
+
+                    <!-- Action Buttons Row -->
+                    <div
+                        style="display: flex; justify-content: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem;">
+                        <button class="btn btn-primary btn-lg" id="revealLLMBtnBottom" disabled>
+                            👁️ Reveal LLM Judgments
+                        </button>
+                        <button class="btn btn-primary btn-lg" id="saveDriveBtn" disabled style="opacity: 0.5;">
+                            💾 Save to Colab Notebook
+                        </button>
+                    </div>
+
+                    <!-- Progress/Status Message -->
+                    <p id="bottomInstructions" style="margin: 0; color: var(--text-muted); font-size: 0.9rem;">
+                        Complete all 4 human reviews → Click "Reveal LLM Judgments" → Save will be enabled
                     </p>
                 </div>
 
@@ -411,7 +418,7 @@
     <!-- Toast Container -->
     <div id="toastContainer" style="position: fixed; bottom: 1rem; right: 1rem; z-index: 1000;"></div>
 
-    <script src="/static/app.js?v=134"></script>
+    <script src="/static/app.js?v=135"></script>
 </body>
 
 </html>

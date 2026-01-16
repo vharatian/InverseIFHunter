@@ -101,11 +101,12 @@ const elements = {
     selectionCount: document.getElementById('selectionCount'),
     confirmSelectionBtn: document.getElementById('confirmSelectionBtn'),
     
-    // Reveal Button (NEW)
-    revealLLMBtn: document.getElementById('revealLLMBtn'),
+    // Reveal Button - now at bottom
+    revealLLMBtn: document.getElementById('revealLLMBtnBottom'),  // Bottom button
     reviewProgressText: document.getElementById('reviewProgressText'),
     reviewInstructions: document.getElementById('reviewInstructions'),
     reviewProgressContainer: document.getElementById('reviewProgressContainer'),
+    bottomInstructions: document.getElementById('bottomInstructions'),
     
     // Blind Judging Modal
     blindJudgeModal: document.getElementById('blindJudgeModal'),
@@ -1163,15 +1164,30 @@ function updateReviewProgress() {
         }
     }
     
+    // Update top instructions
     if (elements.reviewInstructions) {
         if (state.llmRevealed) {
-            elements.reviewInstructions.textContent = 'Reviews locked. You can now save to Drive.';
+            elements.reviewInstructions.textContent = '✅ Reviews locked. Scroll down to save.';
             elements.reviewInstructions.style.color = 'var(--success)';
         } else if (reviewCount >= 4) {
-            elements.reviewInstructions.textContent = 'All reviews complete! Click "Reveal LLM Judgments" to see AI scores.';
+            elements.reviewInstructions.textContent = '✅ All reviews complete! Scroll down to reveal LLM judgments.';
             elements.reviewInstructions.style.color = 'var(--success)';
         } else {
-            elements.reviewInstructions.textContent = `Complete all 4 human reviews to reveal LLM judgments and enable saving.`;
+            elements.reviewInstructions.textContent = `Complete all 4 human reviews, then scroll down to reveal LLM judgments and save.`;
+        }
+    }
+    
+    // Update bottom instructions
+    if (elements.bottomInstructions) {
+        if (state.llmRevealed) {
+            elements.bottomInstructions.textContent = '✅ LLM Judgments revealed. Reviews locked. Click Save to Colab Notebook.';
+            elements.bottomInstructions.style.color = 'var(--success)';
+        } else if (reviewCount >= 4) {
+            elements.bottomInstructions.textContent = '✅ All reviews complete! Click "Reveal LLM Judgments" → Save will be enabled.';
+            elements.bottomInstructions.style.color = 'var(--success)';
+        } else {
+            elements.bottomInstructions.textContent = `Complete all 4 human reviews → Click "Reveal LLM Judgments" → Save will be enabled`;
+            elements.bottomInstructions.style.color = 'var(--text-muted)';
         }
     }
 }
