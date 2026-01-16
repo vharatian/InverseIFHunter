@@ -536,10 +536,14 @@ label {
 .preview-content {
     max-height: 300px;
     overflow-y: auto;
+    position: relative;
 }
 
 .preview-panel {
     padding: 0.5rem;
+    display: flex;
+    flex-direction: column;
+    min-height: 100%;
 }
 
 .preview-panel .code-block {
@@ -1196,9 +1200,15 @@ main {
 .judge-reference-section {
     margin-top: 1.5rem;
     padding: 1rem;
-    background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(139, 92, 246, 0.1));
+    background: var(--bg-card);
     border-radius: 8px;
     border: 1px solid var(--accent-primary);
+    border-top: 2px solid var(--accent-primary);
+    position: sticky;
+    bottom: 0;
+    z-index: 10;
+    margin-top: auto;
+    box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.2);
 }
 
 .judge-reference-btn {
