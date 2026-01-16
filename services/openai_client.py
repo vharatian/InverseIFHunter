@@ -118,7 +118,13 @@ class OpenAIJudgeClient:
         }
         
         try:
-            # Extract grading basis (criteria)
+            # Log raw output for debugging
+            print(f"DEBUG: Parsing judge output (first 500 chars): {text[:500]}...")
+            
+            # Extract grading basis (criteria) - try multiple patterns
+            criteria_parsed = False
+            
+            # Pattern 1: [Grading Basis]: {JSON}
             grading_match = re.search(
                 r'\[Grading Basis\]:\s*(\{[^}]+\})',
                 text,
@@ -126,13 +132,34 @@ class OpenAIJudgeClient:
             )
             if grading_match:
                 try:
-                    # Clean up the JSON (handle newlines, etc.)
                     criteria_str = grading_match.group(1)
                     criteria_str = re.sub(r'\s+', ' ', criteria_str)
                     result["criteria"] = json.loads(criteria_str)
+                    criteria_parsed = True
                 except json.JSONDecodeError:
-                    # Try parsing as key-value pairs
                     result["criteria"] = self._parse_criteria_fallback(grading_match.group(1))
+                    criteria_parsed = len(result["criteria"]) > 0
+            
+            # Pattern 2: Look for "C1": "PASS" or "C1: PASS" anywhere
+            if not criteria_parsed:
+                c_pattern = re.findall(r'["\']?(C\d+)["\']?\s*[:=]\s*["\']?(PASS|FAIL)["\']?', text, re.IGNORECASE)
+                if c_pattern:
+                    result["criteria"] = {k: v.upper() for k, v in c_pattern}
+                    criteria_parsed = True
+                    print(f"DEBUG: Parsed criteria from C-pattern: {result['criteria']}")
+            
+            # Pattern 3: Look for criterion names like "Correctness: PASS"
+            if not criteria_parsed:
+                named_pattern = re.findall(r'([A-Za-z_]+)\s*[:=]\s*(PASS|FAIL)', text, re.IGNORECASE)
+                if named_pattern:
+                    # Filter out common non-criteria words
+                    exclude = {'score', 'answer', 'answer_score', 'result', 'verdict', 'status'}
+                    result["criteria"] = {k: v.upper() for k, v in named_pattern if k.lower() not in exclude}
+                    if result["criteria"]:
+                        criteria_parsed = True
+                        print(f"DEBUG: Parsed criteria from named pattern: {result['criteria']}")
+            
+            print(f"DEBUG: Final parsed criteria: {result['criteria']}")
             
             # Extract score from [Score]: X point(s)
             score_match = re.search(r'\[Score\]:\s*(\d+)\s*point', text, re.IGNORECASE)
