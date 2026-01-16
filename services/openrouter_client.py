@@ -35,7 +35,7 @@ class OpenRouterClient:
     # Default max tokens per model (actual model capabilities)
     MAX_TOKENS = {
         "nvidia/nemotron-3-nano-30b-a3b:free": 32768,  # 32k actual capability
-        "qwen/qwen3-235b-a22b-thinking-2507": 16384,
+        "qwen/qwen3-235b-a22b-thinking-2507": 131072,  # 128k actual capability
     }
     
     def __init__(self, api_key: Optional[str] = None):
