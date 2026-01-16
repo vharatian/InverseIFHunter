@@ -534,9 +534,11 @@ label {
 
 /* Preview Panel */
 .preview-content {
-    max-height: 300px;
+    max-height: 600px;
+    min-height: 500px;
     overflow-y: auto;
     position: relative;
+    padding-bottom: 120px; /* Space for fixed judge buttons */
 }
 
 .preview-panel {
@@ -549,9 +551,11 @@ label {
 .preview-panel .code-block {
     white-space: pre-wrap;
     word-break: break-word;
-    max-height: 250px;
+    max-height: 450px;
+    min-height: 400px;
     overflow-y: auto;
-    font-size: 0.85rem;
+    font-size: 0.9rem;
+    line-height: 1.6;
 }
 
 /* Loading Overlay */
@@ -682,7 +686,8 @@ label {
     border-radius: var(--radius-md);
     padding: 1rem;
     font-family: 'JetBrains Mono', 'Fira Code', monospace;
-    font-size: 0.85rem;
+    font-size: 0.9rem;
+    line-height: 1.6;
     overflow-x: auto;
     white-space: pre-wrap;
     word-break: break-word;
@@ -1070,10 +1075,11 @@ main {
     border: 1px solid var(--border);
     border-radius: 8px;
     padding: 1rem;
-    max-height: 250px;
+    max-height: 450px;
     overflow-y: auto;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 0.85rem;
+    font-size: 0.9rem;
+    line-height: 1.6;
     white-space: pre-wrap;
     word-break: break-word;
 }
@@ -1196,19 +1202,22 @@ main {
     transform: scale(1.02);
 }
 
-/* Judge Reference Button */
+/* Judge Reference Button - Fixed at bottom */
 .judge-reference-section {
     margin-top: 1.5rem;
-    padding: 1rem;
+    padding: 1rem 1.5rem;
     background: var(--bg-card);
-    border-radius: 8px;
+    border-radius: 8px 8px 0 0;
     border: 1px solid var(--accent-primary);
     border-top: 2px solid var(--accent-primary);
-    position: sticky;
+    border-bottom: none;
+    position: fixed;
     bottom: 0;
-    z-index: 10;
-    margin-top: auto;
+    left: 0;
+    right: 0;
+    z-index: 1000;
     box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.2);
+    max-width: 100%;
 }
 
 .judge-reference-btn {
