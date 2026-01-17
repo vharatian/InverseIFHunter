@@ -2341,6 +2341,57 @@ async function judgeReferenceResponse() {
             criteriaEntries = Object.entries(criteria);
         } else {
             console.log('✅ No missing criteria detected - all initial criteria are present in current response_reference');
+            
+            // Check for sequential gaps in criteria IDs (e.g., C1, C2, C3 but no C4)
+            // This handles cases where criteria were removed before notebook was loaded
+            const allCriteriaIds = new Set([...initialCriteriaIds, ...currentCriteriaIds, ...judgedCriteriaIds]);
+            const criteriaNumbers = Array.from(allCriteriaIds)
+                .map(id => {
+                    const match = id.match(/^C(\d+)$/i);
+                    return match ? parseInt(match[1]) : null;
+                })
+                .filter(num => num !== null)
+                .sort((a, b) => a - b);
+            
+            if (criteriaNumbers.length > 0) {
+                const maxCriteriaNum = Math.max(...criteriaNumbers);
+                const expectedCriteriaIds = new Set();
+                for (let i = 1; i <= maxCriteriaNum; i++) {
+                    expectedCriteriaIds.add(`C${i}`);
+                }
+                
+                const missingSequentialIds = [...expectedCriteriaIds].filter(id => !allCriteriaIds.has(id));
+                if (missingSequentialIds.length > 0) {
+                    console.warn('⚠️ SEQUENTIAL GAP DETECTED: Missing criteria IDs:', missingSequentialIds);
+                    console.warn('   This suggests criteria were removed from response_reference before notebook was loaded.');
+                    console.warn('   Adding them as MISSING to criteria breakdown...');
+                    
+                    for (const missingId of missingSequentialIds) {
+                        if (!(missingId in criteria)) {
+                            criteria[missingId] = 'MISSING';
+                            // Try to find description from initialCriteria, otherwise use placeholder
+                            const missingCriterion = (state.initialCriteria || []).find(c => c.id === missingId);
+                            if (missingCriterion) {
+                                if (!state.criteria.find(c => c.id === missingId)) {
+                                    state.criteria.push(missingCriterion);
+                                }
+                            } else {
+                                // Add placeholder if not in initialCriteria
+                                if (!state.criteria.find(c => c.id === missingId)) {
+                                    state.criteria.push({ 
+                                        id: missingId, 
+                                        criteria: `Criterion ${missingId} (removed from response_reference - please add it back)` 
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    // Recalculate entries after adding MISSING
+                    criteriaEntries = Object.entries(criteria);
+                    console.log('✅ Added sequentially missing criteria:', missingSequentialIds);
+                }
+            }
+            
             // Double-check: if judge result has fewer criteria than initial, something might be wrong
             if (initialCriteriaIds.size > judgedCriteriaIds.size) {
                 const notJudged = [...initialCriteriaIds].filter(id => !judgedCriteriaIds.has(id));
