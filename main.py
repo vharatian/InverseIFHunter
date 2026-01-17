@@ -288,6 +288,12 @@ async def judge_reference(session_id: str):
         try:
             # Re-fetch the notebook to get latest content
             parsed, _ = await notebook_parser.load_from_url(storage["url"])
+            # Log if response_reference changed
+            original_ref = session.notebook.response_reference
+            if original_ref and parsed.response_reference != original_ref:
+                print(f"DEBUG: response_reference changed in Colab. Original length: {len(original_ref)}, New length: {len(parsed.response_reference)}")
+                print(f"DEBUG: Original (first 200 chars): {original_ref[:200]}...")
+                print(f"DEBUG: New (first 200 chars): {parsed.response_reference[:200]}...")
             # Update session with latest notebook data
             session.notebook = parsed
             # Extract criteria count for debugging
