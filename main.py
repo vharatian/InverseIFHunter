@@ -338,13 +338,17 @@ async def judge_reference(session_id: str):
         )
         
         score = judge_result.get("score")
+        
+        # Also return the current response_reference so frontend can re-parse criteria
+        # This ensures state.criteria is always in sync with what was actually judged
         return {
             "success": True,
             "score": score,
             "explanation": judge_result.get("explanation", ""),
             "criteria": judge_result.get("criteria", {}),
             "raw_output": judge_result.get("raw_output", ""),
-            "is_passing": (score or 0) >= 1  # Handle None score
+            "is_passing": (score or 0) >= 1,  # Handle None score
+            "response_reference": notebook.response_reference  # Include fresh response_reference
         }
     except Exception as e:
         raise HTTPException(500, f"Judge error: {str(e)}")

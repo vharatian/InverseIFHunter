@@ -2206,20 +2206,28 @@ async function judgeReferenceResponse() {
         
         // Debug: Log what criteria were judged
         console.log('Judge result criteria:', Object.keys(criteria));
-        console.log('Current state.criteria IDs:', (state.criteria || []).map(c => c.id));
+        console.log('Current state.criteria IDs (before update):', (state.criteria || []).map(c => c.id));
         
-        // Update state.criteria based on what was actually judged
-        // This ensures UI shows the same criteria that were evaluated
-        const judgedCriteriaIds = new Set(Object.keys(criteria));
-        state.criteria = (state.criteria || []).filter(c => judgedCriteriaIds.has(c.id));
-        
-        // Also add any criteria from judge result that aren't in state.criteria
-        // (in case judge evaluated criteria we don't have descriptions for)
-        for (const [cId, status] of Object.entries(criteria)) {
-            if (!state.criteria.find(c => c.id === cId)) {
-                state.criteria.push({ id: cId, criteria: `Criterion ${cId} (from judge result)` });
+        // IMPORTANT: Re-parse criteria from fresh response_reference if provided
+        // This ensures state.criteria matches what was actually in the notebook when judging
+        if (data.response_reference) {
+            console.log('Re-parsing criteria from fresh response_reference');
+            state.criteria = parseCriteria(data.response_reference);
+            console.log('Updated state.criteria IDs (from response_reference):', state.criteria.map(c => c.id));
+        } else {
+            // Fallback: Update state.criteria based on what was actually judged
+            const judgedCriteriaIds = new Set(Object.keys(criteria));
+            state.criteria = (state.criteria || []).filter(c => judgedCriteriaIds.has(c.id));
+            
+            // Also add any criteria from judge result that aren't in state.criteria
+            for (const [cId, status] of Object.entries(criteria)) {
+                if (!state.criteria.find(c => c.id === cId)) {
+                    state.criteria.push({ id: cId, criteria: `Criterion ${cId} (from judge result)` });
+                }
             }
         }
+        
+        console.log('Final state.criteria IDs:', state.criteria.map(c => c.id));
         
         // Check if ALL criteria pass (not just overall score)
         // Missing criteria (MISSING status) don't count as failures
@@ -2368,19 +2376,28 @@ async function saveAndRejudge() {
         
         // Debug: Log what criteria were judged
         console.log('Judge result criteria (saveAndRejudge):', Object.keys(criteria));
-        console.log('Current state.criteria IDs:', (state.criteria || []).map(c => c.id));
+        console.log('Current state.criteria IDs (before update):', (state.criteria || []).map(c => c.id));
         
-        // Update state.criteria based on what was actually judged
-        const judgedCriteriaIds = new Set(Object.keys(criteria));
-        state.criteria = (state.criteria || []).filter(c => judgedCriteriaIds.has(c.id));
-        
-        // Also add any criteria from judge result that aren't in state.criteria
-        // (in case judge evaluated criteria we don't have descriptions for)
-        for (const [cId, status] of Object.entries(criteria)) {
-            if (!state.criteria.find(c => c.id === cId)) {
-                state.criteria.push({ id: cId, criteria: `Criterion ${cId} (from judge result)` });
+        // IMPORTANT: Re-parse criteria from fresh response_reference if provided
+        // This ensures state.criteria matches what was actually in the notebook when judging
+        if (data.response_reference) {
+            console.log('Re-parsing criteria from fresh response_reference (saveAndRejudge)');
+            state.criteria = parseCriteria(data.response_reference);
+            console.log('Updated state.criteria IDs (from response_reference):', state.criteria.map(c => c.id));
+        } else {
+            // Fallback: Update state.criteria based on what was actually judged
+            const judgedCriteriaIds = new Set(Object.keys(criteria));
+            state.criteria = (state.criteria || []).filter(c => judgedCriteriaIds.has(c.id));
+            
+            // Also add any criteria from judge result that aren't in state.criteria
+            for (const [cId, status] of Object.entries(criteria)) {
+                if (!state.criteria.find(c => c.id === cId)) {
+                    state.criteria.push({ id: cId, criteria: `Criterion ${cId} (from judge result)` });
+                }
             }
         }
+        
+        console.log('Final state.criteria IDs (saveAndRejudge):', state.criteria.map(c => c.id));
         
         // Check if ALL criteria pass (not just overall score)
         // Missing criteria (MISSING status) don't count as failures
