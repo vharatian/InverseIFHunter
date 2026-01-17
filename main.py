@@ -280,6 +280,18 @@ async def judge_reference(session_id: str):
     if not session:
         raise HTTPException(404, "Session not found")
     
+    # Re-fetch notebook from Colab to get latest response_reference
+    storage = get_session_storage(session_id)
+    if storage and "url" in storage:
+        try:
+            # Re-fetch the notebook to get latest content
+            parsed, _ = await notebook_parser.load_from_url(storage["url"])
+            # Update session with latest notebook data
+            session.notebook = parsed
+            print(f"DEBUG: Refreshed notebook from Colab for session {session_id}")
+        except Exception as e:
+            print(f"WARNING: Could not refresh notebook from Colab: {e}. Using cached version.")
+    
     notebook = session.notebook
     
     # The 'response' is the expected answer to judge
@@ -293,7 +305,7 @@ async def judge_reference(session_id: str):
         judge_result = await judge.judge_response(
             prompt=notebook.prompt,
             student_response=notebook.response,  # Judge the expected response
-            response_reference=notebook.response_reference,  # Against the criteria
+            response_reference=notebook.response_reference,  # Against the criteria (now fresh from Colab)
             judge_system_prompt=notebook.judge_system_prompt,
             judge_prompt_template=notebook.judge_prompt_template,
             model="gpt-5"

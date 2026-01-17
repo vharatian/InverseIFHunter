@@ -389,21 +389,35 @@ class OpenAIJudgeClient:
         # Step 3: Aggregate results
         final_criteria = {}
         failed_criteria = []
+        missing_criteria = []  # Criteria that were expected but not evaluated
         pass_count = 0
+        
+        # Track which criteria were evaluated
+        evaluated_ids = set()
         
         for res in results:
             c_id = res['id']
             status = res['status']
             reason = res['reason']
             final_criteria[c_id] = status
+            evaluated_ids.add(c_id)
             
             if status == 'PASS':
                 pass_count += 1
             else:
                 failed_criteria.append(f"{c_id}: {reason}")
         
+        # Check for missing criteria (expected but not evaluated)
+        expected_ids = {c.get('id') for c in criteria_list}
+        missing_ids = expected_ids - evaluated_ids
+        if missing_ids:
+            for c_id in missing_ids:
+                missing_criteria.append(c_id)
+                # Mark as missing (not a failure, but an error)
+                final_criteria[c_id] = "MISSING"
+        
         # Calculate scores
-        # Calculate scores based on Fail Rate
+        # Calculate scores based on Fail Rate (missing criteria don't count as failures)
         # "75% fail" example -> If Fail Rate >= 50%, Score is 0.
         fail_count = len(failed_criteria)
         total_count = len(criteria_list) if criteria_list else 1
@@ -416,9 +430,11 @@ class OpenAIJudgeClient:
             f"Independent Judging Results:\n"
             f"- Passing Criteria: {pass_count}/{len(criteria_list)}\n"
         )
+        if missing_criteria:
+            explanation += f"\n⚠️ Missing Criteria (not evaluated): {', '.join(missing_criteria)}\n"
         if failed_criteria:
             explanation += "\nFailed Criteria Details:\n" + "\n".join(failed_criteria)
-        else:
+        elif not missing_criteria:
             explanation += "\nAll criteria passed."
             
         return {

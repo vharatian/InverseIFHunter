@@ -1934,20 +1934,42 @@ function formatJudgeCriteriaDisplay(criteria) {
     
     // Build HTML for each criterion
     const criteriaHtml = entries.map(([key, value]) => {
-        const isPassing = String(value).toUpperCase() === 'PASS';
-        const statusEmoji = isPassing ? '✅' : '❌';
-        const statusText = isPassing ? 'PASS' : 'FAIL';
-        const statusColor = isPassing ? 'var(--success)' : 'var(--danger)';
+        const statusUpper = String(value).toUpperCase();
+        const isPassing = statusUpper === 'PASS';
+        const isMissing = statusUpper === 'MISSING';
+        
+        let statusEmoji, statusText, statusColor, bgColor;
+        
+        if (isMissing) {
+            // Missing criteria = warning/error (not a failure)
+            statusEmoji = '⚠️';
+            statusText = 'MISSING';
+            statusColor = 'var(--warning)';
+            bgColor = 'var(--warning-bg)';
+        } else if (isPassing) {
+            statusEmoji = '✅';
+            statusText = 'PASS';
+            statusColor = 'var(--success)';
+            bgColor = 'var(--bg-tertiary)';
+        } else {
+            statusEmoji = '❌';
+            statusText = 'FAIL';
+            statusColor = 'var(--danger)';
+            bgColor = 'var(--bg-tertiary)';
+        }
         
         // Find matching criteria description from state.criteria
         const criteriaDesc = (state.criteria || []).find(c => c.id === key);
         const criteriaText = criteriaDesc ? criteriaDesc.criteria : '';
         
+        const warningMsg = isMissing ? '<span style="font-size: 0.8rem; color: var(--warning); font-style: italic;">(Not evaluated - does not count as failure)</span>' : '';
+        
         return `
-            <div style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem; margin: 0.25rem 0; background: var(--bg-tertiary); border-radius: 6px; border-left: 3px solid ${statusColor};">
+            <div style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem; margin: 0.25rem 0; background: ${bgColor}; border-radius: 6px; border-left: 3px solid ${statusColor};">
                 <span style="font-weight: 600; min-width: 35px;">${key}:</span>
                 <span style="color: ${statusColor}; font-weight: 600;">${statusEmoji} ${statusText}</span>
                 ${criteriaText ? `<span style="flex: 1; font-size: 0.85rem; color: var(--text-secondary);">${escapeHtml(criteriaText)}</span>` : ''}
+                ${warningMsg}
             </div>
         `;
     }).join('');
@@ -2178,13 +2200,24 @@ async function judgeReferenceResponse() {
         
         const data = await response.json();
         
-        // Check if ALL criteria pass (not just overall score)
+        // Update state.criteria from judge result to keep in sync
         const criteria = data.criteria || {};
         const criteriaEntries = Object.entries(criteria);
-        const allCriteriaPass = criteriaEntries.length > 0 && 
-            criteriaEntries.every(([key, value]) => String(value).toUpperCase() === 'PASS');
         
-        // Only enable hunt if ALL criteria pass
+        // Update state.criteria based on what was actually judged
+        // This ensures UI shows the same criteria that were evaluated
+        const judgedCriteriaIds = new Set(Object.keys(criteria));
+        state.criteria = (state.criteria || []).filter(c => judgedCriteriaIds.has(c.id));
+        
+        // Check if ALL criteria pass (not just overall score)
+        // Missing criteria (MISSING status) don't count as failures
+        const evaluatedCriteria = criteriaEntries.filter(([key, value]) => 
+            String(value).toUpperCase() !== 'MISSING'
+        );
+        const allCriteriaPass = evaluatedCriteria.length > 0 && 
+            evaluatedCriteria.every(([key, value]) => String(value).toUpperCase() === 'PASS');
+        
+        // Only enable hunt if ALL criteria pass (missing criteria are warnings, not failures)
         const isPassing = allCriteriaPass;
         const scoreClass = isPassing ? 'score-1' : 'score-0';
         const scoreEmoji = isPassing ? '✅' : '❌';
@@ -2317,13 +2350,23 @@ async function saveAndRejudge() {
         
         const data = await judgeResponse.json();
         
-        // Check if ALL criteria pass (not just overall score)
+        // Update state.criteria from judge result to keep in sync
         const criteria = data.criteria || {};
         const criteriaEntries = Object.entries(criteria);
-        const allCriteriaPass = criteriaEntries.length > 0 && 
-            criteriaEntries.every(([key, value]) => String(value).toUpperCase() === 'PASS');
         
-        // Only enable hunt if ALL criteria pass
+        // Update state.criteria based on what was actually judged
+        const judgedCriteriaIds = new Set(Object.keys(criteria));
+        state.criteria = (state.criteria || []).filter(c => judgedCriteriaIds.has(c.id));
+        
+        // Check if ALL criteria pass (not just overall score)
+        // Missing criteria (MISSING status) don't count as failures
+        const evaluatedCriteria = criteriaEntries.filter(([key, value]) => 
+            String(value).toUpperCase() !== 'MISSING'
+        );
+        const allCriteriaPass = evaluatedCriteria.length > 0 && 
+            evaluatedCriteria.every(([key, value]) => String(value).toUpperCase() === 'PASS');
+        
+        // Only enable hunt if ALL criteria pass (missing criteria are warnings, not failures)
         const isPassing = allCriteriaPass;
         const scoreClass = isPassing ? 'score-1' : 'score-0';
         const scoreEmoji = isPassing ? '✅' : '❌';
