@@ -2386,7 +2386,7 @@ async function judgeReferenceResponse() {
                     <p style="margin-top: 0.25rem; font-size: 0.9rem; color: var(--text-secondary); white-space: pre-wrap;">${escapeHtml(data.explanation || 'No explanation provided')}</p>
                 </div>
                 
-                ${data.score === null ? `
+                ${(data.score === null || !criteria || Object.keys(criteria).length === 0) ? `
                 <div style="margin-top: 0.75rem; padding: 0.5rem; background: var(--danger-bg); border-radius: 4px;">
                     <label style="font-weight: 600; font-size: 0.9rem; color: var(--danger);">⚠️ Debug - Raw Output:</label>
                     <pre style="margin-top: 0.25rem; font-size: 0.8rem; color: var(--text-secondary); white-space: pre-wrap; max-height: 200px; overflow: auto;">${escapeHtml(data.raw_output || 'No raw output')}</pre>

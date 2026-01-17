@@ -227,21 +227,30 @@ class OpenAIJudgeClient:
             # Extract grading basis (criteria) - try multiple patterns
             criteria_parsed = False
             
-            # Pattern 1: [Grading Basis]: {JSON}
+            # Pattern 1: [Grading Basis]: {JSON} - handle multi-line JSON
             grading_match = re.search(
-                r'\[Grading Basis\]:\s*(\{[^}]+\})',
+                r'\[Grading Basis\]:\s*(\{.*?\})',
                 text,
                 re.IGNORECASE | re.DOTALL
             )
             if grading_match:
                 try:
                     criteria_str = grading_match.group(1)
-                    criteria_str = re.sub(r'\s+', ' ', criteria_str)
+                    # Try parsing as-is first (handles multi-line)
                     result["criteria"] = json.loads(criteria_str)
                     criteria_parsed = True
+                    print(f"DEBUG: Parsed criteria from [Grading Basis] JSON: {result['criteria']}")
                 except json.JSONDecodeError:
-                    result["criteria"] = self._parse_criteria_fallback(grading_match.group(1))
-                    criteria_parsed = len(result["criteria"]) > 0
+                    # Fallback: try normalizing whitespace
+                    try:
+                        criteria_str = re.sub(r'\s+', ' ', criteria_str)
+                        result["criteria"] = json.loads(criteria_str)
+                        criteria_parsed = True
+                        print(f"DEBUG: Parsed criteria after whitespace normalization: {result['criteria']}")
+                    except json.JSONDecodeError:
+                        result["criteria"] = self._parse_criteria_fallback(grading_match.group(1))
+                        criteria_parsed = len(result["criteria"]) > 0
+                        print(f"DEBUG: Used fallback parser, got {len(result['criteria'])} criteria")
             
             # Pattern 2: Look for "C1": "PASS" or "C1: PASS" anywhere
             if not criteria_parsed:
@@ -263,23 +272,38 @@ class OpenAIJudgeClient:
                         print(f"DEBUG: Parsed criteria from named pattern: {result['criteria']}")
             
             print(f"DEBUG: Final parsed criteria: {result['criteria']}")
+            print(f"DEBUG: Criteria count: {len(result['criteria'])}")
+            if not criteria_parsed:
+                print(f"DEBUG: WARNING - No criteria were parsed from judge output!")
+                print(f"DEBUG: First 1000 chars of output: {text[:1000]}")
             
             # Extract score from [Score]: X point(s)
             score_match = re.search(r'\[Score\]:\s*(\d+)\s*point', text, re.IGNORECASE)
             if score_match:
                 result["score"] = int(score_match.group(1))
             
-            # Extract score from [JSON]: {"answer_score": X}
-            json_match = re.search(r'\[JSON\]:\s*(\{[^}]+\})', text, re.IGNORECASE)
+            # Extract score from [JSON]: {"answer_score": X} - handle multi-line JSON
+            json_match = re.search(r'\[JSON\]:\s*(\{.*?\})', text, re.IGNORECASE | re.DOTALL)
             if json_match:
                 try:
-                    json_data = json.loads(json_match.group(1))
+                    json_str = json_match.group(1)
+                    json_data = json.loads(json_str)
                     if "answer_score" in json_data:
                         result["score"] = json_data["answer_score"]
+                        print(f"DEBUG: Extracted score from [JSON]: {result['score']}")
                 except json.JSONDecodeError:
-                    pass
+                    # Try normalizing whitespace
+                    try:
+                        json_str = re.sub(r'\s+', ' ', json_str)
+                        json_data = json.loads(json_str)
+                        if "answer_score" in json_data:
+                            result["score"] = json_data["answer_score"]
+                            print(f"DEBUG: Extracted score after whitespace normalization: {result['score']}")
+                    except json.JSONDecodeError:
+                        print(f"DEBUG: Failed to parse [JSON] section: {json_match.group(1)[:100]}")
+                        pass
             
-            # Extract explanation
+            # Extract explanation - try multiple patterns
             explanation_match = re.search(
                 r'\[Explanation\]:\s*(.+?)(?=\[|$)',
                 text,
@@ -287,6 +311,17 @@ class OpenAIJudgeClient:
             )
             if explanation_match:
                 result["explanation"] = explanation_match.group(1).strip()
+                print(f"DEBUG: Extracted explanation (length: {len(result['explanation'])})")
+            else:
+                # Try alternative pattern: [Explanation]: followed by text until next section or end
+                explanation_match2 = re.search(
+                    r'\[Explanation\][:\s]*(.+?)(?=\n\n\[|\n\[|$)',
+                    text,
+                    re.IGNORECASE | re.DOTALL
+                )
+                if explanation_match2:
+                    result["explanation"] = explanation_match2.group(1).strip()
+                    print(f"DEBUG: Extracted explanation with alternative pattern (length: {len(result['explanation'])})")
             
             # Fallback: if no score found, count PASS/FAIL
             if result["score"] is None and result["criteria"]:
