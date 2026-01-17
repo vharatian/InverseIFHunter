@@ -2441,8 +2441,8 @@ async function judgeReferenceResponse() {
         } else {
             console.log('✅ No missing criteria detected - all initial criteria are present in current response_reference');
             
-            // Check for sequential gaps in criteria IDs (e.g., C1, C2, C3 but no C4)
-            // Also check judge explanation for mentions of criteria that aren't in the result
+            // Optional: Check for sequential gaps as a WARNING only (not marking as missing)
+            // This helps identify potential issues but doesn't assume criteria should exist
             const allCriteriaIds = new Set([...initialCriteriaIds, ...currentCriteriaIds, ...judgedCriteriaIds]);
             const criteriaNumbers = Array.from(allCriteriaIds)
                 .map(id => {
@@ -2452,79 +2452,23 @@ async function judgeReferenceResponse() {
                 .filter(num => num !== null)
                 .sort((a, b) => a - b);
             
-            // Check judge explanation for mentions of criteria IDs
-            const explanation = data.explanation || '';
-            const mentionedCriteriaIds = new Set();
-            const criteriaMentionPattern = /C(\d+)/gi;
-            let match;
-            while ((match = criteriaMentionPattern.exec(explanation)) !== null) {
-                mentionedCriteriaIds.add(`C${match[1]}`);
-            }
-            
-            // Combine all sources to find expected criteria
-            const allExpectedIds = new Set([...allCriteriaIds, ...mentionedCriteriaIds]);
-            const allExpectedNumbers = Array.from(allExpectedIds)
-                .map(id => {
-                    const match = id.match(/^C(\d+)$/i);
-                    return match ? parseInt(match[1]) : null;
-                })
-                .filter(num => num !== null)
-                .sort((a, b) => a - b);
-            
-            if (allExpectedNumbers.length > 0) {
-                // If judge says "all criteria satisfied" and we have C1, C2, C3, 
-                // check if there might be a C4 that should exist
-                const explanationLower = explanation.toLowerCase();
-                const allCriteriaSatisfied = explanationLower.includes('all criteria') || 
-                                            explanationLower.includes('all satisfied') ||
-                                            explanationLower.includes('criteria were satisfied');
+            if (criteriaNumbers.length > 0) {
+                const minNum = Math.min(...criteriaNumbers);
+                const maxNum = Math.max(...criteriaNumbers);
                 
-                // Determine max criteria number: use max from all sources, or if "all criteria satisfied"
-                // and we have C1-C3, check up to C4 as a reasonable assumption
-                let maxCriteriaNum = Math.max(...allExpectedNumbers);
-                if (allCriteriaSatisfied && criteriaNumbers.length === 3 && 
-                    criteriaNumbers[0] === 1 && criteriaNumbers[1] === 2 && criteriaNumbers[2] === 3) {
-                    // If we have exactly C1, C2, C3 and judge says "all criteria satisfied",
-                    // check if C4 should exist (common pattern)
-                    maxCriteriaNum = Math.max(maxCriteriaNum, 4);
-                    console.log('🔍 Detected C1-C3 pattern with "all criteria satisfied" - checking for C4');
-                }
-                
-                const expectedCriteriaIds = new Set();
-                for (let i = 1; i <= maxCriteriaNum; i++) {
-                    expectedCriteriaIds.add(`C${i}`);
-                }
-                
-                const missingSequentialIds = [...expectedCriteriaIds].filter(id => !allCriteriaIds.has(id));
-                if (missingSequentialIds.length > 0) {
-                    console.warn('⚠️ SEQUENTIAL GAP DETECTED: Missing criteria IDs:', missingSequentialIds);
-                    console.warn('   Found in judge explanation:', Array.from(mentionedCriteriaIds));
-                    console.warn('   This suggests criteria were removed from response_reference before notebook was loaded.');
-                    console.warn('   Adding them as MISSING to criteria breakdown...');
-                    
-                    for (const missingId of missingSequentialIds) {
-                        if (!(missingId in criteria)) {
-                            criteria[missingId] = 'MISSING';
-                            // Try to find description from initialCriteria, otherwise use placeholder
-                            const missingCriterion = (state.initialCriteria || []).find(c => c.id === missingId);
-                            if (missingCriterion) {
-                                if (!state.criteria.find(c => c.id === missingId)) {
-                                    state.criteria.push(missingCriterion);
-                                }
-                            } else {
-                                // Add placeholder if not in initialCriteria
-                                if (!state.criteria.find(c => c.id === missingId)) {
-                                    state.criteria.push({ 
-                                        id: missingId, 
-                                        criteria: `Criterion ${missingId} (removed from response_reference - please add it back)` 
-                                    });
-                                }
-                            }
-                        }
+                // Check for sequential gaps (e.g., C1, C2, C17 - missing C3-C16)
+                const sequentialGaps = [];
+                for (let i = minNum; i <= maxNum; i++) {
+                    const cId = `C${i}`;
+                    if (!allCriteriaIds.has(cId)) {
+                        sequentialGaps.push(cId);
                     }
-                    // Recalculate entries after adding MISSING
-                    criteriaEntries = Object.entries(criteria);
-                    console.log('✅ Added sequentially missing criteria:', missingSequentialIds);
+                }
+                
+                if (sequentialGaps.length > 0) {
+                    console.warn('⚠️ SEQUENTIAL GAP DETECTED (WARNING ONLY - not marking as missing):', sequentialGaps);
+                    console.warn('   This suggests non-sequential criteria IDs. This is OK if those criteria never existed.');
+                    console.warn('   Only criteria in initialCriteria will be marked as MISSING.');
                 }
             }
             
@@ -2789,6 +2733,39 @@ async function saveAndRejudge() {
             }
             // Recalculate entries after adding MISSING
             criteriaEntries = Object.entries(criteria);
+        } else {
+            console.log('✅ No missing criteria detected (saveAndRejudge) - all initial criteria are present in current response_reference');
+            
+            // Optional: Check for sequential gaps as a WARNING only (not marking as missing)
+            // This helps identify potential issues but doesn't assume criteria should exist
+            const allCriteriaIds = new Set([...initialCriteriaIds, ...currentCriteriaIds, ...judgedCriteriaIds]);
+            const criteriaNumbers = Array.from(allCriteriaIds)
+                .map(id => {
+                    const match = id.match(/^C(\d+)$/i);
+                    return match ? parseInt(match[1]) : null;
+                })
+                .filter(num => num !== null)
+                .sort((a, b) => a - b);
+            
+            if (criteriaNumbers.length > 0) {
+                const minNum = Math.min(...criteriaNumbers);
+                const maxNum = Math.max(...criteriaNumbers);
+                
+                // Check for sequential gaps (e.g., C1, C2, C17 - missing C3-C16)
+                const sequentialGaps = [];
+                for (let i = minNum; i <= maxNum; i++) {
+                    const cId = `C${i}`;
+                    if (!allCriteriaIds.has(cId)) {
+                        sequentialGaps.push(cId);
+                    }
+                }
+                
+                if (sequentialGaps.length > 0) {
+                    console.warn('⚠️ SEQUENTIAL GAP DETECTED (WARNING ONLY - not marking as missing, saveAndRejudge):', sequentialGaps);
+                    console.warn('   This suggests non-sequential criteria IDs. This is OK if those criteria never existed.');
+                    console.warn('   Only criteria in initialCriteria will be marked as MISSING.');
+                }
+            }
         }
         
         console.log('Final state.criteria IDs (saveAndRejudge):', state.criteria.map(c => c.id));
