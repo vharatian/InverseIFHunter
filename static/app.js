@@ -2665,11 +2665,19 @@ async function saveAndRejudge() {
         if (criteriaNotInResponseRef.length > 0) {
             console.warn('⚠️ Judge returned criteria not in response_reference (saveAndRejudge):', criteriaNotInResponseRef);
             console.warn('   These will be marked as MISSING instead of their judge status (FAIL/PASS)');
-            // Remove these from criteria object - they'll be added back as MISSING below
+            // Mark these as MISSING and add them to state.criteria
             for (const id of criteriaNotInResponseRef) {
-                delete criteria[id];
+                criteria[id] = 'MISSING';
+                // Add to state.criteria if not already there
+                if (!state.criteria.find(c => c.id === id)) {
+                    state.criteria.push({ 
+                        id: id, 
+                        criteria: `Criterion ${id} (not in response_reference - please add it back)` 
+                    });
+                    console.log(`✅ Added missing criterion ${id} to state.criteria (from judge result, saveAndRejudge)`);
+                }
             }
-            // Recalculate entries after removing invalid criteria
+            // Recalculate entries after adding MISSING
             criteriaEntries = Object.entries(criteria);
         }
         
