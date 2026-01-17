@@ -2648,10 +2648,26 @@ async function saveAndRejudge() {
             currentCriteria = state.criteria;
         }
         
+        // CRITICAL: Filter out criteria from judge result that are NOT in response_reference
+        // These should be marked as MISSING, not FAIL
+        const currentCriteriaIds = new Set(currentCriteria.map(c => c.id));
+        const judgedCriteriaIds = new Set(Object.keys(criteria));
+        const criteriaNotInResponseRef = [...judgedCriteriaIds].filter(id => !currentCriteriaIds.has(id));
+        
+        if (criteriaNotInResponseRef.length > 0) {
+            console.warn('⚠️ Judge returned criteria not in response_reference (saveAndRejudge):', criteriaNotInResponseRef);
+            console.warn('   These will be marked as MISSING instead of their judge status (FAIL/PASS)');
+            // Remove these from criteria object - they'll be added back as MISSING below
+            for (const id of criteriaNotInResponseRef) {
+                delete criteria[id];
+            }
+            // Recalculate entries after removing invalid criteria
+            criteriaEntries = Object.entries(criteria);
+        }
+        
         // Check for missing criteria: Compare initial criteria with current criteria
         // If a criterion was in initial but not in current, it's MISSING
         const initialCriteriaIds = new Set((state.initialCriteria || []).map(c => c.id));
-        const currentCriteriaIds = new Set(currentCriteria.map(c => c.id));
         const missingCriteriaIds = [...initialCriteriaIds].filter(id => !currentCriteriaIds.has(id));
         
         console.log('DEBUG: Missing criteria check (saveAndRejudge) - Initial:', Array.from(initialCriteriaIds), 'Current:', Array.from(currentCriteriaIds), 'Missing:', missingCriteriaIds);
