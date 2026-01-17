@@ -1976,8 +1976,13 @@ function formatJudgeCriteriaDisplay(criteria) {
             bgColor = 'var(--bg-tertiary)';
         }
         
-        // Find matching criteria description from state.criteria
-        const criteriaDesc = (state.criteria || []).find(c => c.id === key);
+        // Find matching criteria description from state.criteria or state.initialCriteria
+        // This ensures missing criteria (from initialCriteria) can still be displayed
+        let criteriaDesc = (state.criteria || []).find(c => c.id === key);
+        if (!criteriaDesc) {
+            // If not in current criteria, check initial criteria (for missing criteria)
+            criteriaDesc = (state.initialCriteria || []).find(c => c.id === key);
+        }
         const criteriaText = criteriaDesc ? criteriaDesc.criteria : '';
         
         const warningMsg = isMissing ? '<span style="font-size: 0.8rem; color: var(--warning); font-style: italic;">(Not evaluated - does not count as failure)</span>' : '';
