@@ -2015,11 +2015,28 @@ function formatLLMCriteria(criteria, fullExplanation) {
  * Shows each criterion with pass/fail status
  */
 function formatJudgeCriteriaDisplay(criteria) {
-    if (!criteria || Object.keys(criteria).length === 0) {
-        return '<div style="padding: 0.5rem; color: var(--text-muted); font-style: italic;">No criteria breakdown available</div>';
+    // Ensure ALL criteria from initialCriteria are shown, even if not in judge result
+    // This ensures missing criteria are always displayed
+    const allCriteriaIds = new Set(Object.keys(criteria || {}));
+    const initialCriteriaIds = new Set((state.initialCriteria || []).map(c => c.id));
+    
+    // Add missing criteria from initialCriteria that aren't in the judge result
+    for (const initialId of initialCriteriaIds) {
+        if (!(initialId in criteria)) {
+            criteria[initialId] = 'MISSING';
+        }
     }
     
-    const entries = Object.entries(criteria);
+    // Sort criteria by ID (C1, C2, C3, etc.) for consistent display
+    const entries = Object.entries(criteria).sort(([a], [b]) => {
+        const aNum = parseInt(a.match(/C(\d+)/)?.[1] || '0');
+        const bNum = parseInt(b.match(/C(\d+)/)?.[1] || '0');
+        return aNum - bNum;
+    });
+    
+    if (entries.length === 0) {
+        return '<div style="padding: 0.5rem; color: var(--text-muted); font-style: italic;">No criteria breakdown available</div>';
+    }
     
     // Build HTML for each criterion
     const criteriaHtml = entries.map(([key, value]) => {
