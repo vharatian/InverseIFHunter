@@ -375,8 +375,11 @@ class OpenAIJudgeClient:
             )
             
         criteria_ids = [c.get('id') for c in criteria_list]
-        print(f"DEBUG: Extracted {len(criteria_list)} criteria: {criteria_ids}")
-        print(f"DEBUG: Reference snippet (first 200 chars): {reference[:200]}...")
+        print(f"DEBUG: _judge_independently - Extracted {len(criteria_list)} criteria: {criteria_ids}")
+        print(f"DEBUG: _judge_independently - Reference snippet (first 500 chars): {reference[:500]}...")
+        print(f"DEBUG: _judge_independently - Full criteria details:")
+        for c in criteria_list:
+            print(f"  - {c.get('id')}: {c.get('description', '')[:150]}...")
         
         # Step 2: Evaluate each criterion independently
         tasks = []
@@ -397,12 +400,14 @@ class OpenAIJudgeClient:
         # Track which criteria were evaluated
         evaluated_ids = set()
         
+        print(f"DEBUG: _judge_independently - Got {len(results)} evaluation results")
         for res in results:
             c_id = res['id']
             status = res['status']
             reason = res['reason']
             final_criteria[c_id] = status
             evaluated_ids.add(c_id)
+            print(f"DEBUG: _judge_independently - Evaluated {c_id}: {status} (reason: {reason[:100] if reason else 'N/A'}...)")
             
             if status == 'PASS':
                 pass_count += 1
@@ -413,11 +418,15 @@ class OpenAIJudgeClient:
         # This happens when a criterion was in the initial criteria but not in the current response_reference
         expected_ids = {c.get('id') for c in criteria_list}
         missing_ids = expected_ids - evaluated_ids
+        print(f"DEBUG: _judge_independently - Expected criteria IDs: {expected_ids}")
+        print(f"DEBUG: _judge_independently - Evaluated criteria IDs: {evaluated_ids}")
+        print(f"DEBUG: _judge_independently - Missing criteria IDs: {missing_ids}")
         if missing_ids:
             for c_id in missing_ids:
                 missing_criteria.append(c_id)
                 # Mark as missing (not a failure, but an error)
                 final_criteria[c_id] = "MISSING"
+                print(f"DEBUG: _judge_independently - Marked {c_id} as MISSING")
         
         # Calculate scores
         # Calculate scores based on Fail Rate (missing criteria don't count as failures)
@@ -497,8 +506,11 @@ class OpenAIJudgeClient:
             
             if normalized:
                 criteria_ids = [c.get('id') for c in normalized]
-                print(f"DEBUG: Parsed {len(normalized)} criteria directly from JSON array: {criteria_ids}")
-                print(f"DEBUG: Reference snippet (first 300 chars): {reference[:300]}...")
+                print(f"DEBUG: _extract_criteria - Parsed {len(normalized)} criteria directly from JSON array: {criteria_ids}")
+                print(f"DEBUG: _extract_criteria - Full criteria list:")
+                for c in normalized:
+                    print(f"  - {c.get('id')}: {c.get('description', '')[:100]}...")
+                print(f"DEBUG: _extract_criteria - Reference snippet (first 500 chars): {reference[:500]}...")
                 return normalized
             else:
                 raise ValueError("Reference JSON array must contain at least one valid criterion")

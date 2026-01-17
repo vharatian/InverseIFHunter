@@ -328,6 +328,22 @@ async def judge_reference(session_id: str):
         from services.openai_client import get_openai_judge_client
         judge = get_openai_judge_client()
         
+        # Log the exact response_reference being sent to judge
+        ref_to_judge = notebook.response_reference or ""
+        print(f"DEBUG: judge_reference - About to call judge with response_reference (first 500 chars): {ref_to_judge[:500]}...")
+        import re
+        import json as json_lib
+        array_match = re.search(r'\[.*?\]', ref_to_judge, re.DOTALL)
+        if array_match:
+            try:
+                criteria_list = json_lib.loads(array_match.group(0))
+                if isinstance(criteria_list, list):
+                    criteria_ids_in_ref = [item.get('id', f'C{i+1}') if isinstance(item, dict) else f'C{i+1}' 
+                                          for i, item in enumerate(criteria_list)]
+                    print(f"DEBUG: judge_reference - Criteria IDs in response_reference being sent to judge: {criteria_ids_in_ref}")
+            except Exception as e:
+                print(f"DEBUG: judge_reference - Could not parse criteria from response_reference: {e}")
+        
         judge_result = await judge.judge_response(
             prompt=notebook.prompt,
             student_response=notebook.response,  # Judge the expected response
@@ -336,6 +352,8 @@ async def judge_reference(session_id: str):
             judge_prompt_template=notebook.judge_prompt_template,
             model="gpt-5"
         )
+        
+        print(f"DEBUG: judge_reference - Judge returned criteria: {list(judge_result.get('criteria', {}).keys())}")
         
         score = judge_result.get("score")
         criteria = judge_result.get("criteria", {})
