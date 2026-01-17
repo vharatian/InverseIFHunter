@@ -2329,6 +2329,12 @@ async function judgeReferenceResponse() {
                     console.error('   This means the notebook was loaded AFTER this criterion was removed from response_reference.');
                     console.error('   state.initialCriteria:', state.initialCriteria);
                     console.error('   To fix: Reload the notebook from the ORIGINAL Colab URL (before C4 was removed)');
+                    // Still add it to state.criteria as MISSING even without description
+                    // This ensures it shows in the UI
+                    if (!state.criteria.find(c => c.id === missingId)) {
+                        state.criteria.push({ id: missingId, criteria: `Criterion ${missingId} (description not available - was removed before notebook was loaded)` });
+                        console.log(`⚠️ Added missing criterion ${missingId} to state.criteria without description`);
+                    }
                 }
             }
             // Recalculate entries after adding MISSING
