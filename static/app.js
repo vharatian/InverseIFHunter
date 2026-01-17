@@ -2555,20 +2555,27 @@ async function judgeReferenceResponse() {
         // Update reference validated state
         state.referenceValidated = isPassing;
         
-        // Enable/disable Start Hunt based on result - ONLY if ALL criteria pass AND no missing criteria
+        // Enable/disable Start Hunt based on result
+        // Requirements: JSON valid + All criteria present + All criteria pass + No missing criteria
         if (elements.startHuntBtn) {
-            if (isPassing && !hasMissingCriteria) {
+            // First check: JSON must be valid
+            if (!state.modelRefValid) {
+                elements.startHuntBtn.disabled = true;
+                elements.startHuntBtn.title = 'Model Reference must be valid JSON before hunting';
+            }
+            // Second check: All criteria must be present (no missing)
+            else if (hasMissingCriteria) {
+                const missingIds = missingCriteria.map(([id]) => id).join(', ');
+                elements.startHuntBtn.disabled = true;
+                elements.startHuntBtn.title = `Missing criteria: ${missingIds}. Please add them back to response_reference and re-judge.`;
+            }
+            // Third check: All criteria must pass
+            else if (isPassing && !hasMissingCriteria) {
                 elements.startHuntBtn.disabled = false;
                 elements.startHuntBtn.title = '';
             } else {
-                if (hasMissingCriteria) {
-                    const missingIds = missingCriteria.map(([id]) => id).join(', ');
-                    elements.startHuntBtn.disabled = true;
-                    elements.startHuntBtn.title = `Missing criteria: ${missingIds}. Please add them back to response_reference and re-judge.`;
-                } else {
-                    elements.startHuntBtn.disabled = true;
-                    elements.startHuntBtn.title = 'All criteria must pass before starting hunt';
-                }
+                elements.startHuntBtn.disabled = true;
+                elements.startHuntBtn.title = 'All criteria must pass before starting hunt';
             }
         }
         
@@ -2797,20 +2804,27 @@ async function saveAndRejudge() {
         // Update reference validated state
         state.referenceValidated = isPassing;
         
-        // Enable/disable Start Hunt based on result - ONLY if ALL criteria pass AND no missing criteria
+        // Enable/disable Start Hunt based on result
+        // Requirements: JSON valid + All criteria present + All criteria pass + No missing criteria
         if (elements.startHuntBtn) {
-            if (isPassing && !hasMissingCriteria) {
+            // First check: JSON must be valid
+            if (!state.modelRefValid) {
+                elements.startHuntBtn.disabled = true;
+                elements.startHuntBtn.title = 'Model Reference must be valid JSON before hunting';
+            }
+            // Second check: All criteria must be present (no missing)
+            else if (hasMissingCriteria) {
+                const missingIds = missingCriteria.map(([id]) => id).join(', ');
+                elements.startHuntBtn.disabled = true;
+                elements.startHuntBtn.title = `Missing criteria: ${missingIds}. Please add them back to response_reference and re-judge.`;
+            }
+            // Third check: All criteria must pass
+            else if (isPassing && !hasMissingCriteria) {
                 elements.startHuntBtn.disabled = false;
                 elements.startHuntBtn.title = '';
             } else {
-                if (hasMissingCriteria) {
-                    const missingIds = missingCriteria.map(([id]) => id).join(', ');
-                    elements.startHuntBtn.disabled = true;
-                    elements.startHuntBtn.title = `Missing criteria: ${missingIds}. Please add them back to response_reference and re-judge.`;
-                } else {
-                    elements.startHuntBtn.disabled = true;
-                    elements.startHuntBtn.title = 'All criteria must pass before starting hunt';
-                }
+                elements.startHuntBtn.disabled = true;
+                elements.startHuntBtn.title = 'All criteria must pass before starting hunt';
             }
         }
         
