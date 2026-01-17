@@ -2343,7 +2343,7 @@ async function judgeReferenceResponse() {
             console.log('✅ No missing criteria detected - all initial criteria are present in current response_reference');
             
             // Check for sequential gaps in criteria IDs (e.g., C1, C2, C3 but no C4)
-            // This handles cases where criteria were removed before notebook was loaded
+            // Also check judge explanation for mentions of criteria that aren't in the result
             const allCriteriaIds = new Set([...initialCriteriaIds, ...currentCriteriaIds, ...judgedCriteriaIds]);
             const criteriaNumbers = Array.from(allCriteriaIds)
                 .map(id => {
@@ -2353,8 +2353,27 @@ async function judgeReferenceResponse() {
                 .filter(num => num !== null)
                 .sort((a, b) => a - b);
             
-            if (criteriaNumbers.length > 0) {
-                const maxCriteriaNum = Math.max(...criteriaNumbers);
+            // Check judge explanation for mentions of criteria IDs
+            const explanation = data.explanation || '';
+            const mentionedCriteriaIds = new Set();
+            const criteriaMentionPattern = /C(\d+)/gi;
+            let match;
+            while ((match = criteriaMentionPattern.exec(explanation)) !== null) {
+                mentionedCriteriaIds.add(`C${match[1]}`);
+            }
+            
+            // Combine all sources to find expected criteria
+            const allExpectedIds = new Set([...allCriteriaIds, ...mentionedCriteriaIds]);
+            const allExpectedNumbers = Array.from(allExpectedIds)
+                .map(id => {
+                    const match = id.match(/^C(\d+)$/i);
+                    return match ? parseInt(match[1]) : null;
+                })
+                .filter(num => num !== null)
+                .sort((a, b) => a - b);
+            
+            if (allExpectedNumbers.length > 0) {
+                const maxCriteriaNum = Math.max(...allExpectedNumbers);
                 const expectedCriteriaIds = new Set();
                 for (let i = 1; i <= maxCriteriaNum; i++) {
                     expectedCriteriaIds.add(`C${i}`);
@@ -2363,6 +2382,7 @@ async function judgeReferenceResponse() {
                 const missingSequentialIds = [...expectedCriteriaIds].filter(id => !allCriteriaIds.has(id));
                 if (missingSequentialIds.length > 0) {
                     console.warn('⚠️ SEQUENTIAL GAP DETECTED: Missing criteria IDs:', missingSequentialIds);
+                    console.warn('   Found in judge explanation:', Array.from(mentionedCriteriaIds));
                     console.warn('   This suggests criteria were removed from response_reference before notebook was loaded.');
                     console.warn('   Adding them as MISSING to criteria breakdown...');
                     
