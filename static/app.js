@@ -2720,6 +2720,12 @@ async function saveAndRejudge() {
                 <div style="margin-top: 0.75rem;">
                     <label style="font-weight: 600; font-size: 0.9rem;">📝 Judge Explanation:</label>
                     <p style="margin-top: 0.25rem; font-size: 0.9rem; color: var(--text-secondary); white-space: pre-wrap;">${escapeHtml(data.explanation || 'No explanation provided')}</p>
+                    ${missingCriteria && missingCriteria.length > 0 ? `
+                    <div style="margin-top: 0.5rem; padding: 0.5rem; background: var(--warning-bg); border-left: 3px solid var(--warning); border-radius: 4px; font-size: 0.85rem;">
+                        <strong>⚠️ Note:</strong> The judge's explanation above refers only to the criteria present in <code>response_reference</code> (${evaluatedCriteria.length} criteria evaluated). 
+                        ${missingCriteria.length} criterion/criteria (${missingCriteria.map(([id]) => id).join(', ')}) ${missingCriteria.length === 1 ? 'is' : 'are'} missing from <code>response_reference</code> and ${missingCriteria.length === 1 ? 'was' : 'were'} not evaluated.
+                    </div>
+                    ` : ''}
                 </div>
             </div>
         `;
