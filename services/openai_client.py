@@ -224,6 +224,101 @@ class OpenAIJudgeClient:
             # Log raw output for debugging
             print(f"DEBUG: Parsing judge output (first 500 chars): {text[:500]}...")
             
+            # First, check if the entire output is a JSON object (new format)
+            # Try parsing the entire text as JSON first
+            text_stripped = text.strip()
+            json_data = None
+            
+            # Try 1: Parse entire text as JSON
+            if text_stripped.startswith('{'):
+                try:
+                    json_data = json.loads(text_stripped)
+                except json.JSONDecodeError:
+                    pass
+            
+            # Try 2: Find JSON object in text (might have extra whitespace or markdown)
+            if not json_data:
+                # Look for JSON object that contains "result" field
+                json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*"result"[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', text, re.DOTALL)
+                if json_match:
+                    try:
+                        json_data = json.loads(json_match.group(0))
+                    except json.JSONDecodeError:
+                        pass
+            
+            if json_data and "result" in json_data:
+                    print(f"DEBUG: Detected JSON format output: {list(json_data.keys())}")
+                    
+                    # Extract score from "result" field
+                    if "result" in json_data:
+                        result_str = str(json_data["result"]).upper()
+                        if result_str == "PASS":
+                            result["score"] = 1
+                        elif result_str == "FAIL":
+                            result["score"] = 0
+                        print(f"DEBUG: Extracted score from JSON result field: {result['score']}")
+                    
+                    # Extract explanation
+                    if "explanation" in json_data:
+                        result["explanation"] = str(json_data["explanation"]).strip()
+                        print(f"DEBUG: Extracted explanation from JSON (length: {len(result['explanation'])})")
+                    
+                    # Try to extract criteria from explanation text
+                    # First, try to get expected criteria from response_reference if available
+                    # (We'll need to pass this through, but for now extract from explanation)
+                    explanation_text = result.get("explanation", "")
+                    
+                    # Look for all criterion IDs mentioned in explanation (C1, C2, etc.)
+                    criteria_pattern = re.findall(r'(C\d+)', explanation_text, re.IGNORECASE)
+                    
+                    # Also check if there's a "criteria" field in the JSON
+                    if "criteria" in json_data:
+                        criteria_data = json_data["criteria"]
+                        if isinstance(criteria_data, dict):
+                            result["criteria"] = {k.upper(): str(v).upper() for k, v in criteria_data.items()}
+                            print(f"DEBUG: Extracted criteria from JSON criteria field: {list(result['criteria'].keys())}")
+                        elif isinstance(criteria_data, list):
+                            # List format, convert to dict
+                            for item in criteria_data:
+                                if isinstance(item, dict) and "id" in item:
+                                    c_id = item["id"].upper()
+                                    status = str(item.get("status", item.get("result", "PASS"))).upper()
+                                    result["criteria"][c_id] = status
+                            print(f"DEBUG: Extracted criteria from JSON criteria list: {list(result['criteria'].keys())}")
+                    
+                    # If no criteria field, extract from explanation
+                    if not result["criteria"] and criteria_pattern:
+                        # Check if explanation mentions PASS/FAIL for each criterion
+                        for c_id in set(criteria_pattern):
+                            c_id_upper = c_id.upper()
+                            # Look for context around this criterion ID in explanation
+                            # Pattern: "C1" followed by something that suggests PASS or the explanation is positive
+                            # Since result is PASS, assume all mentioned criteria passed
+                            if result["score"] == 1:
+                                result["criteria"][c_id_upper] = "PASS"
+                            else:
+                                # For FAIL, check if explanation says it failed
+                                # Look for negative words near the criterion
+                                c_context = re.search(
+                                    rf'{c_id}[^.]*?({"|".join(["failed", "does not", "did not", "lacks", "missing"])})',
+                                    explanation_text,
+                                    re.IGNORECASE
+                                )
+                                if c_context:
+                                    result["criteria"][c_id_upper] = "FAIL"
+                                else:
+                                    # If result is PASS overall, assume mentioned criteria passed
+                                    result["criteria"][c_id_upper] = "PASS" if result["score"] == 1 else "FAIL"
+                        print(f"DEBUG: Extracted criteria from explanation: {list(result['criteria'].keys())}")
+                        
+                        # If we still have no criteria but have a score, try to infer from response_reference
+                        # This would require passing response_reference to this method, but for now we'll work with what we have
+                    
+                    # If we got score and explanation, we're done
+                    if result["score"] is not None:
+                        print(f"DEBUG: Successfully parsed JSON format output - score: {result['score']}, criteria: {len(result['criteria'])}")
+                        return result
+            
             # Extract grading basis (criteria) - try multiple patterns
             criteria_parsed = False
             
