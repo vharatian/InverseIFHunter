@@ -347,31 +347,33 @@ class OpenAIJudgeClient:
                                     result["criteria"][c_id_upper] = "PASS" if result["score"] == 1 else "FAIL"
                         print(f"DEBUG: Extracted criteria from explanation: {list(result['criteria'].keys())}")
                     
+                    # Check if explanation suggests all criteria passed
+                    explanation_lower = explanation_text.lower()
+                    all_passed_indicators = [
+                        "all criteria", "all criterion", "all satisfied", "all met",
+                        "criteria were satisfied", "criteria satisfied", "all passed"
+                    ]
+                    all_passed = any(indicator in explanation_lower for indicator in all_passed_indicators)
+                    
                     # If we still don't have criteria but have a PASS result, infer from response_reference
                     # This handles cases where the judge says "all criteria satisfied" but doesn't list them
-                    if not result["criteria"] and result["score"] == 1 and response_reference:
-                        # Check if explanation suggests all criteria passed
-                        explanation_lower = explanation_text.lower()
-                        all_passed_indicators = [
-                            "all criteria", "all criterion", "all satisfied", "all met",
-                            "criteria were satisfied", "criteria satisfied", "all passed"
-                        ]
-                        if any(indicator in explanation_lower for indicator in all_passed_indicators):
-                            try:
-                                # Extract expected criteria IDs from response_reference
-                                array_match = re.search(r'\[.*?\]', response_reference, re.DOTALL)
-                                if array_match:
-                                    criteria_list = json.loads(array_match.group(0))
-                                    if isinstance(criteria_list, list):
-                                        for item in criteria_list:
-                                            c_id = item.get('id', '').upper() if isinstance(item, dict) else ''
-                                            if c_id:
-                                                result["criteria"][c_id] = "PASS"
-                                        print(f"DEBUG: Inferred all criteria as PASS from 'all criteria satisfied' message: {list(result['criteria'].keys())}")
-                            except Exception as e:
-                                print(f"DEBUG: Could not infer criteria from response_reference: {e}")
+                    if not result["criteria"] and result["score"] == 1 and response_reference and all_passed:
+                        try:
+                            # Extract expected criteria IDs from response_reference
+                            array_match = re.search(r'\[.*?\]', response_reference, re.DOTALL)
+                            if array_match:
+                                criteria_list = json.loads(array_match.group(0))
+                                if isinstance(criteria_list, list):
+                                    for item in criteria_list:
+                                        c_id = item.get('id', '').upper() if isinstance(item, dict) else ''
+                                        if c_id:
+                                            result["criteria"][c_id] = "PASS"
+                                    print(f"DEBUG: Inferred all criteria as PASS from 'all criteria satisfied' message: {list(result['criteria'].keys())}")
+                        except Exception as e:
+                            print(f"DEBUG: Could not infer criteria from response_reference: {e}")
                     
                     # Check for missing criteria by comparing with expected criteria from response_reference
+                    # IMPORTANT: If judge says "all criteria satisfied", mark ALL expected criteria as PASS
                     if response_reference:
                         try:
                             # Extract expected criteria IDs from response_reference
@@ -385,17 +387,9 @@ class OpenAIJudgeClient:
                                     missing_ids = expected_ids - extracted_ids
                                     
                                     if missing_ids:
-                                        # Only mark as MISSING if the explanation doesn't suggest all criteria passed
-                                        explanation_lower = explanation_text.lower()
-                                        all_passed_indicators = [
-                                            "all criteria", "all criterion", "all satisfied", "all met",
-                                            "criteria were satisfied", "criteria satisfied", "all passed"
-                                        ]
-                                        all_passed = any(indicator in explanation_lower for indicator in all_passed_indicators)
-                                        
                                         if all_passed and result["score"] == 1:
-                                            # If judge says all criteria passed, mark missing ones as PASS too
-                                            print(f"DEBUG: Judge says all criteria passed, marking missing ones as PASS: {missing_ids}")
+                                            # If judge says all criteria passed, mark ALL missing ones as PASS
+                                            print(f"DEBUG: Judge says all criteria passed, marking ALL missing ones as PASS: {missing_ids}")
                                             for c_id in missing_ids:
                                                 result["criteria"][c_id] = "PASS"
                                         else:
@@ -404,6 +398,14 @@ class OpenAIJudgeClient:
                                             for c_id in missing_ids:
                                                 result["criteria"][c_id] = "MISSING"
                                         print(f"DEBUG: Updated criteria (including missing/inferred): {list(result['criteria'].keys())}")
+                                    elif all_passed and result["score"] == 1:
+                                        # Even if no missing IDs, ensure ALL expected criteria are marked as PASS
+                                        # This handles cases where some were extracted but not all
+                                        print(f"DEBUG: Judge says all criteria passed, ensuring ALL expected criteria are marked: {expected_ids}")
+                                        for c_id in expected_ids:
+                                            if c_id not in result["criteria"]:
+                                                result["criteria"][c_id] = "PASS"
+                                        print(f"DEBUG: Final criteria after ensuring all are marked: {list(result['criteria'].keys())}")
                         except Exception as e:
                             print(f"DEBUG: Could not extract expected criteria from response_reference: {e}")
                     
