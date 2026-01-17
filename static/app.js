@@ -568,9 +568,14 @@ function populatePreviewTabs(notebook) {
     // Parse and store criteria from response_reference
     state.criteria = parseCriteria(notebook.response_reference || '');
     // Store initial criteria to detect missing ones later
-    state.initialCriteria = JSON.parse(JSON.stringify(state.criteria)); // Deep copy
+    // IMPORTANT: Only set initialCriteria if it doesn't exist yet (preserve original)
+    if (!state.initialCriteria || state.initialCriteria.length === 0) {
+        state.initialCriteria = JSON.parse(JSON.stringify(state.criteria)); // Deep copy
+        console.log('Initial criteria (stored for comparison):', state.initialCriteria.map(c => c.id));
+    } else {
+        console.log('Initial criteria preserved (not overwritten):', state.initialCriteria.map(c => c.id));
+    }
     console.log('Parsed criteria:', state.criteria);
-    console.log('Initial criteria (stored for comparison):', state.initialCriteria.map(c => c.id));
 }
 
 // Validate that Model Reference is valid JSON format with criteria
@@ -2242,7 +2247,7 @@ async function judgeReferenceResponse() {
         
         // Update state.criteria from judge result to keep in sync
         let criteria = data.criteria || {};
-        const criteriaEntries = Object.entries(criteria);
+        let criteriaEntries = Object.entries(criteria); // Use let, not const
         
         // Debug: Log what criteria were judged
         console.log('Judge result criteria:', Object.keys(criteria));
@@ -2269,6 +2274,8 @@ async function judgeReferenceResponse() {
         const initialCriteriaIds = new Set((state.initialCriteria || []).map(c => c.id));
         const currentCriteriaIds = new Set(currentCriteria.map(c => c.id));
         const missingCriteriaIds = [...initialCriteriaIds].filter(id => !currentCriteriaIds.has(id));
+        
+        console.log('DEBUG: Missing criteria check - Initial:', Array.from(initialCriteriaIds), 'Current:', Array.from(currentCriteriaIds), 'Missing:', missingCriteriaIds);
         
         if (missingCriteriaIds.length > 0) {
             console.warn('Missing criteria detected:', missingCriteriaIds);
@@ -2479,6 +2486,8 @@ async function saveAndRejudge() {
         const initialCriteriaIds = new Set((state.initialCriteria || []).map(c => c.id));
         const currentCriteriaIds = new Set(currentCriteria.map(c => c.id));
         const missingCriteriaIds = [...initialCriteriaIds].filter(id => !currentCriteriaIds.has(id));
+        
+        console.log('DEBUG: Missing criteria check (saveAndRejudge) - Initial:', Array.from(initialCriteriaIds), 'Current:', Array.from(currentCriteriaIds), 'Missing:', missingCriteriaIds);
         
         if (missingCriteriaIds.length > 0) {
             console.warn('Missing criteria detected (saveAndRejudge):', missingCriteriaIds);
