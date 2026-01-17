@@ -2332,6 +2332,11 @@ async function judgeReferenceResponse() {
         });
         
         if (!response.ok) {
+            if (response.status === 404) {
+                // Session not found - likely expired or invalid
+                showToast('⚠️ Session expired. Please reload the notebook.', 'error');
+                throw new Error('Session not found. Please reload the notebook from Colab.');
+            }
             const error = await response.json();
             throw new Error(error.detail || 'Judge failed');
         }
@@ -2704,6 +2709,11 @@ async function saveAndRejudge() {
         });
         
         if (!judgeResponse.ok) {
+            if (judgeResponse.status === 404) {
+                // Session not found - likely expired or invalid
+                showToast('⚠️ Session expired. Please reload the notebook.', 'error');
+                throw new Error('Session not found. Please reload the notebook from Colab.');
+            }
             const error = await judgeResponse.json();
             throw new Error(error.detail || 'Judge failed');
         }
