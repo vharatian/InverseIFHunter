@@ -532,19 +532,29 @@ label {
     color: var(--warning);
 }
 
+/* Notebook Preview Card - Larger */
+#notebookPreviewCard {
+    min-height: 800px;
+    display: flex;
+    flex-direction: column;
+}
+
 /* Preview Panel */
 .preview-content {
-    max-height: 600px;
-    min-height: 500px;
+    flex: 1;
+    max-height: 700px;
+    min-height: 600px;
     overflow-y: auto;
     position: relative;
-    padding-bottom: 120px; /* Space for fixed judge buttons */
+    display: flex;
+    flex-direction: column;
 }
 
 .preview-panel {
     padding: 0.5rem;
     display: flex;
     flex-direction: column;
+    flex: 1;
     min-height: 100%;
 }
 
@@ -1202,22 +1212,18 @@ main {
     transform: scale(1.02);
 }
 
-/* Judge Reference Button - Fixed at bottom */
+/* Judge Reference Button - Sticky to preview section bottom */
 .judge-reference-section {
-    margin-top: 1.5rem;
+    margin-top: auto;
     padding: 1rem 1.5rem;
     background: var(--bg-card);
-    border-radius: 8px 8px 0 0;
+    border-radius: 8px;
     border: 1px solid var(--accent-primary);
     border-top: 2px solid var(--accent-primary);
-    border-bottom: none;
-    position: fixed;
+    position: sticky;
     bottom: 0;
-    left: 0;
-    right: 0;
-    z-index: 1000;
+    z-index: 10;
     box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.2);
-    max-width: 100%;
 }
 
 .judge-reference-btn {
