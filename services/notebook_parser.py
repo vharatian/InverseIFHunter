@@ -356,9 +356,10 @@ class NotebookParser:
                 continue
             
             # Pattern 1: **Key:** Value or **Key:** - Value (with bold markers)
-            match = re.match(r'\*\*([^*:]+)\*\*:?\s*-?\s*(.+)', line)
+            # Match key before closing **, then optional colon
+            match = re.match(r'\*\*([^*]+?)\*\*:?\s*-?\s*(.+)', line)
             if match:
-                key = match.group(1).strip()
+                key = match.group(1).strip().rstrip(':')  # Remove trailing colon if present
                 value = match.group(2).strip()
                 if key and value:
                     metadata[key] = value
