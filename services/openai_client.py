@@ -188,7 +188,7 @@ class OpenAIJudgeClient:
                 }
             
             print(f"DEBUG: Got judge response of length {len(raw_output)}")
-            return self._parse_judge_output(raw_output)
+            return self._parse_judge_output(raw_output, response_reference)
             
         except Exception as e:
             error_msg = f"API Error: {str(e)}"
@@ -201,7 +201,7 @@ class OpenAIJudgeClient:
                 "error": error_msg
             }
     
-    def _parse_judge_output(self, text: str) -> Dict[str, Any]:
+    def _parse_judge_output(self, text: str, response_reference: str = None) -> Dict[str, Any]:
         """
         Parse structured judge output.
         
@@ -347,8 +347,26 @@ class OpenAIJudgeClient:
                                     result["criteria"][c_id_upper] = "PASS" if result["score"] == 1 else "FAIL"
                         print(f"DEBUG: Extracted criteria from explanation: {list(result['criteria'].keys())}")
                         
-                        # If we still have no criteria but have a score, try to infer from response_reference
-                        # This would require passing response_reference to this method, but for now we'll work with what we have
+                    # Check for missing criteria by comparing with expected criteria from response_reference
+                    if response_reference:
+                        try:
+                            # Extract expected criteria IDs from response_reference
+                            array_match = re.search(r'\[.*?\]', response_reference, re.DOTALL)
+                            if array_match:
+                                criteria_list = json.loads(array_match.group(0))
+                                if isinstance(criteria_list, list):
+                                    expected_ids = {item.get('id', f'C{i+1}').upper() if isinstance(item, dict) else f'C{i+1}'.upper() 
+                                                   for i, item in enumerate(criteria_list)}
+                                    extracted_ids = set(result["criteria"].keys())
+                                    missing_ids = expected_ids - extracted_ids
+                                    
+                                    if missing_ids:
+                                        print(f"DEBUG: Missing criteria detected: {missing_ids}")
+                                        for c_id in missing_ids:
+                                            result["criteria"][c_id] = "MISSING"
+                                        print(f"DEBUG: Updated criteria (including missing): {list(result['criteria'].keys())}")
+                        except Exception as e:
+                            print(f"DEBUG: Could not extract expected criteria from response_reference: {e}")
                     
                     # If we got score and explanation, we're done
                     if result["score"] is not None:
@@ -493,6 +511,28 @@ class OpenAIJudgeClient:
             
         except Exception as e:
             result["error"] = f"Parse error: {str(e)}"
+        
+        # Final check: Compare extracted criteria with expected criteria from response_reference
+        # This ensures we catch missing criteria regardless of parsing path
+        if response_reference and result.get("score") is not None:
+            try:
+                # Extract expected criteria IDs from response_reference
+                array_match = re.search(r'\[.*?\]', response_reference, re.DOTALL)
+                if array_match:
+                    criteria_list = json.loads(array_match.group(0))
+                    if isinstance(criteria_list, list):
+                        expected_ids = {item.get('id', f'C{i+1}').upper() if isinstance(item, dict) else f'C{i+1}'.upper() 
+                                       for i, item in enumerate(criteria_list)}
+                        extracted_ids = set(result["criteria"].keys())
+                        missing_ids = expected_ids - extracted_ids
+                        
+                        if missing_ids:
+                            print(f"DEBUG: Final check - Missing criteria detected: {missing_ids}")
+                            for c_id in missing_ids:
+                                result["criteria"][c_id] = "MISSING"
+                            print(f"DEBUG: Final criteria (including missing): {list(result['criteria'].keys())}")
+            except Exception as e:
+                print(f"DEBUG: Could not check for missing criteria: {e}")
         
         return result
     
