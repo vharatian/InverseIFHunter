@@ -282,15 +282,41 @@ async def judge_reference(session_id: str):
     
     # Re-fetch notebook from Colab to get latest response_reference
     storage = get_session_storage(session_id)
+    old_ref = session.notebook.response_reference[:100] if session.notebook.response_reference else "empty"
+    
     if storage and "url" in storage:
         try:
             # Re-fetch the notebook to get latest content
             parsed, _ = await notebook_parser.load_from_url(storage["url"])
             # Update session with latest notebook data
             session.notebook = parsed
-            print(f"DEBUG: Refreshed notebook from Colab for session {session_id}")
+            # Extract criteria count for debugging
+            import re
+            import json as json_lib
+            ref = session.notebook.response_reference or ""
+            array_match = re.search(r'\[.*?\]', ref, re.DOTALL)
+            criteria_count = 0
+            criteria_ids = []
+            if array_match:
+                try:
+                    criteria_list = json_lib.loads(array_match.group(0))
+                    if isinstance(criteria_list, list):
+                        criteria_count = len(criteria_list)
+                        criteria_ids = [item.get('id', f'C{i+1}') if isinstance(item, dict) else f'C{i+1}' 
+                                       for i, item in enumerate(criteria_list)]
+                except Exception as parse_err:
+                    print(f"DEBUG: Could not parse criteria list: {parse_err}")
+            new_ref = ref[:100] if ref else "empty"
+            print(f"DEBUG: Refreshed notebook from Colab for session {session_id}.")
+            print(f"DEBUG: Old response_reference (first 100 chars): {old_ref}...")
+            print(f"DEBUG: New response_reference (first 100 chars): {new_ref}...")
+            print(f"DEBUG: Found {criteria_count} criteria: {criteria_ids}")
         except Exception as e:
             print(f"WARNING: Could not refresh notebook from Colab: {e}. Using cached version.")
+            import traceback
+            traceback.print_exc()
+    else:
+        print(f"WARNING: No storage URL found for session {session_id}. Cannot refresh from Colab.")
     
     notebook = session.notebook
     

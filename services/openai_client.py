@@ -374,7 +374,9 @@ class OpenAIJudgeClient:
                 model=model, independent_judging=False
             )
             
-        print(f"DEBUG: Extracted {len(criteria_list)} criteria: {[c.get('id') for c in criteria_list]}")
+        criteria_ids = [c.get('id') for c in criteria_list]
+        print(f"DEBUG: Extracted {len(criteria_list)} criteria: {criteria_ids}")
+        print(f"DEBUG: Reference snippet (first 200 chars): {reference[:200]}...")
         
         # Step 2: Evaluate each criterion independently
         tasks = []
@@ -493,7 +495,9 @@ class OpenAIJudgeClient:
                     normalized.append({"id": f"C{idx+1}", "description": item})
             
             if normalized:
-                print(f"DEBUG: Optimization - Parsed {len(normalized)} criteria directly from JSON array.")
+                criteria_ids = [c.get('id') for c in normalized]
+                print(f"DEBUG: Parsed {len(normalized)} criteria directly from JSON array: {criteria_ids}")
+                print(f"DEBUG: Reference snippet (first 300 chars): {reference[:300]}...")
                 return normalized
             else:
                 raise ValueError("Reference JSON array must contain at least one valid criterion")

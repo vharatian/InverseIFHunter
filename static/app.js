@@ -2204,10 +2204,22 @@ async function judgeReferenceResponse() {
         const criteria = data.criteria || {};
         const criteriaEntries = Object.entries(criteria);
         
+        // Debug: Log what criteria were judged
+        console.log('Judge result criteria:', Object.keys(criteria));
+        console.log('Current state.criteria IDs:', (state.criteria || []).map(c => c.id));
+        
         // Update state.criteria based on what was actually judged
         // This ensures UI shows the same criteria that were evaluated
         const judgedCriteriaIds = new Set(Object.keys(criteria));
         state.criteria = (state.criteria || []).filter(c => judgedCriteriaIds.has(c.id));
+        
+        // Also add any criteria from judge result that aren't in state.criteria
+        // (in case judge evaluated criteria we don't have descriptions for)
+        for (const [cId, status] of Object.entries(criteria)) {
+            if (!state.criteria.find(c => c.id === cId)) {
+                state.criteria.push({ id: cId, criteria: `Criterion ${cId} (from judge result)` });
+            }
+        }
         
         // Check if ALL criteria pass (not just overall score)
         // Missing criteria (MISSING status) don't count as failures
@@ -2354,9 +2366,21 @@ async function saveAndRejudge() {
         const criteria = data.criteria || {};
         const criteriaEntries = Object.entries(criteria);
         
+        // Debug: Log what criteria were judged
+        console.log('Judge result criteria (saveAndRejudge):', Object.keys(criteria));
+        console.log('Current state.criteria IDs:', (state.criteria || []).map(c => c.id));
+        
         // Update state.criteria based on what was actually judged
         const judgedCriteriaIds = new Set(Object.keys(criteria));
         state.criteria = (state.criteria || []).filter(c => judgedCriteriaIds.has(c.id));
+        
+        // Also add any criteria from judge result that aren't in state.criteria
+        // (in case judge evaluated criteria we don't have descriptions for)
+        for (const [cId, status] of Object.entries(criteria)) {
+            if (!state.criteria.find(c => c.id === cId)) {
+                state.criteria.push({ id: cId, criteria: `Criterion ${cId} (from judge result)` });
+            }
+        }
         
         // Check if ALL criteria pass (not just overall score)
         // Missing criteria (MISSING status) don't count as failures
