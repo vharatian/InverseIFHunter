@@ -225,26 +225,61 @@ class OpenAIJudgeClient:
             print(f"DEBUG: Parsing judge output (first 500 chars): {text[:500]}...")
             
             # First, check if the entire output is a JSON object (new format)
-            # Try parsing the entire text as JSON first
+            # The output might have prefixes like "Output:" or be wrapped in markdown code blocks
+            print(f"DEBUG: _parse_judge_output - Input text (first 200 chars): {text[:200]}")
             text_stripped = text.strip()
             json_data = None
             
-            # Try 1: Parse entire text as JSON
+            # Try 1: Remove common prefixes
+            # Handle "Output:" prefix
+            if text_stripped.startswith("Output:"):
+                text_stripped = text_stripped[7:].strip()  # Remove "Output:" prefix
+                print(f"DEBUG: Removed 'Output:' prefix, remaining (first 200 chars): {text_stripped[:200]}")
+            # Handle markdown code blocks
+            if text_stripped.startswith("```"):
+                # Remove code block markers
+                lines = text_stripped.split('\n')
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].strip() == "```":
+                    lines = lines[:-1]
+                text_stripped = '\n'.join(lines).strip()
+            
+            # Try 2: Parse entire text as JSON (after cleaning)
             if text_stripped.startswith('{'):
                 try:
                     json_data = json.loads(text_stripped)
-                except json.JSONDecodeError:
+                    print(f"DEBUG: Successfully parsed JSON from cleaned text")
+                except json.JSONDecodeError as e:
+                    print(f"DEBUG: Failed to parse cleaned text as JSON: {e}")
                     pass
             
-            # Try 2: Find JSON object in text (might have extra whitespace or markdown)
+            # Try 3: Find JSON object in text using a more robust pattern
             if not json_data:
-                # Look for JSON object that contains "result" field
-                json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*"result"[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', text, re.DOTALL)
-                if json_match:
-                    try:
-                        json_data = json.loads(json_match.group(0))
-                    except json.JSONDecodeError:
-                        pass
+                # Look for JSON object that contains "result" field - use a simpler, more reliable pattern
+                # Find the first { and last } that contain "result"
+                start_idx = text.find('{')
+                if start_idx != -1:
+                    # Find matching closing brace
+                    brace_count = 0
+                    end_idx = start_idx
+                    for i in range(start_idx, len(text)):
+                        if text[i] == '{':
+                            brace_count += 1
+                        elif text[i] == '}':
+                            brace_count -= 1
+                            if brace_count == 0:
+                                end_idx = i + 1
+                                break
+                    
+                    if end_idx > start_idx:
+                        json_str = text[start_idx:end_idx]
+                        try:
+                            json_data = json.loads(json_str)
+                            print(f"DEBUG: Successfully parsed JSON using brace matching")
+                        except json.JSONDecodeError as e:
+                            print(f"DEBUG: Failed to parse JSON from brace matching: {e}")
+                            pass
             
             if json_data and "result" in json_data:
                     print(f"DEBUG: Detected JSON format output: {list(json_data.keys())}")
@@ -270,6 +305,7 @@ class OpenAIJudgeClient:
                     
                     # Look for all criterion IDs mentioned in explanation (C1, C2, etc.)
                     criteria_pattern = re.findall(r'(C\d+)', explanation_text, re.IGNORECASE)
+                    print(f"DEBUG: Found criterion IDs in explanation: {criteria_pattern}")
                     
                     # Also check if there's a "criteria" field in the JSON
                     if "criteria" in json_data:
