@@ -2373,7 +2373,24 @@ async function judgeReferenceResponse() {
                 .sort((a, b) => a - b);
             
             if (allExpectedNumbers.length > 0) {
-                const maxCriteriaNum = Math.max(...allExpectedNumbers);
+                // If judge says "all criteria satisfied" and we have C1, C2, C3, 
+                // check if there might be a C4 that should exist
+                const explanationLower = explanation.toLowerCase();
+                const allCriteriaSatisfied = explanationLower.includes('all criteria') || 
+                                            explanationLower.includes('all satisfied') ||
+                                            explanationLower.includes('criteria were satisfied');
+                
+                // Determine max criteria number: use max from all sources, or if "all criteria satisfied"
+                // and we have C1-C3, check up to C4 as a reasonable assumption
+                let maxCriteriaNum = Math.max(...allExpectedNumbers);
+                if (allCriteriaSatisfied && criteriaNumbers.length === 3 && 
+                    criteriaNumbers[0] === 1 && criteriaNumbers[1] === 2 && criteriaNumbers[2] === 3) {
+                    // If we have exactly C1, C2, C3 and judge says "all criteria satisfied",
+                    // check if C4 should exist (common pattern)
+                    maxCriteriaNum = Math.max(maxCriteriaNum, 4);
+                    console.log('🔍 Detected C1-C3 pattern with "all criteria satisfied" - checking for C4');
+                }
+                
                 const expectedCriteriaIds = new Set();
                 for (let i = 1; i <= maxCriteriaNum; i++) {
                     expectedCriteriaIds.add(`C${i}`);
