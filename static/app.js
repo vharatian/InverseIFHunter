@@ -2295,32 +2295,57 @@ async function judgeReferenceResponse() {
         // If a criterion was in initial but not in current, it's MISSING
         const initialCriteriaIds = new Set((state.initialCriteria || []).map(c => c.id));
         const currentCriteriaIds = new Set(currentCriteria.map(c => c.id));
+        const judgedCriteriaIds = new Set(Object.keys(criteria));
         const missingCriteriaIds = [...initialCriteriaIds].filter(id => !currentCriteriaIds.has(id));
         
         console.log('🔍 POST-JUDGE MISSING CHECK:');
         console.log('   Initial criteria IDs:', Array.from(initialCriteriaIds));
-        console.log('   Current criteria IDs:', Array.from(currentCriteriaIds));
-        console.log('   Missing criteria IDs:', missingCriteriaIds);
+        console.log('   Current criteria IDs (from response_reference):', Array.from(currentCriteriaIds));
+        console.log('   Judged criteria IDs (from judge result):', Array.from(judgedCriteriaIds));
+        console.log('   Missing criteria IDs (in initial but not in current):', missingCriteriaIds);
         console.log('   state.initialCriteria exists?', !!state.initialCriteria);
+        console.log('   state.initialCriteria length:', state.initialCriteria?.length || 0);
         console.log('   state.initialCriteria:', state.initialCriteria);
         
         if (missingCriteriaIds.length > 0) {
             console.warn('⚠️ MISSING CRITERIA DETECTED:', missingCriteriaIds);
             // Add missing criteria to judge result as MISSING
             for (const missingId of missingCriteriaIds) {
-                criteria[missingId] = 'MISSING';
+                // Don't overwrite if already in criteria (shouldn't happen, but just in case)
+                if (!(missingId in criteria)) {
+                    criteria[missingId] = 'MISSING';
+                }
                 // Also add to state.criteria so it shows in UI
                 const missingCriterion = (state.initialCriteria || []).find(c => c.id === missingId);
-                if (missingCriterion && !state.criteria.find(c => c.id === missingId)) {
-                    state.criteria.push(missingCriterion);
+                if (missingCriterion) {
+                    if (!state.criteria.find(c => c.id === missingId)) {
+                        state.criteria.push(missingCriterion);
+                        console.log(`✅ Added missing criterion ${missingId} to state.criteria`);
+                    } else {
+                        console.log(`ℹ️ Missing criterion ${missingId} already in state.criteria`);
+                    }
+                } else {
+                    console.error(`❌ ERROR: Missing criterion ${missingId} not found in state.initialCriteria!`);
+                    console.error('   This means the notebook was loaded AFTER this criterion was removed from response_reference.');
+                    console.error('   state.initialCriteria:', state.initialCriteria);
+                    console.error('   To fix: Reload the notebook from the ORIGINAL Colab URL (before C4 was removed)');
                 }
             }
             // Recalculate entries after adding MISSING
             criteriaEntries = Object.entries(criteria);
+        } else {
+            console.log('✅ No missing criteria detected - all initial criteria are present in current response_reference');
+            // Double-check: if judge result has fewer criteria than initial, something might be wrong
+            if (initialCriteriaIds.size > judgedCriteriaIds.size) {
+                const notJudged = [...initialCriteriaIds].filter(id => !judgedCriteriaIds.has(id));
+                console.warn('⚠️ WARNING: Some initial criteria were not judged:', notJudged);
+                console.warn('   This might indicate criteria were removed from response_reference after initial load');
+            }
         }
         
         console.log('Final state.criteria IDs:', state.criteria.map(c => c.id));
         console.log('Final judge result criteria (including missing):', Object.keys(criteria));
+        console.log('Final criteria object:', criteria);
         
         // Check if ALL criteria pass (not just overall score)
         // Missing criteria (MISSING status) don't count as failures, but block hunting
