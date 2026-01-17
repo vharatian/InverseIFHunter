@@ -310,12 +310,17 @@ class NotebookParser:
             return
         
         # Standard fields
+        # Use first occurrence only (don't overwrite if already set)
+        # This ensures we get the original content, not later edits
         if heading == 'prompt':
-            result.prompt = content
+            if not result.prompt:  # Only set if not already set
+                result.prompt = content
         elif heading == 'response':
-            result.response = content
+            if not result.response:  # Only set if not already set
+                result.response = content
         elif heading == 'response_reference':
-            result.response_reference = content
+            if not result.response_reference:  # Only set if not already set - use FIRST occurrence
+                result.response_reference = content
         elif heading == 'judge_prompt_template':
             result.judge_prompt_template = content
         elif heading == 'judge_system_prompt':
