@@ -410,6 +410,7 @@ class OpenAIJudgeClient:
                 failed_criteria.append(f"{c_id}: {reason}")
         
         # Check for missing criteria (expected but not evaluated)
+        # This happens when a criterion was in the initial criteria but not in the current response_reference
         expected_ids = {c.get('id') for c in criteria_list}
         missing_ids = expected_ids - evaluated_ids
         if missing_ids:

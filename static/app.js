@@ -567,7 +567,10 @@ function populatePreviewTabs(notebook) {
     
     // Parse and store criteria from response_reference
     state.criteria = parseCriteria(notebook.response_reference || '');
+    // Store initial criteria to detect missing ones later
+    state.initialCriteria = JSON.parse(JSON.stringify(state.criteria)); // Deep copy
     console.log('Parsed criteria:', state.criteria);
+    console.log('Initial criteria (stored for comparison):', state.initialCriteria.map(c => c.id));
 }
 
 // Validate that Model Reference is valid JSON format with criteria
@@ -2181,6 +2184,43 @@ async function judgeReferenceResponse() {
         return;
     }
     
+    // Check for missing criteria before judging
+    // Compare initial criteria with current criteria from preview
+    const currentRefText = elements.modelrefPreview?.textContent || '';
+    const currentCriteria = parseCriteria(currentRefText);
+    const currentCriteriaIds = new Set(currentCriteria.map(c => c.id));
+    const initialCriteriaIds = new Set((state.initialCriteria || []).map(c => c.id));
+    const missingBeforeJudge = [...initialCriteriaIds].filter(id => !currentCriteriaIds.has(id));
+    
+    if (missingBeforeJudge.length > 0) {
+        const missingIds = missingBeforeJudge.join(', ');
+        showToast(`❌ Cannot judge: Missing criteria ${missingIds}. Please add them back to response_reference and try again.`, 'error');
+        // Show a warning in the result div
+        const resultDiv = elements.referenceJudgeResult;
+        resultDiv.innerHTML = `
+            <div style="padding: 1rem; background: var(--bg-primary); border-radius: 8px; border: 2px solid var(--warning);">
+                <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
+                    <span style="font-size: 1.5rem;">⚠️</span>
+                    <span style="font-weight: 600; color: var(--warning);">Missing Criteria Detected</span>
+                </div>
+                <p style="margin-bottom: 0.5rem; color: var(--text-secondary);">
+                    The following criteria were in the original notebook but are missing from the current response_reference:
+                </p>
+                <ul style="margin-left: 1.5rem; margin-bottom: 0.75rem; color: var(--warning);">
+                    ${missingBeforeJudge.map(id => {
+                        const criterion = (state.initialCriteria || []).find(c => c.id === id);
+                        return `<li><strong>${id}</strong>: ${criterion ? escapeHtml(criterion.criteria) : 'Criterion description not found'}</li>`;
+                    }).join('')}
+                </ul>
+                <p style="color: var(--text-secondary); font-size: 0.9rem;">
+                    <strong>Action Required:</strong> Please add these criteria back to the response_reference section in your Colab notebook, then click "Save to Colab & Re-judge" or "Judge Only" again.
+                </p>
+            </div>
+        `;
+        resultDiv.classList.remove('hidden');
+        return;
+    }
+    
     const btn = elements.judgeReferenceBtn;
     const resultDiv = elements.referenceJudgeResult;
     
@@ -2201,69 +2241,109 @@ async function judgeReferenceResponse() {
         const data = await response.json();
         
         // Update state.criteria from judge result to keep in sync
-        const criteria = data.criteria || {};
+        let criteria = data.criteria || {};
         const criteriaEntries = Object.entries(criteria);
         
         // Debug: Log what criteria were judged
         console.log('Judge result criteria:', Object.keys(criteria));
+        console.log('Initial criteria IDs:', (state.initialCriteria || []).map(c => c.id));
         console.log('Current state.criteria IDs (before update):', (state.criteria || []).map(c => c.id));
         
         // IMPORTANT: Re-parse criteria from fresh response_reference if provided
         // This ensures state.criteria matches what was actually in the notebook when judging
+        let currentCriteria = [];
         if (data.response_reference) {
             console.log('Re-parsing criteria from fresh response_reference');
-            state.criteria = parseCriteria(data.response_reference);
+            currentCriteria = parseCriteria(data.response_reference);
+            state.criteria = currentCriteria;
             console.log('Updated state.criteria IDs (from response_reference):', state.criteria.map(c => c.id));
         } else {
             // Fallback: Update state.criteria based on what was actually judged
             const judgedCriteriaIds = new Set(Object.keys(criteria));
             state.criteria = (state.criteria || []).filter(c => judgedCriteriaIds.has(c.id));
-            
-            // Also add any criteria from judge result that aren't in state.criteria
-            for (const [cId, status] of Object.entries(criteria)) {
-                if (!state.criteria.find(c => c.id === cId)) {
-                    state.criteria.push({ id: cId, criteria: `Criterion ${cId} (from judge result)` });
+            currentCriteria = state.criteria;
+        }
+        
+        // Check for missing criteria: Compare initial criteria with current criteria
+        // If a criterion was in initial but not in current, it's MISSING
+        const initialCriteriaIds = new Set((state.initialCriteria || []).map(c => c.id));
+        const currentCriteriaIds = new Set(currentCriteria.map(c => c.id));
+        const missingCriteriaIds = [...initialCriteriaIds].filter(id => !currentCriteriaIds.has(id));
+        
+        if (missingCriteriaIds.length > 0) {
+            console.warn('Missing criteria detected:', missingCriteriaIds);
+            // Add missing criteria to judge result as MISSING
+            for (const missingId of missingCriteriaIds) {
+                criteria[missingId] = 'MISSING';
+                // Also add to state.criteria so it shows in UI
+                const missingCriterion = (state.initialCriteria || []).find(c => c.id === missingId);
+                if (missingCriterion && !state.criteria.find(c => c.id === missingId)) {
+                    state.criteria.push(missingCriterion);
                 }
             }
+            // Recalculate entries after adding MISSING
+            criteriaEntries = Object.entries(criteria);
         }
         
         console.log('Final state.criteria IDs:', state.criteria.map(c => c.id));
+        console.log('Final judge result criteria (including missing):', Object.keys(criteria));
         
         // Check if ALL criteria pass (not just overall score)
-        // Missing criteria (MISSING status) don't count as failures
+        // Missing criteria (MISSING status) don't count as failures, but block hunting
         const evaluatedCriteria = criteriaEntries.filter(([key, value]) => 
             String(value).toUpperCase() !== 'MISSING'
+        );
+        const missingCriteria = criteriaEntries.filter(([key, value]) => 
+            String(value).toUpperCase() === 'MISSING'
         );
         const allCriteriaPass = evaluatedCriteria.length > 0 && 
             evaluatedCriteria.every(([key, value]) => String(value).toUpperCase() === 'PASS');
         
-        // Only enable hunt if ALL criteria pass (missing criteria are warnings, not failures)
-        const isPassing = allCriteriaPass;
+        // Block hunting if there are missing criteria
+        const hasMissingCriteria = missingCriteria.length > 0;
+        const isPassing = allCriteriaPass && !hasMissingCriteria;
         const scoreClass = isPassing ? 'score-1' : 'score-0';
         const scoreEmoji = isPassing ? '✅' : '❌';
         
         // Update reference validated state
         state.referenceValidated = isPassing;
         
-        // Enable/disable Start Hunt based on result - ONLY if ALL criteria pass
+        // Enable/disable Start Hunt based on result - ONLY if ALL criteria pass AND no missing criteria
         if (elements.startHuntBtn) {
-            if (isPassing) {
+            if (isPassing && !hasMissingCriteria) {
                 elements.startHuntBtn.disabled = false;
                 elements.startHuntBtn.title = '';
             } else {
-                elements.startHuntBtn.disabled = true;
-                elements.startHuntBtn.title = 'All criteria must pass before starting hunt';
+                if (hasMissingCriteria) {
+                    const missingIds = missingCriteria.map(([id]) => id).join(', ');
+                    elements.startHuntBtn.disabled = true;
+                    elements.startHuntBtn.title = `Missing criteria: ${missingIds}. Please add them back to response_reference and re-judge.`;
+                } else {
+                    elements.startHuntBtn.disabled = true;
+                    elements.startHuntBtn.title = 'All criteria must pass before starting hunt';
+                }
             }
         }
         
         // Build criteria breakdown HTML
         const criteriaHtml = formatJudgeCriteriaDisplay(criteria);
         
+        // Build status message
+        let statusMessage = '';
+        if (hasMissingCriteria) {
+            const missingIds = missingCriteria.map(([id]) => id).join(', ');
+            statusMessage = `⚠️ MISSING CRITERIA: ${missingIds} - Please add them back to response_reference and re-judge`;
+        } else if (isPassing) {
+            statusMessage = 'ALL CRITERIA PASS - Hunt Enabled!';
+        } else {
+            statusMessage = 'CRITERIA FAILED - Fix before hunting';
+        }
+        
         resultDiv.innerHTML = `
-            <div style="padding: 1rem; background: var(--bg-primary); border-radius: 8px; border: 1px solid ${isPassing ? 'var(--success)' : 'var(--danger)'};">
+            <div style="padding: 1rem; background: var(--bg-primary); border-radius: 8px; border: 1px solid ${hasMissingCriteria ? 'var(--warning)' : (isPassing ? 'var(--success)' : 'var(--danger)')};">
                 <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
                     <span class="score-badge ${scoreClass}">${scoreEmoji} Score: ${data.score}</span>
-                    <span style="font-weight: 600;">${isPassing ? 'ALL CRITERIA PASS - Hunt Enabled!' : 'CRITERIA FAILED - Fix before hunting'}</span>
+                    <span style="font-weight: 600;">${statusMessage}</span>
                 </div>
                 
                 <!-- Criteria Breakdown -->
@@ -2371,69 +2451,109 @@ async function saveAndRejudge() {
         const data = await judgeResponse.json();
         
         // Update state.criteria from judge result to keep in sync
-        const criteria = data.criteria || {};
-        const criteriaEntries = Object.entries(criteria);
+        let criteria = data.criteria || {};
+        let criteriaEntries = Object.entries(criteria);
         
         // Debug: Log what criteria were judged
         console.log('Judge result criteria (saveAndRejudge):', Object.keys(criteria));
+        console.log('Initial criteria IDs:', (state.initialCriteria || []).map(c => c.id));
         console.log('Current state.criteria IDs (before update):', (state.criteria || []).map(c => c.id));
         
         // IMPORTANT: Re-parse criteria from fresh response_reference if provided
         // This ensures state.criteria matches what was actually in the notebook when judging
+        let currentCriteria = [];
         if (data.response_reference) {
             console.log('Re-parsing criteria from fresh response_reference (saveAndRejudge)');
-            state.criteria = parseCriteria(data.response_reference);
+            currentCriteria = parseCriteria(data.response_reference);
+            state.criteria = currentCriteria;
             console.log('Updated state.criteria IDs (from response_reference):', state.criteria.map(c => c.id));
         } else {
             // Fallback: Update state.criteria based on what was actually judged
             const judgedCriteriaIds = new Set(Object.keys(criteria));
             state.criteria = (state.criteria || []).filter(c => judgedCriteriaIds.has(c.id));
-            
-            // Also add any criteria from judge result that aren't in state.criteria
-            for (const [cId, status] of Object.entries(criteria)) {
-                if (!state.criteria.find(c => c.id === cId)) {
-                    state.criteria.push({ id: cId, criteria: `Criterion ${cId} (from judge result)` });
+            currentCriteria = state.criteria;
+        }
+        
+        // Check for missing criteria: Compare initial criteria with current criteria
+        // If a criterion was in initial but not in current, it's MISSING
+        const initialCriteriaIds = new Set((state.initialCriteria || []).map(c => c.id));
+        const currentCriteriaIds = new Set(currentCriteria.map(c => c.id));
+        const missingCriteriaIds = [...initialCriteriaIds].filter(id => !currentCriteriaIds.has(id));
+        
+        if (missingCriteriaIds.length > 0) {
+            console.warn('Missing criteria detected (saveAndRejudge):', missingCriteriaIds);
+            // Add missing criteria to judge result as MISSING
+            for (const missingId of missingCriteriaIds) {
+                criteria[missingId] = 'MISSING';
+                // Also add to state.criteria so it shows in UI
+                const missingCriterion = (state.initialCriteria || []).find(c => c.id === missingId);
+                if (missingCriterion && !state.criteria.find(c => c.id === missingId)) {
+                    state.criteria.push(missingCriterion);
                 }
             }
+            // Recalculate entries after adding MISSING
+            criteriaEntries = Object.entries(criteria);
         }
         
         console.log('Final state.criteria IDs (saveAndRejudge):', state.criteria.map(c => c.id));
+        console.log('Final judge result criteria (including missing):', Object.keys(criteria));
         
         // Check if ALL criteria pass (not just overall score)
-        // Missing criteria (MISSING status) don't count as failures
+        // Missing criteria (MISSING status) don't count as failures, but block hunting
         const evaluatedCriteria = criteriaEntries.filter(([key, value]) => 
             String(value).toUpperCase() !== 'MISSING'
+        );
+        const missingCriteria = criteriaEntries.filter(([key, value]) => 
+            String(value).toUpperCase() === 'MISSING'
         );
         const allCriteriaPass = evaluatedCriteria.length > 0 && 
             evaluatedCriteria.every(([key, value]) => String(value).toUpperCase() === 'PASS');
         
-        // Only enable hunt if ALL criteria pass (missing criteria are warnings, not failures)
-        const isPassing = allCriteriaPass;
+        // Block hunting if there are missing criteria
+        const hasMissingCriteria = missingCriteria.length > 0;
+        const isPassing = allCriteriaPass && !hasMissingCriteria;
         const scoreClass = isPassing ? 'score-1' : 'score-0';
         const scoreEmoji = isPassing ? '✅' : '❌';
         
         // Update reference validated state
         state.referenceValidated = isPassing;
         
-        // Enable/disable Start Hunt based on result - ONLY if ALL criteria pass
+        // Enable/disable Start Hunt based on result - ONLY if ALL criteria pass AND no missing criteria
         if (elements.startHuntBtn) {
-            if (isPassing) {
+            if (isPassing && !hasMissingCriteria) {
                 elements.startHuntBtn.disabled = false;
                 elements.startHuntBtn.title = '';
             } else {
-                elements.startHuntBtn.disabled = true;
-                elements.startHuntBtn.title = 'All criteria must pass before starting hunt';
+                if (hasMissingCriteria) {
+                    const missingIds = missingCriteria.map(([id]) => id).join(', ');
+                    elements.startHuntBtn.disabled = true;
+                    elements.startHuntBtn.title = `Missing criteria: ${missingIds}. Please add them back to response_reference and re-judge.`;
+                } else {
+                    elements.startHuntBtn.disabled = true;
+                    elements.startHuntBtn.title = 'All criteria must pass before starting hunt';
+                }
             }
         }
         
         // Build criteria breakdown HTML
         const criteriaHtml = formatJudgeCriteriaDisplay(criteria);
         
+        // Build status message
+        let statusMessage = '';
+        if (hasMissingCriteria) {
+            const missingIds = missingCriteria.map(([id]) => id).join(', ');
+            statusMessage = `⚠️ Saved but MISSING CRITERIA: ${missingIds} - Please add them back to response_reference and re-judge`;
+        } else if (isPassing) {
+            statusMessage = '✅ Saved & ALL CRITERIA PASS - Hunt Enabled!';
+        } else {
+            statusMessage = '❌ Saved but CRITERIA FAILED - Edit & try again';
+        }
+        
         resultDiv.innerHTML = `
-            <div style="padding: 1rem; background: var(--bg-primary); border-radius: 8px; border: 1px solid ${isPassing ? 'var(--success)' : 'var(--danger)'};">
+            <div style="padding: 1rem; background: var(--bg-primary); border-radius: 8px; border: 1px solid ${hasMissingCriteria ? 'var(--warning)' : (isPassing ? 'var(--success)' : 'var(--danger)')};">
                 <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
                     <span class="score-badge ${scoreClass}">${scoreEmoji} Score: ${data.score}</span>
-                    <span style="font-weight: 600;">${isPassing ? '✅ Saved & ALL CRITERIA PASS - Hunt Enabled!' : '❌ Saved but CRITERIA FAILED - Edit & try again'}</span>
+                    <span style="font-weight: 600;">${statusMessage}</span>
                 </div>
                 
                 <!-- Criteria Breakdown -->

@@ -338,6 +338,11 @@ async def judge_reference(session_id: str):
         )
         
         score = judge_result.get("score")
+        criteria = judge_result.get("criteria", {})
+        
+        # Check for missing criteria by comparing with initial criteria from session
+        # We need to get the initial criteria that was loaded when notebook was first uploaded
+        # For now, we'll let the frontend handle this comparison since it has state.initialCriteria
         
         # Also return the current response_reference so frontend can re-parse criteria
         # This ensures state.criteria is always in sync with what was actually judged
@@ -345,7 +350,7 @@ async def judge_reference(session_id: str):
             "success": True,
             "score": score,
             "explanation": judge_result.get("explanation", ""),
-            "criteria": judge_result.get("criteria", {}),
+            "criteria": criteria,
             "raw_output": judge_result.get("raw_output", ""),
             "is_passing": (score or 0) >= 1,  # Handle None score
             "response_reference": notebook.response_reference  # Include fresh response_reference
