@@ -586,6 +586,77 @@ function populatePreviewTabs(notebook) {
             .map(c => c.id));
     }
     console.log('Parsed current criteria:', state.criteria);
+    
+    // Validate Model Reference: Check JSON format AND criteria completeness
+    validateModelReferenceAndCriteria(notebook.response_reference || '');
+}
+
+// Validate Model Reference: JSON format AND criteria completeness
+function validateModelReferenceAndCriteria(responseReference) {
+    // Step 1: Check JSON format
+    const jsonValidation = validateModelReferenceJSON(responseReference);
+    state.modelRefValid = jsonValidation.valid;
+    
+    if (!jsonValidation.valid) {
+        // JSON is invalid - show error and disable hunt
+        if (elements.modelrefPreview) {
+            elements.modelrefPreview.innerHTML = `
+                <div style="color: var(--danger); margin-bottom: 1rem; padding: 0.75rem; background: var(--danger-bg); border-radius: 8px;">
+                    <strong>❌ Invalid JSON Format</strong><br>
+                    ${escapeHtml(jsonValidation.error)}
+                </div>
+                <pre style="white-space: pre-wrap; word-break: break-word;">${escapeHtml(responseReference || 'No content')}</pre>
+            `;
+        }
+        if (elements.startHuntBtn) {
+            elements.startHuntBtn.disabled = true;
+            elements.startHuntBtn.title = `Model Reference JSON Error: ${jsonValidation.error}`;
+        }
+        return;
+    }
+    
+    // Step 2: JSON is valid, now check criteria completeness
+    const currentCriteria = parseCriteria(responseReference);
+    const currentCriteriaIds = new Set(currentCriteria.map(c => c.id));
+    const initialCriteriaIds = new Set((state.initialCriteria || []).map(c => c.id));
+    const missingCriteriaIds = [...initialCriteriaIds].filter(id => !currentCriteriaIds.has(id));
+    
+    if (missingCriteriaIds.length > 0) {
+        // Criteria are missing - show warning and disable hunt
+        const missingList = missingCriteriaIds.map(id => {
+            const criterion = (state.initialCriteria || []).find(c => c.id === id);
+            return `• ${id}: ${criterion ? criterion.criteria.substring(0, 60) + '...' : 'Description not available'}`;
+        }).join('<br>');
+        
+        if (elements.modelrefPreview) {
+            elements.modelrefPreview.innerHTML = `
+                <div style="color: var(--warning); margin-bottom: 1rem; padding: 0.75rem; background: var(--warning-bg); border-radius: 8px;">
+                    <strong>⚠️ Missing Criteria</strong><br>
+                    The following criteria from the original notebook are missing from Model Reference:<br>
+                    ${missingList}
+                </div>
+                <pre style="white-space: pre-wrap; word-break: break-word;">${escapeHtml(responseReference || 'No content')}</pre>
+            `;
+        }
+        if (elements.startHuntBtn) {
+            elements.startHuntBtn.disabled = true;
+            elements.startHuntBtn.title = `Missing criteria: ${missingCriteriaIds.join(', ')}. Please add them back to Model Reference.`;
+        }
+        showToast(`⚠️ Missing criteria: ${missingCriteriaIds.join(', ')}`, 'warning');
+        return;
+    }
+    
+    // Step 3: JSON is valid AND all criteria are present
+    // But hunt is still disabled until judge passes
+    if (elements.modelrefPreview) {
+        elements.modelrefPreview.textContent = responseReference || 'No model reference criteria found';
+    }
+    if (elements.startHuntBtn) {
+        // Don't enable yet - still need to judge first
+        elements.startHuntBtn.disabled = true;
+        elements.startHuntBtn.title = 'Model Reference is valid. Click "Judge Reference Response" to validate.';
+    }
+    console.log('✅ Model Reference validation passed: JSON valid and all criteria present');
 }
 
 // Validate that Model Reference is valid JSON format with criteria
