@@ -2000,6 +2000,9 @@ function createResultCard(result, slotIndex, rowNumber) {
         });
     }
     
+    // Get submit button reference for enabling when criteria are clicked
+    const submitBtn = card.querySelector('.submit-human-review-btn');
+    
     // Criterion pass/fail button handlers
     card.querySelectorAll('.criterion-pass').forEach(btn => {
         btn.addEventListener('click', (e) => {
@@ -2013,6 +2016,12 @@ function createResultCard(result, slotIndex, rowNumber) {
             row.querySelector('.criterion-fail').style.background = 'transparent';
             row.querySelector('.criterion-fail').style.color = 'var(--danger)';
             row.dataset.grade = 'pass';
+            
+            // Enable submit button when criteria is selected
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.style.opacity = '1';
+            }
         });
     });
     
@@ -2028,6 +2037,12 @@ function createResultCard(result, slotIndex, rowNumber) {
             row.querySelector('.criterion-pass').style.background = 'transparent';
             row.querySelector('.criterion-pass').style.color = 'var(--success)';
             row.dataset.grade = 'fail';
+            
+            // Enable submit button when criteria is selected
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.style.opacity = '1';
+            }
         });
     });
     
@@ -2042,26 +2057,33 @@ function createResultCard(result, slotIndex, rowNumber) {
     
     // Re-enable submit button when user types in textarea or changes criteria
     const notesTextarea = card.querySelector('.human-review-notes');
-    const submitBtn = card.querySelector('.submit-human-review-btn');
     
-    // Listen for textarea input to re-enable submit
+    // Listen for textarea input to re-enable submit (if it was previously submitted)
     notesTextarea.addEventListener('input', () => {
-        if (submitBtn.disabled && submitBtn.textContent.includes('Submitted')) {
+        if (submitBtn && submitBtn.disabled && submitBtn.textContent.includes('Submitted')) {
             submitBtn.disabled = false;
             submitBtn.textContent = '✅ Submit Human Review';
             submitBtn.style.background = '';
+        } else if (submitBtn) {
+            // Also enable if not disabled but just to be sure
+            submitBtn.disabled = false;
+            submitBtn.style.opacity = '1';
         }
     });
     
     // Also re-enable on any criteria button click if already submitted
+    // (Note: Criteria buttons already enable submit button in their handlers above)
     const criteriaRows = card.querySelectorAll('.criteria-rating-row');
     criteriaRows.forEach(row => {
         row.querySelectorAll('.criteria-btn').forEach(btn => {
             btn.addEventListener('click', () => {
-                if (submitBtn.disabled && submitBtn.textContent.includes('Submitted')) {
+                if (submitBtn && submitBtn.disabled && submitBtn.textContent.includes('Submitted')) {
                     submitBtn.disabled = false;
                     submitBtn.textContent = '✅ Submit Human Review';
                     submitBtn.style.background = '';
+                } else if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.style.opacity = '1';
                 }
             });
         });
@@ -2705,7 +2727,7 @@ function initHuntNumberControls() {
     
     // Function to update all controls to a value
     function updateValue(newValue) {
-        const value = Math.max(4, Math.min(16, parseInt(newValue) || 4));
+        const value = Math.max(1, Math.min(6, parseInt(newValue) || 4));
         
         numberInput.value = value;
         slider.value = value;
@@ -2721,10 +2743,10 @@ function initHuntNumberControls() {
         
         // Update button states
         if (decreaseBtn) {
-            decreaseBtn.disabled = value <= 4;
+            decreaseBtn.disabled = value <= 1;
         }
         if (increaseBtn) {
-            increaseBtn.disabled = value >= 16;
+            increaseBtn.disabled = value >= 6;
         }
     }
     
@@ -2742,7 +2764,7 @@ function initHuntNumberControls() {
     if (decreaseBtn) {
         decreaseBtn.addEventListener('click', () => {
             const current = parseInt(numberInput.value) || 4;
-            if (current > 4) {
+            if (current > 1) {
                 updateValue(current - 1);
             }
         });
@@ -2752,7 +2774,7 @@ function initHuntNumberControls() {
     if (increaseBtn) {
         increaseBtn.addEventListener('click', () => {
             const current = parseInt(numberInput.value) || 4;
-            if (current < 16) {
+            if (current < 6) {
                 updateValue(current + 1);
             }
         });
