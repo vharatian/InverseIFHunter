@@ -531,8 +531,7 @@ async function saveToDrive() {
     }
     
     // ===== VALIDATION 3: Check for criterion diversity in LLM JUDGE ONLY (not human judge) =====
-    // Get selected results to check LLM judge criteria
-    const selectedRowNumbers = state.selectedRowNumbers || [];
+    // Get selected results to check LLM judge criteria (reuse selectedRowNumbers from line 447)
     const selectedResults = selectedRowNumbers.map(rn => state.allResponses[rn]).filter(r => r);
     
     const criteriaVotes = {};  // Track votes per criterion from LLM judges: { C1: { pass: 0, fail: 0 }, ... }
