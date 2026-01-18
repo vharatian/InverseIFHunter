@@ -492,11 +492,11 @@ class NotebookParser:
         def get_cell_type_and_slot(heading_lower):
             if not heading_lower:
                 return None, None
-                model_match = self.MODEL_PATTERN.match(heading_lower)
-                if model_match:
+            model_match = self.MODEL_PATTERN.match(heading_lower)
+            if model_match:
                 return 'model', int(model_match.group(2))
-                judge_match = self.LLM_JUDGE_PATTERN.match(heading_lower)
-                if judge_match:
+            judge_match = self.LLM_JUDGE_PATTERN.match(heading_lower)
+            if judge_match:
                 return 'llm_judge', int(judge_match.group(1))
             human_match = self.HUMAN_JUDGE_PATTERN.match(heading_lower)
             if human_match:
@@ -508,43 +508,43 @@ class NotebookParser:
         
         # Helper function to format LLM judge content
         def format_llm_judge_content(result):
-                    judge_criteria = result.get('judge_criteria', {}) if result else {}
-                    judge_score = (result.get('judge_score') or result.get('score', 0)) if result else 0
-                    judge_explanation = result.get('judge_explanation', '') if result else ''
-                    judge_output_raw = result.get('judge_output', '') if result else ''
-                    
-                    # If judge_criteria is empty, try to parse from judge_output
-                    if not judge_criteria and judge_output_raw:
-                        import json as json_module
-                        try:
-                            json_match = re.search(r'\{[^{}]*"criteria"[^{}]*\}', judge_output_raw, re.DOTALL)
-                            if json_match:
-                                parsed = json_module.loads(json_match.group(0))
-                                judge_criteria = parsed.get('criteria', {})
-                        except:
-                            pass
-                    
-                    if not judge_criteria:
-                        judge_criteria = {}
-                    grading_json = json.dumps({k: v.upper() for k, v in judge_criteria.items()}, indent=2)
-                    
-                    formatted_explanation = judge_explanation or judge_output_raw or "No explanation provided"
-                    if formatted_explanation and not formatted_explanation.strip().startswith('•'):
-                        lines = formatted_explanation.split('\n')
-                        formatted_lines = []
-                        for line in lines:
-                            line = line.strip()
-                            if line:
-                                criterion_match = re.search(r'\b(C\d+)\s+(PASS|FAIL|pass|fail)', line, re.IGNORECASE)
-                                if criterion_match:
-                                    criterion_id = criterion_match.group(1)
-                                    status = criterion_match.group(2).upper()
-                                    formatted_lines.append(f"• {criterion_id} {status}: {line}")
-                                else:
-                                    formatted_lines.append(f"• {line}")
-                        if formatted_lines:
-                            formatted_explanation = '\n'.join(formatted_lines)
-                    
+            judge_criteria = result.get('judge_criteria', {}) if result else {}
+            judge_score = (result.get('judge_score') or result.get('score', 0)) if result else 0
+            judge_explanation = result.get('judge_explanation', '') if result else ''
+            judge_output_raw = result.get('judge_output', '') if result else ''
+            
+            # If judge_criteria is empty, try to parse from judge_output
+            if not judge_criteria and judge_output_raw:
+                import json as json_module
+                try:
+                    json_match = re.search(r'\{[^{}]*"criteria"[^{}]*\}', judge_output_raw, re.DOTALL)
+                    if json_match:
+                        parsed = json_module.loads(json_match.group(0))
+                        judge_criteria = parsed.get('criteria', {})
+                except:
+                    pass
+            
+            if not judge_criteria:
+                judge_criteria = {}
+            grading_json = json.dumps({k: v.upper() for k, v in judge_criteria.items()}, indent=2)
+            
+            formatted_explanation = judge_explanation or judge_output_raw or "No explanation provided"
+            if formatted_explanation and not formatted_explanation.strip().startswith('•'):
+                lines = formatted_explanation.split('\n')
+                formatted_lines = []
+                for line in lines:
+                    line = line.strip()
+                    if line:
+                        criterion_match = re.search(r'\b(C\d+)\s+(PASS|FAIL|pass|fail)', line, re.IGNORECASE)
+                        if criterion_match:
+                            criterion_id = criterion_match.group(1)
+                            status = criterion_match.group(2).upper()
+                            formatted_lines.append(f"• {criterion_id} {status}: {line}")
+                        else:
+                            formatted_lines.append(f"• {line}")
+                if formatted_lines:
+                    formatted_explanation = '\n'.join(formatted_lines)
+            
             return f"""[Grading Basis]:
 
 {grading_json}
@@ -559,17 +559,17 @@ class NotebookParser:
                     
         # Helper function to format human judge content
         def format_human_judge_content(review):
-                    grading_basis = review.get('grading_basis', {}) if review else {}
-                    if grading_basis:
-                        grading_json = json.dumps({k: v.upper() for k, v in grading_basis.items()}, indent=2)
-                    else:
-                        grading_json = "{}"
-                    
-                    pass_count = sum(1 for v in grading_basis.values() if v.upper() == 'PASS')
-                    score = 1 if pass_count > len(grading_basis) / 2 else 0
-                    
-                    explanation = (review.get('explanation', '') or review.get('notes', '')) if review else ''
-                    
+            grading_basis = review.get('grading_basis', {}) if review else {}
+            if grading_basis:
+                grading_json = json.dumps({k: v.upper() for k, v in grading_basis.items()}, indent=2)
+            else:
+                grading_json = "{}"
+            
+            pass_count = sum(1 for v in grading_basis.values() if v.upper() == 'PASS')
+            score = 1 if pass_count > len(grading_basis) / 2 else 0
+            
+            explanation = (review.get('explanation', '') or review.get('notes', '')) if review else ''
+            
             return f"""[Grading Basis]:
 
 {grading_json}
