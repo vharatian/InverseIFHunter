@@ -1590,62 +1590,24 @@ function createResultCard(result, slotIndex) {
             <span class="expandable-arrow">▼</span>
         </div>
         <div class="expandable-content">
-            <!-- Tabbed Interface -->
-            <div class="slot-tabs-container" data-hunt-id="${result.hunt_id}">
-                <!-- Tab Navigation -->
-                <div class="slot-tabs-nav" role="tablist">
-                    <button class="slot-tab active" data-tab="response" role="tab" aria-selected="true">
-                        📄 Response
-                    </button>
-                    <button class="slot-tab" data-tab="reasoning" role="tab" aria-selected="false">
-                        🧠 Reasoning
-                    </button>
-                    <button class="slot-tab" data-tab="grade" role="tab" aria-selected="false">
-                        ✅ Grade
-                    </button>
-                    <button class="slot-tab" data-tab="review" role="tab" aria-selected="false">
-                        📝 Review
-                    </button>
-            </div>
-            
-                <!-- Tab Content -->
-                <div class="slot-tabs-content">
-                    <!-- Response Tab -->
-                    <div class="slot-tab-panel active" data-tab="response" role="tabpanel">
-                        <div class="tab-content-inner">
-                            <label style="font-weight: 600; display: block; margin-bottom: 0.75rem; color: var(--text-primary);">
-                                Model Response (${shortModel}_${slotNum}):
-                            </label>
-                            <div class="code-block" style="white-space: pre-wrap; line-height: 1.6; font-size: 0.9rem;">${escapeHtml(responseText)}</div>
-                        </div>
-                    </div>
-                    
-                    <!-- Reasoning Tab -->
-                    <div class="slot-tab-panel" data-tab="reasoning" role="tabpanel">
-                        <div class="tab-content-inner">
-                            <label style="font-weight: 600; display: block; margin-bottom: 0.75rem; color: var(--text-primary);">
-                                🧠 Model Reasoning Trace:
-                            </label>
-                ${reasoningTrace ? `
-                                <div class="code-block" style="font-size: 0.85rem; background: var(--bg-tertiary); white-space: pre-wrap; line-height: 1.6;">
-                        ${escapeHtml(reasoningTrace)}
-                    </div>
-                ` : `
-                                <div style="padding: 1.5rem; background: var(--bg-tertiary); border-radius: 8px; border: 1px dashed var(--border); color: var(--text-muted); font-style: italic; text-align: center;">
-                                    ⚠️ No reasoning trace available.<br>
-                                    <span style="font-size: 0.85rem;">The model either doesn't support chain-of-thought reasoning, or the reasoning was empty for this response.</span>
-                    </div>
-                `}
-                        </div>
-            </div>
-            
-                    <!-- Grade Tab (Criteria) -->
-                    <div class="slot-tab-panel" data-tab="grade" role="tabpanel">
-                        <div class="tab-content-inner">
-                            <label style="font-weight: 600; display: block; margin-bottom: 1rem; color: var(--text-primary);">
-                                📋 Grading Basis - Per Criterion:
-                            </label>
-                            <div class="criteria-grading" data-hunt-id="${result.hunt_id}">
+            <!-- Split-Panel Layout -->
+            <div class="slot-split-container" data-hunt-id="${result.hunt_id}">
+                <!-- Left Panel: Response (Larger, Scrollable) -->
+                <div class="slot-response-panel">
+                    <label style="font-weight: 600; display: block; margin-bottom: 0.75rem; color: var(--text-primary);">
+                        📄 Model Response (${shortModel}_${slotNum}):
+                    </label>
+                    <div class="code-block response-content" style="white-space: pre-wrap; line-height: 1.6; font-size: 0.9rem; max-height: 600px; overflow-y: auto;">${escapeHtml(responseText)}</div>
+                </div>
+                
+                <!-- Right Panel: Grade + Explanation -->
+                <div class="slot-grading-panel">
+                    <!-- Grade Section (Top) -->
+                    <div class="slot-grade-section">
+                        <label style="font-weight: 600; display: block; margin-bottom: 1rem; color: var(--text-primary);">
+                            ✅ Grading Basis - Per Criterion:
+                        </label>
+                        <div class="criteria-grading" data-hunt-id="${result.hunt_id}" style="max-height: 400px; overflow-y: auto;">
                     ${(state.criteria || []).map(c => `
                                     <div class="criterion-row" data-criterion-id="${c.id}" style="display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0.75rem; padding: 1rem; margin-bottom: 0.75rem; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border); transition: all var(--transition-fast);">
                                         <span style="font-weight: 700; min-width: 40px; font-size: 1rem; color: var(--accent-primary);">${c.id}:</span>
@@ -1660,30 +1622,47 @@ function createResultCard(result, slotIndex) {
                             </div>
                         </div>
                     `).join('')}
-                            </div>
-                        </div>
-                </div>
-                
-                    <!-- Review Tab (Explanation + Submit) -->
-                    <div class="slot-tab-panel" data-tab="review" role="tabpanel">
-                        <div class="tab-content-inner">
-                            <label style="font-weight: 600; display: block; margin-bottom: 0.75rem; color: var(--text-primary);">
-                                📝 Human Review (human_judge_${slotNum}):
-                            </label>
-                            
-                            <div style="margin-bottom: 1rem;">
-                                <label style="font-weight: 500; font-size: 0.9rem; display: block; margin-bottom: 0.5rem; color: var(--text-secondary);">
-                                    Explanation:
-                                </label>
-                                <textarea class="human-review-notes" data-hunt-id="${result.hunt_id}" placeholder="Explain your grading decisions (which criteria failed and why)..." style="width: 100%; min-height: 120px; padding: 0.75rem; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-primary); color: var(--text-primary); font-size: 0.9rem; resize: vertical; font-family: inherit; line-height: 1.5;"></textarea>
-                </div>
-                
-                            <button class="btn btn-primary submit-human-review-btn" data-hunt-id="${result.hunt_id}" style="width: 100%; padding: 0.875rem; font-weight: 600; font-size: 0.95rem; border-radius: 8px;">
-                                ✅ Submit Human Review
-                            </button>
-                            <div class="human-review-status" data-hunt-id="${result.hunt_id}" style="margin-top: 0.75rem; font-size: 0.85rem; color: var(--text-muted); text-align: center;"></div>
                         </div>
                     </div>
+                    
+                    <!-- Explanation Section (Bottom) -->
+                    <div class="slot-explanation-section">
+                        <label style="font-weight: 600; display: block; margin-bottom: 0.75rem; color: var(--text-primary);">
+                            📝 Human Review (human_judge_${slotNum}):
+                        </label>
+                        
+                        <div style="margin-bottom: 1rem;">
+                            <label style="font-weight: 500; font-size: 0.9rem; display: block; margin-bottom: 0.5rem; color: var(--text-secondary);">
+                                Explanation:
+                            </label>
+                            <textarea class="human-review-notes" data-hunt-id="${result.hunt_id}" placeholder="Explain your grading decisions (which criteria failed and why)..." style="width: 100%; min-height: 150px; padding: 0.75rem; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-primary); color: var(--text-primary); font-size: 0.9rem; resize: vertical; font-family: inherit; line-height: 1.5;"></textarea>
+                </div>
+                        
+                        <button class="btn btn-primary submit-human-review-btn" data-hunt-id="${result.hunt_id}" style="width: 100%; padding: 0.875rem; font-weight: 600; font-size: 0.95rem; border-radius: 8px;">
+                            ✅ Submit Human Review
+                        </button>
+                        <div class="human-review-status" data-hunt-id="${result.hunt_id}" style="margin-top: 0.75rem; font-size: 0.85rem; color: var(--text-muted); text-align: center;"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Reasoning Section (Collapsible, Reference Only) -->
+            <div class="slot-reasoning-section" style="margin-top: 1.5rem;">
+                <button class="reasoning-toggle-btn" style="width: 100%; padding: 0.75rem; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font-weight: 600; color: var(--text-primary); display: flex; align-items: center; justify-content: space-between; transition: all var(--transition-fast);">
+                    <span>🧠 Model Reasoning Trace (Reference Only)</span>
+                    <span class="reasoning-toggle-arrow">▼</span>
+                </button>
+                <div class="reasoning-content" style="display: none; margin-top: 1rem; padding: 1rem; background: var(--bg-tertiary); border-radius: 8px; border: 1px solid var(--border);">
+                ${reasoningTrace ? `
+                                <div class="code-block" style="font-size: 0.85rem; background: var(--bg-primary); white-space: pre-wrap; line-height: 1.6; max-height: 400px; overflow-y: auto; padding: 1rem; border-radius: 8px;">
+                        ${escapeHtml(reasoningTrace)}
+                    </div>
+                ` : `
+                                <div style="padding: 1.5rem; background: var(--bg-primary); border-radius: 8px; border: 1px dashed var(--border); color: var(--text-muted); font-style: italic; text-align: center;">
+                                    ⚠️ No reasoning trace available.<br>
+                                    <span style="font-size: 0.85rem;">The model either doesn't support chain-of-thought reasoning, or the reasoning was empty for this response.</span>
+                    </div>
+                `}
                 </div>
             </div>
             
@@ -1718,35 +1697,19 @@ function createResultCard(result, slotIndex) {
         card.classList.toggle('open');
     });
     
-    // Tab switching functionality
-    const tabContainer = card.querySelector('.slot-tabs-container');
-    if (tabContainer) {
-        const tabs = tabContainer.querySelectorAll('.slot-tab');
-        const tabPanels = tabContainer.querySelectorAll('.slot-tab-panel');
-        
-        tabs.forEach(tab => {
-            tab.addEventListener('click', (e) => {
-                e.stopPropagation(); // Prevent card toggle
-                
-                const targetTab = tab.dataset.tab;
-                
-                // Remove active from all tabs and panels
-                tabs.forEach(t => {
-                    t.classList.remove('active');
-                    t.setAttribute('aria-selected', 'false');
-                });
-                tabPanels.forEach(p => {
-                    p.classList.remove('active');
-                });
-                
-                // Add active to clicked tab and corresponding panel
-                tab.classList.add('active');
-                tab.setAttribute('aria-selected', 'true');
-                const targetPanel = tabContainer.querySelector(`.slot-tab-panel[data-tab="${targetTab}"]`);
-                if (targetPanel) {
-                    targetPanel.classList.add('active');
-                }
-            });
+    // Reasoning toggle functionality
+    const reasoningToggle = card.querySelector('.reasoning-toggle-btn');
+    const reasoningContent = card.querySelector('.reasoning-content');
+    const reasoningArrow = card.querySelector('.reasoning-toggle-arrow');
+    
+    if (reasoningToggle && reasoningContent) {
+        reasoningToggle.addEventListener('click', (e) => {
+            e.stopPropagation(); // Prevent card toggle
+            const isHidden = reasoningContent.style.display === 'none';
+            reasoningContent.style.display = isHidden ? 'block' : 'none';
+            reasoningArrow.textContent = isHidden ? '▲' : '▼';
+            reasoningToggle.style.borderBottomLeftRadius = isHidden ? '0' : '8px';
+            reasoningToggle.style.borderBottomRightRadius = isHidden ? '0' : '8px';
         });
     }
     
