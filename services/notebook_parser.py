@@ -468,27 +468,28 @@ class NotebookParser:
             
             match = self.HEADING_PATTERN.search(content)
             if match:
-                heading = match.group(1).lower()
+                heading_lower = match.group(1).lower()  # For matching
+                heading_original = match.group(1)  # Preserve original case for writing
                 
                 # PRESERVE original response_reference and judge_system_prompt - DO NOT OVERWRITE
-                if heading == 'response_reference' or heading == 'judge_system_prompt':
+                if heading_lower == 'response_reference' or heading_lower == 'judge_system_prompt':
                     # Keep original content intact - these should never be modified
                     continue
                 
                 # Update model response slots (qwen_1, qwen_2, etc.)
-                model_match = self.MODEL_PATTERN.match(heading)
+                model_match = self.MODEL_PATTERN.match(heading_lower)
                 if model_match:
                     slot_num = int(model_match.group(2))
                     if slot_num in slot_to_result:
                         result = slot_to_result[slot_num]
-                        new_content = f"**[{heading}]**\n\n{result.get('response', '')}"
+                        new_content = f"**[{heading_original}]**\n\n{result.get('response', '')}"
                         # Reasoning trace will be saved in separate cell
                         cell['source'] = [new_content]
                         updated_slots.add(f"model_{slot_num}")
                         print(f"DEBUG: Updated model_{slot_num} cell with response")
                 
                 # Update LLM judge slots
-                judge_match = self.LLM_JUDGE_PATTERN.match(heading)
+                judge_match = self.LLM_JUDGE_PATTERN.match(heading_lower)
                 if judge_match:
                     slot_num = int(judge_match.group(1))
                     if slot_num in slot_to_result:
@@ -552,13 +553,13 @@ class NotebookParser:
 
 {formatted_explanation}"""
                         
-                        new_content = f"**[{heading}]**\n\n{llm_content}"
+                        new_content = f"**[{heading_original}]**\n\n{llm_content}"
                         cell['source'] = [new_content]
                         updated_slots.add(f"judge_{slot_num}")
                         print(f"DEBUG: Updated judge_{slot_num} cell with formatted output")
                 
                 # Update human judge slots
-                human_match = self.HUMAN_JUDGE_PATTERN.match(heading) if hasattr(self, 'HUMAN_JUDGE_PATTERN') else re.match(r'human_judge_(\d+)', heading)
+                human_match = self.HUMAN_JUDGE_PATTERN.match(heading_lower) if hasattr(self, 'HUMAN_JUDGE_PATTERN') else re.match(r'human_judge_(\d+)', heading_lower)
                 if human_match:
                     slot_num = int(human_match.group(1))
                     if slot_num in huntid_to_review:
@@ -608,17 +609,21 @@ class NotebookParser:
                         print(f"DEBUG: Updated reasoning_trace_{slot_num} cell")
                 
                 # Update attempts counter
-                if heading == 'number_of_attempts_made':
+                if heading_lower == 'number_of_attempts_made':
                     new_attempts = parsed.attempts_made + len(results)
                     # Clamp attempts to valid range: min 1, max 8
                     new_attempts = max(1, min(8, new_attempts))
-                    cell['source'] = [f"**[number_of_attempts_made]**:\n\n{new_attempts}"]
+                    # Preserve original heading format
+                    attempts_heading = heading_original if 'number_of_attempts_made' in heading_lower else 'number_of_attempts_made'
+                    cell['source'] = [f"**[{attempts_heading}]**:\n\n{new_attempts}"]
                     updated_slots.add('number_of_attempts_made')
                     print(f"DEBUG: Updated existing attempts cell to {new_attempts}")
                 
                 # Update total hunts ran
-                if heading == 'total_hunts_ran':
-                    cell['source'] = [f"**[total_hunts_ran]**:\n\n{total_hunts_ran}"]
+                if heading_lower == 'total_hunts_ran':
+                    # Preserve original heading format
+                    hunts_heading = heading_original if 'total_hunts_ran' in heading_lower else 'total_hunts_ran'
+                    cell['source'] = [f"**[{hunts_heading}]**:\n\n{total_hunts_ran}"]
                     updated_slots.add('total_hunts_ran')
                     print(f"DEBUG: Updated existing total_hunts_ran cell to {total_hunts_ran}")
         
@@ -782,14 +787,16 @@ class NotebookParser:
                         content = ''.join(source)
                     else:
                         content = str(source)
-                    match = self.HEADING_PATTERN.search(content)
-                    if match and match.group(1).lower() == reasoning_heading:
-                        # Update existing reasoning trace cell (even if empty)
-                        cell['source'] = [f"**[{reasoning_heading}]**\n\n{reasoning_trace}"]
-                        reasoning_exists = True
-                        updated_slots.add(f"reasoning_{slot_num}")
-                        print(f"DEBUG: Updated existing reasoning_trace_{slot_num} cell")
-                        break
+                        match = self.HEADING_PATTERN.search(content)
+                        if match and match.group(1).lower() == reasoning_heading:
+                            # Update existing reasoning trace cell (even if empty)
+                            # Preserve original heading format
+                            original_heading = match.group(1)
+                            cell['source'] = [f"**[{original_heading}]**\n\n{reasoning_trace}"]
+                            reasoning_exists = True
+                            updated_slots.add(f"reasoning_{slot_num}")
+                            print(f"DEBUG: Updated existing reasoning_trace_{slot_num} cell")
+                            break
                 
                 if not reasoning_exists:
                     # Add new reasoning trace cell (even if empty, to ensure all 4 are present)
