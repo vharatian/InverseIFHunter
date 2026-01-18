@@ -328,9 +328,11 @@ class NotebookParser:
             result.judge_system_prompt = content
         elif heading == 'number_of_attempts_made':
             try:
-                result.attempts_made = int(re.search(r'\d+', content).group())
+                attempts = int(re.search(r'\d+', content).group())
+                # Clamp attempts to valid range: min 1, max 8
+                result.attempts_made = max(1, min(8, attempts))
             except (AttributeError, ValueError):
-                result.attempts_made = 0
+                result.attempts_made = 1  # Default to 1 instead of 0
         
         # Model slots (nemotron_1, qwen_1, model_1, etc.)
         elif self.MODEL_PATTERN.match(heading):
@@ -606,6 +608,8 @@ class NotebookParser:
                 # Update attempts counter
                 if heading == 'number_of_attempts_made':
                     new_attempts = parsed.attempts_made + len(results)
+                    # Clamp attempts to valid range: min 1, max 8
+                    new_attempts = max(1, min(8, new_attempts))
                     cell['source'] = [f"**[number_of_attempts_made]**:\n\n{new_attempts}"]
                     updated_slots.add('number_of_attempts_made')
                     print(f"DEBUG: Updated existing attempts cell to {new_attempts}")
@@ -789,6 +793,8 @@ class NotebookParser:
         if not attempts_cell_found:
             # Create attempts cell if it doesn't exist
             new_attempts = parsed.attempts_made + len(results)
+            # Clamp attempts to valid range: min 1, max 8
+            new_attempts = max(1, min(8, new_attempts))
             new_cells.append({
                 "cell_type": "markdown",
                 "id": "auto_attempts_counter",
