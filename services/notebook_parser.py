@@ -485,10 +485,52 @@ class NotebookParser:
                     slot_num = int(judge_match.group(1))
                     if slot_num in slot_to_result:
                         result = slot_to_result[slot_num]
-                        new_content = f"**[{heading}]**\n\n{result.get('judge_output', '')}"
+                        
+                        # Format LLM judge output in required format
+                        judge_criteria = result.get('judge_criteria', {})
+                        judge_score = result.get('judge_score', 0)
+                        judge_explanation = result.get('judge_explanation', '')
+                        
+                        # Format grading basis as JSON
+                        grading_json = json.dumps({k: v.upper() for k, v in judge_criteria.items()}, indent=2)
+                        
+                        # Format explanation with bullet points if it contains criteria
+                        formatted_explanation = judge_explanation
+                        if judge_explanation and not judge_explanation.strip().startswith('•'):
+                            # Try to format explanation with bullet points for each criterion
+                            lines = judge_explanation.split('\n')
+                            formatted_lines = []
+                            for line in lines:
+                                line = line.strip()
+                                if line:
+                                    # Check if line mentions a criterion (C1, C2, etc.)
+                                    criterion_match = re.search(r'\b(C\d+)\s+(PASS|FAIL|pass|fail)', line, re.IGNORECASE)
+                                    if criterion_match:
+                                        criterion_id = criterion_match.group(1)
+                                        status = criterion_match.group(2).upper()
+                                        # Format as bullet point
+                                        formatted_lines.append(f"• {criterion_id} {status}: {line}")
+                                    else:
+                                        formatted_lines.append(f"• {line}")
+                            if formatted_lines:
+                                formatted_explanation = '\n'.join(formatted_lines)
+                        
+                        llm_content = f"""[Grading Basis]:
+
+{grading_json}
+
+[Score]: {judge_score} point(s)
+
+[JSON]: {{"answer_score": {judge_score}}}
+
+[Explanation]:
+
+{formatted_explanation}"""
+                        
+                        new_content = f"**[{heading}]**\n\n{llm_content}"
                         cell['source'] = [new_content]
                         updated_slots.add(f"judge_{slot_num}")
-                        print(f"DEBUG: Updated judge_{slot_num} cell")
+                        print(f"DEBUG: Updated judge_{slot_num} cell with formatted output")
                 
                 # Update human judge slots
                 human_match = self.HUMAN_JUDGE_PATTERN.match(heading) if hasattr(self, 'HUMAN_JUDGE_PATTERN') else re.match(r'human_judge_(\d+)', heading)

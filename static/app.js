@@ -457,30 +457,43 @@ async function saveToDrive() {
     // ===== VALIDATION 3: Check for criterion diversity (at least one C has both PASS and FAIL) =====
     const criteriaVotes = {};  // Track votes per criterion: { C1: { pass: 0, fail: 0 }, ... }
     
+    console.log('🔍 DIVERSITY CHECK - All reviews:', reviews);
+    
     for (const review of reviews) {
         const gradingBasis = review.grading_basis || {};
+        console.log('  Review grading_basis:', gradingBasis);
+        
         for (const [criterionId, vote] of Object.entries(gradingBasis)) {
             if (!criteriaVotes[criterionId]) {
                 criteriaVotes[criterionId] = { pass: 0, fail: 0 };
             }
-            if (vote.toUpperCase() === 'PASS') {
+            const voteUpper = String(vote || '').toUpperCase();
+            if (voteUpper === 'PASS') {
                 criteriaVotes[criterionId].pass++;
-            } else if (vote.toUpperCase() === 'FAIL') {
+            } else if (voteUpper === 'FAIL') {
                 criteriaVotes[criterionId].fail++;
             }
         }
     }
+    
+    console.log('  Criteria votes summary:', criteriaVotes);
     
     // Check if ANY criterion has both a pass AND a fail
     const hasDiverseCriterion = Object.entries(criteriaVotes).some(
         ([id, votes]) => votes.pass > 0 && votes.fail > 0
     );
     
+    console.log('  Has diverse criterion?', hasDiverseCriterion);
+    console.log('  Total criteria checked:', Object.keys(criteriaVotes).length);
+    
+    // CRITICAL: Must have at least one criterion with both PASS and FAIL
     if (!hasDiverseCriterion && Object.keys(criteriaVotes).length > 0) {
         // Build a summary of votes for the error message
         const votesSummary = Object.entries(criteriaVotes)
             .map(([id, v]) => `${id}: ${v.pass} pass, ${v.fail} fail`)
             .join('\n  ');
+        
+        console.error('❌ DIVERSITY CHECK FAILED:', votesSummary);
         
         showToast('Criterion diversity required: At least one criterion must have both PASS and FAIL. You can still edit the slots to fix this.', 'error');
         alert(
@@ -490,10 +503,11 @@ async function saveToDrive() {
             `⚠️ IMPORTANT: You can still edit the human judge slots above to fix this.\n` +
             `Change some criteria from FAIL to PASS (or vice versa) to create diversity, then try saving again.`
         );
-        // Don't return - allow user to continue editing slots
-        // The slots remain editable, user just needs to fix the diversity issue
+        // CRITICAL: Return here to prevent save
         return;
     }
+    
+    console.log('✅ Diversity check passed');
     
     // ===== All validations passed - proceed with save =====
     const btn = document.getElementById('saveDriveBtn');
@@ -1833,8 +1847,9 @@ function submitHumanReview(huntId, card, slotNum) {
         if (!grade) {
             allGraded = false;
         } else {
-            grading[criterionId] = grade;
-            if (grade === 'fail') anyFailed = true;
+            // Store as uppercase for consistency
+            grading[criterionId] = grade.toUpperCase(); // 'pass' -> 'PASS', 'fail' -> 'FAIL'
+            if (grade.toLowerCase() === 'fail') anyFailed = true;
         }
     });
     
