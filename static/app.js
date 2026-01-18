@@ -1561,7 +1561,7 @@ function updateSelectionCount() {
     const normalizedSelectedIds = state.selectedHuntIds.map(id => {
         const num = Number(id);
         if (isNaN(num)) {
-            console.warn('⚠️ Invalid hunt_id in selectedHuntIds:', id);
+            console.warn('⚠️ Invalid hunt_id in selectedHuntIds:', id, typeof id);
             return null;
         }
         return num;
@@ -1569,16 +1569,30 @@ function updateSelectionCount() {
     
     // Get breakdown of breaking vs passing
     // Use normalized comparison to handle type mismatches
-    const selectedResults = normalizedSelectedIds.map(id => {
+    const selectedResults = [];
+    const missingIds = [];
+    
+    for (const id of normalizedSelectedIds) {
         const result = state.allResponses.find(r => {
             const rId = Number(r.hunt_id);
             return !isNaN(rId) && rId === id;
         });
-        if (!result) {
-            console.warn(`⚠️ Could not find result for hunt_id: ${id}`);
+        if (result) {
+            selectedResults.push(result);
+        } else {
+            missingIds.push(id);
+            console.error(`❌ CRITICAL: Could not find result for hunt_id: ${id}`);
+            console.error('   Available hunt_ids:', state.allResponses.map(r => ({ id: r.hunt_id, type: typeof r.hunt_id })));
         }
-        return result;
-    }).filter(r => r !== undefined && r !== null);
+    }
+    
+    // If we're missing results, that's a critical error
+    if (missingIds.length > 0) {
+        console.error(`❌ CRITICAL ERROR: ${missingIds.length} selected hunt_ids not found in allResponses!`);
+        console.error('   Missing IDs:', missingIds);
+        console.error('   Selected IDs:', state.selectedHuntIds);
+        console.error('   Available IDs:', state.allResponses.map(r => r.hunt_id));
+    }
     
     // Log detailed info about each selected result
     console.log('🔍 Selected Results Details:', selectedResults.map(r => ({
