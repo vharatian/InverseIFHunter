@@ -566,9 +566,14 @@ async def save_to_drive(session_id: str, request: Request):
         all_results = hunt_engine.export_results(session_id)
         
         # Filter results to only include selected hunt IDs
+        # Normalize hunt_ids to integers for comparison (handle both string and int)
         if selected_hunt_ids:
-            results = [r for r in all_results if r.get('hunt_id') in selected_hunt_ids]
+            normalized_selected = [int(hid) if isinstance(hid, str) else hid for hid in selected_hunt_ids]
+            results = [r for r in all_results if int(r.get('hunt_id', 0)) in normalized_selected]
+            # Preserve order of selected_hunt_ids
+            results = sorted(results, key=lambda r: normalized_selected.index(int(r.get('hunt_id', 0))) if int(r.get('hunt_id', 0)) in normalized_selected else 999)
             print(f"DEBUG: Filtering to {len(results)} selected results out of {len(all_results)} total")
+            print(f"DEBUG: Selected hunt_ids: {normalized_selected}, Found results: {[r.get('hunt_id') for r in results]}")
         else:
             # Fallback: use all if no selection provided
             results = all_results
