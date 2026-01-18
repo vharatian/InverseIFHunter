@@ -421,16 +421,18 @@ async function saveToDrive() {
     const selectedResults = selectedRowNumbers.map(rn => state.allResponses[rn]).filter(r => r);
     const selectedHuntIds = selectedResults.map(r => r.hunt_id);
     
-    // Check that reviews exist for all selected hunt_ids
-    const missingReviews = selectedHuntIds.filter(huntId => !state.humanReviews || !state.humanReviews[huntId]);
+    // Check that reviews exist for all selected row numbers (using row number keys)
+    const reviewKeys = selectedRowNumbers.map(rn => `row_${rn}`);
+    const missingReviews = reviewKeys.filter(key => !state.humanReviews || !state.humanReviews[key]);
     if (missingReviews.length > 0) {
         showToast(`Missing reviews for ${missingReviews.length} selected hunt(s). Please complete all reviews first.`, 'error');
-        console.error('Missing reviews for hunt_ids:', missingReviews);
+        console.error('Missing reviews for row numbers:', missingReviews);
+        console.error('Available review keys:', Object.keys(state.humanReviews || {}));
         return;
     }
     
-    // Get reviews only for selected hunt_ids
-    const reviews = selectedHuntIds.map(huntId => state.humanReviews[huntId]).filter(r => r);
+    // Get reviews only for selected row numbers
+    const reviews = reviewKeys.map(key => state.humanReviews[key]).filter(r => r);
     
     if (reviews.length !== 4) {
         showToast(`Only ${reviews.length}/4 reviews found for selected hunts. Please complete all reviews.`, 'error');
@@ -561,15 +563,33 @@ async function saveToDrive() {
     btn.textContent = '⏳ Saving...';
     
     try {
+        // Convert row-based review keys back to hunt_id-based keys for backend compatibility
+        const selectedRowNumbers = state.selectedRowNumbers || [];
+        const selectedResults = selectedRowNumbers.map(rn => state.allResponses[rn]).filter(r => r);
+        const reviewsForBackend = {};
+        selectedRowNumbers.forEach((rn, index) => {
+            const reviewKey = `row_${rn}`;
+            const review = state.humanReviews[reviewKey];
+            if (review && selectedResults[index]) {
+                // Backend expects hunt_id as key
+                reviewsForBackend[selectedResults[index].hunt_id] = {
+                    judgment: review.judgment,
+                    grading_basis: review.grading_basis,
+                    explanation: review.explanation,
+                    slotNum: review.slotNum,
+                    timestamp: review.timestamp
+                };
+            }
+        });
+        
         // First save reviews
         await fetch(`/api/save-reviews/${state.sessionId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ reviews: state.humanReviews || {} })
+            body: JSON.stringify({ reviews: reviewsForBackend })
         });
         
-        // Convert row numbers to hunt_ids for backend
-        const selectedResults = state.selectedRowNumbers.map(rn => state.allResponses[rn]).filter(r => r);
+        // Get selected results (already computed above)
         const selectedHuntIds = selectedResults.map(r => r.hunt_id);
         
         // Then save to drive - ONLY the selected responses
@@ -1639,7 +1659,8 @@ function displaySelectedForReview() {
     
     // Create result cards for each selected response (blind mode - LLM hidden)
     selectedResponses.forEach((result, index) => {
-        const card = createResultCard(result, index);
+        const rowNumber = state.selectedRowNumbers[index]; // Get the row number for this result
+        const card = createResultCard(result, index, rowNumber); // Pass row number
         elements.breakingResults.appendChild(card);
     });
     
@@ -1658,8 +1679,11 @@ function displaySelectedForReview() {
 }
 
 function updateReviewProgress() {
-    const reviewCount = Object.keys(state.humanReviews).length;
-    const selectedCount = state.selectedRowNumbers.length;
+    // Count reviews for SELECTED row numbers only
+    const selectedRowNumbers = state.selectedRowNumbers || [];
+    const reviewKeys = selectedRowNumbers.map(rn => `row_${rn}`);
+    const reviewCount = reviewKeys.filter(key => state.humanReviews && state.humanReviews[key]).length;
+    const selectedCount = selectedRowNumbers.length;
     
     if (elements.reviewProgressText) {
         elements.reviewProgressText.textContent = `${reviewCount} / ${selectedCount} completed`;
@@ -1708,8 +1732,18 @@ function updateReviewProgress() {
 }
 
 function revealLLMJudgments() {
-    if (Object.keys(state.humanReviews).length < 4) {
-        showToast('Please complete all 4 human reviews first', 'error');
+    // Check reviews for the SELECTED row numbers
+    const selectedRowNumbers = state.selectedRowNumbers || [];
+    if (selectedRowNumbers.length !== 4) {
+        showToast('Please select exactly 4 hunts first', 'error');
+        return;
+    }
+    
+    const reviewKeys = selectedRowNumbers.map(rn => `row_${rn}`);
+    const completedReviews = reviewKeys.filter(key => state.humanReviews && state.humanReviews[key]);
+    
+    if (completedReviews.length < 4) {
+        showToast(`Please complete all 4 human reviews first. Completed: ${completedReviews.length}/4`, 'error');
         return;
     }
     
@@ -1783,11 +1817,12 @@ async function displayBreakingResults() {
     }
 }
 
-function createResultCard(result, slotIndex) {
+function createResultCard(result, slotIndex, rowNumber) {
     const card = document.createElement('div');
     card.className = 'expandable-card';
     card.dataset.huntId = result.hunt_id;
     card.dataset.slotIndex = slotIndex || 0;
+    card.dataset.rowNumber = rowNumber !== undefined ? rowNumber : null; // Store row number for unique identification
     
     const shortModel = result.model.split('/').pop();
     const score = result.judge_score ?? 0;
@@ -1999,7 +2034,10 @@ function createResultCard(result, slotIndex) {
     // Submit human review button
     card.querySelector('.submit-human-review-btn').addEventListener('click', (e) => {
         e.stopPropagation();
-        submitHumanReview(result.hunt_id, card, slotNum);
+        const rowNum = card.dataset.rowNumber !== null && card.dataset.rowNumber !== undefined 
+            ? Number(card.dataset.rowNumber) 
+            : null;
+        submitHumanReview(result.hunt_id, card, slotNum, rowNum);
     });
     
     // Re-enable submit button when user types in textarea or changes criteria
@@ -2086,10 +2124,15 @@ function handleHumanReview(huntId, judgment, card, slotNum) {
 }
 
 // New criteria-based human review submission
-function submitHumanReview(huntId, card, slotNum) {
-    const notes = card.querySelector(`.human-review-notes[data-hunt-id="${huntId}"]`).value;
+function submitHumanReview(huntId, card, slotNum, rowNumber) {
+    const notesEl = card.querySelector(`.human-review-notes[data-hunt-id="${huntId}"]`);
+    const notes = notesEl ? (notesEl.value || notesEl.textContent || '') : '';
     const statusEl = card.querySelector(`.human-review-status[data-hunt-id="${huntId}"]`);
     const criteriaGrading = card.querySelector(`.criteria-grading[data-hunt-id="${huntId}"]`);
+    
+    // Use row number as key if available, otherwise fall back to hunt_id
+    // Row number ensures uniqueness across different runs
+    const reviewKey = rowNumber !== null && rowNumber !== undefined ? `row_${rowNumber}` : `hunt_${huntId}`;
     
     // Collect grades for each criterion
     const criterionRows = criteriaGrading.querySelectorAll('.criterion-row');
@@ -2137,8 +2180,11 @@ function submitHumanReview(huntId, card, slotNum) {
     const overallJudgment = anyFailed ? 'fail' : 'pass';
     
     // Store human review in state with slot info and criteria
+    // Use row number as key to ensure uniqueness across runs
     if (!state.humanReviews) state.humanReviews = {};
-    state.humanReviews[huntId] = {
+    state.humanReviews[reviewKey] = {
+        hunt_id: huntId,  // Keep hunt_id for backend compatibility
+        row_number: rowNumber,  // Store row number for reference
         judgment: overallJudgment,
         grading_basis: grading,  // {C1: 'pass', C2: 'fail', ...}
         explanation: notes,
@@ -2185,15 +2231,39 @@ function revealLLMJudge(huntId, card) {
 }
 
 function checkAllReviewsComplete() {
-    const reviewCount = Object.keys(state.humanReviews || {}).length;
+    // Check reviews for the SELECTED row numbers, not just any reviews
+    const selectedRowNumbers = state.selectedRowNumbers || [];
+    if (selectedRowNumbers.length !== 4) {
+        return; // Not enough selected yet
+    }
+    
+    // Check if all 4 selected hunts have reviews (using row number keys)
+    const reviewKeys = selectedRowNumbers.map(rn => `row_${rn}`);
+    const completedReviews = reviewKeys.filter(key => state.humanReviews && state.humanReviews[key]);
+    const reviewCount = completedReviews.length;
     const totalSlots = 4;
+    
+    console.log('🔍 checkAllReviewsComplete:', {
+        selectedRowNumbers,
+        reviewKeys,
+        completedReviews,
+        reviewCount,
+        allReviews: Object.keys(state.humanReviews || {})
+    });
     
     if (reviewCount >= totalSlots) {
         showToast('All 4 reviews complete! Ready to export.', 'success');
+        // Enable reveal button
+        if (elements.revealLLMBtn) {
+            elements.revealLLMBtn.disabled = false;
+            elements.revealLLMBtn.style.opacity = '1';
+        }
         // Enable save button prominently
         if (elements.saveDriveBtn) {
             elements.saveDriveBtn.classList.add('pulse');
         }
+        // Update progress display
+        updateReviewProgress();
     }
 }
 
