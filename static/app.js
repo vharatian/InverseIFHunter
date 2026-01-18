@@ -1537,9 +1537,10 @@ function toggleResponseSelection(huntId, card) {
         
         // Allow selection if we're not at 4 yet, or if the combination is valid
         // Only add if not already in the list (prevent duplicates)
-        // Store normalized ID to ensure consistent types
-        if (!state.selectedHuntIds.some(id => Number(id) === normalizedHuntId)) {
-            state.selectedHuntIds.push(normalizedHuntId); // Store normalized number for consistency
+        // Store the original huntId to match what's in allResponses (for lookup consistency)
+        const alreadySelected = state.selectedHuntIds.some(id => Number(id) === normalizedHuntId);
+        if (!alreadySelected) {
+            state.selectedHuntIds.push(huntId); // Store original to match allResponses
         }
         card.classList.add('selected');
         card.style.borderColor = 'var(--accent-primary)';
