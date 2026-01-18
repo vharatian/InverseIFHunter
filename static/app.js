@@ -382,21 +382,58 @@ function handleNotebookLoaded(data, isUrl = false) {
 async function saveToDrive() {
     if (!state.sessionId) return;
     
+    // ===== SARCASTIC CONFIRMATION DIALOG =====
+    const confirmed = confirm(
+        `🚨 FINAL WARNING: ONE-TIME ACTION 🚨\n\n` +
+        `Are you ABSOLUTELY, POSITIVELY, 100% CERTAIN you want to save?\n\n` +
+        `Because once you click "OK", there's no going back.\n` +
+        `No undo button. No "oops, let me fix that".\n` +
+        `This is it. The point of no return.\n\n` +
+        `Did you:\n` +
+        `✅ Review all 4 responses carefully?\n` +
+        `✅ Grade all criteria correctly?\n` +
+        `✅ Write explanations that make sense?\n` +
+        `✅ Double-check everything?\n\n` +
+        `If you're not 100% sure, click "Cancel" and go back.\n` +
+        `If you're ready to commit to this forever, click "OK".\n\n` +
+        `Last chance to back out...`
+    );
+    
+    if (!confirmed) {
+        showToast('Smart move. Double-check everything before saving!', 'info');
+        return;
+    }
+    
     // ===== VALIDATION 0: Check LLM revealed =====
     if (!state.llmRevealed) {
         showToast('Complete all reviews and reveal LLM judgments before saving.', 'error');
         return;
     }
     
-    // ===== VALIDATION 1: Check pending reviews =====
-    const reviewCount = Object.keys(state.humanReviews || {}).length;
-    if (reviewCount < 4) {
-        showToast(`Only ${reviewCount}/4 human reviews completed. Complete all reviews first.`, 'error');
+    // ===== VALIDATION 1: Check that all selected hunt_ids have reviews =====
+    const selectedHuntIds = state.selectedHuntIds || [];
+    if (selectedHuntIds.length !== 4) {
+        showToast(`Please select exactly 4 responses for review. Currently selected: ${selectedHuntIds.length}`, 'error');
+        return;
+    }
+    
+    // Check that reviews exist for all selected hunt_ids
+    const missingReviews = selectedHuntIds.filter(huntId => !state.humanReviews || !state.humanReviews[huntId]);
+    if (missingReviews.length > 0) {
+        showToast(`Missing reviews for ${missingReviews.length} selected response(s). Please complete all reviews first.`, 'error');
+        console.error('Missing reviews for hunt_ids:', missingReviews);
+        return;
+    }
+    
+    // Get reviews only for selected hunt_ids
+    const reviews = selectedHuntIds.map(huntId => state.humanReviews[huntId]).filter(r => r);
+    
+    if (reviews.length !== 4) {
+        showToast(`Only ${reviews.length}/4 reviews found for selected responses. Please complete all reviews.`, 'error');
         return;
     }
     
     // ===== VALIDATION 1b: Check each review has criteria grading and explanation =====
-    const reviews = Object.values(state.humanReviews || {});
     const incompleteReviews = [];
     
     for (let i = 0; i < reviews.length; i++) {
@@ -1256,16 +1293,20 @@ function displaySelectionCards() {
     // NO auto-selection - human picks all 4 manually
     state.selectedHuntIds = [];
     
-    // Filter to only show broken hunts (judge_score === 0)
+    // Show both breaking and passing hunts
     const brokenHunts = state.allResponses.filter(r => r.judge_score === 0);
+    const passingHunts = state.allResponses.filter(r => r.judge_score > 0);
     
-    if (brokenHunts.length === 0) {
-        grid.innerHTML = '<div style="text-align: center; padding: 2rem; color: var(--text-muted);">No broken hunts found. Run more hunts to find model breaks.</div>';
+    if (brokenHunts.length === 0 && passingHunts.length === 0) {
+        grid.innerHTML = '<div style="text-align: center; padding: 2rem; color: var(--text-muted);">No hunts found. Run hunts first.</div>';
         return;
     }
     
-    // Create cards for only broken responses
-    brokenHunts.forEach((result, index) => {
+    // Combine and sort: breaking first, then passing
+    const allHunts = [...brokenHunts, ...passingHunts];
+    
+    // Create cards for all responses (both breaking and passing)
+    allHunts.forEach((result, index) => {
         const isSelected = state.selectedHuntIds.includes(result.hunt_id);
         const isFailed = result.judge_score === 0;
         const shortModel = (result.model || 'unknown').split('/').pop().substring(0, 20);
@@ -1318,6 +1359,10 @@ function displaySelectionCards() {
 function toggleResponseSelection(huntId, card) {
     const checkbox = card.querySelector('.selection-checkbox');
     
+    // Get the result to check if it's breaking or passing
+    const result = state.allResponses.find(r => r.hunt_id === huntId);
+    const isBreaking = result && result.judge_score === 0;
+    
     if (checkbox.checked) {
         // Add to selection (max 4)
         if (state.selectedHuntIds.length >= 4) {
@@ -1325,6 +1370,36 @@ function toggleResponseSelection(huntId, card) {
             showToast('Maximum 4 responses allowed. Unselect one first.', 'warning');
             return;
         }
+        
+        // Get current selection breakdown
+        const selectedResults = state.selectedHuntIds.map(id => 
+            state.allResponses.find(r => r.hunt_id === id)
+        ).filter(r => r);
+        const breakingCount = selectedResults.filter(r => r.judge_score === 0).length;
+        const passingCount = selectedResults.filter(r => r.judge_score > 0).length;
+        
+        // Calculate what the counts would be after adding this one
+        const newBreakingCount = breakingCount + (isBreaking ? 1 : 0);
+        const newPassingCount = passingCount + (isBreaking ? 0 : 1);
+        
+        // Validate: Only allow 4 breaking OR 3 breaking + 1 passing
+        const isValidCombination = 
+            (newBreakingCount === 4 && newPassingCount === 0) ||  // All 4 breaking
+            (newBreakingCount === 3 && newPassingCount === 1);    // 3 breaking + 1 passing
+        
+        if (!isValidCombination && state.selectedHuntIds.length === 3) {
+            // About to select the 4th one, check if it's valid
+            checkbox.checked = false;
+            if (newBreakingCount < 3) {
+                showToast('Invalid combination. Need either 4 breaking OR 3 breaking + 1 passing. You need more breaking hunts.', 'warning');
+            } else if (newBreakingCount === 3 && newPassingCount > 1) {
+                showToast('Invalid combination. Can only have 1 passing hunt. Select a breaking hunt instead.', 'warning');
+            } else if (newBreakingCount > 4 || newPassingCount > 1) {
+                showToast('Invalid combination. Need either 4 breaking OR 3 breaking + 1 passing.', 'warning');
+            }
+            return;
+        }
+        
         state.selectedHuntIds.push(huntId);
         card.classList.add('selected');
         card.style.borderColor = 'var(--accent-primary)';
@@ -1342,14 +1417,78 @@ function toggleResponseSelection(huntId, card) {
 
 function updateSelectionCount() {
     const count = state.selectedHuntIds.length;
-    elements.selectionCount.textContent = `Selected: ${count} / 4`;
-    elements.selectionCount.style.color = count === 4 ? 'var(--success)' : 'var(--text-primary)';
-    elements.confirmSelectionBtn.disabled = count !== 4;
+    
+    // Get breakdown of breaking vs passing
+    const selectedResults = state.selectedHuntIds.map(id => 
+        state.allResponses.find(r => r.hunt_id === id)
+    ).filter(r => r);
+    const breakingCount = selectedResults.filter(r => r.judge_score === 0).length;
+    const passingCount = selectedResults.filter(r => r.judge_score > 0).length;
+    
+    // Check if current combination is valid
+    const isValidCombination = 
+        (breakingCount === 4 && passingCount === 0) ||  // All 4 breaking
+        (breakingCount === 3 && passingCount === 1);    // 3 breaking + 1 passing
+    
+    // Build status text
+    let statusText = `Selected: ${count} / 4`;
+    if (count > 0) {
+        statusText += ` (${breakingCount} breaking, ${passingCount} passing)`;
+    }
+    
+    // Add validation message
+    if (count === 4 && !isValidCombination) {
+        statusText += ' ⚠️ Invalid combination';
+        elements.selectionCount.style.color = 'var(--danger)';
+    } else if (count === 4 && isValidCombination) {
+        statusText += ' ✅ Valid';
+        elements.selectionCount.style.color = 'var(--success)';
+    } else {
+        elements.selectionCount.style.color = 'var(--text-primary)';
+    }
+    
+    elements.selectionCount.textContent = statusText;
+    
+    // Enable confirm button only if exactly 4 selected AND valid combination
+    elements.confirmSelectionBtn.disabled = !(count === 4 && isValidCombination);
 }
 
 function confirmSelection() {
     if (state.selectedHuntIds.length !== 4) {
         showToast('Please select exactly 4 responses', 'error');
+        return;
+    }
+    
+    // Validate combination one more time
+    const selectedResults = state.selectedHuntIds.map(id => 
+        state.allResponses.find(r => r.hunt_id === id)
+    ).filter(r => r);
+    const breakingCount = selectedResults.filter(r => r.judge_score === 0).length;
+    const passingCount = selectedResults.filter(r => r.judge_score > 0).length;
+    
+    const isValidCombination = 
+        (breakingCount === 4 && passingCount === 0) ||  // All 4 breaking
+        (breakingCount === 3 && passingCount === 1);    // 3 breaking + 1 passing
+    
+    if (!isValidCombination) {
+        showToast('Invalid combination. Need either 4 breaking OR 3 breaking + 1 passing.', 'error');
+        return;
+    }
+    
+    // ===== SARCASTIC CONFIRMATION DIALOG =====
+    const confirmed = confirm(
+        `🎯 LOCKING IN YOUR SELECTION 🎯\n\n` +
+        `You've selected ${breakingCount} breaking and ${passingCount} passing response(s).\n\n` +
+        `Once you confirm, you're stuck with these 4.\n` +
+        `No swapping. No "wait, I want a different one".\n` +
+        `This is your final team. Make sure it's the right one.\n\n` +
+        `Are you REALLY sure these are the 4 you want to review?\n\n` +
+        `Click "Cancel" if you want to change your mind.\n` +
+        `Click "OK" if you're ready to commit.`
+    );
+    
+    if (!confirmed) {
+        showToast('Good call. Make sure you have the right selection!', 'info');
         return;
     }
     
@@ -1861,6 +2000,24 @@ function submitHumanReview(huntId, card, slotNum) {
     // Validate all criteria are graded
     if (!allGraded) {
         showToast('Please grade all criteria before submitting', 'error');
+        return;
+    }
+    
+    // ===== SARCASTIC CONFIRMATION DIALOG =====
+    const gradingSummary = Object.entries(grading).map(([k, v]) => `${k}: ${v}`).join(', ');
+    const confirmed = confirm(
+        `📝 SUBMITTING REVIEW FOR SLOT ${slotNum} 📝\n\n` +
+        `Your grading: ${gradingSummary}\n` +
+        `Overall: ${anyFailed ? 'FAIL' : 'PASS'}\n\n` +
+        `Are you sure about these grades?\n` +
+        `Double-checked your explanation?\n\n` +
+        `(Note: You can edit this later, but it's better to get it right the first time!)\n\n` +
+        `Click "Cancel" to review again.\n` +
+        `Click "OK" to submit.`
+    );
+    
+    if (!confirmed) {
+        showToast('Take your time! Make sure everything is correct.', 'info');
         return;
     }
     
