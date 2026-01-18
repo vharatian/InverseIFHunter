@@ -645,13 +645,21 @@ class NotebookParser:
         new_cells = []
         
         for slot_num in range(1, 5):  # Always create slots 1-4
-            # Get result for this slot if it exists
+            # Get result for this slot - ALWAYS use slot_to_result mapping first (correct mapping)
             slot_result = None
-            if slot_num <= len(results):
-                slot_result = results[slot_num - 1]  # 0-indexed
-            # Also check slot_to_result mapping
-            if not slot_result and slot_num in slot_to_result:
+            if slot_num in slot_to_result:
                 slot_result = slot_to_result[slot_num]
+            # Fallback to direct indexing only if not in mapping
+            elif slot_num <= len(results):
+                slot_result = results[slot_num - 1]  # 0-indexed
+                print(f"DEBUG: Slot {slot_num} not in slot_to_result, using direct index {slot_num - 1}")
+            
+            # Debug: Log response length for troubleshooting
+            if slot_result:
+                response_len = len(slot_result.get('response', ''))
+                print(f"DEBUG: Slot {slot_num} - response length: {response_len}, preview: {slot_result.get('response', '')[:50]}...")
+            else:
+                print(f"DEBUG: Slot {slot_num} - no result found")
             
             # Add model response if not updated - ALWAYS create for all 4 slots
             if f"model_{slot_num}" not in updated_slots:
