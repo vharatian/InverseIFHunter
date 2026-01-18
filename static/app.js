@@ -497,16 +497,21 @@ async function saveToDrive() {
         return;
     }
     
-    // ===== VALIDATION 3: Check for criterion diversity (at least one C has both PASS and FAIL) =====
-    const criteriaVotes = {};  // Track votes per criterion: { C1: { pass: 0, fail: 0 }, ... }
+    // ===== VALIDATION 3: Check for criterion diversity in LLM JUDGE ONLY (not human judge) =====
+    // Get selected results to check LLM judge criteria
+    const selectedRowNumbers = state.selectedRowNumbers || [];
+    const selectedResults = selectedRowNumbers.map(rn => state.allResponses[rn]).filter(r => r);
     
-    console.log('🔍 DIVERSITY CHECK - All reviews:', reviews);
+    const criteriaVotes = {};  // Track votes per criterion from LLM judges: { C1: { pass: 0, fail: 0 }, ... }
     
-    for (const review of reviews) {
-        const gradingBasis = review.grading_basis || {};
-        console.log('  Review grading_basis:', gradingBasis);
+    console.log('🔍 DIVERSITY CHECK - LLM Judge criteria from selected results:', selectedResults);
+    
+    // Check LLM judge criteria (not human judge)
+    for (const result of selectedResults) {
+        const judgeCriteria = result.judge_criteria || {};
+        console.log('  LLM Judge criteria:', judgeCriteria);
         
-        for (const [criterionId, vote] of Object.entries(gradingBasis)) {
+        for (const [criterionId, vote] of Object.entries(judgeCriteria)) {
             if (!criteriaVotes[criterionId]) {
                 criteriaVotes[criterionId] = { pass: 0, fail: 0 };
             }
@@ -519,38 +524,38 @@ async function saveToDrive() {
         }
     }
     
-    console.log('  Criteria votes summary:', criteriaVotes);
+    console.log('  LLM Criteria votes summary:', criteriaVotes);
     
-    // Check if ANY criterion has both a pass AND a fail
+    // Check if ANY criterion has both a pass AND a fail in LLM judge results
     const hasDiverseCriterion = Object.entries(criteriaVotes).some(
         ([id, votes]) => votes.pass > 0 && votes.fail > 0
     );
     
-    console.log('  Has diverse criterion?', hasDiverseCriterion);
+    console.log('  Has diverse criterion in LLM judges?', hasDiverseCriterion);
     console.log('  Total criteria checked:', Object.keys(criteriaVotes).length);
     
-    // CRITICAL: Must have at least one criterion with both PASS and FAIL
+    // CRITICAL: Must have at least one criterion with both PASS and FAIL in LLM judge results
     if (!hasDiverseCriterion && Object.keys(criteriaVotes).length > 0) {
         // Build a summary of votes for the error message
         const votesSummary = Object.entries(criteriaVotes)
             .map(([id, v]) => `${id}: ${v.pass} pass, ${v.fail} fail`)
             .join('\n  ');
         
-        console.error('❌ DIVERSITY CHECK FAILED:', votesSummary);
+        console.error('❌ LLM JUDGE DIVERSITY CHECK FAILED:', votesSummary);
         
-        showToast('Criterion diversity required: At least one criterion must have both PASS and FAIL. You can still edit the slots to fix this.', 'error');
+        showToast('LLM Judge criterion diversity required: At least one criterion must have both PASS and FAIL in LLM judge results. Run more hunts to get diverse LLM judgments.', 'error');
         alert(
-            `Cannot save: Missing criterion diversity!\n\n` +
-            `Requirement: At least one criterion (C1, C2, etc.) must receive both a PASS and a FAIL across the 4 responses.\n\n` +
-            `Current votes:\n  ${votesSummary}\n\n` +
-            `⚠️ IMPORTANT: You can still edit the human judge slots above to fix this.\n` +
-            `Change some criteria from FAIL to PASS (or vice versa) to create diversity, then try saving again.`
+            `Cannot save: Missing LLM Judge criterion diversity!\n\n` +
+            `Requirement: At least one criterion (C1, C2, etc.) must receive both a PASS and a FAIL from LLM judges across the selected responses.\n\n` +
+            `Current LLM judge votes:\n  ${votesSummary}\n\n` +
+            `⚠️ NOTE: This checks LLM judge diversity, not human judge diversity.\n` +
+            `Run more hunts until LLM judges give diverse results, then try saving again.`
         );
         // CRITICAL: Return here to prevent save
         return;
     }
     
-    console.log('✅ Diversity check passed');
+    console.log('✅ LLM Judge diversity check passed');
     
     // ===== All validations passed - proceed with save =====
     const btn = document.getElementById('saveDriveBtn');
@@ -1292,18 +1297,13 @@ async function fetchAllResponsesAndShowSelection(completedHunts, breaksFound) {
         
         console.log('Criteria diversity check:', { criteriaGrades, diverseCriteria, criteriaMetDiversity });
         
-        const criteriaMet = criteriaMetBreaks && criteriaMetDiversity;
+        // Only check breaks requirement, not diversity (diversity is checked for LLM judge only, not for selection)
+        const criteriaMet = criteriaMetBreaks;
         
         if (!criteriaMet) {
             // Don't show selection - criteria not met
             elements.selectionSection.classList.add('hidden');
-            let errorMsg = '';
-            if (!criteriaMetBreaks) {
-                errorMsg = `⚠️ Need at least 3 breaks (score 0). Currently have ${totalBreaks}. Run more hunts!`;
-            } else if (!criteriaMetDiversity) {
-                const criteriaList = Object.keys(criteriaGrades).join(', ') || 'none found';
-                errorMsg = `⚠️ Need at least 1 criterion with both PASS and FAIL across hunts.\nCriteria found: ${criteriaList}\nRun hunts until at least one criterion has both grades.`;
-            }
+            let errorMsg = `⚠️ Need at least 3 breaks (score 0). Currently have ${totalBreaks}. Run more hunts!`;
             showToast(errorMsg, 'warning');
             alert(`Cannot proceed to human review:\n\n${errorMsg}\n\nPlease run more hunts until criteria is met.`);
             return;

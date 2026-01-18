@@ -484,6 +484,7 @@ async def export_notebook(session_id: str, include_reasoning: bool = True):
         
         # Get human reviews (saved via /api/save-reviews)
         human_reviews = getattr(session, 'human_reviews', {})
+        total_hunts_ran = session.total_hunts  # Total hunts ran across all attempts
         
         # Generate modified notebook
         modified_content = notebook_parser.export_notebook(
@@ -491,7 +492,8 @@ async def export_notebook(session_id: str, include_reasoning: bool = True):
             parsed=session.notebook,
             results=results,
             include_reasoning=include_reasoning,
-            human_reviews=human_reviews
+            human_reviews=human_reviews,
+            total_hunts_ran=total_hunts_ran
         )
         
         # Return as downloadable file
@@ -580,13 +582,15 @@ async def save_to_drive(session_id: str, request: Request):
             print(f"WARNING: No selected_hunt_ids provided, saving all {len(results)} results")
         
         human_reviews = getattr(session, 'human_reviews', {})
+        total_hunts_ran = session.total_hunts  # Total hunts ran across all attempts
         
         modified_content = notebook_parser.export_notebook(
             original_content=original_content,
             parsed=session.notebook,
             results=results,
             include_reasoning=True,
-            human_reviews=human_reviews
+            human_reviews=human_reviews,
+            total_hunts_ran=total_hunts_ran
         )
         
         # Update file (export_notebook returns JSON string already)

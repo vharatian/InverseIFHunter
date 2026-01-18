@@ -23,7 +23,7 @@ class NotebookParser:
     # Known cell types
     METADATA_HEADINGS = {'prompt', 'response', 'response_reference', 
                          'judge_prompt_template', 'judge_system_prompt',
-                         'number_of_attempts_made'}
+                         'number_of_attempts_made', 'total_hunts_ran'}
     MODEL_PATTERN = re.compile(r'^(nemotron|qwen|model)_(\d+)$', re.IGNORECASE)
     LLM_JUDGE_PATTERN = re.compile(r'^llm_judge_(\d+)$', re.IGNORECASE)
     HUMAN_JUDGE_PATTERN = re.compile(r'^human_judge_(\d+)$', re.IGNORECASE)
@@ -408,7 +408,8 @@ class NotebookParser:
         parsed: ParsedNotebook,
         results: List[Dict[str, Any]],
         include_reasoning: bool = True,
-        human_reviews: Dict[str, Any] = None
+        human_reviews: Dict[str, Any] = None,
+        total_hunts_ran: int = 0
     ) -> str:
         """
         Export modified notebook with hunt results.
@@ -419,6 +420,7 @@ class NotebookParser:
             results: List of hunt results to add
             include_reasoning: Whether to append reasoning traces
             human_reviews: Dict of human reviews keyed by hunt_id
+            total_hunts_ran: Total number of hunts ran across all attempts
         
         Returns:
             Modified notebook JSON string
@@ -613,16 +615,30 @@ class NotebookParser:
                     cell['source'] = [f"**[number_of_attempts_made]**:\n\n{new_attempts}"]
                     updated_slots.add('number_of_attempts_made')
                     print(f"DEBUG: Updated existing attempts cell to {new_attempts}")
+                
+                # Update total hunts ran
+                if heading == 'total_hunts_ran':
+                    cell['source'] = [f"**[total_hunts_ran]**:\n\n{total_hunts_ran}"]
+                    updated_slots.add('total_hunts_ran')
+                    print(f"DEBUG: Updated existing total_hunts_ran cell to {total_hunts_ran}")
         
         # Add new cells for results that don't have slots
+        # Ensure ALL 4 slots are created (even if we have fewer results)
         new_cells = []
-        for i, result in enumerate(results):
-            # Use position in results list (1-4) as slot number, not hunt_id
-            slot_num = i + 1
+        max_slots = max(4, len(results))  # Always create at least 4 slots
+        
+        for slot_num in range(1, max_slots + 1):
+            # Get result for this slot if it exists
+            slot_result = None
+            if slot_num <= len(results):
+                slot_result = results[slot_num - 1]  # 0-indexed
+            # Also check slot_to_result mapping
+            if not slot_result and slot_num in slot_to_result:
+                slot_result = slot_to_result[slot_num]
             
             # Add model response if not updated
             if f"model_{slot_num}" not in updated_slots:
-                model_content = f"**[{model_prefix}_{slot_num}]**\n\n{result.get('response', '')}"
+                model_content = f"**[{model_prefix}_{slot_num}]**\n\n{slot_result.get('response', '') if slot_result else ''}"
                 # Reasoning trace will be saved in separate cell
                 new_cells.append({
                     "cell_type": "markdown",
@@ -631,17 +647,17 @@ class NotebookParser:
                     "source": [model_content]
                 })
             
-            # Add LLM judge if not updated
-            if f"judge_{slot_num}" not in updated_slots and slot_num in slot_to_result:
-                result = slot_to_result[slot_num]
-                # slot_num is already correct (1-4) from the loop
+            # Add LLM judge if not updated - ALWAYS create for all 4 slots, even if data is missing
+            if f"judge_{slot_num}" not in updated_slots:
+                # Use slot_result or empty dict
+                judge_result = slot_result or {}
                 
                 # Format LLM judge output in required format
                 # Try judge_score first, then fall back to score for backward compatibility
-                judge_criteria = result.get('judge_criteria', {})
-                judge_score = result.get('judge_score') or result.get('score', 0)
-                judge_explanation = result.get('judge_explanation', '')
-                judge_output_raw = result.get('judge_output', '')
+                judge_criteria = judge_result.get('judge_criteria', {})
+                judge_score = judge_result.get('judge_score') or judge_result.get('score', 0)
+                judge_explanation = judge_result.get('judge_explanation', '')
+                judge_output_raw = judge_result.get('judge_output', '')
                 
                 # If judge_criteria is empty, try to parse from judge_output
                 if not judge_criteria and judge_output_raw:
@@ -696,14 +712,15 @@ class NotebookParser:
                     "metadata": {},
                     "source": [f"**[llm_judge_{slot_num}]**\n\n{llm_content}"]
                 })
+                print(f"DEBUG: Added LLM judge cell for slot {slot_num}")
             
-            # Add human judge if not updated (always add if we have a review)
-            if f"human_{slot_num}" not in updated_slots and slot_num in huntid_to_review:
-                review = huntid_to_review[slot_num]
-                judgment = review.get('judgment', 'unknown').upper()
+            # Add human judge if not updated - ALWAYS create for all 4 slots, even if review is missing
+            if f"human_{slot_num}" not in updated_slots:
+                review = huntid_to_review.get(slot_num, {})  # Get review or empty dict if missing
+                judgment = review.get('judgment', 'unknown').upper() if review else 'unknown'
                 
                 # Format grading basis as JSON
-                grading_basis = review.get('grading_basis', {})
+                grading_basis = review.get('grading_basis', {}) if review else {}
                 if grading_basis:
                     # Create JSON format for grading
                     grading_json = json.dumps({k: v.upper() for k, v in grading_basis.items()}, indent=2)
@@ -713,10 +730,10 @@ class NotebookParser:
                 # Calculate score (FAIL = 0, PASS = 1 per criterion)
                 pass_count = sum(1 for v in grading_basis.values() if v.upper() == 'PASS')
                 total_criteria = len(grading_basis) if grading_basis else 4
-                score = pass_count
+                score = 1 if pass_count > total_criteria / 2 else 0
                 
                 # Get explanation
-                explanation = review.get('explanation', '') or review.get('notes', '')
+                explanation = review.get('explanation', '') or review.get('notes', '') if review else ''
                 
                 # Build human content in required format
                 human_content = f"""[Grading Basis]:
@@ -737,6 +754,7 @@ class NotebookParser:
                     "metadata": {},
                     "source": [f"**[human_judge_{slot_num}]**\n\n{human_content}"]
                 })
+                print(f"DEBUG: Added human judge cell for slot {slot_num}")
         
         # Remove any combined reasoning_traces cells (we only want individual cells)
         cells = [cell for cell in cells if not (
@@ -802,6 +820,16 @@ class NotebookParser:
                 "source": [f"**[number_of_attempts_made]**:\n\n{new_attempts}"]
             })
             print(f"DEBUG: Created new attempts cell with count={new_attempts}")
+        
+        # Add total_hunts_ran cell if it doesn't exist or wasn't updated
+        if 'total_hunts_ran' not in updated_slots:
+            new_cells.append({
+                "cell_type": "markdown",
+                "id": "auto_total_hunts_ran",
+                "metadata": {},
+                "source": [f"**[total_hunts_ran]**:\n\n{total_hunts_ran}"]
+            })
+            print(f"DEBUG: Created total_hunts_ran cell with count={total_hunts_ran}")
         
         if new_cells:
             cells.extend(new_cells)
