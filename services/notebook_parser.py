@@ -496,72 +496,77 @@ class NotebookParser:
                     # Keep original content intact - these should never be modified
                     continue
                 
-                # Update model response slots (qwen_1, qwen_2, etc.)
+                # Update model response slots (qwen_1, qwen_2, etc.) - ALWAYS update if heading matches
                 model_match = self.MODEL_PATTERN.match(heading_lower)
                 if model_match:
                     slot_num = int(model_match.group(2))
-                    if slot_num in slot_to_result:
-                        result = slot_to_result[slot_num]
-                        new_content = f"**[{heading_original}]**\n\n{result.get('response', '')}"
-                        # Reasoning trace will be saved in separate cell
-                        cell['source'] = [new_content]
-                        updated_slots.add(f"model_{slot_num}")
-                        print(f"DEBUG: Updated model_{slot_num} cell with response")
+                    # Always update with latest data, even if empty
+                    result = slot_to_result.get(slot_num)
+                    if not result and slot_num <= len(results):
+                        result = results[slot_num - 1]  # Fallback to direct indexing
+                    response_text = result.get('response', '') if result else ''
+                    new_content = f"**[{heading_original}]**\n\n{response_text}"
+                    # Reasoning trace will be saved in separate cell
+                    cell['source'] = [new_content]
+                    updated_slots.add(f"model_{slot_num}")
+                    print(f"DEBUG: Updated model_{slot_num} cell with response (length: {len(response_text)})")
                 
-                # Update LLM judge slots
+                # Update LLM judge slots - ALWAYS update if heading matches
                 judge_match = self.LLM_JUDGE_PATTERN.match(heading_lower)
                 if judge_match:
                     slot_num = int(judge_match.group(1))
-                    if slot_num in slot_to_result:
-                        result = slot_to_result[slot_num]
-                        
-                        # Format LLM judge output in required format
-                        # Try judge_score first, then fall back to score for backward compatibility
-                        judge_criteria = result.get('judge_criteria', {})
-                        judge_score = result.get('judge_score') or result.get('score', 0)
-                        judge_explanation = result.get('judge_explanation', '')
-                        judge_output_raw = result.get('judge_output', '')
-                        
-                        # If judge_criteria is empty, try to parse from judge_output
-                        if not judge_criteria and judge_output_raw:
-                            # Try to extract criteria from raw output
-                            import json as json_module
-                            try:
-                                # Look for JSON in the output
-                                json_match = re.search(r'\{[^{}]*"criteria"[^{}]*\}', judge_output_raw, re.DOTALL)
-                                if json_match:
-                                    parsed = json_module.loads(json_match.group(0))
-                                    judge_criteria = parsed.get('criteria', {})
-                            except:
-                                pass
-                        
-                        # Format grading basis as JSON (must have at least empty dict)
-                        if not judge_criteria:
-                            judge_criteria = {}
-                        grading_json = json.dumps({k: v.upper() for k, v in judge_criteria.items()}, indent=2)
-                        
-                        # Format explanation with bullet points if it contains criteria
-                        formatted_explanation = judge_explanation or judge_output_raw or "No explanation provided"
-                        if formatted_explanation and not formatted_explanation.strip().startswith('•'):
-                            # Try to format explanation with bullet points for each criterion
-                            lines = formatted_explanation.split('\n')
-                            formatted_lines = []
-                            for line in lines:
-                                line = line.strip()
-                                if line:
-                                    # Check if line mentions a criterion (C1, C2, etc.)
-                                    criterion_match = re.search(r'\b(C\d+)\s+(PASS|FAIL|pass|fail)', line, re.IGNORECASE)
-                                    if criterion_match:
-                                        criterion_id = criterion_match.group(1)
-                                        status = criterion_match.group(2).upper()
-                                        # Format as bullet point
-                                        formatted_lines.append(f"• {criterion_id} {status}: {line}")
-                                    else:
-                                        formatted_lines.append(f"• {line}")
-                            if formatted_lines:
-                                formatted_explanation = '\n'.join(formatted_lines)
-                        
-                        llm_content = f"""[Grading Basis]:
+                    # Always update with latest data, even if empty
+                    result = slot_to_result.get(slot_num)
+                    if not result and slot_num <= len(results):
+                        result = results[slot_num - 1]  # Fallback to direct indexing
+                    
+                    # Format LLM judge output in required format
+                    # Try judge_score first, then fall back to score for backward compatibility
+                    judge_criteria = result.get('judge_criteria', {}) if result else {}
+                    judge_score = (result.get('judge_score') or result.get('score', 0)) if result else 0
+                    judge_explanation = result.get('judge_explanation', '') if result else ''
+                    judge_output_raw = result.get('judge_output', '') if result else ''
+                    
+                    # If judge_criteria is empty, try to parse from judge_output
+                    if not judge_criteria and judge_output_raw:
+                        # Try to extract criteria from raw output
+                        import json as json_module
+                        try:
+                            # Look for JSON in the output
+                            json_match = re.search(r'\{[^{}]*"criteria"[^{}]*\}', judge_output_raw, re.DOTALL)
+                            if json_match:
+                                parsed = json_module.loads(json_match.group(0))
+                                judge_criteria = parsed.get('criteria', {})
+                        except:
+                            pass
+                    
+                    # Format grading basis as JSON (must have at least empty dict)
+                    if not judge_criteria:
+                        judge_criteria = {}
+                    grading_json = json.dumps({k: v.upper() for k, v in judge_criteria.items()}, indent=2)
+                    
+                    # Format explanation with bullet points if it contains criteria
+                    formatted_explanation = judge_explanation or judge_output_raw or "No explanation provided"
+                    if formatted_explanation and not formatted_explanation.strip().startswith('•'):
+                        # Try to format explanation with bullet points for each criterion
+                        lines = formatted_explanation.split('\n')
+                        formatted_lines = []
+                        for line in lines:
+                            line = line.strip()
+                            if line:
+                                # Check if line mentions a criterion (C1, C2, etc.)
+                                criterion_match = re.search(r'\b(C\d+)\s+(PASS|FAIL|pass|fail)', line, re.IGNORECASE)
+                                if criterion_match:
+                                    criterion_id = criterion_match.group(1)
+                                    status = criterion_match.group(2).upper()
+                                    # Format as bullet point
+                                    formatted_lines.append(f"• {criterion_id} {status}: {line}")
+                                else:
+                                    formatted_lines.append(f"• {line}")
+                        if formatted_lines:
+                            formatted_explanation = '\n'.join(formatted_lines)
+                    
+                    llm_content = f"""[Grading Basis]:
 
 {grading_json}
 
@@ -572,36 +577,36 @@ class NotebookParser:
 [Explanation]:
 
 {formatted_explanation}"""
-                        
-                        new_content = f"**[{heading_original}]**\n\n{llm_content}"
-                        cell['source'] = [new_content]
-                        updated_slots.add(f"judge_{slot_num}")
-                        print(f"DEBUG: Updated judge_{slot_num} cell with formatted output")
+                    
+                    new_content = f"**[{heading_original}]**\n\n{llm_content}"
+                    cell['source'] = [new_content]
+                    updated_slots.add(f"judge_{slot_num}")
+                    print(f"DEBUG: Updated judge_{slot_num} cell with formatted output")
                 
-                # Update human judge slots
+                # Update human judge slots - ALWAYS update if heading matches
                 human_match = self.HUMAN_JUDGE_PATTERN.match(heading_lower) if hasattr(self, 'HUMAN_JUDGE_PATTERN') else re.match(r'human_judge_(\d+)', heading_lower)
                 if human_match:
                     slot_num = int(human_match.group(1))
-                    if slot_num in huntid_to_review:
-                        review = huntid_to_review[slot_num]
-                        judgment = review.get('judgment', 'unknown').upper()
-                        
-                        # Format grading basis as JSON
-                        grading_basis = review.get('grading_basis', {})
-                        if grading_basis:
-                            grading_json = json.dumps({k: v.upper() for k, v in grading_basis.items()}, indent=2)
-                        else:
-                            grading_json = "{}"
-                        
-                        # Calculate score (count PASS criteria)
-                        pass_count = sum(1 for v in grading_basis.values() if v.upper() == 'PASS')
-                        score = 1 if pass_count > len(grading_basis) / 2 else 0
-                        
-                        # Get explanation
-                        explanation = review.get('explanation', '') or review.get('notes', '')
-                        
-                        # Build human content in required format
-                        human_content = f"""[Grading Basis]:
+                    # Always update with latest data, even if empty
+                    review = huntid_to_review.get(slot_num)
+                    judgment = review.get('judgment', 'unknown').upper() if review else 'unknown'
+                    
+                    # Format grading basis as JSON
+                    grading_basis = review.get('grading_basis', {}) if review else {}
+                    if grading_basis:
+                        grading_json = json.dumps({k: v.upper() for k, v in grading_basis.items()}, indent=2)
+                    else:
+                        grading_json = "{}"
+                    
+                    # Calculate score (count PASS criteria)
+                    pass_count = sum(1 for v in grading_basis.values() if v.upper() == 'PASS')
+                    score = 1 if pass_count > len(grading_basis) / 2 else 0
+                    
+                    # Get explanation
+                    explanation = (review.get('explanation', '') or review.get('notes', '')) if review else ''
+                    
+                    # Build human content in required format
+                    human_content = f"""[Grading Basis]:
 
 {grading_json}
 
@@ -612,21 +617,24 @@ class NotebookParser:
 [Explanation]:
 
 {explanation}"""
-                        new_content = f"**[{heading_original}]**\n\n{human_content}"
-                        cell['source'] = [new_content]
-                        updated_slots.add(f"human_{slot_num}")
-                        print(f"DEBUG: Updated human_{slot_num} cell with judgment={judgment}")
+                    new_content = f"**[{heading_original}]**\n\n{human_content}"
+                    cell['source'] = [new_content]
+                    updated_slots.add(f"human_{slot_num}")
+                    print(f"DEBUG: Updated human_{slot_num} cell with judgment={judgment}")
                 
-                # Update reasoning trace slots (ensure all 4 are saved, even if empty)
+                # Update reasoning trace slots - ALWAYS update if heading matches (even if empty)
                 reasoning_match = self.REASONING_TRACE_PATTERN.match(heading_lower)
                 if reasoning_match:
                     slot_num = int(reasoning_match.group(1))
-                    if slot_num in slot_to_result:
-                        result = slot_to_result[slot_num]
-                        # Update even if empty to ensure cell exists
-                        cell['source'] = [f"**[reasoning_trace_{slot_num}]**\n\n{result.get('reasoning_trace', '')}"]
-                        updated_slots.add(f"reasoning_{slot_num}")
-                        print(f"DEBUG: Updated reasoning_trace_{slot_num} cell")
+                    # Always update with latest data, even if empty
+                    result = slot_to_result.get(slot_num)
+                    if not result and slot_num <= len(results):
+                        result = results[slot_num - 1]  # Fallback to direct indexing
+                    reasoning_trace = result.get('reasoning_trace', '') if result else ''
+                    # Preserve original heading format
+                    cell['source'] = [f"**[{heading_original}]**\n\n{reasoning_trace}"]
+                    updated_slots.add(f"reasoning_{slot_num}")
+                    print(f"DEBUG: Updated reasoning_trace_{slot_num} cell (length: {len(reasoning_trace)})")
                 
                 # Update attempts counter - use total_hunts_ran instead of parsed.attempts_made + len(results)
                 if heading_lower == 'number_of_attempts_made':
