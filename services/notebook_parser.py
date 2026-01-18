@@ -466,6 +466,11 @@ class NotebookParser:
             if match:
                 heading = match.group(1).lower()
                 
+                # PRESERVE original response_reference and judge_system_prompt - DO NOT OVERWRITE
+                if heading == 'response_reference' or heading == 'judge_system_prompt':
+                    # Keep original content intact - these should never be modified
+                    continue
+                
                 # Update model response slots (qwen_1, qwen_2, etc.)
                 model_match = self.MODEL_PATTERN.match(heading)
                 if model_match:
@@ -486,8 +491,9 @@ class NotebookParser:
                         result = slot_to_result[slot_num]
                         
                         # Format LLM judge output in required format
+                        # Try judge_score first, then fall back to score for backward compatibility
                         judge_criteria = result.get('judge_criteria', {})
-                        judge_score = result.get('judge_score', 0)
+                        judge_score = result.get('judge_score') or result.get('score', 0)
                         judge_explanation = result.get('judge_explanation', '')
                         judge_output_raw = result.get('judge_output', '')
                         
@@ -586,16 +592,16 @@ class NotebookParser:
                         updated_slots.add(f"human_{slot_num}")
                         print(f"DEBUG: Updated human_{slot_num} cell with judgment={judgment}")
                 
-                # Update reasoning trace slots
+                # Update reasoning trace slots (ensure all 4 are saved, even if empty)
                 reasoning_match = self.REASONING_TRACE_PATTERN.match(heading)
                 if reasoning_match:
                     slot_num = int(reasoning_match.group(1))
                     if slot_num in slot_to_result:
                         result = slot_to_result[slot_num]
-                        if result.get('reasoning_trace'):
-                            cell['source'] = [f"**[reasoning_trace_{slot_num}]**\n\n{result.get('reasoning_trace', '')}"]
-                            updated_slots.add(f"reasoning_{slot_num}")
-                            print(f"DEBUG: Updated reasoning_trace_{slot_num} cell")
+                        # Update even if empty to ensure cell exists
+                        cell['source'] = [f"**[reasoning_trace_{slot_num}]**\n\n{result.get('reasoning_trace', '')}"]
+                        updated_slots.add(f"reasoning_{slot_num}")
+                        print(f"DEBUG: Updated reasoning_trace_{slot_num} cell")
                 
                 # Update attempts counter
                 if heading == 'number_of_attempts_made':
@@ -627,8 +633,9 @@ class NotebookParser:
                 # slot_num is already correct (1-4) from the loop
                 
                 # Format LLM judge output in required format
+                # Try judge_score first, then fall back to score for backward compatibility
                 judge_criteria = result.get('judge_criteria', {})
-                judge_score = result.get('judge_score', 0)
+                judge_score = result.get('judge_score') or result.get('score', 0)
                 judge_explanation = result.get('judge_explanation', '')
                 judge_output_raw = result.get('judge_output', '')
                 
@@ -727,38 +734,51 @@ class NotebookParser:
                     "source": [f"**[human_judge_{slot_num}]**\n\n{human_content}"]
                 })
         
+        # Remove any combined reasoning_traces cells (we only want individual cells)
+        cells = [cell for cell in cells if not (
+            isinstance(cell.get('source'), list) and 
+            any('**[reasoning_traces]**' in str(s).lower() for s in cell.get('source', []))
+        )]
+        
         # Add reasoning traces as separate cells (reasoning_trace_1, reasoning_trace_2, etc.)
+        # Ensure ALL 4 reasoning traces are saved, even if some are empty
         if include_reasoning:
             for i, result in enumerate(results):
                 slot_num = i + 1
-                if result.get('reasoning_trace'):
-                    # Check if reasoning_trace cell already exists
-                    reasoning_heading = f"reasoning_trace_{slot_num}"
-                    reasoning_exists = False
-                    for cell in cells:
-                        source = cell.get('source', [])
-                        if isinstance(source, list):
-                            content = ''.join(source)
-                        else:
-                            content = str(source)
-                        match = self.HEADING_PATTERN.search(content)
-                        if match and match.group(1).lower() == reasoning_heading:
-                            # Update existing reasoning trace cell
-                            cell['source'] = [f"**[{reasoning_heading}]**\n\n{result.get('reasoning_trace', '')}"]
-                            reasoning_exists = True
-                            updated_slots.add(f"reasoning_{slot_num}")
-                            print(f"DEBUG: Updated reasoning_trace_{slot_num} cell")
-                            break
-                    
-                    if not reasoning_exists:
-                        # Add new reasoning trace cell
-                        new_cells.append({
-                            "cell_type": "markdown",
-                            "id": f"auto_reasoning_trace_{slot_num}",
-                            "metadata": {},
-                            "source": [f"**[reasoning_trace_{slot_num}]**\n\n{result.get('reasoning_trace', '')}"]
-                        })
-                        print(f"DEBUG: Added new reasoning_trace_{slot_num} cell")
+                reasoning_trace = result.get('reasoning_trace', '')
+                
+                # Skip if already updated in the main loop above
+                if f"reasoning_{slot_num}" in updated_slots:
+                    continue
+                
+                # Check if reasoning_trace cell already exists (but wasn't updated)
+                reasoning_heading = f"reasoning_trace_{slot_num}"
+                reasoning_exists = False
+                for cell in cells:
+                    source = cell.get('source', [])
+                    if isinstance(source, list):
+                        content = ''.join(source)
+                    else:
+                        content = str(source)
+                    match = self.HEADING_PATTERN.search(content)
+                    if match and match.group(1).lower() == reasoning_heading:
+                        # Update existing reasoning trace cell (even if empty)
+                        cell['source'] = [f"**[{reasoning_heading}]**\n\n{reasoning_trace}"]
+                        reasoning_exists = True
+                        updated_slots.add(f"reasoning_{slot_num}")
+                        print(f"DEBUG: Updated existing reasoning_trace_{slot_num} cell")
+                        break
+                
+                if not reasoning_exists:
+                    # Add new reasoning trace cell (even if empty, to ensure all 4 are present)
+                    new_cells.append({
+                        "cell_type": "markdown",
+                        "id": f"auto_reasoning_trace_{slot_num}",
+                        "metadata": {},
+                        "source": [f"**[reasoning_trace_{slot_num}]**\n\n{reasoning_trace}"]
+                    })
+                    updated_slots.add(f"reasoning_{slot_num}")
+                    print(f"DEBUG: Added new reasoning_trace_{slot_num} cell")
         
         # Insert new cells before the last cell or at the end
         print(f"DEBUG: Updated slots: {updated_slots}")

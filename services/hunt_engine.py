@@ -389,7 +389,10 @@ class HuntEngine:
                 "response": r.response,
                 "reasoning_trace": r.reasoning_trace,
                 "judge_output": r.judge_output,
-                "score": r.judge_score,
+                "judge_score": r.judge_score,  # Use judge_score for consistency
+                "judge_criteria": r.judge_criteria,  # Include criteria for LLM judge output
+                "judge_explanation": r.judge_explanation,  # Include explanation
+                "score": r.judge_score,  # Keep score for backward compatibility
                 "is_breaking": r.is_breaking
             }
             for r in session.results
