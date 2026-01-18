@@ -27,6 +27,7 @@ class NotebookParser:
     MODEL_PATTERN = re.compile(r'^(nemotron|qwen|model)_(\d+)$', re.IGNORECASE)
     LLM_JUDGE_PATTERN = re.compile(r'^llm_judge_(\d+)$', re.IGNORECASE)
     HUMAN_JUDGE_PATTERN = re.compile(r'^human_judge_(\d+)$', re.IGNORECASE)
+    REASONING_TRACE_PATTERN = re.compile(r'^reasoning_trace_(\d+)$', re.IGNORECASE)
     
     def __init__(self):
         self.notebook_data: Optional[Dict[str, Any]] = None
@@ -472,12 +473,10 @@ class NotebookParser:
                     if slot_num in slot_to_result:
                         result = slot_to_result[slot_num]
                         new_content = f"**[{heading}]**\n\n{result.get('response', '')}"
-                        # Also include reasoning trace if available
-                        if result.get('reasoning_trace'):
-                            new_content += f"\n\n**[reasoning_trace_{slot_num}]**\n\n{result.get('reasoning_trace', '')}"
+                        # Reasoning trace will be saved in separate cell
                         cell['source'] = [new_content]
                         updated_slots.add(f"model_{slot_num}")
-                        print(f"DEBUG: Updated model_{slot_num} cell with response + reasoning")
+                        print(f"DEBUG: Updated model_{slot_num} cell with response")
                 
                 # Update LLM judge slots
                 judge_match = self.LLM_JUDGE_PATTERN.match(heading)
@@ -490,15 +489,31 @@ class NotebookParser:
                         judge_criteria = result.get('judge_criteria', {})
                         judge_score = result.get('judge_score', 0)
                         judge_explanation = result.get('judge_explanation', '')
+                        judge_output_raw = result.get('judge_output', '')
                         
-                        # Format grading basis as JSON
+                        # If judge_criteria is empty, try to parse from judge_output
+                        if not judge_criteria and judge_output_raw:
+                            # Try to extract criteria from raw output
+                            import json as json_module
+                            try:
+                                # Look for JSON in the output
+                                json_match = re.search(r'\{[^{}]*"criteria"[^{}]*\}', judge_output_raw, re.DOTALL)
+                                if json_match:
+                                    parsed = json_module.loads(json_match.group(0))
+                                    judge_criteria = parsed.get('criteria', {})
+                            except:
+                                pass
+                        
+                        # Format grading basis as JSON (must have at least empty dict)
+                        if not judge_criteria:
+                            judge_criteria = {}
                         grading_json = json.dumps({k: v.upper() for k, v in judge_criteria.items()}, indent=2)
                         
                         # Format explanation with bullet points if it contains criteria
-                        formatted_explanation = judge_explanation
-                        if judge_explanation and not judge_explanation.strip().startswith('•'):
+                        formatted_explanation = judge_explanation or judge_output_raw or "No explanation provided"
+                        if formatted_explanation and not formatted_explanation.strip().startswith('•'):
                             # Try to format explanation with bullet points for each criterion
-                            lines = judge_explanation.split('\n')
+                            lines = formatted_explanation.split('\n')
                             formatted_lines = []
                             for line in lines:
                                 line = line.strip()
@@ -571,6 +586,17 @@ class NotebookParser:
                         updated_slots.add(f"human_{slot_num}")
                         print(f"DEBUG: Updated human_{slot_num} cell with judgment={judgment}")
                 
+                # Update reasoning trace slots
+                reasoning_match = self.REASONING_TRACE_PATTERN.match(heading)
+                if reasoning_match:
+                    slot_num = int(reasoning_match.group(1))
+                    if slot_num in slot_to_result:
+                        result = slot_to_result[slot_num]
+                        if result.get('reasoning_trace'):
+                            cell['source'] = [f"**[reasoning_trace_{slot_num}]**\n\n{result.get('reasoning_trace', '')}"]
+                            updated_slots.add(f"reasoning_{slot_num}")
+                            print(f"DEBUG: Updated reasoning_trace_{slot_num} cell")
+                
                 # Update attempts counter
                 if heading == 'number_of_attempts_made':
                     new_attempts = parsed.attempts_made + len(results)
@@ -580,15 +606,14 @@ class NotebookParser:
         
         # Add new cells for results that don't have slots
         new_cells = []
-        for result in results:
-            slot_num = result.get('hunt_id')
+        for i, result in enumerate(results):
+            # Use position in results list (1-4) as slot number, not hunt_id
+            slot_num = i + 1
             
             # Add model response if not updated
             if f"model_{slot_num}" not in updated_slots:
                 model_content = f"**[{model_prefix}_{slot_num}]**\n\n{result.get('response', '')}"
-                # Also add reasoning trace if available
-                if include_reasoning and result.get('reasoning_trace'):
-                    model_content += f"\n\n**[reasoning_trace_{slot_num}]**\n\n{result.get('reasoning_trace', '')}"
+                # Reasoning trace will be saved in separate cell
                 new_cells.append({
                     "cell_type": "markdown",
                     "id": f"auto_model_{slot_num}",
@@ -596,13 +621,69 @@ class NotebookParser:
                     "source": [model_content]
                 })
             
-            # Add judge output if not updated
-            if f"judge_{slot_num}" not in updated_slots:
+            # Add LLM judge if not updated
+            if f"judge_{slot_num}" not in updated_slots and slot_num in slot_to_result:
+                result = slot_to_result[slot_num]
+                # slot_num is already correct (1-4) from the loop
+                
+                # Format LLM judge output in required format
+                judge_criteria = result.get('judge_criteria', {})
+                judge_score = result.get('judge_score', 0)
+                judge_explanation = result.get('judge_explanation', '')
+                judge_output_raw = result.get('judge_output', '')
+                
+                # If judge_criteria is empty, try to parse from judge_output
+                if not judge_criteria and judge_output_raw:
+                    # Try to extract criteria from raw output
+                    try:
+                        # Look for JSON in the output
+                        json_match = re.search(r'\{[^{}]*"criteria"[^{}]*\}', judge_output_raw, re.DOTALL)
+                        if json_match:
+                            parsed = json.loads(json_match.group(0))
+                            judge_criteria = parsed.get('criteria', {})
+                    except:
+                        pass
+                
+                # Format grading basis as JSON (must have at least empty dict)
+                if not judge_criteria:
+                    judge_criteria = {}
+                grading_json = json.dumps({k: v.upper() for k, v in judge_criteria.items()}, indent=2)
+                
+                # Format explanation with bullet points
+                formatted_explanation = judge_explanation or judge_output_raw or "No explanation provided"
+                if formatted_explanation and not formatted_explanation.strip().startswith('•'):
+                    lines = formatted_explanation.split('\n')
+                    formatted_lines = []
+                    for line in lines:
+                        line = line.strip()
+                        if line:
+                            criterion_match = re.search(r'\b(C\d+)\s+(PASS|FAIL|pass|fail)', line, re.IGNORECASE)
+                            if criterion_match:
+                                criterion_id = criterion_match.group(1)
+                                status = criterion_match.group(2).upper()
+                                formatted_lines.append(f"• {criterion_id} {status}: {line}")
+                            else:
+                                formatted_lines.append(f"• {line}")
+                    if formatted_lines:
+                        formatted_explanation = '\n'.join(formatted_lines)
+                
+                llm_content = f"""[Grading Basis]:
+
+{grading_json}
+
+[Score]: {judge_score} point(s)
+
+[JSON]: {{"answer_score": {judge_score}}}
+
+[Explanation]:
+
+{formatted_explanation}"""
+                
                 new_cells.append({
                     "cell_type": "markdown",
-                    "id": f"auto_judge_{slot_num}",
+                    "id": f"auto_llm_judge_{slot_num}",
                     "metadata": {},
-                    "source": [f"**[llm_judge_{slot_num}]**\n\n{result.get('judge_output', '')}"]
+                    "source": [f"**[llm_judge_{slot_num}]**\n\n{llm_content}"]
                 })
             
             # Add human judge if not updated (always add if we have a review)
@@ -646,21 +727,38 @@ class NotebookParser:
                     "source": [f"**[human_judge_{slot_num}]**\n\n{human_content}"]
                 })
         
-        # Add reasoning traces at the end if requested (legacy format)
+        # Add reasoning traces as separate cells (reasoning_trace_1, reasoning_trace_2, etc.)
         if include_reasoning:
-            reasoning_content = ["**[reasoning_traces]**\n\n"]
-            for result in results:
+            for i, result in enumerate(results):
+                slot_num = i + 1
                 if result.get('reasoning_trace'):
-                    reasoning_content.append(f"### Hunt {result.get('hunt_id')} - {result.get('model', 'unknown')}\n\n")
-                    reasoning_content.append(f"```\n{result.get('reasoning_trace')}\n```\n\n")
-            
-            if len(reasoning_content) > 1:
-                new_cells.append({
-                    "cell_type": "markdown",
-                    "id": "auto_reasoning_traces",
-                    "metadata": {},
-                    "source": reasoning_content
-                })
+                    # Check if reasoning_trace cell already exists
+                    reasoning_heading = f"reasoning_trace_{slot_num}"
+                    reasoning_exists = False
+                    for cell in cells:
+                        source = cell.get('source', [])
+                        if isinstance(source, list):
+                            content = ''.join(source)
+                        else:
+                            content = str(source)
+                        match = self.HEADING_PATTERN.search(content)
+                        if match and match.group(1).lower() == reasoning_heading:
+                            # Update existing reasoning trace cell
+                            cell['source'] = [f"**[{reasoning_heading}]**\n\n{result.get('reasoning_trace', '')}"]
+                            reasoning_exists = True
+                            updated_slots.add(f"reasoning_{slot_num}")
+                            print(f"DEBUG: Updated reasoning_trace_{slot_num} cell")
+                            break
+                    
+                    if not reasoning_exists:
+                        # Add new reasoning trace cell
+                        new_cells.append({
+                            "cell_type": "markdown",
+                            "id": f"auto_reasoning_trace_{slot_num}",
+                            "metadata": {},
+                            "source": [f"**[reasoning_trace_{slot_num}]**\n\n{result.get('reasoning_trace', '')}"]
+                        })
+                        print(f"DEBUG: Added new reasoning_trace_{slot_num} cell")
         
         # Insert new cells before the last cell or at the end
         print(f"DEBUG: Updated slots: {updated_slots}")

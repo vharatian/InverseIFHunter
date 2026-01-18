@@ -585,8 +585,20 @@ function populatePreviewTabs(notebook) {
     }
     
     // Parse and store criteria from response_reference
-    const parsedCriteria = parseCriteria(notebook.response_reference || '');
-    state.criteria = parsedCriteria;
+    try {
+        const parsedCriteria = parseCriteria(notebook.response_reference || '');
+        state.criteria = parsedCriteria;
+    } catch (error) {
+        console.error('Failed to parse criteria:', error);
+        showToast(`❌ Failed to parse criteria: ${error.message}. Please fix the response_reference format.`, 'error');
+        state.criteria = null;
+        // Disable hunt button
+        if (elements.startHuntBtn) {
+            elements.startHuntBtn.disabled = true;
+            elements.startHuntBtn.title = `Criteria Parse Error: ${error.message}`;
+        }
+        return;
+    }
     
     // Store initial criteria to detect missing ones later
     // CRITICAL: Only set initialCriteria ONCE when notebook is first loaded
@@ -633,7 +645,18 @@ function validateModelReferenceAndCriteria(responseReference) {
     }
     
     // Step 2: JSON is valid, now check criteria completeness
-    const currentCriteria = parseCriteria(responseReference);
+    let currentCriteria;
+    try {
+        currentCriteria = parseCriteria(responseReference);
+    } catch (error) {
+        console.error('Failed to parse criteria:', error);
+        showToast(`❌ Failed to parse criteria: ${error.message}`, 'error');
+        if (elements.startHuntBtn) {
+            elements.startHuntBtn.disabled = true;
+            elements.startHuntBtn.title = `Criteria Parse Error: ${error.message}`;
+        }
+        return;
+    }
     const currentCriteriaIds = new Set(currentCriteria.map(c => c.id));
     const initialCriteriaIds = new Set((state.initialCriteria || []).map(c => c.id));
     const missingCriteriaIds = [...initialCriteriaIds].filter(id => !currentCriteriaIds.has(id));
@@ -727,10 +750,12 @@ function validateModelReferenceJSON(responseReference) {
 
 // Parse criteria from response_reference text
 // Only parses the JSON array between [ and ], ignoring any text outside
+// STRICT MODE: No fallback - throws error if parsing fails
 function parseCriteria(responseReference) {
     if (!responseReference || !responseReference.trim()) {
-        console.warn('Empty response_reference, using default criteria');
-        return getDefaultCriteria();
+        const error = 'Empty response_reference - cannot parse criteria';
+        console.error(error);
+        throw new Error(error);
     }
     
     try {
@@ -738,20 +763,22 @@ function parseCriteria(responseReference) {
         const arrayMatch = responseReference.match(/\[[\s\S]*?\]/);
         
         if (!arrayMatch) {
-            console.warn('No JSON array found between [ and ], using default criteria');
-            return getDefaultCriteria();
+            const error = 'No JSON array found between [ and ] brackets in response_reference';
+            console.error(error);
+            throw new Error(error);
         }
         
         const jsonArrayStr = arrayMatch[0];
         const criteriaArray = JSON.parse(jsonArrayStr);
         
         if (!Array.isArray(criteriaArray) || criteriaArray.length === 0) {
-            console.warn('JSON array is empty or invalid, using default criteria');
-            return getDefaultCriteria();
+            const error = 'JSON array is empty or invalid - must contain at least one criterion';
+            console.error(error);
+            throw new Error(error);
         }
         
         // Parse each criterion item
-            const criteria = [];
+        const criteria = [];
         for (let idx = 0; idx < criteriaArray.length; idx++) {
             const item = criteriaArray[idx];
             
@@ -785,7 +812,7 @@ function parseCriteria(responseReference) {
             return criteria;
         }
         
-        // Fallback: Look for embedded JSON object (legacy support)
+        // Try alternative format: JSON object with C1, C2 keys
         const jsonObjMatch = responseReference.match(/\{[\s\S]*?"C\d+"[\s\S]*?\}/);
         if (jsonObjMatch) {
             try {
@@ -804,17 +831,23 @@ function parseCriteria(responseReference) {
                     return criteria;
                 }
             } catch (e) {
-                // Continue to next method
+                // Continue to throw error
             }
         }
         
+        const error = 'Could not extract valid criteria from response_reference JSON array';
+        console.error(error);
+        throw new Error(error);
+        
     } catch (e) {
-        console.warn('Could not parse criteria from response_reference:', e);
+        if (e instanceof SyntaxError || e.message.includes('JSON')) {
+            const error = `JSON parse error in response_reference: ${e.message}`;
+            console.error(error);
+            throw new Error(error);
+        }
+        // Re-throw if it's already our custom error
+        throw e;
     }
-    
-    // Fallback: create default criteria
-    console.log('Using default criteria fallback');
-    return getDefaultCriteria();
 }
 
 function getDefaultCriteria() {
@@ -1222,8 +1255,16 @@ function displaySelectionCards() {
     // NO auto-selection - human picks all 4 manually
     state.selectedHuntIds = [];
     
-    // Create cards for all responses
-    state.allResponses.forEach((result, index) => {
+    // Filter to only show broken hunts (judge_score === 0)
+    const brokenHunts = state.allResponses.filter(r => r.judge_score === 0);
+    
+    if (brokenHunts.length === 0) {
+        grid.innerHTML = '<div style="text-align: center; padding: 2rem; color: var(--text-muted);">No broken hunts found. Run more hunts to find model breaks.</div>';
+        return;
+    }
+    
+    // Create cards for only broken responses
+    brokenHunts.forEach((result, index) => {
         const isSelected = state.selectedHuntIds.includes(result.hunt_id);
         const isFailed = result.judge_score === 0;
         const shortModel = (result.model || 'unknown').split('/').pop().substring(0, 20);
@@ -2393,7 +2434,14 @@ async function judgeReferenceResponse() {
     // Check for missing criteria before judging
     // Compare initial criteria with current criteria from preview
     const currentRefText = elements.modelrefPreview?.textContent || '';
-    const currentCriteria = parseCriteria(currentRefText);
+    let currentCriteria;
+    try {
+        currentCriteria = parseCriteria(currentRefText);
+    } catch (error) {
+        console.error('Failed to parse criteria:', error);
+        showToast(`❌ Failed to parse criteria: ${error.message}`, 'error');
+        return;
+    }
     const currentCriteriaIds = new Set(currentCriteria.map(c => c.id));
     const initialCriteriaIds = new Set((state.initialCriteria || []).map(c => c.id));
     const missingBeforeJudge = [...initialCriteriaIds].filter(id => !currentCriteriaIds.has(id));
@@ -2495,9 +2543,15 @@ async function judgeReferenceResponse() {
         let currentCriteria = [];
         if (data.response_reference) {
             console.log('Re-parsing criteria from fresh response_reference');
-            currentCriteria = parseCriteria(data.response_reference);
-            state.criteria = currentCriteria;
-            console.log('Updated state.criteria IDs (from response_reference):', state.criteria.map(c => c.id));
+            try {
+                currentCriteria = parseCriteria(data.response_reference);
+                state.criteria = currentCriteria;
+                console.log('Updated state.criteria IDs (from response_reference):', state.criteria.map(c => c.id));
+            } catch (error) {
+                console.error('Failed to parse criteria:', error);
+                showToast(`❌ Failed to parse criteria: ${error.message}`, 'error');
+                return;
+            }
         } else {
             // Fallback: Update state.criteria based on what was actually judged
             const judgedCriteriaIds = new Set(Object.keys(criteria));
@@ -2758,7 +2812,14 @@ async function saveAndRejudge() {
     
     // Check minimum 3 criteria requirement
     const currentRefText = elements.modelrefPreview?.textContent || '';
-    const currentCriteria = parseCriteria(currentRefText);
+    let currentCriteria;
+    try {
+        currentCriteria = parseCriteria(currentRefText);
+    } catch (error) {
+        console.error('Failed to parse criteria:', error);
+        showToast(`❌ Failed to parse criteria: ${error.message}`, 'error');
+        return;
+    }
     if (currentCriteria.length < 3) {
         showToast(`❌ Minimum 3 criteria required. Currently have ${currentCriteria.length}. Please add more criteria before saving.`, 'error');
         return;
@@ -2824,9 +2885,15 @@ async function saveAndRejudge() {
         let currentCriteria = [];
         if (data.response_reference) {
             console.log('Re-parsing criteria from fresh response_reference (saveAndRejudge)');
-            currentCriteria = parseCriteria(data.response_reference);
-            state.criteria = currentCriteria;
-            console.log('Updated state.criteria IDs (from response_reference):', state.criteria.map(c => c.id));
+            try {
+                currentCriteria = parseCriteria(data.response_reference);
+                state.criteria = currentCriteria;
+                console.log('Updated state.criteria IDs (from response_reference):', state.criteria.map(c => c.id));
+            } catch (error) {
+                console.error('Failed to parse criteria:', error);
+                showToast(`❌ Failed to parse criteria: ${error.message}`, 'error');
+                return;
+            }
         } else {
             // Fallback: Update state.criteria based on what was actually judged
             const judgedCriteriaIds = new Set(Object.keys(criteria));
