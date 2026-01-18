@@ -576,6 +576,18 @@ async def save_to_drive(session_id: str, request: Request):
             results = sorted(results, key=lambda r: normalized_selected.index(int(r.get('hunt_id', 0))) if int(r.get('hunt_id', 0)) in normalized_selected else 999)
             print(f"DEBUG: Filtering to {len(results)} selected results out of {len(all_results)} total")
             print(f"DEBUG: Selected hunt_ids: {normalized_selected}, Found results: {[r.get('hunt_id') for r in results]}")
+            
+            # CRITICAL: Check if all selected hunt_ids were found
+            found_hunt_ids = [int(r.get('hunt_id', 0)) for r in results]
+            missing_hunt_ids = [hid for hid in normalized_selected if hid not in found_hunt_ids]
+            if missing_hunt_ids:
+                print(f"ERROR: Selected hunt_ids {missing_hunt_ids} not found in all_results!")
+                print(f"ERROR: This will cause empty slots. Available hunt_ids: {[int(r.get('hunt_id', 0)) for r in all_results]}")
+                # This is a critical error - we can't save properly if hunt_ids are missing
+                raise HTTPException(400, f"Selected hunt_ids {missing_hunt_ids} not found in results. Available: {[int(r.get('hunt_id', 0)) for r in all_results]}")
+            
+            if len(results) < 4:
+                print(f"WARNING: Only {len(results)} results found, but 4 slots will be created. Slots {len(results)+1}-4 will be empty.")
         else:
             # Fallback: use all if no selection provided
             results = all_results
