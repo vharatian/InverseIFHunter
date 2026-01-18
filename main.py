@@ -566,11 +566,14 @@ async def save_to_drive(session_id: str, request: Request):
         # Generate content - FILTER to only selected results
         original_content = storage.get("original_content")
         all_results = hunt_engine.export_results(session_id)
+        print(f"DEBUG: Total results from export_results: {len(all_results)}")
+        print(f"DEBUG: All result hunt_ids: {[r.get('hunt_id') for r in all_results]}")
         
         # Filter results to only include selected hunt IDs
         # Normalize hunt_ids to integers for comparison (handle both string and int)
         if selected_hunt_ids:
             normalized_selected = [int(hid) if isinstance(hid, str) else hid for hid in selected_hunt_ids]
+            print(f"DEBUG: Selected hunt_ids (normalized): {normalized_selected}")
             results = [r for r in all_results if int(r.get('hunt_id', 0)) in normalized_selected]
             # Preserve order of selected_hunt_ids
             results = sorted(results, key=lambda r: normalized_selected.index(int(r.get('hunt_id', 0))) if int(r.get('hunt_id', 0)) in normalized_selected else 999)
@@ -583,6 +586,16 @@ async def save_to_drive(session_id: str, request: Request):
             if missing_hunt_ids:
                 print(f"ERROR: Selected hunt_ids {missing_hunt_ids} not found in all_results!")
                 print(f"ERROR: This will cause empty slots. Available hunt_ids: {[int(r.get('hunt_id', 0)) for r in all_results]}")
+                # Check session results directly to see all hunt_ids (including non-completed)
+                session = hunt_engine.get_session(session_id)
+                if session:
+                    all_session_hunt_ids = [r.hunt_id for r in session.results]
+                    print(f"DEBUG: All session hunt_ids (including non-completed): {all_session_hunt_ids}")
+                    missing_results = [r for r in session.results if r.hunt_id in missing_hunt_ids]
+                    if missing_results:
+                        print(f"DEBUG: Missing hunt_ids found in session but not completed:")
+                        for r in missing_results:
+                            print(f"  - hunt_id {r.hunt_id}: status={r.status.value}, has_response={bool(r.response)}")
                 # This is a critical error - we can't save properly if hunt_ids are missing
                 raise HTTPException(400, f"Selected hunt_ids {missing_hunt_ids} not found in results. Available: {[int(r.get('hunt_id', 0)) for r in all_results]}")
             
