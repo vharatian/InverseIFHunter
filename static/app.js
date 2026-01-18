@@ -1371,35 +1371,50 @@ function toggleResponseSelection(huntId, card) {
             return;
         }
         
-        // Get current selection breakdown
+        // Get current selection breakdown (BEFORE adding the new one)
         const selectedResults = state.selectedHuntIds.map(id => 
             state.allResponses.find(r => r.hunt_id === id)
         ).filter(r => r);
-        const breakingCount = selectedResults.filter(r => r.judge_score === 0).length;
-        const passingCount = selectedResults.filter(r => r.judge_score > 0).length;
+        const currentBreakingCount = selectedResults.filter(r => r.judge_score === 0).length;
+        const currentPassingCount = selectedResults.filter(r => r.judge_score > 0).length;
         
-        // Calculate what the counts would be after adding this one
-        const newBreakingCount = breakingCount + (isBreaking ? 1 : 0);
-        const newPassingCount = passingCount + (isBreaking ? 0 : 1);
+        // Calculate what the counts would be AFTER adding this one
+        const newBreakingCount = currentBreakingCount + (isBreaking ? 1 : 0);
+        const newPassingCount = currentPassingCount + (isBreaking ? 0 : 1);
         
-        // Validate: Only allow 4 breaking OR 3 breaking + 1 passing
-        const isValidCombination = 
-            (newBreakingCount === 4 && newPassingCount === 0) ||  // All 4 breaking
-            (newBreakingCount === 3 && newPassingCount === 1);    // 3 breaking + 1 passing
-        
-        if (!isValidCombination && state.selectedHuntIds.length === 3) {
-            // About to select the 4th one, check if it's valid
-            checkbox.checked = false;
-            if (newBreakingCount < 3) {
-                showToast('Invalid combination. Need either 4 breaking OR 3 breaking + 1 passing. You need more breaking hunts.', 'warning');
-            } else if (newBreakingCount === 3 && newPassingCount > 1) {
-                showToast('Invalid combination. Can only have 1 passing hunt. Select a breaking hunt instead.', 'warning');
-            } else if (newBreakingCount > 4 || newPassingCount > 1) {
-                showToast('Invalid combination. Need either 4 breaking OR 3 breaking + 1 passing.', 'warning');
+        // Only validate when we're about to complete the selection (selecting the 4th item)
+        if (state.selectedHuntIds.length === 3) {
+            // Validate: Only allow 4 breaking OR 3 breaking + 1 passing
+            const isValidCombination = 
+                (newBreakingCount === 4 && newPassingCount === 0) ||  // All 4 breaking
+                (newBreakingCount === 3 && newPassingCount === 1);    // 3 breaking + 1 passing
+            
+            console.log('🔍 Selection validation:', {
+                currentBreaking: currentBreakingCount,
+                currentPassing: currentPassingCount,
+                isAddingBreaking: isBreaking,
+                newBreaking: newBreakingCount,
+                newPassing: newPassingCount,
+                isValid: isValidCombination
+            });
+            
+            if (!isValidCombination) {
+                checkbox.checked = false;
+                // Provide specific error messages
+                if (newBreakingCount < 3) {
+                    showToast(`Invalid combination: ${newBreakingCount} breaking, ${newPassingCount} passing. Need either 4 breaking OR 3 breaking + 1 passing. Select more breaking hunts.`, 'warning');
+                } else if (newBreakingCount === 3 && newPassingCount > 1) {
+                    showToast('Invalid combination. Can only have 1 passing hunt. Select a breaking hunt instead.', 'warning');
+                } else if (newBreakingCount === 4 && newPassingCount > 0) {
+                    showToast('Invalid combination. If selecting 4 breaking, cannot have any passing hunts. Unselect a passing hunt first.', 'warning');
+                } else {
+                    showToast(`Invalid combination: ${newBreakingCount} breaking, ${newPassingCount} passing. Need either 4 breaking OR 3 breaking + 1 passing.`, 'warning');
+                }
+                return;
             }
-            return;
         }
         
+        // Allow selection if we're not at 4 yet, or if the combination is valid
         state.selectedHuntIds.push(huntId);
         card.classList.add('selected');
         card.style.borderColor = 'var(--accent-primary)';
