@@ -1361,6 +1361,7 @@ function displaySelectionCards() {
                 const checkbox = card.querySelector('.selection-checkbox');
                 checkbox.checked = !checkbox.checked;
             }
+            // Pass the original hunt_id (not normalized) to maintain consistency
             toggleResponseSelection(result.hunt_id, card);
         });
         
