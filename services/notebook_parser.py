@@ -476,52 +476,38 @@ class NotebookParser:
                 huntid_to_review[int(slot_num)] = review
                 print(f"DEBUG: Slot {slot_num} has review: {review.get('judgment')}, notes: {review.get('notes', '')[:30]}...")
         
-        # Update existing cells and track which slots we've updated
-        updated_slots = set()
-        
-        for cell in cells:
+        # Helper function to get cell heading
+        def get_cell_heading(cell):
             source = cell.get('source', [])
             if isinstance(source, list):
                 content = ''.join(source)
             else:
                 content = str(source)
-            
             match = self.HEADING_PATTERN.search(content)
             if match:
-                heading_lower = match.group(1).lower()  # For matching
-                heading_original = match.group(1)  # Preserve original case for writing
-                
-                # PRESERVE original response_reference and judge_system_prompt - DO NOT OVERWRITE
-                if heading_lower == 'response_reference' or heading_lower == 'judge_system_prompt':
-                    # Keep original content intact - these should never be modified
-                    continue
-                
-                # Update model response slots (qwen_1, qwen_2, etc.) - ALWAYS update if heading matches
+                return match.group(1).lower(), match.group(1)
+            return None, None
+        
+        # Helper function to determine cell type and slot
+        def get_cell_type_and_slot(heading_lower):
+            if not heading_lower:
+                return None, None
                 model_match = self.MODEL_PATTERN.match(heading_lower)
                 if model_match:
-                    slot_num = int(model_match.group(2))
-                    # Always update with latest data, even if empty
-                    result = slot_to_result.get(slot_num)
-                    if not result and slot_num <= len(results):
-                        result = results[slot_num - 1]  # Fallback to direct indexing
-                    response_text = result.get('response', '') if result else ''
-                    new_content = f"**[{heading_original}]**\n\n{response_text}"
-                    # Reasoning trace will be saved in separate cell
-                    cell['source'] = [new_content]
-                    updated_slots.add(f"model_{slot_num}")
-                    print(f"DEBUG: Updated model_{slot_num} cell with response (length: {len(response_text)})")
-                
-                # Update LLM judge slots - ALWAYS update if heading matches
+                return 'model', int(model_match.group(2))
                 judge_match = self.LLM_JUDGE_PATTERN.match(heading_lower)
                 if judge_match:
-                    slot_num = int(judge_match.group(1))
-                    # Always update with latest data, even if empty
-                    result = slot_to_result.get(slot_num)
-                    if not result and slot_num <= len(results):
-                        result = results[slot_num - 1]  # Fallback to direct indexing
-                    
-                    # Format LLM judge output in required format
-                    # Try judge_score first, then fall back to score for backward compatibility
+                return 'llm_judge', int(judge_match.group(1))
+            human_match = self.HUMAN_JUDGE_PATTERN.match(heading_lower)
+            if human_match:
+                return 'human_judge', int(human_match.group(1))
+            reasoning_match = self.REASONING_TRACE_PATTERN.match(heading_lower)
+            if reasoning_match:
+                return 'reasoning_trace', int(reasoning_match.group(1))
+            return None, None
+        
+        # Helper function to format LLM judge content
+        def format_llm_judge_content(result):
                     judge_criteria = result.get('judge_criteria', {}) if result else {}
                     judge_score = (result.get('judge_score') or result.get('score', 0)) if result else 0
                     judge_explanation = result.get('judge_explanation', '') if result else ''
@@ -529,10 +515,8 @@ class NotebookParser:
                     
                     # If judge_criteria is empty, try to parse from judge_output
                     if not judge_criteria and judge_output_raw:
-                        # Try to extract criteria from raw output
                         import json as json_module
                         try:
-                            # Look for JSON in the output
                             json_match = re.search(r'\{[^{}]*"criteria"[^{}]*\}', judge_output_raw, re.DOTALL)
                             if json_match:
                                 parsed = json_module.loads(json_match.group(0))
@@ -540,33 +524,28 @@ class NotebookParser:
                         except:
                             pass
                     
-                    # Format grading basis as JSON (must have at least empty dict)
                     if not judge_criteria:
                         judge_criteria = {}
                     grading_json = json.dumps({k: v.upper() for k, v in judge_criteria.items()}, indent=2)
                     
-                    # Format explanation with bullet points if it contains criteria
                     formatted_explanation = judge_explanation or judge_output_raw or "No explanation provided"
                     if formatted_explanation and not formatted_explanation.strip().startswith('•'):
-                        # Try to format explanation with bullet points for each criterion
                         lines = formatted_explanation.split('\n')
                         formatted_lines = []
                         for line in lines:
                             line = line.strip()
                             if line:
-                                # Check if line mentions a criterion (C1, C2, etc.)
                                 criterion_match = re.search(r'\b(C\d+)\s+(PASS|FAIL|pass|fail)', line, re.IGNORECASE)
                                 if criterion_match:
                                     criterion_id = criterion_match.group(1)
                                     status = criterion_match.group(2).upper()
-                                    # Format as bullet point
                                     formatted_lines.append(f"• {criterion_id} {status}: {line}")
                                 else:
                                     formatted_lines.append(f"• {line}")
                         if formatted_lines:
                             formatted_explanation = '\n'.join(formatted_lines)
                     
-                    llm_content = f"""[Grading Basis]:
+            return f"""[Grading Basis]:
 
 {grading_json}
 
@@ -578,35 +557,20 @@ class NotebookParser:
 
 {formatted_explanation}"""
                     
-                    new_content = f"**[{heading_original}]**\n\n{llm_content}"
-                    cell['source'] = [new_content]
-                    updated_slots.add(f"judge_{slot_num}")
-                    print(f"DEBUG: Updated judge_{slot_num} cell with formatted output")
-                
-                # Update human judge slots - ALWAYS update if heading matches
-                human_match = self.HUMAN_JUDGE_PATTERN.match(heading_lower) if hasattr(self, 'HUMAN_JUDGE_PATTERN') else re.match(r'human_judge_(\d+)', heading_lower)
-                if human_match:
-                    slot_num = int(human_match.group(1))
-                    # Always update with latest data, even if empty
-                    review = huntid_to_review.get(slot_num)
-                    judgment = review.get('judgment', 'unknown').upper() if review else 'unknown'
-                    
-                    # Format grading basis as JSON
+        # Helper function to format human judge content
+        def format_human_judge_content(review):
                     grading_basis = review.get('grading_basis', {}) if review else {}
                     if grading_basis:
                         grading_json = json.dumps({k: v.upper() for k, v in grading_basis.items()}, indent=2)
                     else:
                         grading_json = "{}"
                     
-                    # Calculate score (count PASS criteria)
                     pass_count = sum(1 for v in grading_basis.values() if v.upper() == 'PASS')
                     score = 1 if pass_count > len(grading_basis) / 2 else 0
                     
-                    # Get explanation
                     explanation = (review.get('explanation', '') or review.get('notes', '')) if review else ''
                     
-                    # Build human content in required format
-                    human_content = f"""[Grading Basis]:
+            return f"""[Grading Basis]:
 
 {grading_json}
 
@@ -617,311 +581,171 @@ class NotebookParser:
 [Explanation]:
 
 {explanation}"""
-                    new_content = f"**[{heading_original}]**\n\n{human_content}"
-                    cell['source'] = [new_content]
-                    updated_slots.add(f"human_{slot_num}")
-                    print(f"DEBUG: Updated human_{slot_num} cell with judgment={judgment}")
-                
-                # Update reasoning trace slots - ALWAYS update if heading matches (even if empty)
-                reasoning_match = self.REASONING_TRACE_PATTERN.match(heading_lower)
-                if reasoning_match:
-                    slot_num = int(reasoning_match.group(1))
-                    # Always update with latest data, even if empty
+        
+        # Step 1: Update existing cells with new content and separate slot cells from non-slot cells
+        slot_cells_dict = {}  # {(slot_num, cell_type): cell}
+        non_slot_cells = []  # All other cells (metadata, prompt, response_reference, etc.)
+        updated_slots = set()
+        
+        for cell in cells:
+            heading_lower, heading_original = get_cell_heading(cell)
+            
+            if not heading_lower:
+                # Cell has no heading, keep as-is in non-slot cells
+                non_slot_cells.append(cell)
+                continue
+            
+            # PRESERVE original response_reference and judge_system_prompt - DO NOT OVERWRITE
+            if heading_lower == 'response_reference' or heading_lower == 'judge_system_prompt':
+                non_slot_cells.append(cell)
+                continue
+            
+            # Check if this is a slot cell
+            cell_type, slot_num = get_cell_type_and_slot(heading_lower)
+            
+            if cell_type and slot_num:
+                # This is a slot cell - update it and track it
+                if cell_type == 'model':
                     result = slot_to_result.get(slot_num)
                     if not result and slot_num <= len(results):
-                        result = results[slot_num - 1]  # Fallback to direct indexing
-                    reasoning_trace = result.get('reasoning_trace', '') if result else ''
-                    # Preserve original heading format
-                    cell['source'] = [f"**[{heading_original}]**\n\n{reasoning_trace}"]
-                    updated_slots.add(f"reasoning_{slot_num}")
-                    print(f"DEBUG: Updated reasoning_trace_{slot_num} cell (length: {len(reasoning_trace)})")
+                        result = results[slot_num - 1]
+                    response_text = result.get('response', '') if result else ''
+                    cell['source'] = [f"**[{heading_original}]**\n\n{response_text}"]
+                    updated_slots.add(f"model_{slot_num}")
+                    slot_cells_dict[(slot_num, 'model')] = cell
+                    print(f"DEBUG: Updated model_{slot_num} cell")
                 
-                # Update attempts counter - use total_hunts_ran instead of parsed.attempts_made + len(results)
-                if heading_lower == 'number_of_attempts_made':
-                    new_attempts = total_hunts_ran  # Use total_hunts_ran directly
-                    # Clamp attempts to valid range: min 1, max 8
-                    new_attempts = max(1, min(8, new_attempts))
-                    # Preserve original heading format
-                    attempts_heading = heading_original if 'number_of_attempts_made' in heading_lower else 'number_of_attempts_made'
-                    cell['source'] = [f"**[{attempts_heading}]**:\n\n{new_attempts}"]
-                    updated_slots.add('number_of_attempts_made')
-                    print(f"DEBUG: Updated existing attempts cell to {new_attempts} (from total_hunts_ran)")
-        
-        # Add new cells for results that don't have slots
-        # CRITICAL: Always create exactly 4 slots (1-4) regardless of results length
-        new_cells = []
-        
-        for slot_num in range(1, 5):  # Always create slots 1-4
-            # Get result for this slot - ALWAYS use slot_to_result mapping first (correct mapping)
-            slot_result = None
-            if slot_num in slot_to_result:
-                slot_result = slot_to_result[slot_num]
-            # Fallback to direct indexing only if not in mapping
-            elif slot_num <= len(results):
-                slot_result = results[slot_num - 1]  # 0-indexed
-                print(f"DEBUG: Slot {slot_num} not in slot_to_result, using direct index {slot_num - 1}")
-            
-            # Debug: Log response length for troubleshooting
-            if slot_result:
-                response_len = len(slot_result.get('response', ''))
-                print(f"DEBUG: Slot {slot_num} - response length: {response_len}, preview: {slot_result.get('response', '')[:50]}...")
+                elif cell_type == 'llm_judge':
+                    result = slot_to_result.get(slot_num)
+                    if not result and slot_num <= len(results):
+                        result = results[slot_num - 1]
+                    llm_content = format_llm_judge_content(result)
+                    cell['source'] = [f"**[{heading_original}]**\n\n{llm_content}"]
+                    updated_slots.add(f"judge_{slot_num}")
+                    slot_cells_dict[(slot_num, 'llm_judge')] = cell
+                    print(f"DEBUG: Updated llm_judge_{slot_num} cell")
+                
+                elif cell_type == 'human_judge':
+                    review = huntid_to_review.get(slot_num)
+                    human_content = format_human_judge_content(review)
+                    cell['source'] = [f"**[{heading_original}]**\n\n{human_content}"]
+                    updated_slots.add(f"human_{slot_num}")
+                    slot_cells_dict[(slot_num, 'human_judge')] = cell
+                    print(f"DEBUG: Updated human_judge_{slot_num} cell")
+                
+                elif cell_type == 'reasoning_trace':
+                    if include_reasoning:
+                        result = slot_to_result.get(slot_num)
+                        if not result and slot_num <= len(results):
+                            result = results[slot_num - 1]
+                        reasoning_trace = result.get('reasoning_trace', '') if result else ''
+                        cell['source'] = [f"**[{heading_original}]**\n\n{reasoning_trace}"]
+                        updated_slots.add(f"reasoning_{slot_num}")
+                        slot_cells_dict[(slot_num, 'reasoning_trace')] = cell
+                        print(f"DEBUG: Updated reasoning_trace_{slot_num} cell")
+                    else:
+                        # Skip reasoning trace if not included
+                        continue
             else:
-                print(f"DEBUG: Slot {slot_num} - no result found")
+                # Not a slot cell - check if it's number_of_attempts_made
+                if heading_lower == 'number_of_attempts_made':
+                    new_attempts = total_hunts_ran
+                    new_attempts = max(1, min(8, new_attempts))
+                    cell['source'] = [f"**[{heading_original}]**:\n\n{new_attempts}"]
+                    updated_slots.add('number_of_attempts_made')
+                    print(f"DEBUG: Updated number_of_attempts_made cell to {new_attempts}")
+                # Keep all non-slot cells in their original order (for now)
+                non_slot_cells.append(cell)
+        
+        # Step 2: Create missing slot cells
+        for slot_num in range(1, 5):  # Always create slots 1-4
+            slot_result = slot_to_result.get(slot_num)
+            if not slot_result and slot_num <= len(results):
+                slot_result = results[slot_num - 1]
             
-            # Add model response if not updated - ALWAYS create for all 4 slots
-            if f"model_{slot_num}" not in updated_slots:
+            # Create model cell if missing
+            if (slot_num, 'model') not in slot_cells_dict:
                 response_text = slot_result.get('response', '') if slot_result else ''
-                model_content = f"**[{model_prefix_capitalized}_{slot_num}]**\n\n{response_text}"
-                # Reasoning trace will be saved in separate cell
-                new_cells.append({
+                slot_cells_dict[(slot_num, 'model')] = {
                     "cell_type": "markdown",
                     "id": f"auto_model_{slot_num}",
                     "metadata": {},
-                    "source": [model_content]
-                })
-                print(f"DEBUG: Added model cell for slot {slot_num} with prefix {model_prefix_capitalized}")
+                    "source": [f"**[{model_prefix_capitalized}_{slot_num}]**\n\n{response_text}"]
+                }
+                print(f"DEBUG: Created model_{slot_num} cell")
             
-            # Add LLM judge if not updated - ALWAYS create for all 4 slots, even if data is missing
-            if f"judge_{slot_num}" not in updated_slots:
-                # Use slot_result or empty dict
-                judge_result = slot_result or {}
-                
-                # Format LLM judge output in required format
-                # Try judge_score first, then fall back to score for backward compatibility
-                judge_criteria = judge_result.get('judge_criteria', {})
-                judge_score = judge_result.get('judge_score') or judge_result.get('score', 0)
-                judge_explanation = judge_result.get('judge_explanation', '')
-                judge_output_raw = judge_result.get('judge_output', '')
-                
-                # If judge_criteria is empty, try to parse from judge_output
-                if not judge_criteria and judge_output_raw:
-                    # Try to extract criteria from raw output
-                    try:
-                        # Look for JSON in the output
-                        json_match = re.search(r'\{[^{}]*"criteria"[^{}]*\}', judge_output_raw, re.DOTALL)
-                        if json_match:
-                            parsed = json.loads(json_match.group(0))
-                            judge_criteria = parsed.get('criteria', {})
-                    except:
-                        pass
-                
-                # Format grading basis as JSON (must have at least empty dict)
-                if not judge_criteria:
-                    judge_criteria = {}
-                grading_json = json.dumps({k: v.upper() for k, v in judge_criteria.items()}, indent=2)
-                
-                # Format explanation with bullet points
-                formatted_explanation = judge_explanation or judge_output_raw or "No explanation provided"
-                if formatted_explanation and not formatted_explanation.strip().startswith('•'):
-                    lines = formatted_explanation.split('\n')
-                    formatted_lines = []
-                    for line in lines:
-                        line = line.strip()
-                        if line:
-                            criterion_match = re.search(r'\b(C\d+)\s+(PASS|FAIL|pass|fail)', line, re.IGNORECASE)
-                            if criterion_match:
-                                criterion_id = criterion_match.group(1)
-                                status = criterion_match.group(2).upper()
-                                formatted_lines.append(f"• {criterion_id} {status}: {line}")
-                            else:
-                                formatted_lines.append(f"• {line}")
-                    if formatted_lines:
-                        formatted_explanation = '\n'.join(formatted_lines)
-                
-                llm_content = f"""[Grading Basis]:
-
-{grading_json}
-
-[Score]: {judge_score} point(s)
-
-[JSON]: {{"answer_score": {judge_score}}}
-
-[Explanation]:
-
-{formatted_explanation}"""
-                
-                new_cells.append({
+            # Create llm_judge cell if missing
+            if (slot_num, 'llm_judge') not in slot_cells_dict:
+                llm_content = format_llm_judge_content(slot_result)
+                slot_cells_dict[(slot_num, 'llm_judge')] = {
                     "cell_type": "markdown",
                     "id": f"auto_llm_judge_{slot_num}",
                     "metadata": {},
                     "source": [f"**[llm_judge_{slot_num}]**\n\n{llm_content}"]
-                })
-                print(f"DEBUG: Added LLM judge cell for slot {slot_num}")
+                }
+                print(f"DEBUG: Created llm_judge_{slot_num} cell")
             
-            # Add human judge if not updated - ALWAYS create for all 4 slots, even if review is missing
-            if f"human_{slot_num}" not in updated_slots:
-                review = huntid_to_review.get(slot_num, {})  # Get review or empty dict if missing
-                judgment = review.get('judgment', 'unknown').upper() if review else 'unknown'
-                
-                # Format grading basis as JSON
-                grading_basis = review.get('grading_basis', {}) if review else {}
-                if grading_basis:
-                    # Create JSON format for grading
-                    grading_json = json.dumps({k: v.upper() for k, v in grading_basis.items()}, indent=2)
-                else:
-                    grading_json = "{}"
-                
-                # Calculate score (FAIL = 0, PASS = 1 per criterion)
-                pass_count = sum(1 for v in grading_basis.values() if v.upper() == 'PASS')
-                total_criteria = len(grading_basis) if grading_basis else 4
-                score = 1 if pass_count > total_criteria / 2 else 0
-                
-                # Get explanation
-                explanation = review.get('explanation', '') or review.get('notes', '') if review else ''
-                
-                # Build human content in required format
-                human_content = f"""[Grading Basis]:
-
-{grading_json}
-
-[Score]: {score} point(s)
-
-[JSON]: {{"answer_score": {score}}}
-
-[Explanation]:
-
-{explanation}"""
-                    
-                new_cells.append({
+            # Create human_judge cell if missing
+            if (slot_num, 'human_judge') not in slot_cells_dict:
+                review = huntid_to_review.get(slot_num, {})
+                human_content = format_human_judge_content(review)
+                slot_cells_dict[(slot_num, 'human_judge')] = {
                     "cell_type": "markdown",
                     "id": f"auto_human_{slot_num}",
                     "metadata": {},
                     "source": [f"**[human_judge_{slot_num}]**\n\n{human_content}"]
-                })
-                print(f"DEBUG: Added human judge cell for slot {slot_num}")
-        
-        # Remove any combined reasoning_traces cells (we only want individual cells)
-        cells = [cell for cell in cells if not (
-            isinstance(cell.get('source'), list) and 
-            any('**[reasoning_traces]**' in str(s).lower() for s in cell.get('source', []))
-        )]
-        
-        # Add reasoning traces as separate cells (reasoning_trace_1, reasoning_trace_2, etc.)
-        # CRITICAL: Always create ALL 4 reasoning traces (1-4), even if empty
-        if include_reasoning:
-            for slot_num in range(1, 5):  # Always create slots 1-4
-                # Skip if already updated in the main loop above
-                if f"reasoning_{slot_num}" in updated_slots:
-                    continue
-                
-                # Get reasoning trace from result if available - ALWAYS use slot_to_result mapping first (correct mapping)
-                reasoning_trace = ''
-                if slot_num in slot_to_result:
-                    reasoning_trace = slot_to_result[slot_num].get('reasoning_trace', '')
-                # Fallback to direct indexing only if not in mapping
-                elif slot_num <= len(results):
-                    reasoning_trace = results[slot_num - 1].get('reasoning_trace', '')
-                    print(f"DEBUG: Slot {slot_num} reasoning not in slot_to_result, using direct index {slot_num - 1}")
-                
-                # Check if reasoning_trace cell already exists (but wasn't updated)
-                reasoning_heading = f"reasoning_trace_{slot_num}"
-                reasoning_exists = False
-                for cell in cells:
-                    source = cell.get('source', [])
-                    if isinstance(source, list):
-                        content = ''.join(source)
-                    else:
-                        content = str(source)
-                    match = self.HEADING_PATTERN.search(content)
-                    if match and match.group(1).lower() == reasoning_heading:
-                        # Update existing reasoning trace cell (even if empty)
-                        # Preserve original heading format
-                        original_heading = match.group(1)
-                        cell['source'] = [f"**[{original_heading}]**\n\n{reasoning_trace}"]
-                        reasoning_exists = True
-                        updated_slots.add(f"reasoning_{slot_num}")
-                        print(f"DEBUG: Updated existing reasoning_trace_{slot_num} cell")
-                        break
-                
-                if not reasoning_exists:
-                    # Add new reasoning trace cell (even if empty, to ensure all 4 are present)
-                    new_cells.append({
-                        "cell_type": "markdown",
-                        "id": f"auto_reasoning_trace_{slot_num}",
-                        "metadata": {},
-                        "source": [f"**[reasoning_trace_{slot_num}]**\n\n{reasoning_trace}"]
-                    })
-                    updated_slots.add(f"reasoning_{slot_num}")
-                    print(f"DEBUG: Added new reasoning_trace_{slot_num} cell (empty={not reasoning_trace})")
-        
-        # Find insertion point: after the last slot's human_judge cell, or at the end
-        print(f"DEBUG: Updated slots: {updated_slots}")
-        print(f"DEBUG: Adding {len(new_cells)} new cells")
-        
-        # Find the last position where a slot cell exists (model, llm_judge, or human_judge)
-        # We want to insert new cells right after the last slot's human_judge
-        insertion_index = len(cells)  # Default: append at end
-        
-        # Search backwards to find the last human_judge cell
-        for i in range(len(cells) - 1, -1, -1):
-            cell = cells[i]
-            source = cell.get('source', [])
-            if isinstance(source, list):
-                content = ''.join(source)
-            else:
-                content = str(source)
+                }
+                print(f"DEBUG: Created human_judge_{slot_num} cell")
             
-            match = self.HEADING_PATTERN.search(content)
-            if match:
-                heading_lower = match.group(1).lower()
-                # Check if this is a human_judge cell (last cell in a slot's group)
-                if self.HUMAN_JUDGE_PATTERN.match(heading_lower):
-                    insertion_index = i + 1  # Insert after this cell
-                    print(f"DEBUG: Found insertion point after human_judge cell at index {i}")
-                    break
-                # Also check for model or llm_judge cells (in case human_judge is missing)
-                elif self.MODEL_PATTERN.match(heading_lower) or self.LLM_JUDGE_PATTERN.match(heading_lower):
-                    # If we haven't found a human_judge yet, use this as insertion point
-                    if insertion_index == len(cells):
-                        insertion_index = i + 1
-                        print(f"DEBUG: Found insertion point after model/llm_judge cell at index {i}")
+            # Create reasoning_trace cell if missing and include_reasoning is True
+            if include_reasoning and (slot_num, 'reasoning_trace') not in slot_cells_dict:
+                reasoning_trace = slot_result.get('reasoning_trace', '') if slot_result else ''
+                slot_cells_dict[(slot_num, 'reasoning_trace')] = {
+                    "cell_type": "markdown",
+                    "id": f"auto_reasoning_trace_{slot_num}",
+                    "metadata": {},
+                    "source": [f"**[reasoning_trace_{slot_num}]**\n\n{reasoning_trace}"]
+                }
+                print(f"DEBUG: Created reasoning_trace_{slot_num} cell")
         
-        # Separate slot cells from metadata cells (attempts, total_hunts_ran)
-        slot_cells = []  # Model, LLM judge, human judge cells (in order per slot)
-        metadata_cells = []  # Attempts, total_hunts_ran cells
+        # Step 3: Build ordered slot cells list (model_1, llm_judge_1, human_judge_1, reasoning_trace_1, model_2, ...)
+        ordered_slot_cells = []
+        cell_type_order = ['model', 'llm_judge', 'human_judge', 'reasoning_trace']
+        for slot_num in range(1, 5):
+            for cell_type in cell_type_order:
+                if (slot_num, cell_type) in slot_cells_dict:
+                    ordered_slot_cells.append(slot_cells_dict[(slot_num, cell_type)])
         
-        for cell in new_cells:
-            source = cell.get('source', [])
-            if isinstance(source, list):
-                content = ''.join(source)
-            else:
-                content = str(source)
-            
-            # Check if this is a metadata cell
-            if 'number_of_attempts_made' in content:
-                metadata_cells.append(cell)
-            else:
-                slot_cells.append(cell)
+        # Step 4: Find insertion point for slot cells (after last non-slot cell that should come before slots)
+        # We want to insert slot cells after metadata cells like prompt, response, response_reference, judge_prompt_template, judge_system_prompt
+        # but before number_of_attempts_made
+        insertion_index = len(non_slot_cells)
         
-        # Insert slot cells at the correct position (maintaining order: model -> llm_judge -> human_judge per slot)
-        if slot_cells:
-            cells[insertion_index:insertion_index] = slot_cells
-            print(f"DEBUG: Inserted {len(slot_cells)} slot cells at index {insertion_index}")
+        # Find the position of number_of_attempts_made in non_slot_cells
+        for i, cell in enumerate(non_slot_cells):
+            heading_lower, _ = get_cell_heading(cell)
+            if heading_lower == 'number_of_attempts_made':
+                insertion_index = i
+                break
         
-        # Check if attempts cell was updated (found in notebook)
+        # Step 5: Insert slot cells at the correct position
+        final_cells = non_slot_cells[:insertion_index] + ordered_slot_cells + non_slot_cells[insertion_index:]
+        
+        # Step 6: Add number_of_attempts_made cell at the end if it doesn't exist
         attempts_cell_found = 'number_of_attempts_made' in updated_slots
         if not attempts_cell_found:
-            # Create attempts cell if it doesn't exist - use total_hunts_ran instead of parsed.attempts_made + len(results)
-            new_attempts = total_hunts_ran  # Use total_hunts_ran directly
-            # Clamp attempts to valid range: min 1, max 8
+            new_attempts = total_hunts_ran
             new_attempts = max(1, min(8, new_attempts))
-            metadata_cells.append({
+            final_cells.append({
                 "cell_type": "markdown",
                 "id": "auto_attempts_counter",
                 "metadata": {},
                 "source": [f"**[number_of_attempts_made]**:\n\n{new_attempts}"]
             })
-            print(f"DEBUG: Created new attempts cell with count={new_attempts} (from total_hunts_ran)")
+            print(f"DEBUG: Created number_of_attempts_made cell with count={new_attempts}")
         
-        # REMOVED: total_hunts_ran cell - no longer needed (number_of_attempts_made now equals total_hunts_ran)
-        
-        # Append metadata cells at the end
-        if metadata_cells:
-            cells.extend(metadata_cells)
-            print(f"DEBUG: Appended {len(metadata_cells)} metadata cells at the end")
-        
-        notebook['cells'] = cells
-        print(f"DEBUG: Final notebook has {len(cells)} cells")
+        notebook['cells'] = final_cells
+        print(f"DEBUG: Final notebook has {len(final_cells)} cells")
         return json.dumps(notebook, indent=2)
 
 
