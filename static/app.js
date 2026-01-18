@@ -1498,26 +1498,16 @@ function toggleResponseSelection(huntId, card) {
             }
         } else if (currentCount === 1) {
             // Selecting the 2nd item - must be able to reach valid state with 2 more selections
-            // Valid intermediate states for 2nd item:
-            // - (2 breaking, 0 passing) - can add 2 breaking → (4 breaking, 0 passing) ✅ OR can add 1 breaking + 1 passing → (3 breaking, 1 passing) ✅
-            // - (1 breaking, 1 passing) - can add 2 breaking → (3 breaking, 1 passing) ✅
-            // - (1 breaking, 0 passing) - can add 2 breaking → (3 breaking, 0 passing) - invalid, need 1 more breaking. Can add 1 breaking + 1 passing → (2 breaking, 1 passing) - invalid, need 1 more breaking.
-            // - (0 breaking, 1 passing) - can add 2 breaking → (2 breaking, 1 passing) - invalid, need 1 more breaking. Can add 3 breaking → (3 breaking, 1 passing) but only 2 slots left.
-            // - (0 breaking, 2 passing) - can add 2 breaking → (2 breaking, 2 passing) - invalid
-            
-            // So for 2nd item, valid states are:
-            // - (2 breaking, 0 passing) ✅
-            // - (1 breaking, 1 passing) ✅
-            // - (1 breaking, 0 passing) - wait, can we reach valid? Need 2 more slots. If we add 2 breaking → (3 breaking, 0 passing) - invalid. If we add 1 breaking + 1 passing → (2 breaking, 1 passing) - invalid.
-            // Actually no, (1 breaking, 0 passing) is invalid for 2nd item.
-            
+            // Valid states: (2 breaking, 0 passing) or (1 breaking, 1 passing)
+            // - (2 breaking, 0 passing): can add 2 breaking → (4 breaking, 0 passing) ✅ OR 1 breaking + 1 passing → (3 breaking, 1 passing) ✅
+            // - (1 breaking, 1 passing): can add 2 breaking → (3 breaking, 1 passing) ✅
             const canReachValidState = 
-                (newBreakingCount >= 2 && newPassingCount === 0) ||  // At least 2 breaking, 0 passing
-                (newBreakingCount >= 1 && newPassingCount === 1);    // At least 1 breaking, 1 passing
+                (newBreakingCount === 2 && newPassingCount === 0) ||  // Exactly 2 breaking, 0 passing
+                (newBreakingCount === 1 && newPassingCount === 1);    // Exactly 1 breaking, 1 passing
             
             if (!canReachValidState) {
                 checkbox.checked = false;
-                showToast(`Invalid intermediate state: ${newBreakingCount} breaking, ${newPassingCount} passing. Cannot reach valid final combination. Select more breaking hunts.`, 'warning');
+                showToast(`Invalid: ${newBreakingCount} breaking, ${newPassingCount} passing. Need either (2 breaking, 0 passing) or (1 breaking, 1 passing) at this step.`, 'warning');
                 return;
             }
         }
