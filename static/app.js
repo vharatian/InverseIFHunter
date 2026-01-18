@@ -2705,7 +2705,7 @@ function initHuntNumberControls() {
     
     // Function to update all controls to a value
     function updateValue(newValue) {
-        const value = Math.max(4, Math.min(16, parseInt(newValue) || 4));
+        const value = Math.max(1, Math.min(8, parseInt(newValue) || 4));
         
         numberInput.value = value;
         slider.value = value;
@@ -2721,10 +2721,10 @@ function initHuntNumberControls() {
         
         // Update button states
         if (decreaseBtn) {
-            decreaseBtn.disabled = value <= 4;
+            decreaseBtn.disabled = value <= 1;
         }
         if (increaseBtn) {
-            increaseBtn.disabled = value >= 16;
+            increaseBtn.disabled = value >= 8;
         }
     }
     
@@ -2742,7 +2742,7 @@ function initHuntNumberControls() {
     if (decreaseBtn) {
         decreaseBtn.addEventListener('click', () => {
             const current = parseInt(numberInput.value) || 4;
-            if (current > 4) {
+            if (current > 1) {
                 updateValue(current - 1);
             }
         });
@@ -2752,7 +2752,7 @@ function initHuntNumberControls() {
     if (increaseBtn) {
         increaseBtn.addEventListener('click', () => {
             const current = parseInt(numberInput.value) || 4;
-            if (current < 16) {
+            if (current < 8) {
                 updateValue(current + 1);
             }
         });
