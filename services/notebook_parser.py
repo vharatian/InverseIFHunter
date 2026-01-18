@@ -456,9 +456,16 @@ class NotebookParser:
         
         # Build a mapping from slot number (1-4) to result and review
         slot_to_result = {}
+        print(f"DEBUG: Building slot_to_result mapping from {len(results)} results")
         for i, result in enumerate(results[:4]):  # Max 4 slots
             slot_num = i + 1
             slot_to_result[slot_num] = result
+            response_len = len(result.get('response', ''))
+            reasoning_len = len(result.get('reasoning_trace', ''))
+            print(f"DEBUG: Mapped slot {slot_num} -> hunt_id {result.get('hunt_id')}, response_len={response_len}, reasoning_len={reasoning_len}")
+        
+        if len(results) < 4:
+            print(f"WARNING: Only {len(results)} results provided, but creating 4 slots. Slots {len(results)+1}-4 will be empty.")
         
         # Build mapping from slot number to human review
         huntid_to_review = {}
@@ -789,12 +796,14 @@ class NotebookParser:
                 if f"reasoning_{slot_num}" in updated_slots:
                     continue
                 
-                # Get reasoning trace from result if available
+                # Get reasoning trace from result if available - ALWAYS use slot_to_result mapping first (correct mapping)
                 reasoning_trace = ''
-                if slot_num <= len(results):
-                    reasoning_trace = results[slot_num - 1].get('reasoning_trace', '')
-                elif slot_num in slot_to_result:
+                if slot_num in slot_to_result:
                     reasoning_trace = slot_to_result[slot_num].get('reasoning_trace', '')
+                # Fallback to direct indexing only if not in mapping
+                elif slot_num <= len(results):
+                    reasoning_trace = results[slot_num - 1].get('reasoning_trace', '')
+                    print(f"DEBUG: Slot {slot_num} reasoning not in slot_to_result, using direct index {slot_num - 1}")
                 
                 # Check if reasoning_trace cell already exists (but wasn't updated)
                 reasoning_heading = f"reasoning_trace_{slot_num}"
