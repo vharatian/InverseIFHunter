@@ -439,7 +439,20 @@ class NotebookParser:
         cells = notebook.get('cells', [])
         human_reviews = human_reviews or {}
         
+        # Determine model prefix from existing notebook or from results
         model_prefix = self.get_model_slot_prefix(parsed)
+        
+        # If notebook is empty, try to get model name from results
+        if model_prefix == "model" and results:
+            # Extract model name from first result (e.g., "nvidia/nemotron-3-nano-30b-a3b:free" -> "nemotron")
+            first_model = results[0].get('model', '')
+            if 'nemotron' in first_model.lower():
+                model_prefix = 'nemotron'
+            elif 'qwen' in first_model.lower():
+                model_prefix = 'qwen'
+        
+        # Capitalize model prefix for heading (Nemotron, Qwen, Model)
+        model_prefix_capitalized = model_prefix.capitalize()
         
         # Build a mapping from slot number (1-4) to result and review
         slot_to_result = {}
@@ -628,11 +641,10 @@ class NotebookParser:
                     print(f"DEBUG: Updated existing total_hunts_ran cell to {total_hunts_ran}")
         
         # Add new cells for results that don't have slots
-        # Ensure ALL 4 slots are created (even if we have fewer results)
+        # CRITICAL: Always create exactly 4 slots (1-4) regardless of results length
         new_cells = []
-        max_slots = max(4, len(results))  # Always create at least 4 slots
         
-        for slot_num in range(1, max_slots + 1):
+        for slot_num in range(1, 5):  # Always create slots 1-4
             # Get result for this slot if it exists
             slot_result = None
             if slot_num <= len(results):
@@ -641,9 +653,10 @@ class NotebookParser:
             if not slot_result and slot_num in slot_to_result:
                 slot_result = slot_to_result[slot_num]
             
-            # Add model response if not updated
+            # Add model response if not updated - ALWAYS create for all 4 slots
             if f"model_{slot_num}" not in updated_slots:
-                model_content = f"**[{model_prefix}_{slot_num}]**\n\n{slot_result.get('response', '') if slot_result else ''}"
+                response_text = slot_result.get('response', '') if slot_result else ''
+                model_content = f"**[{model_prefix_capitalized}_{slot_num}]**\n\n{response_text}"
                 # Reasoning trace will be saved in separate cell
                 new_cells.append({
                     "cell_type": "markdown",
@@ -651,6 +664,7 @@ class NotebookParser:
                     "metadata": {},
                     "source": [model_content]
                 })
+                print(f"DEBUG: Added model cell for slot {slot_num} with prefix {model_prefix_capitalized}")
             
             # Add LLM judge if not updated - ALWAYS create for all 4 slots, even if data is missing
             if f"judge_{slot_num}" not in updated_slots:
@@ -768,15 +782,19 @@ class NotebookParser:
         )]
         
         # Add reasoning traces as separate cells (reasoning_trace_1, reasoning_trace_2, etc.)
-        # Ensure ALL 4 reasoning traces are saved, even if some are empty
+        # CRITICAL: Always create ALL 4 reasoning traces (1-4), even if empty
         if include_reasoning:
-            for i, result in enumerate(results):
-                slot_num = i + 1
-                reasoning_trace = result.get('reasoning_trace', '')
-                
+            for slot_num in range(1, 5):  # Always create slots 1-4
                 # Skip if already updated in the main loop above
                 if f"reasoning_{slot_num}" in updated_slots:
                     continue
+                
+                # Get reasoning trace from result if available
+                reasoning_trace = ''
+                if slot_num <= len(results):
+                    reasoning_trace = results[slot_num - 1].get('reasoning_trace', '')
+                elif slot_num in slot_to_result:
+                    reasoning_trace = slot_to_result[slot_num].get('reasoning_trace', '')
                 
                 # Check if reasoning_trace cell already exists (but wasn't updated)
                 reasoning_heading = f"reasoning_trace_{slot_num}"
@@ -787,16 +805,16 @@ class NotebookParser:
                         content = ''.join(source)
                     else:
                         content = str(source)
-                        match = self.HEADING_PATTERN.search(content)
-                        if match and match.group(1).lower() == reasoning_heading:
-                            # Update existing reasoning trace cell (even if empty)
-                            # Preserve original heading format
-                            original_heading = match.group(1)
-                            cell['source'] = [f"**[{original_heading}]**\n\n{reasoning_trace}"]
-                            reasoning_exists = True
-                            updated_slots.add(f"reasoning_{slot_num}")
-                            print(f"DEBUG: Updated existing reasoning_trace_{slot_num} cell")
-                            break
+                    match = self.HEADING_PATTERN.search(content)
+                    if match and match.group(1).lower() == reasoning_heading:
+                        # Update existing reasoning trace cell (even if empty)
+                        # Preserve original heading format
+                        original_heading = match.group(1)
+                        cell['source'] = [f"**[{original_heading}]**\n\n{reasoning_trace}"]
+                        reasoning_exists = True
+                        updated_slots.add(f"reasoning_{slot_num}")
+                        print(f"DEBUG: Updated existing reasoning_trace_{slot_num} cell")
+                        break
                 
                 if not reasoning_exists:
                     # Add new reasoning trace cell (even if empty, to ensure all 4 are present)
@@ -807,7 +825,7 @@ class NotebookParser:
                         "source": [f"**[reasoning_trace_{slot_num}]**\n\n{reasoning_trace}"]
                     })
                     updated_slots.add(f"reasoning_{slot_num}")
-                    print(f"DEBUG: Added new reasoning_trace_{slot_num} cell")
+                    print(f"DEBUG: Added new reasoning_trace_{slot_num} cell (empty={not reasoning_trace})")
         
         # Find insertion point: after the last slot's human_judge cell, or at the end
         print(f"DEBUG: Updated slots: {updated_slots}")
