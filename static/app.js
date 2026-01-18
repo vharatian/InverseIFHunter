@@ -482,13 +482,16 @@ async function saveToDrive() {
             .map(([id, v]) => `${id}: ${v.pass} pass, ${v.fail} fail`)
             .join('\n  ');
         
-        showToast('Criterion diversity required: At least one criterion must have both PASS and FAIL.', 'error');
+        showToast('Criterion diversity required: At least one criterion must have both PASS and FAIL. You can still edit the slots to fix this.', 'error');
         alert(
             `Cannot save: Missing criterion diversity!\n\n` +
             `Requirement: At least one criterion (C1, C2, etc.) must receive both a PASS and a FAIL across the 4 responses.\n\n` +
             `Current votes:\n  ${votesSummary}\n\n` +
-            `Please review your grading to ensure diverse criteria judgments.`
+            `⚠️ IMPORTANT: You can still edit the human judge slots above to fix this.\n` +
+            `Change some criteria from FAIL to PASS (or vice versa) to create diversity, then try saving again.`
         );
+        // Don't return - allow user to continue editing slots
+        // The slots remain editable, user just needs to fix the diversity issue
         return;
     }
     
