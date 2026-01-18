@@ -631,8 +631,6 @@ class NotebookParser:
                     cell['source'] = [f"**[{attempts_heading}]**:\n\n{new_attempts}"]
                     updated_slots.add('number_of_attempts_made')
                     print(f"DEBUG: Updated existing attempts cell to {new_attempts} (from total_hunts_ran)")
-                
-                # REMOVED: total_hunts_ran cell update - no longer needed (number_of_attempts_made now equals total_hunts_ran)
         
         # Add new cells for results that don't have slots
         # CRITICAL: Always create exactly 4 slots (1-4) regardless of results length
