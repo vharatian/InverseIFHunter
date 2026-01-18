@@ -1294,8 +1294,17 @@ function displaySelectionCards() {
     state.selectedHuntIds = [];
     
     // Show both breaking and passing hunts
-    const brokenHunts = state.allResponses.filter(r => r.judge_score === 0);
-    const passingHunts = state.allResponses.filter(r => r.judge_score > 0);
+    // Use same logic as validation: check both judge_score and score fields
+    const brokenHunts = state.allResponses.filter(r => {
+        const judgeScore = r.judge_score !== undefined && r.judge_score !== null ? Number(r.judge_score) : null;
+        const score = r.score !== undefined && r.score !== null ? Number(r.score) : null;
+        return (judgeScore !== null && judgeScore === 0) || (score !== null && score === 0);
+    });
+    const passingHunts = state.allResponses.filter(r => {
+        const judgeScore = r.judge_score !== undefined && r.judge_score !== null ? Number(r.judge_score) : null;
+        const score = r.score !== undefined && r.score !== null ? Number(r.score) : null;
+        return (judgeScore !== null && judgeScore > 0) || (score !== null && score > 0);
+    });
     
     if (brokenHunts.length === 0 && passingHunts.length === 0) {
         grid.innerHTML = '<div style="text-align: center; padding: 2rem; color: var(--text-muted);">No hunts found. Run hunts first.</div>';
@@ -1310,7 +1319,10 @@ function displaySelectionCards() {
         // Normalize for comparison to handle type mismatches
         const normalizedResultId = Number(result.hunt_id);
         const isSelected = state.selectedHuntIds.some(id => Number(id) === normalizedResultId);
-        const isFailed = result.judge_score === 0;
+        // Use same logic as validation: check both judge_score and score fields
+        const judgeScore = result.judge_score !== undefined && result.judge_score !== null ? Number(result.judge_score) : null;
+        const score = result.score !== undefined && result.score !== null ? Number(result.score) : null;
+        const isFailed = (judgeScore !== null && judgeScore === 0) || (score !== null && score === 0);
         const shortModel = (result.model || 'unknown').split('/').pop().substring(0, 20);
         
         const card = document.createElement('div');
