@@ -2307,6 +2307,29 @@ async function judgeReferenceResponse() {
     console.log('   state.initialCriteria exists?', !!state.initialCriteria);
     console.log('   state.initialCriteria length:', state.initialCriteria?.length || 0);
     
+    // Check minimum 3 criteria requirement
+    if (currentCriteria.length < 3) {
+        const resultDiv = elements.referenceJudgeResult;
+        resultDiv.innerHTML = `
+            <div style="padding: 1rem; background: var(--bg-primary); border-radius: 8px; border: 2px solid var(--warning);">
+                <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
+                    <span style="font-size: 1.5rem;">⚠️</span>
+                    <span style="font-weight: 600; color: var(--warning);">Minimum 3 Criteria Required</span>
+                </div>
+                <p style="margin-bottom: 0.5rem; color: var(--text-secondary);">
+                    You currently have <strong>${currentCriteria.length} criteria</strong> in your response_reference.
+                </p>
+                <p style="color: var(--text-secondary); font-size: 0.9rem;">
+                    <strong>Requirement:</strong> You must have at least <strong>3 criteria</strong> before judging.<br>
+                    Please add more criteria to your response_reference section in your Colab notebook.
+                </p>
+            </div>
+        `;
+        resultDiv.classList.remove('hidden');
+        showToast(`❌ Minimum 3 criteria required. Currently have ${currentCriteria.length}.`, 'error');
+        return;
+    }
+    
     if (missingBeforeJudge.length > 0) {
         const missingIds = missingBeforeJudge.join(', ');
         showToast(`❌ Cannot judge: Missing criteria ${missingIds}. Please add them back to response_reference and try again.`, 'error');
@@ -2632,6 +2655,14 @@ async function judgeReferenceResponse() {
 async function saveAndRejudge() {
     if (!state.sessionId) {
         showToast('Please load a notebook first', 'error');
+        return;
+    }
+    
+    // Check minimum 3 criteria requirement
+    const currentRefText = elements.modelrefPreview?.textContent || '';
+    const currentCriteria = parseCriteria(currentRefText);
+    if (currentCriteria.length < 3) {
+        showToast(`❌ Minimum 3 criteria required. Currently have ${currentCriteria.length}. Please add more criteria before saving.`, 'error');
         return;
     }
     
