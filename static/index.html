@@ -154,12 +154,50 @@
                 </div>
 
                 <div class="config-grid">
-                    <div class="form-group">
+                    <div class="form-group" style="grid-column: 1 / -1;">
                         <label for="parallelWorkers">Number of Hunts</label>
-                        <input type="number" id="parallelWorkers" min="4" max="16" value="4">
-                        <small
-                            style="color: var(--text-secondary); font-size: 0.8rem; margin-top: 0.25rem; display: block;">Min:
-                            4, Max: 16</small>
+                        
+                        <!-- Quick Preset Buttons -->
+                        <div class="hunt-presets" style="display: flex; gap: 0.5rem; margin-bottom: 0.75rem; flex-wrap: wrap;">
+                            <button type="button" class="preset-btn" data-value="4">4</button>
+                            <button type="button" class="preset-btn" data-value="6">6</button>
+                            <button type="button" class="preset-btn" data-value="8">8</button>
+                            <button type="button" class="preset-btn" data-value="12">12</button>
+                            <button type="button" class="preset-btn" data-value="16">16</button>
+                        </div>
+                        
+                        <!-- Slider + Number Input Container -->
+                        <div class="hunt-input-container" style="display: flex; align-items: center; gap: 1rem; margin-bottom: 0.5rem;">
+                            <!-- Decrease Button -->
+                            <button type="button" class="hunt-btn hunt-btn-decrease" aria-label="Decrease">
+                                <span style="font-size: 1.2rem; font-weight: 600;">−</span>
+                            </button>
+                            
+                            <!-- Slider -->
+                            <div style="flex: 1; position: relative;">
+                                <input type="range" id="parallelWorkersSlider" min="4" max="16" value="4" step="1" 
+                                    style="width: 100%; height: 8px; cursor: pointer;">
+                                <div class="slider-labels" style="display: flex; justify-content: space-between; margin-top: 0.25rem; font-size: 0.75rem; color: var(--text-muted);">
+                                    <span>4</span>
+                                    <span>16</span>
+                                </div>
+                            </div>
+                            
+                            <!-- Number Input -->
+                            <div style="position: relative; min-width: 80px;">
+                                <input type="number" id="parallelWorkers" min="4" max="16" value="4" 
+                                    style="width: 100%; text-align: center; font-size: 1.1rem; font-weight: 600; padding: 0.75rem 0.5rem;">
+                            </div>
+                            
+                            <!-- Increase Button -->
+                            <button type="button" class="hunt-btn hunt-btn-increase" aria-label="Increase">
+                                <span style="font-size: 1.2rem; font-weight: 600;">+</span>
+                            </button>
+                        </div>
+                        
+                        <small style="color: var(--text-secondary); font-size: 0.8rem; display: block; text-align: center;">
+                            Drag slider, use buttons, or click presets above
+                        </small>
                     </div>
                     <div class="form-group">
                         <label for="providerSelect">Provider</label>

@@ -585,8 +585,9 @@ function populatePreviewTabs(notebook) {
     }
     
     // Parse and store criteria from response_reference
+    let parsedCriteria;
     try {
-        const parsedCriteria = parseCriteria(notebook.response_reference || '');
+        parsedCriteria = parseCriteria(notebook.response_reference || '');
         state.criteria = parsedCriteria;
     } catch (error) {
         console.error('Failed to parse criteria:', error);
@@ -2352,6 +2353,83 @@ function showFinalResults() {
 }
 
 
+// ============== Hunt Number Controls ==============
+
+function initHuntNumberControls() {
+    const numberInput = document.getElementById('parallelWorkers');
+    const slider = document.getElementById('parallelWorkersSlider');
+    const decreaseBtn = document.querySelector('.hunt-btn-decrease');
+    const increaseBtn = document.querySelector('.hunt-btn-increase');
+    const presetBtns = document.querySelectorAll('.preset-btn');
+    
+    if (!numberInput || !slider) return;
+    
+    // Function to update all controls to a value
+    function updateValue(newValue) {
+        const value = Math.max(4, Math.min(16, parseInt(newValue) || 4));
+        
+        numberInput.value = value;
+        slider.value = value;
+        
+        // Update preset button states
+        presetBtns.forEach(btn => {
+            if (parseInt(btn.dataset.value) === value) {
+                btn.classList.add('active');
+            } else {
+                btn.classList.remove('active');
+            }
+        });
+        
+        // Update button states
+        if (decreaseBtn) {
+            decreaseBtn.disabled = value <= 4;
+        }
+        if (increaseBtn) {
+            increaseBtn.disabled = value >= 16;
+        }
+    }
+    
+    // Sync number input -> slider
+    numberInput.addEventListener('input', (e) => {
+        updateValue(e.target.value);
+    });
+    
+    // Sync slider -> number input
+    slider.addEventListener('input', (e) => {
+        updateValue(e.target.value);
+    });
+    
+    // Decrease button
+    if (decreaseBtn) {
+        decreaseBtn.addEventListener('click', () => {
+            const current = parseInt(numberInput.value) || 4;
+            if (current > 4) {
+                updateValue(current - 1);
+            }
+        });
+    }
+    
+    // Increase button
+    if (increaseBtn) {
+        increaseBtn.addEventListener('click', () => {
+            const current = parseInt(numberInput.value) || 4;
+            if (current < 16) {
+                updateValue(current + 1);
+            }
+        });
+    }
+    
+    // Preset buttons
+    presetBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            updateValue(btn.dataset.value);
+        });
+    });
+    
+    // Initialize state
+    updateValue(numberInput.value);
+}
+
 // ============== Event Listeners ==============
 
 function initEventListeners() {
@@ -3053,6 +3131,7 @@ function init() {
     initFileUpload();
     initPreviewTabs();
     initEventListeners();
+    initHuntNumberControls();
     
     if (elements.startHuntBtn) {
         elements.startHuntBtn.disabled = true;
