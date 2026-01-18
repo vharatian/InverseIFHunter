@@ -625,7 +625,7 @@ function populatePreviewTabs(notebook) {
     let parsedCriteria;
     try {
         parsedCriteria = parseCriteria(notebook.response_reference || '');
-        state.criteria = parsedCriteria;
+    state.criteria = parsedCriteria;
     } catch (error) {
         console.error('Failed to parse criteria:', error);
         showToast(`❌ Failed to parse criteria: ${error.message}. Please fix the response_reference format.`, 'error');
@@ -816,7 +816,7 @@ function parseCriteria(responseReference) {
         }
         
         // Parse each criterion item
-        const criteria = [];
+            const criteria = [];
         for (let idx = 0; idx < criteriaArray.length; idx++) {
             const item = criteriaArray[idx];
             
@@ -1307,7 +1307,9 @@ function displaySelectionCards() {
     
     // Create cards for all responses (both breaking and passing)
     allHunts.forEach((result, index) => {
-        const isSelected = state.selectedHuntIds.includes(result.hunt_id);
+        // Normalize for comparison to handle type mismatches
+        const normalizedResultId = Number(result.hunt_id);
+        const isSelected = state.selectedHuntIds.some(id => Number(id) === normalizedResultId);
         const isFailed = result.judge_score === 0;
         const shortModel = (result.model || 'unknown').split('/').pop().substring(0, 20);
         
@@ -1364,7 +1366,10 @@ function toggleResponseSelection(huntId, card) {
     
     // Get the result to check if it's breaking or passing
     const result = state.allResponses.find(r => Number(r.hunt_id) === normalizedHuntId);
-    const isBreaking = result && result.judge_score === 0;
+    // Check both judge_score and score fields
+    const judgeScore = result && result.judge_score !== undefined && result.judge_score !== null ? Number(result.judge_score) : null;
+    const score = result && result.score !== undefined && result.score !== null ? Number(result.score) : null;
+    const isBreaking = result && ((judgeScore !== null && judgeScore === 0) || (score !== null && score === 0));
     
     if (checkbox.checked) {
         // Add to selection (max 4)
@@ -1376,11 +1381,32 @@ function toggleResponseSelection(huntId, card) {
         
         // Get current selection breakdown (BEFORE adding the new one)
         // Normalize IDs for comparison
-        const selectedResults = state.selectedHuntIds.map(id => 
-            state.allResponses.find(r => Number(r.hunt_id) === Number(id))
-        ).filter(r => r !== undefined);
-        const currentBreakingCount = selectedResults.filter(r => r.judge_score === 0).length;
-        const currentPassingCount = selectedResults.filter(r => r.judge_score > 0).length;
+        const selectedResults = state.selectedHuntIds.map(id => {
+            const normalizedId = Number(id);
+            if (isNaN(normalizedId)) {
+                console.warn('⚠️ Invalid hunt_id in selectedHuntIds:', id);
+                return null;
+            }
+            const result = state.allResponses.find(r => {
+                const rId = Number(r.hunt_id);
+                return !isNaN(rId) && rId === normalizedId;
+            });
+            if (!result) {
+                console.warn(`⚠️ Could not find result for hunt_id: ${id} (normalized: ${normalizedId})`);
+            }
+            return result;
+        }).filter(r => r !== undefined && r !== null);
+        
+        const currentBreakingCount = selectedResults.filter(r => {
+            const judgeScore = r.judge_score !== undefined && r.judge_score !== null ? Number(r.judge_score) : null;
+            const score = r.score !== undefined && r.score !== null ? Number(r.score) : null;
+            return (judgeScore !== null && judgeScore === 0) || (score !== null && score === 0);
+        }).length;
+        const currentPassingCount = selectedResults.filter(r => {
+            const judgeScore = r.judge_score !== undefined && r.judge_score !== null ? Number(r.judge_score) : null;
+            const score = r.score !== undefined && r.score !== null ? Number(r.score) : null;
+            return (judgeScore !== null && judgeScore > 0) || (score !== null && score > 0);
+        }).length;
         
         // Calculate what the counts would be AFTER adding this one
         const newBreakingCount = currentBreakingCount + (isBreaking ? 1 : 0);
@@ -1420,8 +1446,9 @@ function toggleResponseSelection(huntId, card) {
         
         // Allow selection if we're not at 4 yet, or if the combination is valid
         // Only add if not already in the list (prevent duplicates)
+        // Store normalized ID to ensure consistent types
         if (!state.selectedHuntIds.some(id => Number(id) === normalizedHuntId)) {
-            state.selectedHuntIds.push(huntId);
+            state.selectedHuntIds.push(normalizedHuntId); // Store normalized number for consistency
         }
         card.classList.add('selected');
         card.style.borderColor = 'var(--accent-primary)';
@@ -1441,23 +1468,60 @@ function updateSelectionCount() {
     const count = state.selectedHuntIds.length;
     
     // Normalize hunt_ids to numbers for comparison (handle string/int mismatch)
-    const normalizedSelectedIds = state.selectedHuntIds.map(id => Number(id));
+    const normalizedSelectedIds = state.selectedHuntIds.map(id => {
+        const num = Number(id);
+        if (isNaN(num)) {
+            console.warn('⚠️ Invalid hunt_id in selectedHuntIds:', id);
+            return null;
+        }
+        return num;
+    }).filter(id => id !== null);
     
     // Get breakdown of breaking vs passing
     // Use normalized comparison to handle type mismatches
-    const selectedResults = normalizedSelectedIds.map(id => 
-        state.allResponses.find(r => Number(r.hunt_id) === id)
-    ).filter(r => r !== undefined);
+    const selectedResults = normalizedSelectedIds.map(id => {
+        const result = state.allResponses.find(r => {
+            const rId = Number(r.hunt_id);
+            return !isNaN(rId) && rId === id;
+        });
+        if (!result) {
+            console.warn(`⚠️ Could not find result for hunt_id: ${id}`);
+        }
+        return result;
+    }).filter(r => r !== undefined && r !== null);
     
-    const breakingCount = selectedResults.filter(r => r.judge_score === 0).length;
-    const passingCount = selectedResults.filter(r => r.judge_score > 0).length;
+    // Log detailed info about each selected result
+    console.log('🔍 Selected Results Details:', selectedResults.map(r => ({
+        hunt_id: r.hunt_id,
+        judge_score: r.judge_score,
+        judge_score_type: typeof r.judge_score,
+        score: r.score, // Also check score field
+        is_breaking: r.judge_score === 0 || r.score === 0,
+        model: r.model
+    })));
+    
+    // Check both judge_score and score fields (some results might use different field names)
+    const breakingCount = selectedResults.filter(r => {
+        const judgeScore = r.judge_score !== undefined && r.judge_score !== null ? Number(r.judge_score) : null;
+        const score = r.score !== undefined && r.score !== null ? Number(r.score) : null;
+        // A hunt is breaking if judge_score is 0 OR score is 0
+        return (judgeScore !== null && judgeScore === 0) || (score !== null && score === 0);
+    }).length;
+    
+    const passingCount = selectedResults.filter(r => {
+        const judgeScore = r.judge_score !== undefined && r.judge_score !== null ? Number(r.judge_score) : null;
+        const score = r.score !== undefined && r.score !== null ? Number(r.score) : null;
+        // A hunt is passing if judge_score > 0 OR score > 0
+        return (judgeScore !== null && judgeScore > 0) || (score !== null && score > 0);
+    }).length;
     
     // Debug logging to help troubleshoot
     console.log('🔍 updateSelectionCount:', {
         selectedHuntIds: state.selectedHuntIds,
         normalizedIds: normalizedSelectedIds,
-        allResponseIds: state.allResponses.map(r => r.hunt_id),
+        allResponseIds: state.allResponses.map(r => ({ id: r.hunt_id, type: typeof r.hunt_id, score: r.judge_score })),
         selectedResultsCount: selectedResults.length,
+        selectedResultsDetails: selectedResults.map(r => ({ id: r.hunt_id, score: r.judge_score })),
         breakingCount,
         passingCount,
         count
@@ -1782,19 +1846,19 @@ function createResultCard(result, slotIndex) {
             <div class="slot-split-container" data-hunt-id="${result.hunt_id}">
                 <!-- Left Panel: Response (Larger, Scrollable) -->
                 <div class="slot-response-panel">
-                    <label style="font-weight: 600; display: block; margin-bottom: 0.75rem; color: var(--text-primary);">
+                            <label style="font-weight: 600; display: block; margin-bottom: 0.75rem; color: var(--text-primary);">
                         📄 Model Response (${shortModel}_${slotNum}):
-                    </label>
+                            </label>
                     <div class="code-block response-content" style="white-space: pre-wrap; line-height: 1.6; font-size: 0.9rem; max-height: 600px; overflow-y: auto;">${escapeHtml(responseText)}</div>
-                </div>
-                
+                    </div>
+                    
                 <!-- Right Panel: Grade + Explanation -->
                 <div class="slot-grading-panel">
                     <!-- Grade Section (Top) -->
                     <div class="slot-grade-section">
-                        <label style="font-weight: 600; display: block; margin-bottom: 1rem; color: var(--text-primary);">
+                            <label style="font-weight: 600; display: block; margin-bottom: 1rem; color: var(--text-primary);">
                             ✅ Grading Basis - Per Criterion:
-                        </label>
+                            </label>
                         <div class="criteria-grading" data-hunt-id="${result.hunt_id}" style="max-height: 400px; overflow-y: auto;">
                     ${(state.criteria || []).map(c => `
                                     <div class="criterion-row" data-criterion-id="${c.id}" style="display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0.75rem; padding: 1rem; margin-bottom: 0.75rem; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border); transition: all var(--transition-fast);">
@@ -1811,27 +1875,27 @@ function createResultCard(result, slotIndex) {
                         </div>
                     `).join('')}
                         </div>
-                    </div>
-                    
+                </div>
+                
                     <!-- Explanation Section (Bottom) -->
                     <div class="slot-explanation-section">
-                        <label style="font-weight: 600; display: block; margin-bottom: 0.75rem; color: var(--text-primary);">
-                            📝 Human Review (human_judge_${slotNum}):
-                        </label>
-                        
-                        <div style="margin-bottom: 1rem;">
-                            <label style="font-weight: 500; font-size: 0.9rem; display: block; margin-bottom: 0.5rem; color: var(--text-secondary);">
-                                Explanation:
+                            <label style="font-weight: 600; display: block; margin-bottom: 0.75rem; color: var(--text-primary);">
+                                📝 Human Review (human_judge_${slotNum}):
                             </label>
+                            
+                            <div style="margin-bottom: 1rem;">
+                                <label style="font-weight: 500; font-size: 0.9rem; display: block; margin-bottom: 0.5rem; color: var(--text-secondary);">
+                                    Explanation:
+                                </label>
                             <textarea class="human-review-notes" data-hunt-id="${result.hunt_id}" placeholder="Explain your grading decisions (which criteria failed and why)..." style="width: 100%; min-height: 150px; padding: 0.75rem; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-primary); color: var(--text-primary); font-size: 0.9rem; resize: vertical; font-family: inherit; line-height: 1.5;"></textarea>
                 </div>
-                        
-                        <button class="btn btn-primary submit-human-review-btn" data-hunt-id="${result.hunt_id}" style="width: 100%; padding: 0.875rem; font-weight: 600; font-size: 0.95rem; border-radius: 8px;">
-                            ✅ Submit Human Review
-                        </button>
-                        <div class="human-review-status" data-hunt-id="${result.hunt_id}" style="margin-top: 0.75rem; font-size: 0.85rem; color: var(--text-muted); text-align: center;"></div>
+                
+                            <button class="btn btn-primary submit-human-review-btn" data-hunt-id="${result.hunt_id}" style="width: 100%; padding: 0.875rem; font-weight: 600; font-size: 0.95rem; border-radius: 8px;">
+                                ✅ Submit Human Review
+                            </button>
+                            <div class="human-review-status" data-hunt-id="${result.hunt_id}" style="margin-top: 0.75rem; font-size: 0.85rem; color: var(--text-muted); text-align: center;"></div>
+                        </div>
                     </div>
-                </div>
             </div>
             
             <!-- Reasoning Section (Collapsible, Reference Only) -->
@@ -1892,7 +1956,7 @@ function createResultCard(result, slotIndex) {
     
     if (reasoningToggle && reasoningContent) {
         reasoningToggle.addEventListener('click', (e) => {
-            e.stopPropagation(); // Prevent card toggle
+                e.stopPropagation(); // Prevent card toggle
             const isHidden = reasoningContent.style.display === 'none';
             reasoningContent.style.display = isHidden ? 'block' : 'none';
             reasoningArrow.textContent = isHidden ? '▲' : '▼';
@@ -2790,9 +2854,9 @@ async function judgeReferenceResponse() {
         if (data.response_reference) {
             console.log('Re-parsing criteria from fresh response_reference');
             try {
-                currentCriteria = parseCriteria(data.response_reference);
-                state.criteria = currentCriteria;
-                console.log('Updated state.criteria IDs (from response_reference):', state.criteria.map(c => c.id));
+            currentCriteria = parseCriteria(data.response_reference);
+            state.criteria = currentCriteria;
+            console.log('Updated state.criteria IDs (from response_reference):', state.criteria.map(c => c.id));
             } catch (error) {
                 console.error('Failed to parse criteria:', error);
                 showToast(`❌ Failed to parse criteria: ${error.message}`, 'error');
@@ -3132,9 +3196,9 @@ async function saveAndRejudge() {
         if (data.response_reference) {
             console.log('Re-parsing criteria from fresh response_reference (saveAndRejudge)');
             try {
-                currentCriteria = parseCriteria(data.response_reference);
-                state.criteria = currentCriteria;
-                console.log('Updated state.criteria IDs (from response_reference):', state.criteria.map(c => c.id));
+            currentCriteria = parseCriteria(data.response_reference);
+            state.criteria = currentCriteria;
+            console.log('Updated state.criteria IDs (from response_reference):', state.criteria.map(c => c.id));
             } catch (error) {
                 console.error('Failed to parse criteria:', error);
                 showToast(`❌ Failed to parse criteria: ${error.message}`, 'error');
