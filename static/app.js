@@ -212,7 +212,15 @@ function initFileUpload() {
     
     // URL Fetch button
     if (elements.fetchUrlBtn) {
-        elements.fetchUrlBtn.addEventListener('click', fetchFromUrl);
+        console.log('Setting up fetch button event listener');
+        elements.fetchUrlBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('Fetch button clicked');
+            fetchFromUrl();
+        });
+    } else {
+        console.error('fetchUrlBtn element not found during initialization');
     }
     
     // Enter key in URL input
@@ -251,13 +259,28 @@ async function uploadFile(file) {
 }
 
 async function fetchFromUrl() {
-    const url = elements.colabUrlInput?.value?.trim();
+    console.log('fetchFromUrl called');
+    
+    if (!elements.colabUrlInput) {
+        console.error('colabUrlInput element not found');
+        showToast('URL input field not found', 'error');
+        return;
+    }
+    
+    if (!elements.fetchUrlBtn) {
+        console.error('fetchUrlBtn element not found');
+        showToast('Fetch button not found', 'error');
+        return;
+    }
+    
+    const url = elements.colabUrlInput.value?.trim();
     if (!url) {
         showToast('Please enter a Colab URL', 'error');
         return;
     }
     
     try {
+        console.log('Fetching from URL:', url);
         showToast('Fetching notebook from URL...', 'info');
         elements.fetchUrlBtn.disabled = true;
         elements.fetchUrlBtn.textContent = '⏳ Fetching...';
@@ -268,15 +291,25 @@ async function fetchFromUrl() {
             body: JSON.stringify({ url })
         });
         
+        console.log('Response status:', response.status);
+        
         if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.detail || 'Fetch failed');
+            let errorMessage = 'Fetch failed';
+            try {
+                const error = await response.json();
+                errorMessage = error.detail || error.message || 'Fetch failed';
+            } catch (e) {
+                errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+            }
+            throw new Error(errorMessage);
         }
         
         const data = await response.json();
+        console.log('Notebook loaded successfully:', data.session_id);
         handleNotebookLoaded(data, true);
         
     } catch (error) {
+        console.error('Error fetching notebook:', error);
         showToast(`Error: ${error.message}`, 'error');
     } finally {
         if (elements.fetchUrlBtn) {
