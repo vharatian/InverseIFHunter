@@ -1212,6 +1212,115 @@ main {
     transform: scale(1.02);
 }
 
+/* Slot Tabs Interface */
+.slot-tabs-container {
+    width: 100%;
+    margin-top: 0.5rem;
+}
+
+.slot-tabs-nav {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    border-bottom: 2px solid var(--border);
+    padding-bottom: 0.5rem;
+}
+
+.slot-tab {
+    padding: 0.75rem 1.25rem;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-weight: 500;
+    font-size: 0.9rem;
+    border-radius: 8px 8px 0 0;
+    transition: all var(--transition-fast);
+    position: relative;
+    font-family: inherit;
+}
+
+.slot-tab:hover {
+    color: var(--text-primary);
+    background: var(--bg-tertiary);
+}
+
+.slot-tab.active {
+    color: var(--accent-primary);
+    background: var(--bg-tertiary);
+    font-weight: 600;
+}
+
+.slot-tab.active::after {
+    content: '';
+    position: absolute;
+    bottom: -2px;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--accent-primary);
+}
+
+.slot-tabs-content {
+    position: relative;
+    min-height: 300px;
+}
+
+.slot-tab-panel {
+    display: none;
+    animation: fadeIn 0.2s ease-in;
+}
+
+.slot-tab-panel.active {
+    display: block;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(5px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.tab-content-inner {
+    padding: 0.5rem 0;
+}
+
+.tab-content-inner .code-block {
+    background: var(--bg-primary);
+    padding: 1rem;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    max-height: none;
+    overflow-y: visible;
+}
+
+.criterion-row:hover {
+    border-color: var(--border-hover);
+    background: var(--bg-hover);
+    transform: translateX(2px);
+}
+
+.criterion-pass.active,
+.criterion-pass:hover {
+    background: var(--success) !important;
+    color: white !important;
+    transform: scale(1.05);
+    box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+}
+
+.criterion-fail.active,
+.criterion-fail:hover {
+    background: var(--danger) !important;
+    color: white !important;
+    transform: scale(1.05);
+    box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3);
+}
+
 /* Judge Reference Button - Sticky to preview section bottom */
 .judge-reference-section {
     margin-top: auto;

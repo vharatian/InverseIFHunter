@@ -737,7 +737,7 @@ function parseCriteria(responseReference) {
         }
         
         // Parse each criterion item
-        const criteria = [];
+            const criteria = [];
         for (let idx = 0; idx < criteriaArray.length; idx++) {
             const item = criteriaArray[idx];
             
@@ -1535,78 +1535,126 @@ function createResultCard(result, slotIndex) {
             <span class="expandable-arrow">▼</span>
         </div>
         <div class="expandable-content">
-            <div style="margin-bottom: 1rem;">
-                <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Model Response (${shortModel}_${slotNum}):</label>
-                <div class="code-block" style="max-height: 400px; overflow-y: auto; white-space: pre-wrap;">${escapeHtml(responseText)}</div>
+            <!-- Tabbed Interface -->
+            <div class="slot-tabs-container" data-hunt-id="${result.hunt_id}">
+                <!-- Tab Navigation -->
+                <div class="slot-tabs-nav" role="tablist">
+                    <button class="slot-tab active" data-tab="response" role="tab" aria-selected="true">
+                        📄 Response
+                    </button>
+                    <button class="slot-tab" data-tab="reasoning" role="tab" aria-selected="false">
+                        🧠 Reasoning
+                    </button>
+                    <button class="slot-tab" data-tab="grade" role="tab" aria-selected="false">
+                        ✅ Grade
+                    </button>
+                    <button class="slot-tab" data-tab="review" role="tab" aria-selected="false">
+                        📝 Review
+                    </button>
             </div>
             
-            <!-- Model Reasoning Trace - VISIBLE for human review -->
-            <div style="margin-top: 1rem;">
-                <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">🧠 Model Reasoning Trace:</label>
+                <!-- Tab Content -->
+                <div class="slot-tabs-content">
+                    <!-- Response Tab -->
+                    <div class="slot-tab-panel active" data-tab="response" role="tabpanel">
+                        <div class="tab-content-inner">
+                            <label style="font-weight: 600; display: block; margin-bottom: 0.75rem; color: var(--text-primary);">
+                                Model Response (${shortModel}_${slotNum}):
+                            </label>
+                            <div class="code-block" style="white-space: pre-wrap; line-height: 1.6; font-size: 0.9rem;">${escapeHtml(responseText)}</div>
+                        </div>
+                    </div>
+                    
+                    <!-- Reasoning Tab -->
+                    <div class="slot-tab-panel" data-tab="reasoning" role="tabpanel">
+                        <div class="tab-content-inner">
+                            <label style="font-weight: 600; display: block; margin-bottom: 0.75rem; color: var(--text-primary);">
+                                🧠 Model Reasoning Trace:
+                            </label>
                 ${reasoningTrace ? `
-                    <div class="code-block" style="max-height: 300px; overflow-y: auto; font-size: 0.85rem; background: var(--bg-tertiary);">
+                                <div class="code-block" style="font-size: 0.85rem; background: var(--bg-tertiary); white-space: pre-wrap; line-height: 1.6;">
                         ${escapeHtml(reasoningTrace)}
                     </div>
                 ` : `
-                    <div style="padding: 0.75rem; background: var(--bg-tertiary); border-radius: 6px; border: 1px dashed var(--border); color: var(--text-muted); font-style: italic; font-size: 0.85rem;">
-                        ⚠️ No reasoning trace available. The model either doesn't support chain-of-thought reasoning, or the reasoning was empty for this response.
+                                <div style="padding: 1.5rem; background: var(--bg-tertiary); border-radius: 8px; border: 1px dashed var(--border); color: var(--text-muted); font-style: italic; text-align: center;">
+                                    ⚠️ No reasoning trace available.<br>
+                                    <span style="font-size: 0.85rem;">The model either doesn't support chain-of-thought reasoning, or the reasoning was empty for this response.</span>
                     </div>
                 `}
+                        </div>
             </div>
             
-            <!-- Human Review Section with Criteria -->
-            <div class="human-review-section" style="margin-top: 1.5rem; padding: 1rem; background: var(--bg-tertiary); border-radius: 8px; border: 1px solid var(--border);">
-                <label style="font-weight: 600; display: block; margin-bottom: 0.75rem;">📝 Human Review (human_judge_${slotNum}):</label>
-                
-                <!-- Grading Basis - Per Criterion -->
-                <div class="criteria-grading" data-hunt-id="${result.hunt_id}" style="margin-bottom: 1rem;">
-                    <label style="font-weight: 500; font-size: 0.9rem; display: block; margin-bottom: 0.5rem;">Grading Basis:</label>
+                    <!-- Grade Tab (Criteria) -->
+                    <div class="slot-tab-panel" data-tab="grade" role="tabpanel">
+                        <div class="tab-content-inner">
+                            <label style="font-weight: 600; display: block; margin-bottom: 1rem; color: var(--text-primary);">
+                                📋 Grading Basis - Per Criterion:
+                            </label>
+                            <div class="criteria-grading" data-hunt-id="${result.hunt_id}">
                     ${(state.criteria || []).map(c => `
-                        <div class="criterion-row" data-criterion-id="${c.id}" style="display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0.5rem; padding: 0.5rem; margin-bottom: 0.5rem; background: var(--bg-primary); border-radius: 6px; border: 1px solid var(--border);">
-                            <span style="font-weight: 600; min-width: 35px;">${c.id}:</span>
-                            <span style="flex: 1; font-size: 0.85rem; color: var(--text-secondary); word-break: break-word; min-width: 200px;">${escapeHtml(c.criteria)}</span>
-                            <div class="criterion-buttons" style="display: flex; gap: 0.25rem; flex-shrink: 0;">
-                                <button class="btn btn-small criterion-pass" data-hunt-id="${result.hunt_id}" data-criterion="${c.id}" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; background: transparent; border: 1px solid var(--success); color: var(--success);">PASS</button>
-                                <button class="btn btn-small criterion-fail" data-hunt-id="${result.hunt_id}" data-criterion="${c.id}" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; background: transparent; border: 1px solid var(--danger); color: var(--danger);">FAIL</button>
+                                    <div class="criterion-row" data-criterion-id="${c.id}" style="display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0.75rem; padding: 1rem; margin-bottom: 0.75rem; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border); transition: all var(--transition-fast);">
+                                        <span style="font-weight: 700; min-width: 40px; font-size: 1rem; color: var(--accent-primary);">${c.id}:</span>
+                                        <span style="flex: 1; font-size: 0.9rem; color: var(--text-secondary); word-break: break-word; min-width: 200px; line-height: 1.5;">${escapeHtml(c.criteria)}</span>
+                                        <div class="criterion-buttons" style="display: flex; gap: 0.5rem; flex-shrink: 0;">
+                                            <button class="btn btn-small criterion-pass" data-hunt-id="${result.hunt_id}" data-criterion="${c.id}" style="padding: 0.5rem 1rem; font-size: 0.85rem; font-weight: 600; background: transparent; border: 2px solid var(--success); color: var(--success); border-radius: 6px; transition: all var(--transition-fast);">
+                                                ✅ PASS
+                                            </button>
+                                            <button class="btn btn-small criterion-fail" data-hunt-id="${result.hunt_id}" data-criterion="${c.id}" style="padding: 0.5rem 1rem; font-size: 0.85rem; font-weight: 600; background: transparent; border: 2px solid var(--danger); color: var(--danger); border-radius: 6px; transition: all var(--transition-fast);">
+                                                ❌ FAIL
+                                            </button>
                             </div>
                         </div>
                     `).join('')}
+                            </div>
+                        </div>
                 </div>
                 
-                <!-- Explanation -->
-                <div style="margin-top: 0.75rem;">
-                    <label style="font-weight: 500; font-size: 0.9rem; display: block; margin-bottom: 0.25rem;">Explanation:</label>
-                    <textarea class="human-review-notes" data-hunt-id="${result.hunt_id}" placeholder="Explain your grading decisions (which criteria failed and why)..." style="width: 100%; min-height: 80px; padding: 0.75rem; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-primary); color: var(--text-primary); font-size: 0.9rem; resize: vertical;"></textarea>
+                    <!-- Review Tab (Explanation + Submit) -->
+                    <div class="slot-tab-panel" data-tab="review" role="tabpanel">
+                        <div class="tab-content-inner">
+                            <label style="font-weight: 600; display: block; margin-bottom: 0.75rem; color: var(--text-primary);">
+                                📝 Human Review (human_judge_${slotNum}):
+                            </label>
+                            
+                            <div style="margin-bottom: 1rem;">
+                                <label style="font-weight: 500; font-size: 0.9rem; display: block; margin-bottom: 0.5rem; color: var(--text-secondary);">
+                                    Explanation:
+                                </label>
+                                <textarea class="human-review-notes" data-hunt-id="${result.hunt_id}" placeholder="Explain your grading decisions (which criteria failed and why)..." style="width: 100%; min-height: 120px; padding: 0.75rem; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-primary); color: var(--text-primary); font-size: 0.9rem; resize: vertical; font-family: inherit; line-height: 1.5;"></textarea>
                 </div>
                 
-                <!-- Submit Button -->
-                <button class="btn btn-primary submit-human-review-btn" data-hunt-id="${result.hunt_id}" style="margin-top: 0.75rem; width: 100%;">✅ Submit Human Review</button>
-                <div class="human-review-status" data-hunt-id="${result.hunt_id}" style="margin-top: 0.5rem; font-size: 0.85rem; color: var(--text-muted);"></div>
+                            <button class="btn btn-primary submit-human-review-btn" data-hunt-id="${result.hunt_id}" style="width: 100%; padding: 0.875rem; font-weight: 600; font-size: 0.95rem; border-radius: 8px;">
+                                ✅ Submit Human Review
+                            </button>
+                            <div class="human-review-status" data-hunt-id="${result.hunt_id}" style="margin-top: 0.75rem; font-size: 0.85rem; color: var(--text-muted); text-align: center;"></div>
+                        </div>
+                    </div>
+                </div>
             </div>
             
             <!-- LLM Judge Section - Hidden until human submits -->
-            <div class="llm-judge-section" data-hunt-id="${result.hunt_id}" style="margin-top: 1rem; display: none;" data-llm-judge='${llmJudgeData.replace(/'/g, "&#39;")}'>
-                <div style="padding: 1rem; background: var(--bg-tertiary); border-radius: 8px; border: 1px solid var(--accent-primary);">
-                    <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">🤖 LLM Judge (llm_judge_${slotNum}):</label>
-                    <div class="llm-judge-score" style="margin-bottom: 0.75rem;">
-                        <span class="score-badge ${scoreClass}">${scoreEmoji} Score: ${score}</span>
+            <div class="llm-judge-section" data-hunt-id="${result.hunt_id}" style="margin-top: 1.5rem; display: none;" data-llm-judge='${llmJudgeData.replace(/'/g, "&#39;")}'>
+                <div style="padding: 1.5rem; background: var(--bg-tertiary); border-radius: 12px; border: 2px solid var(--accent-primary);">
+                    <label style="font-weight: 600; display: block; margin-bottom: 1rem; color: var(--accent-primary); font-size: 1.05rem;">
+                        🤖 LLM Judge (llm_judge_${slotNum}):
+                    </label>
+                    <div class="llm-judge-score" style="margin-bottom: 1rem;">
+                        <span class="score-badge ${scoreClass}" style="font-size: 1rem; padding: 0.5rem 1rem;">${scoreEmoji} Score: ${score}</span>
                     </div>
                     
                     <!-- Criteria Breakdown -->
-                    <div class="llm-criteria-breakdown" style="margin-bottom: 0.75rem;">
-                        <label style="font-weight: 500; font-size: 0.9rem; display: block; margin-bottom: 0.5rem;">📋 Grading Basis:</label>
+                    <div class="llm-criteria-breakdown" style="margin-bottom: 1rem;">
+                        <label style="font-weight: 500; font-size: 0.9rem; display: block; margin-bottom: 0.75rem; color: var(--text-secondary);">📋 Grading Basis:</label>
                         ${formatLLMCriteria(result.judge_criteria, result.judge_explanation)}
                     </div>
                     
                     <!-- Full Explanation -->
-                    <div class="llm-judge-explanation" style="font-size: 0.9rem; color: var(--text-secondary); max-height: 300px; overflow-y: auto; white-space: pre-wrap; background: var(--bg-primary); padding: 0.75rem; border-radius: 6px;">
-                        <label style="font-weight: 500; display: block; margin-bottom: 0.25rem;">📝 Full Explanation:</label>
+                    <div class="llm-judge-explanation" style="font-size: 0.9rem; color: var(--text-secondary); white-space: pre-wrap; background: var(--bg-primary); padding: 1rem; border-radius: 8px; line-height: 1.6;">
+                        <label style="font-weight: 500; display: block; margin-bottom: 0.5rem; color: var(--text-primary);">📝 Full Explanation:</label>
                         ${escapeHtml(result.judge_explanation || 'No explanation available')}
                     </div>
                 </div>
             </div>
-            
-            <!-- Per-card reveal button removed - use main Reveal button at top -->
         </div>
     `;
     
