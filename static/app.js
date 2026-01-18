@@ -43,7 +43,7 @@ const state = {
     
     // Response selection state (NEW)
     allResponses: [],       // All hunt responses (accumulated across runs)
-    selectedHuntIds: [],    // IDs of 4 selected responses for review
+    selectedRowNumbers: [], // Row numbers (0-based indices) of 4 selected hunts for review
     llmRevealed: false,     // Whether LLM judgments have been revealed
     accumulatedHuntOffset: 0,  // Track total hunts for progress table numbering
     currentRunStartOffset: 0,  // Offset at start of current run (for row lookup during run)
@@ -410,17 +410,21 @@ async function saveToDrive() {
         return;
     }
     
-    // ===== VALIDATION 1: Check that all selected hunt_ids have reviews =====
-    const selectedHuntIds = state.selectedHuntIds || [];
-    if (selectedHuntIds.length !== 4) {
-        showToast(`Please select exactly 4 responses for review. Currently selected: ${selectedHuntIds.length}`, 'error');
+    // ===== VALIDATION 1: Check that all selected hunts have reviews =====
+    const selectedRowNumbers = state.selectedRowNumbers || [];
+    if (selectedRowNumbers.length !== 4) {
+        showToast(`Please select exactly 4 hunts for review. Currently selected: ${selectedRowNumbers.length}`, 'error');
         return;
     }
+    
+    // Get selected results and their hunt_ids
+    const selectedResults = selectedRowNumbers.map(rn => state.allResponses[rn]).filter(r => r);
+    const selectedHuntIds = selectedResults.map(r => r.hunt_id);
     
     // Check that reviews exist for all selected hunt_ids
     const missingReviews = selectedHuntIds.filter(huntId => !state.humanReviews || !state.humanReviews[huntId]);
     if (missingReviews.length > 0) {
-        showToast(`Missing reviews for ${missingReviews.length} selected response(s). Please complete all reviews first.`, 'error');
+        showToast(`Missing reviews for ${missingReviews.length} selected hunt(s). Please complete all reviews first.`, 'error');
         console.error('Missing reviews for hunt_ids:', missingReviews);
         return;
     }
@@ -429,7 +433,7 @@ async function saveToDrive() {
     const reviews = selectedHuntIds.map(huntId => state.humanReviews[huntId]).filter(r => r);
     
     if (reviews.length !== 4) {
-        showToast(`Only ${reviews.length}/4 reviews found for selected responses. Please complete all reviews.`, 'error');
+        showToast(`Only ${reviews.length}/4 reviews found for selected hunts. Please complete all reviews.`, 'error');
         return;
     }
     
@@ -564,12 +568,16 @@ async function saveToDrive() {
             body: JSON.stringify({ reviews: state.humanReviews || {} })
         });
         
+        // Convert row numbers to hunt_ids for backend
+        const selectedResults = state.selectedRowNumbers.map(rn => state.allResponses[rn]).filter(r => r);
+        const selectedHuntIds = selectedResults.map(r => r.hunt_id);
+        
         // Then save to drive - ONLY the selected responses
         const response = await fetch(`/api/save-to-drive/${state.sessionId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
-                selected_hunt_ids: state.selectedHuntIds || [] 
+                selected_hunt_ids: selectedHuntIds
             })
         });
         
@@ -1216,9 +1224,17 @@ async function fetchAllResponsesAndShowSelection(completedHunts, breaksFound) {
         const newResponses = data.results || [];
         state.allResponses = [...state.allResponses, ...newResponses];
         
-        // Count total breaks across all accumulated responses
-        const totalBreaks = state.allResponses.filter(r => r.judge_score === 0).length;
-        const totalPasses = state.allResponses.filter(r => r.judge_score >= 1).length;
+        // Count total breaks across all accumulated responses (check both judge_score and score fields)
+        const totalBreaks = state.allResponses.filter(r => {
+            const judgeScore = r.judge_score !== undefined && r.judge_score !== null ? Number(r.judge_score) : null;
+            const score = r.score !== undefined && r.score !== null ? Number(r.score) : null;
+            return (judgeScore !== null && judgeScore === 0) || (score !== null && score === 0);
+        }).length;
+        const totalPasses = state.allResponses.filter(r => {
+            const judgeScore = r.judge_score !== undefined && r.judge_score !== null ? Number(r.judge_score) : null;
+            const score = r.score !== undefined && r.score !== null ? Number(r.score) : null;
+            return (judgeScore !== null && judgeScore > 0) || (score !== null && score > 0);
+        }).length;
         
         // Populate summary
         elements.summarySection.classList.remove('hidden');
@@ -1290,172 +1306,150 @@ function displaySelectionCards() {
     const grid = elements.selectionGrid;
     grid.innerHTML = '';
     
-    // NO auto-selection - human picks all 4 manually
-    state.selectedHuntIds = [];
+    // Reset selection - use row numbers (0-based indices) instead of hunt_ids
+    state.selectedRowNumbers = [];
     
-    // Show both breaking and passing hunts
-    // Use same logic as validation: check both judge_score and score fields
-    const brokenHunts = state.allResponses.filter(r => {
-        const judgeScore = r.judge_score !== undefined && r.judge_score !== null ? Number(r.judge_score) : null;
-        const score = r.score !== undefined && r.score !== null ? Number(r.score) : null;
-        return (judgeScore !== null && judgeScore === 0) || (score !== null && score === 0);
-    });
-    const passingHunts = state.allResponses.filter(r => {
-        const judgeScore = r.judge_score !== undefined && r.judge_score !== null ? Number(r.judge_score) : null;
-        const score = r.score !== undefined && r.score !== null ? Number(r.score) : null;
-        return (judgeScore !== null && judgeScore > 0) || (score !== null && score > 0);
-    });
-    
-    if (brokenHunts.length === 0 && passingHunts.length === 0) {
+    if (state.allResponses.length === 0) {
         grid.innerHTML = '<div style="text-align: center; padding: 2rem; color: var(--text-muted);">No hunts found. Run hunts first.</div>';
         return;
     }
     
-    // Combine and sort: breaking first, then passing
-    const allHunts = [...brokenHunts, ...passingHunts];
+    // Create a table showing all hunts with their row numbers
+    const table = document.createElement('table');
+    table.style.cssText = 'width: 100%; border-collapse: collapse;';
+    table.innerHTML = `
+        <thead>
+            <tr style="background: var(--bg-secondary); border-bottom: 2px solid var(--border);">
+                <th style="padding: 0.75rem; text-align: left; font-weight: 600;">Select</th>
+                <th style="padding: 0.75rem; text-align: left; font-weight: 600;">Hunt #</th>
+                <th style="padding: 0.75rem; text-align: left; font-weight: 600;">Status</th>
+                <th style="padding: 0.75rem; text-align: left; font-weight: 600;">Model</th>
+                <th style="padding: 0.75rem; text-align: left; font-weight: 600;">Response Preview</th>
+            </tr>
+        </thead>
+        <tbody id="huntSelectionTableBody">
+        </tbody>
+    `;
     
-    // Create cards for all responses (both breaking and passing)
-    allHunts.forEach((result, index) => {
-        // Normalize for comparison to handle type mismatches
-        const normalizedResultId = Number(result.hunt_id);
-        const isSelected = state.selectedHuntIds.some(id => Number(id) === normalizedResultId);
-        // Use same logic as validation: check both judge_score and score fields
-        const judgeScore = result.judge_score !== undefined && result.judge_score !== null ? Number(result.judge_score) : null;
-        const score = result.score !== undefined && result.score !== null ? Number(result.score) : null;
-        const isFailed = (judgeScore !== null && judgeScore === 0) || (score !== null && score === 0);
-        const shortModel = (result.model || 'unknown').split('/').pop().substring(0, 20);
-        
-        const card = document.createElement('div');
-        card.className = `selection-card ${isSelected ? 'selected' : ''}`;
-        card.dataset.huntId = result.hunt_id;
-        card.style.cssText = `
-            padding: 1rem;
-            border: 2px solid ${isSelected ? 'var(--accent-primary)' : 'var(--border)'};
-            border-radius: 8px;
-            cursor: pointer;
-            background: ${isSelected ? 'rgba(var(--accent-primary-rgb), 0.1)' : 'var(--bg-primary)'};
-            transition: all 0.2s;
-        `;
-        
-        card.innerHTML = `
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-                <span style="font-weight: 600;">Response ${result.hunt_id}</span>
-                <span class="score-badge" style="padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.8rem; background: ${isFailed ? 'var(--success)' : 'var(--danger)'}; color: white;">
-                    ${isFailed ? '✅ BREAK' : '❌ PASS'}
-                </span>
-            </div>
-            <div style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.5rem;">
-                Model: ${shortModel}
-            </div>
-            <div style="font-size: 0.8rem; color: var(--text-muted); max-height: 60px; overflow: hidden; text-overflow: ellipsis;">
-                ${escapeHtml((result.response || '').substring(0, 150))}...
-            </div>
-            <div style="text-align: center; margin-top: 0.5rem;">
-                <input type="checkbox" class="selection-checkbox" ${isSelected ? 'checked' : ''} style="transform: scale(1.3);">
-            </div>
-        `;
-        
-        // Click handler
-        card.addEventListener('click', (e) => {
-            if (e.target.type !== 'checkbox') {
-                const checkbox = card.querySelector('.selection-checkbox');
-                checkbox.checked = !checkbox.checked;
-            }
-            // Pass the original hunt_id (not normalized) to maintain consistency
-            toggleResponseSelection(result.hunt_id, card);
-        });
-        
-        grid.appendChild(card);
+    const tbody = table.querySelector('#huntSelectionTableBody');
+    
+    // Show all hunts in order (breaking first, then passing)
+    const sortedHunts = [...state.allResponses].sort((a, b) => {
+        // Sort: breaking first (score 0), then passing (score > 0)
+        const aJudgeScore = a.judge_score !== undefined && a.judge_score !== null ? Number(a.judge_score) : (a.score !== undefined && a.score !== null ? Number(a.score) : 999);
+        const bJudgeScore = b.judge_score !== undefined && b.judge_score !== null ? Number(b.judge_score) : (b.score !== undefined && b.score !== null ? Number(b.score) : 999);
+        const aIsBreaking = aJudgeScore === 0;
+        const bIsBreaking = bJudgeScore === 0;
+        if (aIsBreaking && !bIsBreaking) return -1;
+        if (!aIsBreaking && bIsBreaking) return 1;
+        return 0;
     });
     
+    sortedHunts.forEach((result, index) => {
+        const rowNumber = state.allResponses.indexOf(result); // Get original index in allResponses
+        const isSelected = state.selectedRowNumbers.includes(rowNumber);
+        
+        // Determine if breaking or passing
+        const judgeScore = result.judge_score !== undefined && result.judge_score !== null ? Number(result.judge_score) : null;
+        const score = result.score !== undefined && result.score !== null ? Number(result.score) : null;
+        const isBreaking = (judgeScore !== null && judgeScore === 0) || (score !== null && score === 0);
+        
+        const shortModel = (result.model || 'unknown').split('/').pop().substring(0, 20);
+        const responsePreview = (result.response || '').substring(0, 100).replace(/\n/g, ' ');
+        
+        const row = document.createElement('tr');
+        row.className = `hunt-selection-row ${isSelected ? 'selected' : ''}`;
+        row.dataset.rowNumber = rowNumber;
+        row.style.cssText = `
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            background: ${isSelected ? 'rgba(var(--accent-primary-rgb), 0.1)' : 'transparent'};
+            transition: background 0.2s;
+        `;
+        row.onmouseenter = () => {
+            if (!isSelected) row.style.background = 'var(--bg-secondary)';
+        };
+        row.onmouseleave = () => {
+            if (!isSelected) row.style.background = 'transparent';
+        };
+        
+        row.innerHTML = `
+            <td style="padding: 0.75rem; text-align: center;">
+                <input type="checkbox" class="hunt-selection-checkbox" ${isSelected ? 'checked' : ''} 
+                       data-row-number="${rowNumber}" 
+                       style="transform: scale(1.3); cursor: pointer;">
+            </td>
+            <td style="padding: 0.75rem; font-weight: 600;">Hunt #${rowNumber + 1}</td>
+            <td style="padding: 0.75rem;">
+                <span class="score-badge" style="padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.85rem; background: ${isBreaking ? 'var(--success)' : 'var(--danger)'}; color: white;">
+                    ${isBreaking ? '✅ BREAK' : '❌ PASS'}
+                </span>
+            </td>
+            <td style="padding: 0.75rem; font-size: 0.9rem; color: var(--text-secondary);">${shortModel}</td>
+            <td style="padding: 0.75rem; font-size: 0.85rem; color: var(--text-muted); max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                ${escapeHtml(responsePreview)}...
+            </td>
+        `;
+        
+        // Click handler for row
+        row.addEventListener('click', (e) => {
+            if (e.target.type !== 'checkbox') {
+                const checkbox = row.querySelector('.hunt-selection-checkbox');
+                checkbox.checked = !checkbox.checked;
+            }
+            toggleHuntSelection(rowNumber, row);
+        });
+        
+        tbody.appendChild(row);
+    });
+    
+    grid.appendChild(table);
     updateSelectionCount();
 }
 
-function toggleResponseSelection(huntId, card) {
-    const checkbox = card.querySelector('.selection-checkbox');
+function toggleHuntSelection(rowNumber, row) {
+    const checkbox = row.querySelector('.hunt-selection-checkbox');
     
-    // Normalize hunt_id for comparison (handle string/int mismatch)
-    const normalizedHuntId = Number(huntId);
+    // Get the result directly by row number (no lookup needed!)
+    const result = state.allResponses[rowNumber];
+    if (!result) {
+        console.error(`❌ CRITICAL: No result found at row number ${rowNumber}`);
+        return;
+    }
     
-    // Get the result to check if it's breaking or passing
-    const result = state.allResponses.find(r => Number(r.hunt_id) === normalizedHuntId);
-    // Check both judge_score and score fields
-    const judgeScore = result && result.judge_score !== undefined && result.judge_score !== null ? Number(result.judge_score) : null;
-    const score = result && result.score !== undefined && result.score !== null ? Number(result.score) : null;
-    const isBreaking = result && ((judgeScore !== null && judgeScore === 0) || (score !== null && score === 0));
+    // Determine if breaking or passing
+    const judgeScore = result.judge_score !== undefined && result.judge_score !== null ? Number(result.judge_score) : null;
+    const score = result.score !== undefined && result.score !== null ? Number(result.score) : null;
+    const isBreaking = (judgeScore !== null && judgeScore === 0) || (score !== null && score === 0);
     
     if (checkbox.checked) {
         // Add to selection (max 4)
-        if (state.selectedHuntIds.length >= 4) {
+        if (state.selectedRowNumbers.length >= 4) {
             checkbox.checked = false;
-            showToast('Maximum 4 responses allowed. Unselect one first.', 'warning');
+            showToast('Maximum 4 hunts allowed. Unselect one first.', 'warning');
             return;
         }
         
-        // Get current selection breakdown (BEFORE adding the new one)
-        // Normalize IDs for comparison
-        const selectedResults = state.selectedHuntIds.map(id => {
-            const normalizedId = Number(id);
-            if (isNaN(normalizedId)) {
-                console.warn('⚠️ Invalid hunt_id in selectedHuntIds:', id);
-                return null;
-            }
-            const result = state.allResponses.find(r => {
-                const rId = Number(r.hunt_id);
-                return !isNaN(rId) && rId === normalizedId;
-            });
-            if (!result) {
-                console.warn(`⚠️ Could not find result for hunt_id: ${id} (normalized: ${normalizedId})`);
-            }
-            return result;
-        }).filter(r => r !== undefined && r !== null);
-        
+        // Get current selection breakdown
+        const selectedResults = state.selectedRowNumbers.map(rn => state.allResponses[rn]).filter(r => r);
         const currentBreakingCount = selectedResults.filter(r => {
-            const judgeScore = r.judge_score !== undefined && r.judge_score !== null ? Number(r.judge_score) : null;
-            const score = r.score !== undefined && r.score !== null ? Number(r.score) : null;
-            return (judgeScore !== null && judgeScore === 0) || (score !== null && score === 0);
+            const js = r.judge_score !== undefined && r.judge_score !== null ? Number(r.judge_score) : null;
+            const s = r.score !== undefined && r.score !== null ? Number(r.score) : null;
+            return (js !== null && js === 0) || (s !== null && s === 0);
         }).length;
         const currentPassingCount = selectedResults.filter(r => {
-            const judgeScore = r.judge_score !== undefined && r.judge_score !== null ? Number(r.judge_score) : null;
-            const score = r.score !== undefined && r.score !== null ? Number(r.score) : null;
-            return (judgeScore !== null && judgeScore > 0) || (score !== null && score > 0);
+            const js = r.judge_score !== undefined && r.judge_score !== null ? Number(r.judge_score) : null;
+            const s = r.score !== undefined && r.score !== null ? Number(r.score) : null;
+            return (js !== null && js > 0) || (s !== null && s > 0);
         }).length;
         
-        // Calculate what the counts would be AFTER adding this one
+        // Calculate what counts would be AFTER adding this one
         const newBreakingCount = currentBreakingCount + (isBreaking ? 1 : 0);
         const newPassingCount = currentPassingCount + (isBreaking ? 0 : 1);
         
-        // STRICT VALIDATION: Validate at EVERY step, not just when selecting the 4th item
-        // This prevents invalid intermediate states like (1 breaking, 2 passing) or (2 breaking, 2 passing)
+        const currentCount = state.selectedRowNumbers.length;
         
-        // Rule 1: Can only select up to 4 items
-        if (newBreakingCount + newPassingCount > 4) {
-            checkbox.checked = false;
-            showToast('Maximum 4 responses allowed.', 'warning');
-            return;
-        }
-        
-        // Rule 2: At any point, we must be on track for a valid final combination
-        // Valid final states: (4 breaking, 0 passing) OR (3 breaking, 1 passing)
-        // This means at any intermediate state:
-        // - If we have 0-2 items: Allow any combination (we can still reach valid state)
-        // - If we have 3 items: Must be (3 breaking, 0 passing) OR (2 breaking, 1 passing) OR (3 breaking, 0 passing) - wait, that's wrong
-        // Let me think: 
-        //   To get (4 breaking, 0 passing): need at least 3 breaking when selecting 4th
-        //   To get (3 breaking, 1 passing): need exactly (3 breaking, 0 passing) or (2 breaking, 1 passing) when selecting 4th
-        
-        // Actually, simpler logic:
-        // - If selecting 4th item: Must be exactly (4 breaking, 0 passing) OR (3 breaking, 1 passing)
-        // - If selecting 3rd item: Must be able to reach valid state with one more selection
-        //   - Can be (3 breaking, 0 passing) - can add 1 breaking to get (4 breaking, 0 passing) ✅
-        //   - Can be (2 breaking, 1 passing) - can add 1 breaking to get (3 breaking, 1 passing) ✅
-        //   - Can be (2 breaking, 0 passing) - can add 1 breaking to get (3 breaking, 0 passing), then need 1 more... wait no
-        //   - Can be (1 breaking, 0 passing) - can add 3 breaking... no, only 1 more slot
-        
-        // Better approach: At each step, check if the current state + this new item can lead to a valid final state
-        
-        const currentCount = state.selectedHuntIds.length;
-        
+        // SIMPLIFIED VALIDATION: Only validate when selecting 4th item
         if (currentCount === 3) {
             // Selecting the 4th item - must be exactly valid
             const isValidFinalCombination = 
@@ -1465,169 +1459,62 @@ function toggleResponseSelection(huntId, card) {
             if (!isValidFinalCombination) {
                 checkbox.checked = false;
                 if (newBreakingCount < 3) {
-                    showToast(`Invalid combination: ${newBreakingCount} breaking, ${newPassingCount} passing. Need either 4 breaking OR 3 breaking + 1 passing. Select more breaking hunts.`, 'warning');
+                    showToast(`Invalid combination: ${newBreakingCount} breaking, ${newPassingCount} passing. Need either 4 breaking OR 3 breaking + 1 passing.`, 'warning');
                 } else if (newBreakingCount === 3 && newPassingCount > 1) {
                     showToast('Invalid combination. Can only have 1 passing hunt. Select a breaking hunt instead.', 'warning');
-                } else if (newBreakingCount === 4 && newPassingCount > 0) {
-                    showToast('Invalid combination. If selecting 4 breaking, cannot have any passing hunts. Unselect a passing hunt first.', 'warning');
                 } else {
                     showToast(`Invalid combination: ${newBreakingCount} breaking, ${newPassingCount} passing. Need either 4 breaking OR 3 breaking + 1 passing.`, 'warning');
                 }
                 return;
             }
-        } else if (currentCount === 2) {
-            // Selecting the 3rd item - must be able to reach valid state with one more selection
-            // Valid intermediate states for 3rd item:
-            // - (3 breaking, 0 passing) - can add 1 breaking → (4 breaking, 0 passing) ✅
-            // - (2 breaking, 1 passing) - can add 1 breaking → (3 breaking, 1 passing) ✅
-            // - (2 breaking, 0 passing) - can add 1 breaking → (3 breaking, 0 passing), but then need 1 more breaking... wait, only 1 slot left, so can't reach (4 breaking, 0 passing). Can reach (3 breaking, 1 passing) if we add 1 passing... but that would be (3 breaking, 1 passing) ✅
-            // Actually: (2 breaking, 0 passing) + 1 breaking = (3 breaking, 0 passing) - invalid, need 1 more breaking but no slots
-            //           (2 breaking, 0 passing) + 1 passing = (2 breaking, 1 passing) - invalid, need 1 more breaking but only 1 slot left
-            
-            // So for 3rd item, valid states are:
-            // - (3 breaking, 0 passing) ✅
-            // - (2 breaking, 1 passing) ✅
-            // - (1 breaking, 0 passing) - can add 3 breaking? No, only 1 slot. Can add 1 breaking → (2 breaking, 0 passing) - invalid. Can add 1 passing → (1 breaking, 1 passing) - invalid.
-            
-            // Let me recalculate:
-            // To reach (4 breaking, 0 passing): need at least 3 breaking when selecting 4th
-            // To reach (3 breaking, 1 passing): need (3 breaking, 0 passing) or (2 breaking, 1 passing) when selecting 4th
-            
-            // So when selecting 3rd item:
-            // - If (3 breaking, 0 passing): can add 1 breaking → (4 breaking, 0 passing) ✅
-            // - If (2 breaking, 1 passing): can add 1 breaking → (3 breaking, 1 passing) ✅
-            // - If (2 breaking, 0 passing): can only add 1 more. If breaking → (3 breaking, 0 passing) - invalid. If passing → (2 breaking, 1 passing) - invalid.
-            // - If (1 breaking, 1 passing): can only add 1 more. If breaking → (2 breaking, 1 passing) - invalid. If passing → (1 breaking, 2 passing) - invalid.
-            // - If (0 breaking, 2 passing): can only add 1 more. If breaking → (1 breaking, 2 passing) - invalid. If passing → (0 breaking, 3 passing) - invalid.
-            
-            const canReachValidState = 
-                (newBreakingCount === 3 && newPassingCount === 0) ||  // Can add 1 breaking → (4 breaking, 0 passing)
-                (newBreakingCount === 2 && newPassingCount === 1);    // Can add 1 breaking → (3 breaking, 1 passing)
-            
-            if (!canReachValidState) {
-                checkbox.checked = false;
-                showToast(`Invalid intermediate state: ${newBreakingCount} breaking, ${newPassingCount} passing. Cannot reach valid final combination. Select more breaking hunts.`, 'warning');
-                return;
-            }
-        } else if (currentCount === 1) {
-            // Selecting the 2nd item - must be able to reach valid state with 2 more selections
-            // Valid states: (2 breaking, 0 passing) or (1 breaking, 1 passing)
-            // - (2 breaking, 0 passing): can add 2 breaking → (4 breaking, 0 passing) ✅ OR 1 breaking + 1 passing → (3 breaking, 1 passing) ✅
-            // - (1 breaking, 1 passing): can add 2 breaking → (3 breaking, 1 passing) ✅
-            const canReachValidState = 
-                (newBreakingCount === 2 && newPassingCount === 0) ||  // Exactly 2 breaking, 0 passing
-                (newBreakingCount === 1 && newPassingCount === 1);    // Exactly 1 breaking, 1 passing
-            
-            if (!canReachValidState) {
-                checkbox.checked = false;
-                showToast(`Invalid: ${newBreakingCount} breaking, ${newPassingCount} passing. Need either (2 breaking, 0 passing) or (1 breaking, 1 passing) at this step.`, 'warning');
-                return;
-            }
         }
-        // For 0 items (selecting 1st item), allow anything - we can always correct course
         
-        console.log('🔍 Selection validation:', {
-            currentCount,
-            currentBreaking: currentBreakingCount,
-            currentPassing: currentPassingCount,
-            isAddingBreaking: isBreaking,
-            newBreaking: newBreakingCount,
-            newPassing: newPassingCount
-        });
-        
-        // Allow selection if we're not at 4 yet, or if the combination is valid
-        // Only add if not already in the list (prevent duplicates)
-        // Store the original huntId to match what's in allResponses (for lookup consistency)
-        const alreadySelected = state.selectedHuntIds.some(id => Number(id) === normalizedHuntId);
-        if (!alreadySelected) {
-            state.selectedHuntIds.push(huntId); // Store original to match allResponses
+        // Add to selection
+        if (!state.selectedRowNumbers.includes(rowNumber)) {
+            state.selectedRowNumbers.push(rowNumber);
         }
-        card.classList.add('selected');
-        card.style.borderColor = 'var(--accent-primary)';
-        card.style.background = 'rgba(var(--accent-primary-rgb), 0.1)';
+        row.classList.add('selected');
+        row.style.background = 'rgba(var(--accent-primary-rgb), 0.1)';
+        row.style.borderLeft = '4px solid var(--accent-primary)';
     } else {
-        // Remove from selection (normalize for comparison)
-        state.selectedHuntIds = state.selectedHuntIds.filter(id => Number(id) !== normalizedHuntId);
-        card.classList.remove('selected');
-        card.style.borderColor = 'var(--border)';
-        card.style.background = 'var(--bg-primary)';
+        // Remove from selection
+        state.selectedRowNumbers = state.selectedRowNumbers.filter(rn => rn !== rowNumber);
+        row.classList.remove('selected');
+        row.style.background = 'transparent';
+        row.style.borderLeft = 'none';
     }
     
     updateSelectionCount();
 }
 
 function updateSelectionCount() {
-    const count = state.selectedHuntIds.length;
+    const count = state.selectedRowNumbers.length;
     
-    // Normalize hunt_ids to numbers for comparison (handle string/int mismatch)
-    const normalizedSelectedIds = state.selectedHuntIds.map(id => {
-        const num = Number(id);
-        if (isNaN(num)) {
-            console.warn('⚠️ Invalid hunt_id in selectedHuntIds:', id, typeof id);
-            return null;
-        }
-        return num;
-    }).filter(id => id !== null);
+    // Get results directly by row numbers - NO LOOKUP NEEDED!
+    const selectedResults = state.selectedRowNumbers.map(rn => state.allResponses[rn]).filter(r => r !== undefined);
     
-    // Get breakdown of breaking vs passing
-    // Use normalized comparison to handle type mismatches
-    const selectedResults = [];
-    const missingIds = [];
-    
-    for (const id of normalizedSelectedIds) {
-        const result = state.allResponses.find(r => {
-            const rId = Number(r.hunt_id);
-            return !isNaN(rId) && rId === id;
-        });
-        if (result) {
-            selectedResults.push(result);
-        } else {
-            missingIds.push(id);
-            console.error(`❌ CRITICAL: Could not find result for hunt_id: ${id}`);
-            console.error('   Available hunt_ids:', state.allResponses.map(r => ({ id: r.hunt_id, type: typeof r.hunt_id })));
-        }
+    if (selectedResults.length !== count) {
+        console.error(`❌ CRITICAL: Expected ${count} results but found ${selectedResults.length}`);
+        console.error('   Selected row numbers:', state.selectedRowNumbers);
+        console.error('   allResponses length:', state.allResponses.length);
     }
     
-    // If we're missing results, that's a critical error
-    if (missingIds.length > 0) {
-        console.error(`❌ CRITICAL ERROR: ${missingIds.length} selected hunt_ids not found in allResponses!`);
-        console.error('   Missing IDs:', missingIds);
-        console.error('   Selected IDs:', state.selectedHuntIds);
-        console.error('   Available IDs:', state.allResponses.map(r => r.hunt_id));
-    }
-    
-    // Log detailed info about each selected result
-    console.log('🔍 Selected Results Details:', selectedResults.map(r => ({
-        hunt_id: r.hunt_id,
-        judge_score: r.judge_score,
-        judge_score_type: typeof r.judge_score,
-        score: r.score, // Also check score field
-        is_breaking: r.judge_score === 0 || r.score === 0,
-        model: r.model
-    })));
-    
-    // Check both judge_score and score fields (some results might use different field names)
+    // Count breaking vs passing
     const breakingCount = selectedResults.filter(r => {
         const judgeScore = r.judge_score !== undefined && r.judge_score !== null ? Number(r.judge_score) : null;
         const score = r.score !== undefined && r.score !== null ? Number(r.score) : null;
-        // A hunt is breaking if judge_score is 0 OR score is 0
         return (judgeScore !== null && judgeScore === 0) || (score !== null && score === 0);
     }).length;
     
     const passingCount = selectedResults.filter(r => {
         const judgeScore = r.judge_score !== undefined && r.judge_score !== null ? Number(r.judge_score) : null;
         const score = r.score !== undefined && r.score !== null ? Number(r.score) : null;
-        // A hunt is passing if judge_score > 0 OR score > 0
         return (judgeScore !== null && judgeScore > 0) || (score !== null && score > 0);
     }).length;
     
-    // Debug logging to help troubleshoot
     console.log('🔍 updateSelectionCount:', {
-        selectedHuntIds: state.selectedHuntIds,
-        normalizedIds: normalizedSelectedIds,
-        allResponseIds: state.allResponses.map(r => ({ id: r.hunt_id, type: typeof r.hunt_id, score: r.judge_score })),
+        selectedRowNumbers: state.selectedRowNumbers,
         selectedResultsCount: selectedResults.length,
-        selectedResultsDetails: selectedResults.map(r => ({ id: r.hunt_id, score: r.judge_score })),
         breakingCount,
         passingCount,
         count
@@ -1672,17 +1559,30 @@ function updateSelectionCount() {
 }
 
 function confirmSelection() {
-    if (state.selectedHuntIds.length !== 4) {
-        showToast('Please select exactly 4 responses', 'error');
+    if (state.selectedRowNumbers.length !== 4) {
+        showToast('Please select exactly 4 hunts', 'error');
         return;
     }
     
-    // Validate combination one more time
-    const selectedResults = state.selectedHuntIds.map(id => 
-        state.allResponses.find(r => r.hunt_id === id)
-    ).filter(r => r);
-    const breakingCount = selectedResults.filter(r => r.judge_score === 0).length;
-    const passingCount = selectedResults.filter(r => r.judge_score > 0).length;
+    // Get selected results directly by row numbers
+    const selectedResults = state.selectedRowNumbers.map(rn => state.allResponses[rn]).filter(r => r);
+    
+    if (selectedResults.length !== 4) {
+        showToast(`Error: Could not find all selected hunts. Found ${selectedResults.length}/4.`, 'error');
+        return;
+    }
+    
+    // Count breaking vs passing
+    const breakingCount = selectedResults.filter(r => {
+        const judgeScore = r.judge_score !== undefined && r.judge_score !== null ? Number(r.judge_score) : null;
+        const score = r.score !== undefined && r.score !== null ? Number(r.score) : null;
+        return (judgeScore !== null && judgeScore === 0) || (score !== null && score === 0);
+    }).length;
+    const passingCount = selectedResults.filter(r => {
+        const judgeScore = r.judge_score !== undefined && r.judge_score !== null ? Number(r.judge_score) : null;
+        const score = r.score !== undefined && r.score !== null ? Number(r.score) : null;
+        return (judgeScore !== null && judgeScore > 0) || (score !== null && score > 0);
+    }).length;
     
     const isValidCombination = 
         (breakingCount === 4 && passingCount === 0) ||  // All 4 breaking
@@ -1696,7 +1596,7 @@ function confirmSelection() {
     // ===== SARCASTIC CONFIRMATION DIALOG =====
     const confirmed = confirm(
         `🎯 LOCKING IN YOUR SELECTION 🎯\n\n` +
-        `You've selected ${breakingCount} breaking and ${passingCount} passing response(s).\n\n` +
+        `You've selected ${breakingCount} breaking and ${passingCount} passing hunt(s).\n\n` +
         `Once you confirm, you're stuck with these 4.\n` +
         `No swapping. No "wait, I want a different one".\n` +
         `This is your final team. Make sure it's the right one.\n\n` +
@@ -1724,22 +1624,16 @@ function displaySelectedForReview() {
     elements.breakingResults.innerHTML = '';
     elements.noBreaksMessage.classList.add('hidden');
     
-    // DEBUG: Log what we're filtering
+    // Get selected results directly by row numbers - NO LOOKUP!
+    const selectedResponses = state.selectedRowNumbers.map(rn => state.allResponses[rn]).filter(r => r !== undefined);
+    
     console.log('displaySelectedForReview called');
-    console.log('selectedHuntIds:', state.selectedHuntIds);
-    console.log('allResponses hunt_ids:', state.allResponses.map(r => r.hunt_id));
-    
-    // Get the selected responses from allResponses - LIMIT TO EXACTLY 4
-    const selectedResponses = state.allResponses.filter(r => 
-        state.selectedHuntIds.includes(r.hunt_id)
-    ).slice(0, 4);  // Force max 4 just in case
-    
+    console.log('selectedRowNumbers:', state.selectedRowNumbers);
     console.log('selectedResponses count:', selectedResponses.length);
-    console.log('selectedResponses hunt_ids:', selectedResponses.map(r => r.hunt_id));
     
-    if (selectedResponses.length === 0) {
+    if (selectedResponses.length === 0 || selectedResponses.length !== 4) {
         elements.noBreaksMessage.classList.remove('hidden');
-        console.warn('No matching responses found!');
+        console.error(`❌ CRITICAL: Expected 4 responses but got ${selectedResponses.length}`);
         return;
     }
     
@@ -1765,7 +1659,7 @@ function displaySelectedForReview() {
 
 function updateReviewProgress() {
     const reviewCount = Object.keys(state.humanReviews).length;
-    const selectedCount = state.selectedHuntIds.length;
+    const selectedCount = state.selectedRowNumbers.length;
     
     if (elements.reviewProgressText) {
         elements.reviewProgressText.textContent = `${reviewCount} / ${selectedCount} completed`;
@@ -2371,7 +2265,7 @@ function clearPreviousResults() {
     state.isHunting = false;
     state.humanReviews = {};  // Reset human reviews
     state.allResponses = [];  // Reset accumulated responses
-    state.selectedHuntIds = [];  // Reset selection
+    state.selectedRowNumbers = [];  // Reset selection
     state.llmRevealed = false;  // Reset reveal state
     state.accumulatedHuntOffset = 0;  // Reset hunt offset
     state.currentRunStartOffset = 0;  // Reset run offset
