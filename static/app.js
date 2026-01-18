@@ -1663,6 +1663,38 @@ function createResultCard(result, slotIndex) {
         card.classList.toggle('open');
     });
     
+    // Tab switching functionality
+    const tabContainer = card.querySelector('.slot-tabs-container');
+    if (tabContainer) {
+        const tabs = tabContainer.querySelectorAll('.slot-tab');
+        const tabPanels = tabContainer.querySelectorAll('.slot-tab-panel');
+        
+        tabs.forEach(tab => {
+            tab.addEventListener('click', (e) => {
+                e.stopPropagation(); // Prevent card toggle
+                
+                const targetTab = tab.dataset.tab;
+                
+                // Remove active from all tabs and panels
+                tabs.forEach(t => {
+                    t.classList.remove('active');
+                    t.setAttribute('aria-selected', 'false');
+                });
+                tabPanels.forEach(p => {
+                    p.classList.remove('active');
+                });
+                
+                // Add active to clicked tab and corresponding panel
+                tab.classList.add('active');
+                tab.setAttribute('aria-selected', 'true');
+                const targetPanel = tabContainer.querySelector(`.slot-tab-panel[data-tab="${targetTab}"]`);
+                if (targetPanel) {
+                    targetPanel.classList.add('active');
+                }
+            });
+        });
+    }
+    
     // Criterion pass/fail button handlers
     card.querySelectorAll('.criterion-pass').forEach(btn => {
         btn.addEventListener('click', (e) => {
