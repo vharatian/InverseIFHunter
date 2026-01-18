@@ -592,13 +592,13 @@ class NotebookParser:
 [Explanation]:
 
 {explanation}"""
-                        new_content = f"**[{heading}]**\n\n{human_content}"
+                        new_content = f"**[{heading_original}]**\n\n{human_content}"
                         cell['source'] = [new_content]
                         updated_slots.add(f"human_{slot_num}")
                         print(f"DEBUG: Updated human_{slot_num} cell with judgment={judgment}")
                 
                 # Update reasoning trace slots (ensure all 4 are saved, even if empty)
-                reasoning_match = self.REASONING_TRACE_PATTERN.match(heading)
+                reasoning_match = self.REASONING_TRACE_PATTERN.match(heading_lower)
                 if reasoning_match:
                     slot_num = int(reasoning_match.group(1))
                     if slot_num in slot_to_result:
