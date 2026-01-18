@@ -296,7 +296,7 @@ async function fetchFromUrl() {
         if (!response.ok) {
             let errorMessage = 'Fetch failed';
             try {
-                const error = await response.json();
+            const error = await response.json();
                 errorMessage = error.detail || error.message || 'Fetch failed';
             } catch (e) {
                 errorMessage = `HTTP ${response.status}: ${response.statusText}`;
@@ -531,9 +531,7 @@ async function saveToDrive() {
     }
     
     // ===== VALIDATION 3: Check for criterion diversity in LLM JUDGE ONLY (not human judge) =====
-    // Get selected results to check LLM judge criteria (reuse selectedRowNumbers from line 447)
-    const selectedResults = selectedRowNumbers.map(rn => state.allResponses[rn]).filter(r => r);
-    
+    // Reuse selectedResults from line 454 (already computed above)
     const criteriaVotes = {};  // Track votes per criterion from LLM judges: { C1: { pass: 0, fail: 0 }, ... }
     
     console.log('🔍 DIVERSITY CHECK - LLM Judge criteria from selected results:', selectedResults);
