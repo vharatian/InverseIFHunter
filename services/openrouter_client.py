@@ -28,13 +28,13 @@ class OpenRouterClient:
     
     # Model configurations - Exact model names from OpenRouter
     MODELS = {
-        "nemotron": "nvidia/nemotron-3-nano-30b-a3b:free",
+        "nemotron": "nvidia/nemotron-3-nano-30b-a3b",
         "qwen3": "qwen/qwen3-235b-a22b-thinking-2507",
     }
     
     # Default max tokens per model (actual model capabilities)
     MAX_TOKENS = {
-        "nvidia/nemotron-3-nano-30b-a3b:free": 32768,  # 32k actual capability
+        "nvidia/nemotron-3-nano-30b-a3b": 32768,  # 32k actual capability
         "qwen/qwen3-235b-a22b-thinking-2507": 131072,  # 128k actual capability
     }
     

@@ -5,7 +5,7 @@ from enum import Enum
 
 
 class ModelProvider(str, Enum):
-    NEMOTRON = "nvidia/nemotron-3-nano-30b-a3b-bf16"
+    NEMOTRON = "nvidia/nemotron-3-nano-30b-a3b"
     QWEN3 = "qwen/qwen3-235b-a22b-thinking-2507"
 
 
@@ -45,7 +45,7 @@ class HuntConfig(BaseModel):
     """Configuration for a hunt session."""
     parallel_workers: int = Field(default=4, ge=1, le=16)
     target_breaks: int = Field(default=4, ge=1)
-    models: List[str] = Field(default=["nvidia/nemotron-3-nano-30b-a3b-bf16"])
+    models: List[str] = Field(default=["nvidia/nemotron-3-nano-30b-a3b"])
     reasoning_budget_percent: float = Field(default=0.9, ge=0.0, le=1.0)
     max_retries: int = Field(default=3, ge=1)
     judge_model: str = Field(default="gpt-5")

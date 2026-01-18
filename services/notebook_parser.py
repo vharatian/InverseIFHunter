@@ -23,7 +23,7 @@ class NotebookParser:
     # Known cell types
     METADATA_HEADINGS = {'prompt', 'response', 'response_reference', 
                          'judge_prompt_template', 'judge_system_prompt',
-                         'number_of_attempts_made', 'total_hunts_ran'}
+                         'number_of_attempts_made'}
     MODEL_PATTERN = re.compile(r'^(nemotron|qwen|model)_(\d+)$', re.IGNORECASE)
     LLM_JUDGE_PATTERN = re.compile(r'^llm_judge_(\d+)$', re.IGNORECASE)
     HUMAN_JUDGE_PATTERN = re.compile(r'^human_judge_(\d+)$', re.IGNORECASE)
@@ -444,7 +444,7 @@ class NotebookParser:
         
         # If notebook is empty, try to get model name from results
         if model_prefix == "model" and results:
-            # Extract model name from first result (e.g., "nvidia/nemotron-3-nano-30b-a3b:free" -> "nemotron")
+            # Extract model name from first result (e.g., "nvidia/nemotron-3-nano-30b-a3b" -> "nemotron")
             first_model = results[0].get('model', '')
             if 'nemotron' in first_model.lower():
                 model_prefix = 'nemotron'
@@ -621,24 +621,18 @@ class NotebookParser:
                         updated_slots.add(f"reasoning_{slot_num}")
                         print(f"DEBUG: Updated reasoning_trace_{slot_num} cell")
                 
-                # Update attempts counter
+                # Update attempts counter - use total_hunts_ran instead of parsed.attempts_made + len(results)
                 if heading_lower == 'number_of_attempts_made':
-                    new_attempts = parsed.attempts_made + len(results)
+                    new_attempts = total_hunts_ran  # Use total_hunts_ran directly
                     # Clamp attempts to valid range: min 1, max 8
                     new_attempts = max(1, min(8, new_attempts))
                     # Preserve original heading format
                     attempts_heading = heading_original if 'number_of_attempts_made' in heading_lower else 'number_of_attempts_made'
                     cell['source'] = [f"**[{attempts_heading}]**:\n\n{new_attempts}"]
                     updated_slots.add('number_of_attempts_made')
-                    print(f"DEBUG: Updated existing attempts cell to {new_attempts}")
+                    print(f"DEBUG: Updated existing attempts cell to {new_attempts} (from total_hunts_ran)")
                 
-                # Update total hunts ran
-                if heading_lower == 'total_hunts_ran':
-                    # Preserve original heading format
-                    hunts_heading = heading_original if 'total_hunts_ran' in heading_lower else 'total_hunts_ran'
-                    cell['source'] = [f"**[{hunts_heading}]**:\n\n{total_hunts_ran}"]
-                    updated_slots.add('total_hunts_ran')
-                    print(f"DEBUG: Updated existing total_hunts_ran cell to {total_hunts_ran}")
+                # REMOVED: total_hunts_ran cell update - no longer needed (number_of_attempts_made now equals total_hunts_ran)
         
         # Add new cells for results that don't have slots
         # CRITICAL: Always create exactly 4 slots (1-4) regardless of results length
@@ -879,7 +873,7 @@ class NotebookParser:
                 content = str(source)
             
             # Check if this is a metadata cell
-            if 'number_of_attempts_made' in content or 'total_hunts_ran' in content:
+            if 'number_of_attempts_made' in content:
                 metadata_cells.append(cell)
             else:
                 slot_cells.append(cell)
@@ -892,8 +886,8 @@ class NotebookParser:
         # Check if attempts cell was updated (found in notebook)
         attempts_cell_found = 'number_of_attempts_made' in updated_slots
         if not attempts_cell_found:
-            # Create attempts cell if it doesn't exist
-            new_attempts = parsed.attempts_made + len(results)
+            # Create attempts cell if it doesn't exist - use total_hunts_ran instead of parsed.attempts_made + len(results)
+            new_attempts = total_hunts_ran  # Use total_hunts_ran directly
             # Clamp attempts to valid range: min 1, max 8
             new_attempts = max(1, min(8, new_attempts))
             metadata_cells.append({
@@ -902,17 +896,9 @@ class NotebookParser:
                 "metadata": {},
                 "source": [f"**[number_of_attempts_made]**:\n\n{new_attempts}"]
             })
-            print(f"DEBUG: Created new attempts cell with count={new_attempts}")
+            print(f"DEBUG: Created new attempts cell with count={new_attempts} (from total_hunts_ran)")
         
-        # Add total_hunts_ran cell if it doesn't exist or wasn't updated
-        if 'total_hunts_ran' not in updated_slots:
-            metadata_cells.append({
-                "cell_type": "markdown",
-                "id": "auto_total_hunts_ran",
-                "metadata": {},
-                "source": [f"**[total_hunts_ran]**:\n\n{total_hunts_ran}"]
-            })
-            print(f"DEBUG: Created total_hunts_ran cell with count={total_hunts_ran}")
+        # REMOVED: total_hunts_ran cell - no longer needed (number_of_attempts_made now equals total_hunts_ran)
         
         # Append metadata cells at the end
         if metadata_cells:

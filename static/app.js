@@ -12,7 +12,7 @@
 
 const PROVIDER_MODELS = {
     'openrouter': [
-        { id: 'nvidia/nemotron-3-nano-30b-a3b:free', name: 'Nemotron-3-Nano (Fast)' },
+        { id: 'nvidia/nemotron-3-nano-30b-a3b', name: 'Nemotron-3-Nano (Fast)' },
         { id: 'qwen/qwen3-235b-a22b-thinking-2507', name: 'Qwen3-235B (Thinking)' }
     ],
     'fireworks': [
@@ -31,7 +31,7 @@ const state = {
     config: {
         parallel_workers: 4,
         target_breaks: 4,
-        models: ['nvidia/nemotron-3-nano-30b-a3b-bf16'],
+        models: ['nvidia/nemotron-3-nano-30b-a3b'],
         reasoning_budget_percent: 0.9,
         max_retries: 3,
         judge_model: 'gpt-5',
@@ -980,7 +980,7 @@ function initPreviewTabs() {
 // ============== Hunt Configuration ==============
 
 function getConfig() {
-    const model = elements.modelSelect?.value || 'nvidia/nemotron-3-nano-30b-a3b:free';
+    const model = elements.modelSelect?.value || 'nvidia/nemotron-3-nano-30b-a3b';
     const huntCount = parseInt(elements.parallelWorkers.value) || 4;
     
     // Create array with same model for all hunts
