@@ -1359,8 +1359,11 @@ function displaySelectionCards() {
 function toggleResponseSelection(huntId, card) {
     const checkbox = card.querySelector('.selection-checkbox');
     
+    // Normalize hunt_id for comparison (handle string/int mismatch)
+    const normalizedHuntId = Number(huntId);
+    
     // Get the result to check if it's breaking or passing
-    const result = state.allResponses.find(r => r.hunt_id === huntId);
+    const result = state.allResponses.find(r => Number(r.hunt_id) === normalizedHuntId);
     const isBreaking = result && result.judge_score === 0;
     
     if (checkbox.checked) {
@@ -1372,9 +1375,10 @@ function toggleResponseSelection(huntId, card) {
         }
         
         // Get current selection breakdown (BEFORE adding the new one)
+        // Normalize IDs for comparison
         const selectedResults = state.selectedHuntIds.map(id => 
-            state.allResponses.find(r => r.hunt_id === id)
-        ).filter(r => r);
+            state.allResponses.find(r => Number(r.hunt_id) === Number(id))
+        ).filter(r => r !== undefined);
         const currentBreakingCount = selectedResults.filter(r => r.judge_score === 0).length;
         const currentPassingCount = selectedResults.filter(r => r.judge_score > 0).length;
         
@@ -1415,13 +1419,16 @@ function toggleResponseSelection(huntId, card) {
         }
         
         // Allow selection if we're not at 4 yet, or if the combination is valid
-        state.selectedHuntIds.push(huntId);
+        // Only add if not already in the list (prevent duplicates)
+        if (!state.selectedHuntIds.some(id => Number(id) === normalizedHuntId)) {
+            state.selectedHuntIds.push(huntId);
+        }
         card.classList.add('selected');
         card.style.borderColor = 'var(--accent-primary)';
         card.style.background = 'rgba(var(--accent-primary-rgb), 0.1)';
     } else {
-        // Remove from selection
-        state.selectedHuntIds = state.selectedHuntIds.filter(id => id !== huntId);
+        // Remove from selection (normalize for comparison)
+        state.selectedHuntIds = state.selectedHuntIds.filter(id => Number(id) !== normalizedHuntId);
         card.classList.remove('selected');
         card.style.borderColor = 'var(--border)';
         card.style.background = 'var(--bg-primary)';
@@ -1433,12 +1440,28 @@ function toggleResponseSelection(huntId, card) {
 function updateSelectionCount() {
     const count = state.selectedHuntIds.length;
     
+    // Normalize hunt_ids to numbers for comparison (handle string/int mismatch)
+    const normalizedSelectedIds = state.selectedHuntIds.map(id => Number(id));
+    
     // Get breakdown of breaking vs passing
-    const selectedResults = state.selectedHuntIds.map(id => 
-        state.allResponses.find(r => r.hunt_id === id)
-    ).filter(r => r);
+    // Use normalized comparison to handle type mismatches
+    const selectedResults = normalizedSelectedIds.map(id => 
+        state.allResponses.find(r => Number(r.hunt_id) === id)
+    ).filter(r => r !== undefined);
+    
     const breakingCount = selectedResults.filter(r => r.judge_score === 0).length;
     const passingCount = selectedResults.filter(r => r.judge_score > 0).length;
+    
+    // Debug logging to help troubleshoot
+    console.log('🔍 updateSelectionCount:', {
+        selectedHuntIds: state.selectedHuntIds,
+        normalizedIds: normalizedSelectedIds,
+        allResponseIds: state.allResponses.map(r => r.hunt_id),
+        selectedResultsCount: selectedResults.length,
+        breakingCount,
+        passingCount,
+        count
+    });
     
     // Check if current combination is valid
     const isValidCombination = 
@@ -1465,7 +1488,17 @@ function updateSelectionCount() {
     elements.selectionCount.textContent = statusText;
     
     // Enable confirm button only if exactly 4 selected AND valid combination
-    elements.confirmSelectionBtn.disabled = !(count === 4 && isValidCombination);
+    const shouldEnable = count === 4 && isValidCombination;
+    elements.confirmSelectionBtn.disabled = !shouldEnable;
+    
+    console.log('🔍 Button state:', {
+        count,
+        breakingCount,
+        passingCount,
+        isValidCombination,
+        shouldEnable,
+        buttonDisabled: elements.confirmSelectionBtn.disabled
+    });
 }
 
 function confirmSelection() {
