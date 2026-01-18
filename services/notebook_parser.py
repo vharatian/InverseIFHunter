@@ -809,9 +809,59 @@ class NotebookParser:
                     updated_slots.add(f"reasoning_{slot_num}")
                     print(f"DEBUG: Added new reasoning_trace_{slot_num} cell")
         
-        # Insert new cells before the last cell or at the end
+        # Find insertion point: after the last slot's human_judge cell, or at the end
         print(f"DEBUG: Updated slots: {updated_slots}")
         print(f"DEBUG: Adding {len(new_cells)} new cells")
+        
+        # Find the last position where a slot cell exists (model, llm_judge, or human_judge)
+        # We want to insert new cells right after the last slot's human_judge
+        insertion_index = len(cells)  # Default: append at end
+        
+        # Search backwards to find the last human_judge cell
+        for i in range(len(cells) - 1, -1, -1):
+            cell = cells[i]
+            source = cell.get('source', [])
+            if isinstance(source, list):
+                content = ''.join(source)
+            else:
+                content = str(source)
+            
+            match = self.HEADING_PATTERN.search(content)
+            if match:
+                heading_lower = match.group(1).lower()
+                # Check if this is a human_judge cell (last cell in a slot's group)
+                if self.HUMAN_JUDGE_PATTERN.match(heading_lower):
+                    insertion_index = i + 1  # Insert after this cell
+                    print(f"DEBUG: Found insertion point after human_judge cell at index {i}")
+                    break
+                # Also check for model or llm_judge cells (in case human_judge is missing)
+                elif self.MODEL_PATTERN.match(heading_lower) or self.LLM_JUDGE_PATTERN.match(heading_lower):
+                    # If we haven't found a human_judge yet, use this as insertion point
+                    if insertion_index == len(cells):
+                        insertion_index = i + 1
+                        print(f"DEBUG: Found insertion point after model/llm_judge cell at index {i}")
+        
+        # Separate slot cells from metadata cells (attempts, total_hunts_ran)
+        slot_cells = []  # Model, LLM judge, human judge cells (in order per slot)
+        metadata_cells = []  # Attempts, total_hunts_ran cells
+        
+        for cell in new_cells:
+            source = cell.get('source', [])
+            if isinstance(source, list):
+                content = ''.join(source)
+            else:
+                content = str(source)
+            
+            # Check if this is a metadata cell
+            if 'number_of_attempts_made' in content or 'total_hunts_ran' in content:
+                metadata_cells.append(cell)
+            else:
+                slot_cells.append(cell)
+        
+        # Insert slot cells at the correct position (maintaining order: model -> llm_judge -> human_judge per slot)
+        if slot_cells:
+            cells[insertion_index:insertion_index] = slot_cells
+            print(f"DEBUG: Inserted {len(slot_cells)} slot cells at index {insertion_index}")
         
         # Check if attempts cell was updated (found in notebook)
         attempts_cell_found = 'number_of_attempts_made' in updated_slots
@@ -820,7 +870,7 @@ class NotebookParser:
             new_attempts = parsed.attempts_made + len(results)
             # Clamp attempts to valid range: min 1, max 8
             new_attempts = max(1, min(8, new_attempts))
-            new_cells.append({
+            metadata_cells.append({
                 "cell_type": "markdown",
                 "id": "auto_attempts_counter",
                 "metadata": {},
@@ -830,7 +880,7 @@ class NotebookParser:
         
         # Add total_hunts_ran cell if it doesn't exist or wasn't updated
         if 'total_hunts_ran' not in updated_slots:
-            new_cells.append({
+            metadata_cells.append({
                 "cell_type": "markdown",
                 "id": "auto_total_hunts_ran",
                 "metadata": {},
@@ -838,8 +888,10 @@ class NotebookParser:
             })
             print(f"DEBUG: Created total_hunts_ran cell with count={total_hunts_ran}")
         
-        if new_cells:
-            cells.extend(new_cells)
+        # Append metadata cells at the end
+        if metadata_cells:
+            cells.extend(metadata_cells)
+            print(f"DEBUG: Appended {len(metadata_cells)} metadata cells at the end")
         
         notebook['cells'] = cells
         print(f"DEBUG: Final notebook has {len(cells)} cells")
