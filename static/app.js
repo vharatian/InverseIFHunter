@@ -602,6 +602,8 @@ async function saveToDrive() {
         const selectedRowNumbers = state.selectedRowNumbers || [];
         const selectedResults = selectedRowNumbers.map(rn => state.allResponses[rn]).filter(r => r);
         const reviewsForBackend = {};
+        const missingReviews = [];
+        
         selectedRowNumbers.forEach((rn, index) => {
             const reviewKey = `row_${rn}`;
             const review = state.humanReviews[reviewKey];
@@ -614,15 +616,47 @@ async function saveToDrive() {
                     slotNum: review.slotNum,
                     timestamp: review.timestamp
                 };
+            } else if (selectedResults[index]) {
+                // Review missing for this hunt
+                missingReviews.push({
+                    hunt_id: selectedResults[index].hunt_id,
+                    row_number: rn
+                });
             }
         });
         
-        // First save reviews
-        await fetch(`/api/save-reviews/${state.sessionId}`, {
+        // VALIDATION: Check if reviews are missing before saving
+        if (missingReviews.length > 0) {
+            const missingHuntIds = missingReviews.map(m => m.hunt_id).join(', ');
+            const missingRowNumbers = missingReviews.map(m => m.row_number).join(', ');
+            
+            const warningMessage = 
+                `⚠️ WARNING: Reviews are missing for ${missingReviews.length} hunt(s):\n\n` +
+                `Hunt IDs: ${missingHuntIds}\n` +
+                `Row Numbers: ${missingRowNumbers}\n\n` +
+                `These will be saved with empty review data.\n\n` +
+                `Did you submit your reviews? Click "Cancel" to review them first, or "OK" to continue saving.`;
+            
+            const proceed = confirm(warningMessage);
+            if (!proceed) {
+                showToast('Save cancelled. Please complete your reviews first.', 'info');
+                btn.disabled = false;
+                btn.textContent = originalText;
+                return;
+            }
+        }
+        
+        // First save reviews (even if some are missing - save what we have)
+        const saveReviewsResponse = await fetch(`/api/save-reviews/${state.sessionId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ reviews: reviewsForBackend })
         });
+        
+        if (!saveReviewsResponse.ok) {
+            const err = await saveReviewsResponse.json();
+            throw new Error(`Failed to save reviews: ${err.detail || 'Unknown error'}`);
+        }
         
         // Get selected results (already computed above)
         const selectedHuntIds = selectedResults.map(r => r.hunt_id);
@@ -643,7 +677,11 @@ async function saveToDrive() {
             throw new Error(err.detail || 'Save failed');
         }
         
-        showToast('Successfully saved back to Google Drive!', 'success');
+        const successMessage = missingReviews.length > 0
+            ? `✅ Saved to Google Drive! (Note: ${missingReviews.length} hunt(s) saved without reviews)`
+            : '✅ Successfully saved back to Google Drive!';
+        
+        showToast(successMessage, missingReviews.length > 0 ? 'warning' : 'success');
         
     } catch (error) {
         console.error('Drive Save Error:', error);
@@ -2263,6 +2301,36 @@ function submitHumanReview(huntId, card, slotNum, rowNumber) {
     
     // Update the progress display (NEW)
     updateReviewProgress();
+    
+    // AUTO-SAVE: Immediately save review to backend to prevent data loss
+    try {
+        // Convert to backend format (hunt_id as key)
+        const reviewForBackend = {
+            [huntId]: {
+                judgment: overallJudgment,
+                grading_basis: grading,
+                explanation: notes,
+                slotNum: slotNum,
+                timestamp: new Date().toISOString()
+            }
+        };
+        
+        const saveResponse = await fetch(`/api/save-reviews/${state.sessionId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reviews: reviewForBackend })
+        });
+        
+        if (!saveResponse.ok) {
+            console.warn(`Failed to auto-save review for hunt ${huntId}:`, await saveResponse.text());
+            // Don't show error to user - it's auto-save, will be saved again on final save
+        } else {
+            console.log(`✅ Auto-saved review for hunt ${huntId} to backend`);
+        }
+    } catch (error) {
+        console.warn(`Error auto-saving review for hunt ${huntId}:`, error);
+        // Don't show error to user - it's auto-save, will be saved again on final save
+    }
     
     // Check if all 4 reviews are done
     checkAllReviewsComplete();
