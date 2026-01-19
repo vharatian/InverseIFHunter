@@ -130,23 +130,27 @@ class OpenAIJudgeClient:
             # Default template using new format
             user_prompt = f"""## Question
 {prompt}
-----------------------
+
+---
 ## Student Response
 {student_response}
------------------------
-## Standard Respones
+
+---
+## Standard Responses
 {standard_resp}
-----------------------
-## Evalaution Criteria
+
+---
+## Evaluation Criteria
 {response_reference}
----------------------
+
+---
 """
         
         # Always use independent judging (each criterion evaluated separately)
         if independent_judging:
             return await self._judge_independently(
                 prompt, student_response, response_reference, 
-                judge_system_prompt, model
+                judge_system_prompt, model, standard_response=standard_resp
             )
 
         # Retry logic for connection errors (broken pipe, timeouts, etc.)
@@ -691,7 +695,8 @@ class OpenAIJudgeClient:
         student_response: str,
         reference: str,
         system_prompt: str,
-        model: str
+        model: str,
+        standard_response: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Judge response by splitting criteria into independent API calls.
