@@ -104,25 +104,36 @@ class OpenAIJudgeClient:
         
         # Build the judge prompt
         if judge_prompt_template:
+            # Support both old and new template placeholders
             user_prompt = judge_prompt_template.replace(
                 "{prompt}", prompt
             ).replace(
-                "{response_reference}", response_reference
+                "{model_resposne}", student_response  # Note: using exact typo from user's template
             ).replace(
-                "{response}", student_response
+                "{model_response}", student_response  # Also support correct spelling
+            ).replace(
+                "{response}", student_response  # Legacy support
+            ).replace(
+                "{standard_response}", ""  # Not available in current implementation
+            ).replace(
+                "{criteria}", response_reference
+            ).replace(
+                "{response_reference}", response_reference  # Legacy support
             )
         else:
-            user_prompt = f"""#Prompt
-
+            # Default template using new format
+            user_prompt = f"""## Question
 {prompt}
-
-# Judge Criteria
-
-{response_reference}
-
-#Student Ideal Answer
-
+----------------------
+## Student Response
 {student_response}
+-----------------------
+## Standard Respones
+
+----------------------
+## Evalaution Criteria
+{response_reference}
+---------------------
 """
         
         # Always use independent judging (each criterion evaluated separately)
