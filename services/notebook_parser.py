@@ -563,41 +563,82 @@ class NotebookParser:
             criteria_explanations = {}
             
             if explanation_text:
-                # Try multiple patterns to extract per-criterion explanations
-                for criterion_id in judge_criteria.keys():
-                    patterns = [
-                        # Pattern: "C1: explanation..." or "C1 - explanation..."
-                        re.compile(rf'{re.escape(criterion_id)}[:-\s]+\s*(.+?)(?=\s*C\d|$)', re.IGNORECASE | re.DOTALL),
-                        # Pattern: "C1 PASS: explanation..." or "C1 FAIL: explanation..."
-                        re.compile(rf'{re.escape(criterion_id)}\s+(?:PASS|FAIL)[:-\s]?\s*(.+?)(?=\s*C\d|$)', re.IGNORECASE | re.DOTALL),
-                        # Pattern: "Failed Criteria Details: C1: explanation..." or "Passing Criteria: C1: explanation..."
-                        re.compile(rf'(?:Failed|Passing)\s+Criteria\s+Details?:\s*{re.escape(criterion_id)}[:-\s]?\s*(.+?)(?=\s*C\d|$)', re.IGNORECASE | re.DOTALL),
-                    ]
-                    
-                    for pattern in patterns:
-                        match = pattern.search(explanation_text)
-                        if match and match.group(1):
-                            explanation = match.group(1).strip()
-                            # Clean up the explanation (remove extra whitespace, bullet points, etc.)
-                            explanation = re.sub(r'^[•\-\*]\s*', '', explanation)
-                            explanation = re.sub(r'\s+', ' ', explanation).strip()
-                            if explanation and len(explanation) > 5:  # Only use if meaningful
-                                criteria_explanations[criterion_id] = explanation
-                                break
-                    
-                    # Fallback: look for the criterion ID anywhere in the explanation
-                    if criterion_id not in criteria_explanations:
-                        lines = explanation_text.split('\n')
-                        for line in lines:
-                            if criterion_id.upper() in line.upper() and len(line) > len(criterion_id) + 10:
-                                # Extract text after the criterion ID
-                                match = re.search(rf'{re.escape(criterion_id)}[:-\s]?\s*(.+)', line, re.IGNORECASE)
-                                if match:
+                # First, try to extract from "Passing Criteria:" section (before "Failed Criteria Details:")
+                passing_section_match = re.search(r'Passing\s+Criteria(?:\s*:\s*\d+/\d+)?\s*(.*?)(?=Failed\s+Criteria\s+Details|$)', explanation_text, re.IGNORECASE | re.DOTALL)
+                if passing_section_match:
+                    passing_section = passing_section_match.group(1)
+                    # Look for criteria in the passing section
+                    for criterion_id in judge_criteria.keys():
+                        if judge_criteria.get(criterion_id, '').upper() == 'PASS':
+                            # Try to find this criterion in the passing section
+                            pass_patterns = [
+                                re.compile(rf'{re.escape(criterion_id)}[:\s\-]+\s*(.+?)(?=\s*C\d|$)', re.IGNORECASE | re.DOTALL),
+                                re.compile(rf'{re.escape(criterion_id)}\s+PASS[:\s\-]?\s*(.+?)(?=\s*C\d|$)', re.IGNORECASE | re.DOTALL),
+                            ]
+                            for pattern in pass_patterns:
+                                match = pattern.search(passing_section)
+                                if match and match.group(1):
                                     explanation = match.group(1).strip()
                                     explanation = re.sub(r'^[•\-\*]\s*', '', explanation)
+                                    explanation = re.sub(r'\s+', ' ', explanation).strip()
                                     if explanation and len(explanation) > 5:
                                         criteria_explanations[criterion_id] = explanation
                                         break
+                
+                # Then, try to extract from "Failed Criteria Details:" section
+                failed_section_match = re.search(r'Failed\s+Criteria\s+Details?:\s*(.*?)(?=Passing\s+Criteria|$)', explanation_text, re.IGNORECASE | re.DOTALL)
+                if failed_section_match:
+                    failed_section = failed_section_match.group(1)
+                    # Look for criteria in the failed section
+                    for criterion_id in judge_criteria.keys():
+                        if criterion_id not in criteria_explanations:  # Only if not already found
+                            if judge_criteria.get(criterion_id, '').upper() == 'FAIL':
+                                fail_patterns = [
+                                    re.compile(rf'{re.escape(criterion_id)}[:\s\-]+\s*(.+?)(?=\s*C\d|$)', re.IGNORECASE | re.DOTALL),
+                                    re.compile(rf'{re.escape(criterion_id)}\s+FAIL[:\s\-]?\s*(.+?)(?=\s*C\d|$)', re.IGNORECASE | re.DOTALL),
+                                ]
+                                for pattern in fail_patterns:
+                                    match = pattern.search(failed_section)
+                                    if match and match.group(1):
+                                        explanation = match.group(1).strip()
+                                        explanation = re.sub(r'^[•\-\*]\s*', '', explanation)
+                                        explanation = re.sub(r'\s+', ' ', explanation).strip()
+                                        if explanation and len(explanation) > 5:
+                                            criteria_explanations[criterion_id] = explanation
+                                            break
+                
+                # Fallback: look for any criterion ID anywhere in the explanation (for any format)
+                for criterion_id in judge_criteria.keys():
+                    if criterion_id not in criteria_explanations:
+                        patterns = [
+                            # Pattern: "C1: explanation..." or "C1 - explanation..." (fix: escape dash or put at end)
+                            re.compile(rf'{re.escape(criterion_id)}[:\s\-]+\s*(.+?)(?=\s*C\d|$)', re.IGNORECASE | re.DOTALL),
+                            # Pattern: "C1 PASS: explanation..." or "C1 FAIL: explanation..."
+                            re.compile(rf'{re.escape(criterion_id)}\s+(?:PASS|FAIL)[:\s\-]?\s*(.+?)(?=\s*C\d|$)', re.IGNORECASE | re.DOTALL),
+                        ]
+                        for pattern in patterns:
+                            match = pattern.search(explanation_text)
+                            if match and match.group(1):
+                                explanation = match.group(1).strip()
+                                explanation = re.sub(r'^[•\-\*]\s*', '', explanation)
+                                explanation = re.sub(r'\s+', ' ', explanation).strip()
+                                if explanation and len(explanation) > 5:
+                                    criteria_explanations[criterion_id] = explanation
+                                    break
+                        
+                        # Final fallback: look line by line
+                        if criterion_id not in criteria_explanations:
+                            lines = explanation_text.split('\n')
+                            for line in lines:
+                                if criterion_id.upper() in line.upper() and len(line) > len(criterion_id) + 10:
+                                    # Extract text after the criterion ID
+                                    match = re.search(rf'{re.escape(criterion_id)}[:\s\-]?\s*(.+)', line, re.IGNORECASE)
+                                    if match:
+                                        explanation = match.group(1).strip()
+                                        explanation = re.sub(r'^[•\-\*]\s*', '', explanation)
+                                        if explanation and len(explanation) > 5:
+                                            criteria_explanations[criterion_id] = explanation
+                                            break
             
             # Build criteria details list in format: C1: (FAIL) explanation
             criteria_details = []
