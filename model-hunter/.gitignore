@@ -1,0 +1,51 @@
+# Credentials - NEVER COMMIT THESE
+.env
+.env.*
+.env.local
+service_account.json
+*.pem
+*.key
+credentials.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Storage (session data)
+.storage/
+
+# Logs
+*.log
+*.tmp
+
+# Docker
+.dockerignore
+
+# Testing
+.pytest_cache/
+htmlcov/
+.coverage
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Google Cloud SDK (if present)
+google-cloud-sdk/
+ROADMAP.md

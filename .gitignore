@@ -1,0 +1,46 @@
+# Google Cloud SDK
+google-cloud-sdk/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Credentials - NEVER COMMIT THESE
+.env
+.env.*
+.env.local
+service_account.json
+*.pem
+*.key
+credentials.json
+
+# Storage (session data)
+.storage/
+
+# Logs
+*.log
+*.tmp
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Notebooks (optional - uncomment if you don't want to track notebooks)
+# *.ipynb
+
