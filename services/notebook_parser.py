@@ -599,7 +599,7 @@ class NotebookParser:
                                         criteria_explanations[criterion_id] = explanation
                                         break
             
-            # Build criteria details list (ALL criteria, not just failed ones) with explanations
+            # Build criteria details list in format: C1: (FAIL) explanation
             criteria_details = []
             if judge_criteria:
                 # Sort criteria by ID (C1, C2, C3, etc.)
@@ -612,31 +612,14 @@ class NotebookParser:
                     status_upper = str(status).upper()
                     explanation = criteria_explanations.get(criterion_id, "")
                     if explanation:
-                        criteria_details.append(f"- {criterion_id}: {status_upper} - {explanation}")
+                        criteria_details.append(f"{criterion_id}: ({status_upper}) {explanation}")
                     else:
-                        criteria_details.append(f"- {criterion_id}: {status_upper}")
+                        criteria_details.append(f"{criterion_id}: ({status_upper})")
             
             # Combine pass rate summary with criteria details
             criteria_summary = f"{pass_rate_text}, here are the details:\n\n" + "\n".join(criteria_details) if criteria_details else pass_rate_text
             
             grading_json = json.dumps({k: v.upper() for k, v in judge_criteria.items()}, indent=2)
-            
-            formatted_explanation = judge_explanation or judge_output_raw or "No explanation provided"
-            if formatted_explanation and not formatted_explanation.strip().startswith('•'):
-                lines = formatted_explanation.split('\n')
-                formatted_lines = []
-                for line in lines:
-                    line = line.strip()
-                    if line:
-                        criterion_match = re.search(r'\b(C\d+)\s+(PASS|FAIL|pass|fail)', line, re.IGNORECASE)
-                        if criterion_match:
-                            criterion_id = criterion_match.group(1)
-                            status = criterion_match.group(2).upper()
-                            formatted_lines.append(f"• {criterion_id} {status}: {line}")
-                        else:
-                            formatted_lines.append(f"• {line}")
-                if formatted_lines:
-                    formatted_explanation = '\n'.join(formatted_lines)
             
             return f"""[Grading Basis]:
 
@@ -648,9 +631,7 @@ class NotebookParser:
 
 [Explanation]:
 
-{criteria_summary}
-
-{formatted_explanation}"""
+{criteria_summary}"""
                     
         # Helper function to format human judge content
         def format_human_judge_content(review):
@@ -660,28 +641,10 @@ class NotebookParser:
             else:
                 grading_json = "{}"
             
-            # Calculate pass rate
+            # Calculate score based on 50% rule
             total_criteria = len(grading_basis)
             pass_count = sum(1 for v in grading_basis.values() if str(v).upper() == 'PASS')
-            pass_rate_text = f"The pass rate is {pass_count}/{total_criteria}" if total_criteria > 0 else "No criteria evaluated"
-            
-            # Build criteria details list (ALL criteria, not just failed ones)
-            criteria_details = []
-            if grading_basis:
-                # Sort criteria by ID (C1, C2, C3, etc.)
-                def get_criterion_number(criterion_id):
-                    match = re.search(r'(\d+)', str(criterion_id))
-                    return int(match.group(1)) if match else 999
-                
-                sorted_criteria = sorted(grading_basis.items(), key=lambda x: get_criterion_number(x[0]))
-                for criterion_id, status in sorted_criteria:
-                    status_upper = str(status).upper()
-                    criteria_details.append(f"- {criterion_id}: {status_upper}")
-            
-            # Combine pass rate summary with criteria details
-            criteria_summary = f"{pass_rate_text}, here are the details:\n\n" + "\n".join(criteria_details) if criteria_details else pass_rate_text
-            
-            score = 1 if pass_count > len(grading_basis) / 2 else 0
+            score = 1 if pass_count >= total_criteria / 2 else 0
             
             explanation = (review.get('explanation', '') or review.get('notes', '')) if review else ''
             
@@ -694,8 +657,6 @@ class NotebookParser:
 [JSON]: {{"answer_score": {score}}}
 
 [Explanation]:
-
-{criteria_summary}
 
 {explanation}"""
         

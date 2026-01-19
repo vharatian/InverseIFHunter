@@ -2252,7 +2252,6 @@ async function submitHumanReview(huntId, card, slotNum, rowNumber) {
     const criterionRows = criteriaGrading.querySelectorAll('.criterion-row');
     const grading = {};
     let allGraded = true;
-    let anyFailed = false;
     
     criterionRows.forEach(row => {
         const criterionId = row.dataset.criterionId;
@@ -2262,7 +2261,6 @@ async function submitHumanReview(huntId, card, slotNum, rowNumber) {
         } else {
             // Store as uppercase for consistency
             grading[criterionId] = grade.toUpperCase(); // 'pass' -> 'PASS', 'fail' -> 'FAIL'
-            if (grade.toLowerCase() === 'fail') anyFailed = true;
         }
     });
     
@@ -2272,12 +2270,19 @@ async function submitHumanReview(huntId, card, slotNum, rowNumber) {
         return;
     }
     
+    // Calculate pass/fail based on 50% rule: if 50% or more criteria are PASS, overall is PASS
+    const totalCriteria = Object.keys(grading).length;
+    const passCount = Object.values(grading).filter(v => v.toUpperCase() === 'PASS').length;
+    const passRate = totalCriteria > 0 ? passCount / totalCriteria : 0;
+    const overallJudgment = passRate >= 0.5 ? 'pass' : 'fail';
+    
     // ===== SARCASTIC CONFIRMATION DIALOG =====
     const gradingSummary = Object.entries(grading).map(([k, v]) => `${k}: ${v}`).join(', ');
     const confirmed = confirm(
         `📝 SUBMITTING REVIEW FOR SLOT ${slotNum} 📝\n\n` +
         `Your grading: ${gradingSummary}\n` +
-        `Overall: ${anyFailed ? 'FAIL' : 'PASS'}\n\n` +
+        `Pass rate: ${passCount}/${totalCriteria} (${Math.round(passRate * 100)}%)\n` +
+        `Overall: ${overallJudgment.toUpperCase()}\n\n` +
         `Are you sure about these grades?\n` +
         `Double-checked your explanation?\n\n` +
         `(Note: You can edit this later, but it's better to get it right the first time!)\n\n` +
@@ -2289,9 +2294,6 @@ async function submitHumanReview(huntId, card, slotNum, rowNumber) {
         showToast('Take your time! Make sure everything is correct.', 'info');
         return;
     }
-    
-    // Determine overall judgment based on criteria
-    const overallJudgment = anyFailed ? 'fail' : 'pass';
     
     // Store human review in state with slot info and criteria
     // Use row number as key to ensure uniqueness across runs
