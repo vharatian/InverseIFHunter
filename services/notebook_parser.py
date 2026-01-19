@@ -458,14 +458,20 @@ class NotebookParser:
         huntid_to_review = {}
         huntid_to_slotnum = {}  # Map hunt_id -> slotNum
         print(f"DEBUG: human_reviews received: {human_reviews}")
+        print(f"DEBUG: human_reviews keys: {list(human_reviews.keys())}")
         for hunt_id_str, review in human_reviews.items():
             slot_num = review.get('slotNum')
             if slot_num is not None:
                 hunt_id = int(hunt_id_str) if hunt_id_str.isdigit() else None
                 if hunt_id is not None:
-                    huntid_to_slotnum[hunt_id] = int(slot_num)
-                    huntid_to_review[int(slot_num)] = review
-                    print(f"DEBUG: hunt_id {hunt_id} -> slot {slot_num}, judgment: {review.get('judgment')}")
+                    slot_num_int = int(slot_num)
+                    huntid_to_slotnum[hunt_id] = slot_num_int
+                    # Store review by slot_num - if multiple reviews for same slot, keep the last one
+                    if slot_num_int in huntid_to_review:
+                        print(f"WARNING: Multiple reviews for slot {slot_num_int}, keeping the last one")
+                    huntid_to_review[slot_num_int] = review
+                    print(f"DEBUG: hunt_id {hunt_id} -> slot {slot_num_int}, judgment: {review.get('judgment')}, has_grading_basis: {bool(review.get('grading_basis'))}, has_explanation: {bool(review.get('explanation') or review.get('notes'))}")
+        print(f"DEBUG: Final huntid_to_review mapping: {list(huntid_to_review.keys())}")
         
         # Build a mapping from slot number (1-4) to result
         # Priority: Use slotNum from human_reviews if available, otherwise use index
@@ -646,12 +652,27 @@ class NotebookParser:
                     print(f"DEBUG: Updated llm_judge_{slot_num} cell")
                 
                 elif cell_type == 'human_judge':
+                    # Try to get review by slot_num first
                     review = huntid_to_review.get(slot_num)
+                    # Fallback: if no review found by slot_num, try to find by hunt_id from slot_to_result
+                    if review is None:
+                        result = slot_to_result.get(slot_num)
+                        if result:
+                            hunt_id = result.get('hunt_id')
+                            # Try to find review by hunt_id in original human_reviews dict
+                            if hunt_id and str(hunt_id) in human_reviews:
+                                review = human_reviews[str(hunt_id)]
+                                # Update huntid_to_review for future lookups
+                                if review.get('slotNum') == slot_num:
+                                    huntid_to_review[slot_num] = review
+                                    print(f"DEBUG: Found review for slot {slot_num} by hunt_id {hunt_id} (fallback)")
+                    if review is None:
+                        print(f"WARNING: No review found for slot {slot_num}. Available slots in huntid_to_review: {list(huntid_to_review.keys())}, Available hunt_ids in human_reviews: {list(human_reviews.keys())}")
                     human_content = format_human_judge_content(review)
                     cell['source'] = [f"**[{heading_original}]**\n\n{human_content}"]
                     updated_slots.add(f"human_{slot_num}")
                     slot_cells_dict[(slot_num, 'human_judge')] = cell
-                    print(f"DEBUG: Updated human_judge_{slot_num} cell")
+                    print(f"DEBUG: Updated human_judge_{slot_num} cell (review present: {review is not None}, has_grading_basis: {bool(review.get('grading_basis') if review else False)})")
                 
                 elif cell_type == 'reasoning_trace':
                     if include_reasoning:
@@ -708,7 +729,22 @@ class NotebookParser:
             
             # Create human_judge cell if missing
             if (slot_num, 'human_judge') not in slot_cells_dict:
-                review = huntid_to_review.get(slot_num, {})
+                # Try to get review by slot_num first
+                review = huntid_to_review.get(slot_num)
+                # Fallback: if no review found by slot_num, try to find by hunt_id from slot_to_result
+                if review is None:
+                    result = slot_to_result.get(slot_num)
+                    if result:
+                        hunt_id = result.get('hunt_id')
+                        # Try to find review by hunt_id in original human_reviews dict
+                        if hunt_id and str(hunt_id) in human_reviews:
+                            review = human_reviews[str(hunt_id)]
+                            # Update huntid_to_review for future lookups
+                            if review.get('slotNum') == slot_num:
+                                huntid_to_review[slot_num] = review
+                                print(f"DEBUG: Found review for slot {slot_num} by hunt_id {hunt_id} when creating cell (fallback)")
+                if review is None:
+                    print(f"WARNING: No review found for slot {slot_num} when creating cell. Available slots: {list(huntid_to_review.keys())}, Available hunt_ids: {list(human_reviews.keys())}")
                 human_content = format_human_judge_content(review)
                 slot_cells_dict[(slot_num, 'human_judge')] = {
                     "cell_type": "markdown",
@@ -716,7 +752,7 @@ class NotebookParser:
                     "metadata": {},
                     "source": [f"**[human_judge_{slot_num}]**\n\n{human_content}"]
                 }
-                print(f"DEBUG: Created human_judge_{slot_num} cell")
+                print(f"DEBUG: Created human_judge_{slot_num} cell (review present: {review is not None}, has_grading_basis: {bool(review.get('grading_basis') if review else False)})")
             
             # Create reasoning_trace cell if missing and include_reasoning is True
             if include_reasoning and (slot_num, 'reasoning_trace') not in slot_cells_dict:
