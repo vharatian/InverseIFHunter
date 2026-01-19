@@ -640,6 +640,26 @@ class NotebookParser:
                                             criteria_explanations[criterion_id] = explanation
                                             break
             
+            # For passing criteria without explanations, try to infer from overall explanation
+            # Look for positive language or mentions of the criterion being satisfied
+            for criterion_id in judge_criteria.keys():
+                if criterion_id not in criteria_explanations and judge_criteria.get(criterion_id, '').upper() == 'PASS':
+                    # Try to find any mention of this criterion in a positive context
+                    # Look for patterns like "C2 satisfied", "C2 meets", "C2 correctly", etc.
+                    positive_patterns = [
+                        re.compile(rf'{re.escape(criterion_id)}[^.]*?(?:satisfies?|meets?|correctly|properly|adequately|fully|completely|successfully)[^.]*?\.', re.IGNORECASE),
+                        re.compile(rf'(?:satisfies?|meets?|correctly|properly|adequately|fully|completely|successfully)[^.]*?{re.escape(criterion_id)}[^.]*?\.', re.IGNORECASE),
+                    ]
+                    for pattern in positive_patterns:
+                        match = pattern.search(explanation_text)
+                        if match:
+                            explanation = match.group(0).strip()
+                            explanation = re.sub(r'^[•\-\*]\s*', '', explanation)
+                            explanation = re.sub(r'\s+', ' ', explanation).strip()
+                            if explanation and len(explanation) > 10:
+                                criteria_explanations[criterion_id] = explanation
+                                break
+            
             # Build criteria details list in format: C1: (FAIL) explanation
             criteria_details = []
             if judge_criteria:
@@ -655,7 +675,11 @@ class NotebookParser:
                     if explanation:
                         criteria_details.append(f"{criterion_id}: ({status_upper}) {explanation}")
                     else:
-                        criteria_details.append(f"{criterion_id}: ({status_upper})")
+                        # If no explanation found for a passing criterion, add a note
+                        if status_upper == 'PASS':
+                            criteria_details.append(f"{criterion_id}: ({status_upper}) Criterion satisfied - no specific explanation provided in judge output")
+                        else:
+                            criteria_details.append(f"{criterion_id}: ({status_upper})")
             
             # Combine pass rate summary with criteria details
             criteria_summary = f"{pass_rate_text}, here are the details:\n\n" + "\n".join(criteria_details) if criteria_details else pass_rate_text
