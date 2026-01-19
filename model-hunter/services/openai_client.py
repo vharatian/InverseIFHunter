@@ -15,6 +15,7 @@ import asyncio
 from typing import Dict, Any, Optional, List
 from openai import AsyncOpenAI
 from dotenv import load_dotenv
+import time
 
 load_dotenv()
 
@@ -148,22 +149,43 @@ class OpenAIJudgeClient:
                 judge_system_prompt, model
             )
 
+        # Retry logic for connection errors (broken pipe, timeouts, etc.)
+        max_retries = 3
+        retry_delay = 2  # seconds
+        
+        for attempt in range(max_retries):
+            try:
+                # GPT-5 and newer models use 'max_completion_tokens' instead of 'max_tokens'
+                # GPT-5 also only supports default temperature (1), so we don't pass it
+                print(f"DEBUG: Calling judge model '{model}' with prompt length {len(user_prompt)}... (attempt {attempt + 1}/{max_retries})")
+                print(f"DEBUG: System prompt length: {len(judge_system_prompt)}")
+                
+                response = await self.client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": judge_system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    max_completion_tokens=max_tokens,
+                    timeout=120.0  # 2 minute timeout
+                    # Note: temperature not supported by GPT-5, using default (1)
+                )
+                break  # Success, exit retry loop
+            except (BrokenPipeError, ConnectionError, OSError) as e:
+                if attempt < max_retries - 1:
+                    wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                    print(f"WARNING: Connection error (attempt {attempt + 1}/{max_retries}): {str(e)}")
+                    print(f"Retrying in {wait_time} seconds...")
+                    await asyncio.sleep(wait_time)
+                else:
+                    # Last attempt failed
+                    raise
+            except Exception as e:
+                # For other errors, don't retry
+                raise
+        
+        # Process the response
         try:
-            # GPT-5 and newer models use 'max_completion_tokens' instead of 'max_tokens'
-            # GPT-5 also only supports default temperature (1), so we don't pass it
-            print(f"DEBUG: Calling judge model '{model}' with prompt length {len(user_prompt)}...")
-            print(f"DEBUG: System prompt length: {len(judge_system_prompt)}")
-            
-            response = await self.client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": judge_system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                max_completion_tokens=max_tokens
-                # Note: temperature not supported by GPT-5, using default (1)
-            )
-            
             # Debug: Print response structure
             print(f"DEBUG: Response object type: {type(response)}")
             print(f"DEBUG: Response choices count: {len(response.choices) if response.choices else 0}")
@@ -206,6 +228,16 @@ class OpenAIJudgeClient:
             print(f"DEBUG: Got judge response of length {len(raw_output)}")
             return self._parse_judge_output(raw_output, response_reference)
             
+        except (BrokenPipeError, ConnectionError, OSError) as e:
+            error_msg = f"Connection Error: {str(e)}"
+            print(f"ERROR: Judge API connection failed: {error_msg}")
+            return {
+                "score": None,
+                "criteria": {},
+                "explanation": f"Judge connection failed: {error_msg}. Please try again.",
+                "raw_output": error_msg,
+                "error": error_msg
+            }
         except Exception as e:
             error_msg = f"API Error: {str(e)}"
             print(f"ERROR: Judge API failed: {error_msg}")
@@ -829,23 +861,42 @@ class OpenAIJudgeClient:
         }}
         """
         
-        try:
-            # print(f"DEBUG: Evaluating criterion {c_id}...")
-            response = await self.client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": eval_prompt}],
-                response_format={"type": "json_object"}
-            )
-            content = response.choices[0].message.content
-            data = json.loads(content)
-            return {
-                "id": c_id,
-                "status": data.get("status", "FAIL").upper(),
-                "reason": data.get("reason", "No reason")
-            }
-        except Exception as e:
-            print(f"ERROR evaluating criterion {c_id}: {e}")
-            return {"id": c_id, "status": "FAIL", "reason": f"Eval Error: {e}"}
+        # Retry logic for connection errors (broken pipe, timeouts, etc.)
+        max_retries = 3
+        retry_delay = 1  # seconds
+        
+        for attempt in range(max_retries):
+            try:
+                # print(f"DEBUG: Evaluating criterion {c_id}... (attempt {attempt + 1}/{max_retries})")
+                response = await self.client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": eval_prompt}],
+                    response_format={"type": "json_object"},
+                    timeout=60.0  # 1 minute timeout per criterion
+                )
+                content = response.choices[0].message.content
+                data = json.loads(content)
+                return {
+                    "id": c_id,
+                    "status": data.get("status", "FAIL").upper(),
+                    "reason": data.get("reason", "No reason")
+                }
+            except (BrokenPipeError, ConnectionError, OSError) as e:
+                if attempt < max_retries - 1:
+                    wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                    print(f"WARNING: Connection error evaluating criterion {c_id} (attempt {attempt + 1}/{max_retries}): {str(e)}")
+                    print(f"Retrying in {wait_time} seconds...")
+                    await asyncio.sleep(wait_time)
+                else:
+                    # Last attempt failed
+                    print(f"ERROR: Failed to evaluate criterion {c_id} after {max_retries} attempts: {e}")
+                    return {"id": c_id, "status": "FAIL", "reason": f"Connection Error: {str(e)}"}
+            except json.JSONDecodeError as e:
+                print(f"ERROR: JSON decode error for criterion {c_id}: {e}")
+                return {"id": c_id, "status": "FAIL", "reason": f"JSON Error: {str(e)}"}
+            except Exception as e:
+                print(f"ERROR evaluating criterion {c_id}: {e}")
+                return {"id": c_id, "status": "FAIL", "reason": f"Eval Error: {str(e)}"}
 
 
 # Singleton instance
