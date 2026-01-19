@@ -545,9 +545,10 @@ async def save_to_drive(session_id: str, request: Request):
     try:
         from services.google_drive_client import drive_client
         
-        # Parse request body to get selected hunt IDs
+        # Parse request body to get selected hunt IDs and total hunts
         body = await request.json()
         selected_hunt_ids = body.get("selected_hunt_ids", [])
+        total_hunts_from_frontend = body.get("total_hunts")  # Total hunts from frontend (state.allResponses.length)
         
         session = hunt_engine.get_session(session_id)
         if not session:
@@ -608,9 +609,11 @@ async def save_to_drive(session_id: str, request: Request):
             print(f"WARNING: No selected_hunt_ids provided, saving all {len(results)} results")
         
         human_reviews = getattr(session, 'human_reviews', {})
-        # Total hunts = total number of completed hunts (rows in hunt progress table)
-        # Use all_results count, not just selected results
-        total_hunts_ran = len(all_results)  # Total completed hunts across all runs
+        # Total hunts = total number of rows in hunt progress table (from frontend)
+        # Frontend has the correct count (state.allResponses.length) which accumulates across all runs
+        # Backend session.results resets each run, so we use frontend's count
+        total_hunts_ran = total_hunts_from_frontend if total_hunts_from_frontend is not None else len(all_results)
+        print(f"DEBUG: total_hunts_ran = {total_hunts_ran} (from frontend: {total_hunts_from_frontend}, from backend: {len(all_results)})")
         
         modified_content = notebook_parser.export_notebook(
             original_content=original_content,

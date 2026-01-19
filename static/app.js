@@ -628,11 +628,13 @@ async function saveToDrive() {
         const selectedHuntIds = selectedResults.map(r => r.hunt_id);
         
         // Then save to drive - ONLY the selected responses
+        // Pass total_hunts = total number of rows in hunt progress table (state.allResponses.length)
         const response = await fetch(`/api/save-to-drive/${state.sessionId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
-                selected_hunt_ids: selectedHuntIds
+                selected_hunt_ids: selectedHuntIds,
+                total_hunts: state.allResponses.length  // Total hunts across all runs (rows in progress table)
             })
         });
         
