@@ -563,8 +563,8 @@ class NotebookParser:
             criteria_explanations = {}
             
             if explanation_text:
-                # First, try to extract from "Passing Criteria:" section (before "Failed Criteria Details:")
-                passing_section_match = re.search(r'Passing\s+Criteria(?:\s*:\s*\d+/\d+)?\s*(.*?)(?=Failed\s+Criteria\s+Details|$)', explanation_text, re.IGNORECASE | re.DOTALL)
+                # First, try to extract from "Passing Criteria:" or "Passing Criteria Details:" section (before "Failed Criteria Details:")
+                passing_section_match = re.search(r'Passing\s+Criteria(?:\s+Details?)?(?:\s*:\s*\d+/\d+)?\s*(.*?)(?=Failed\s+Criteria\s+Details|$)', explanation_text, re.IGNORECASE | re.DOTALL)
                 if passing_section_match:
                     passing_section = passing_section_match.group(1)
                     # Look for criteria in the passing section
