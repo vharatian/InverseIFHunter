@@ -702,6 +702,7 @@ class OpenAIJudgeClient:
         
         # Step 3: Aggregate results
         final_criteria = {}
+        passed_criteria = []  # Store passing criteria with explanations
         failed_criteria = []
         missing_criteria = []  # Criteria that were expected but not evaluated
         pass_count = 0
@@ -720,6 +721,7 @@ class OpenAIJudgeClient:
             
             if status == 'PASS':
                 pass_count += 1
+                passed_criteria.append(f"{c_id}: {reason}")  # Store passing criteria with explanation
             else:
                 failed_criteria.append(f"{c_id}: {reason}")
         
@@ -753,9 +755,11 @@ class OpenAIJudgeClient:
         )
         if missing_criteria:
             explanation += f"\n⚠️ Missing Criteria (not evaluated): {', '.join(missing_criteria)}\n"
+        if passed_criteria:
+            explanation += "\nPassing Criteria Details:\n" + "\n".join(passed_criteria)
         if failed_criteria:
             explanation += "\nFailed Criteria Details:\n" + "\n".join(failed_criteria)
-        elif not missing_criteria:
+        elif not missing_criteria and not passed_criteria:
             explanation += "\nAll criteria passed."
             
         return {
