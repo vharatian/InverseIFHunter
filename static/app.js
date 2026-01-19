@@ -2238,7 +2238,7 @@ function handleHumanReview(huntId, judgment, card, slotNum) {
 }
 
 // New criteria-based human review submission
-function submitHumanReview(huntId, card, slotNum, rowNumber) {
+async function submitHumanReview(huntId, card, slotNum, rowNumber) {
     const notesEl = card.querySelector(`.human-review-notes[data-hunt-id="${huntId}"]`);
     const notes = notesEl ? (notesEl.value || notesEl.textContent || '') : '';
     const statusEl = card.querySelector(`.human-review-status[data-hunt-id="${huntId}"]`);
