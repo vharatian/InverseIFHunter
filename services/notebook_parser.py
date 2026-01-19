@@ -558,7 +558,48 @@ class NotebookParser:
             pass_count = sum(1 for v in judge_criteria.values() if str(v).upper() == 'PASS')
             pass_rate_text = f"The pass rate is {pass_count}/{total_criteria}" if total_criteria > 0 else "No criteria evaluated"
             
-            # Build criteria details list (ALL criteria, not just failed ones)
+            # Extract per-criterion explanations from judge_explanation or judge_output_raw
+            explanation_text = judge_explanation or judge_output_raw or ""
+            criteria_explanations = {}
+            
+            if explanation_text:
+                # Try multiple patterns to extract per-criterion explanations
+                for criterion_id in judge_criteria.keys():
+                    patterns = [
+                        # Pattern: "C1: explanation..." or "C1 - explanation..."
+                        re.compile(rf'{re.escape(criterion_id)}[:-\s]+\s*(.+?)(?=\s*C\d|$)', re.IGNORECASE | re.DOTALL),
+                        # Pattern: "C1 PASS: explanation..." or "C1 FAIL: explanation..."
+                        re.compile(rf'{re.escape(criterion_id)}\s+(?:PASS|FAIL)[:-\s]?\s*(.+?)(?=\s*C\d|$)', re.IGNORECASE | re.DOTALL),
+                        # Pattern: "Failed Criteria Details: C1: explanation..." or "Passing Criteria: C1: explanation..."
+                        re.compile(rf'(?:Failed|Passing)\s+Criteria\s+Details?:\s*{re.escape(criterion_id)}[:-\s]?\s*(.+?)(?=\s*C\d|$)', re.IGNORECASE | re.DOTALL),
+                    ]
+                    
+                    for pattern in patterns:
+                        match = pattern.search(explanation_text)
+                        if match and match.group(1):
+                            explanation = match.group(1).strip()
+                            # Clean up the explanation (remove extra whitespace, bullet points, etc.)
+                            explanation = re.sub(r'^[•\-\*]\s*', '', explanation)
+                            explanation = re.sub(r'\s+', ' ', explanation).strip()
+                            if explanation and len(explanation) > 5:  # Only use if meaningful
+                                criteria_explanations[criterion_id] = explanation
+                                break
+                    
+                    # Fallback: look for the criterion ID anywhere in the explanation
+                    if criterion_id not in criteria_explanations:
+                        lines = explanation_text.split('\n')
+                        for line in lines:
+                            if criterion_id.upper() in line.upper() and len(line) > len(criterion_id) + 10:
+                                # Extract text after the criterion ID
+                                match = re.search(rf'{re.escape(criterion_id)}[:-\s]?\s*(.+)', line, re.IGNORECASE)
+                                if match:
+                                    explanation = match.group(1).strip()
+                                    explanation = re.sub(r'^[•\-\*]\s*', '', explanation)
+                                    if explanation and len(explanation) > 5:
+                                        criteria_explanations[criterion_id] = explanation
+                                        break
+            
+            # Build criteria details list (ALL criteria, not just failed ones) with explanations
             criteria_details = []
             if judge_criteria:
                 # Sort criteria by ID (C1, C2, C3, etc.)
@@ -569,7 +610,11 @@ class NotebookParser:
                 sorted_criteria = sorted(judge_criteria.items(), key=lambda x: get_criterion_number(x[0]))
                 for criterion_id, status in sorted_criteria:
                     status_upper = str(status).upper()
-                    criteria_details.append(f"- {criterion_id}: {status_upper}")
+                    explanation = criteria_explanations.get(criterion_id, "")
+                    if explanation:
+                        criteria_details.append(f"- {criterion_id}: {status_upper} - {explanation}")
+                    else:
+                        criteria_details.append(f"- {criterion_id}: {status_upper}")
             
             # Combine pass rate summary with criteria details
             criteria_summary = f"{pass_rate_text}, here are the details:\n\n" + "\n".join(criteria_details) if criteria_details else pass_rate_text
