@@ -567,23 +567,59 @@ class NotebookParser:
                 passing_section_match = re.search(r'Passing\s+Criteria(?:\s+Details?)?(?:\s*:\s*\d+/\d+)?\s*(.*?)(?=Failed\s+Criteria\s+Details|$)', explanation_text, re.IGNORECASE | re.DOTALL)
                 if passing_section_match:
                     passing_section = passing_section_match.group(1)
-                    # Look for criteria in the passing section
-                    for criterion_id in judge_criteria.keys():
-                        if judge_criteria.get(criterion_id, '').upper() == 'PASS':
-                            # Try to find this criterion in the passing section
-                            pass_patterns = [
-                                re.compile(rf'{re.escape(criterion_id)}[:\s\-]+\s*(.+?)(?=\s*C\d|$)', re.IGNORECASE | re.DOTALL),
-                                re.compile(rf'{re.escape(criterion_id)}\s+PASS[:\s\-]?\s*(.+?)(?=\s*C\d|$)', re.IGNORECASE | re.DOTALL),
-                            ]
-                            for pattern in pass_patterns:
-                                match = pattern.search(passing_section)
-                                if match and match.group(1):
-                                    explanation = match.group(1).strip()
-                                    explanation = re.sub(r'^[•\-\*]\s*', '', explanation)
-                                    explanation = re.sub(r'\s+', ' ', explanation).strip()
-                                    if explanation and len(explanation) > 5:
-                                        criteria_explanations[criterion_id] = explanation
-                                        break
+                    # Check if there's actual content in the passing section (not just empty)
+                    if passing_section.strip():
+                        # Look for criteria in the passing section
+                        for criterion_id in judge_criteria.keys():
+                            if judge_criteria.get(criterion_id, '').upper() == 'PASS':
+                                # Try to find this criterion in the passing section
+                                pass_patterns = [
+                                    re.compile(rf'{re.escape(criterion_id)}[:\s\-]+\s*(.+?)(?=\s*C\d|$)', re.IGNORECASE | re.DOTALL),
+                                    re.compile(rf'{re.escape(criterion_id)}\s+PASS[:\s\-]?\s*(.+?)(?=\s*C\d|$)', re.IGNORECASE | re.DOTALL),
+                                ]
+                                for pattern in pass_patterns:
+                                    match = pattern.search(passing_section)
+                                    if match and match.group(1):
+                                        explanation = match.group(1).strip()
+                                        explanation = re.sub(r'^[•\-\*]\s*', '', explanation)
+                                        explanation = re.sub(r'\s+', ' ', explanation).strip()
+                                        if explanation and len(explanation) > 5:
+                                            criteria_explanations[criterion_id] = explanation
+                                            break
+                    else:
+                        # "Passing Criteria: X/Y" found but no details section - try to find passing criteria by process of elimination
+                        # Get all failing criteria mentioned in "Failed Criteria Details:"
+                        failed_criteria_mentioned = set()
+                        failed_section_match = re.search(r'Failed\s+Criteria\s+Details?:\s*(.*?)(?=Passing\s+Criteria|$)', explanation_text, re.IGNORECASE | re.DOTALL)
+                        if failed_section_match:
+                            failed_section = failed_section_match.group(1)
+                            # Extract all criterion IDs mentioned in failed section
+                            for criterion_id in judge_criteria.keys():
+                                if re.search(rf'\b{re.escape(criterion_id)}\b', failed_section, re.IGNORECASE):
+                                    failed_criteria_mentioned.add(criterion_id.upper())
+                        
+                        # Now, for each passing criterion, try to find it anywhere in the explanation
+                        for criterion_id in judge_criteria.keys():
+                            if (judge_criteria.get(criterion_id, '').upper() == 'PASS' and 
+                                criterion_id.upper() not in failed_criteria_mentioned and
+                                criterion_id not in criteria_explanations):
+                                # Look for this passing criterion anywhere in the explanation text
+                                # Try patterns that might indicate why it passed
+                                pass_inference_patterns = [
+                                    # Look for criterion mentioned with positive context
+                                    re.compile(rf'{re.escape(criterion_id)}[^.]*?(?:correctly|properly|adequately|satisfies?|meets?|fulfills?|addresses?|identifies?|states?|clarifies?)[^.]*?\.', re.IGNORECASE),
+                                    # Look for positive context before the criterion
+                                    re.compile(rf'(?:correctly|properly|adequately|satisfies?|meets?|fulfills?|addresses?|identifies?|states?|clarifies?)[^.]*?{re.escape(criterion_id)}[^.]*?\.', re.IGNORECASE),
+                                ]
+                                for pattern in pass_inference_patterns:
+                                    match = pattern.search(explanation_text)
+                                    if match:
+                                        explanation = match.group(0).strip()
+                                        explanation = re.sub(r'^[•\-\*]\s*', '', explanation)
+                                        explanation = re.sub(r'\s+', ' ', explanation).strip()
+                                        if explanation and len(explanation) > 10:
+                                            criteria_explanations[criterion_id] = explanation
+                                            break
                 
                 # Then, try to extract from "Failed Criteria Details:" section
                 failed_section_match = re.search(r'Failed\s+Criteria\s+Details?:\s*(.*?)(?=Passing\s+Criteria|$)', explanation_text, re.IGNORECASE | re.DOTALL)
@@ -697,7 +733,7 @@ class NotebookParser:
 [Explanation]:
 
 {criteria_summary}"""
-                    
+        
         # Helper function to format human judge content
         def format_human_judge_content(review):
             grading_basis = review.get('grading_basis', {}) if review else {}
