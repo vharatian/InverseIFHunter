@@ -41,7 +41,8 @@ class OpenAIJudgeClient:
         model: str = DEFAULT_MODEL,
         max_tokens: int = 32768,  # GPT-5 max: 32k tokens for reasoning + response
         temperature: float = 0.1,
-        independent_judging: bool = True  # Always use independent judging
+        independent_judging: bool = True,  # Always use independent judging
+        standard_response: Optional[str] = None  # Standard/expected response from [response] cell
     ) -> Dict[str, Any]:
         """
         Judge a model response using GPT-5.
@@ -55,6 +56,7 @@ class OpenAIJudgeClient:
             model: Model to use for judging
             max_tokens: Maximum tokens for judge response
             temperature: Sampling temperature
+            standard_response: Standard/expected response from [response] cell (for {standard_response} placeholder)
         
         Returns:
             Dict with: score, criteria, explanation, raw_output
@@ -103,6 +105,9 @@ class OpenAIJudgeClient:
             raise ValueError(error_msg)
         
         # Build the judge prompt
+        # Use standard_response if provided, otherwise empty string
+        standard_resp = standard_response or ""
+        
         if judge_prompt_template:
             # Support both old and new template placeholders
             user_prompt = judge_prompt_template.replace(
@@ -114,7 +119,7 @@ class OpenAIJudgeClient:
             ).replace(
                 "{response}", student_response  # Legacy support
             ).replace(
-                "{standard_response}", ""  # Not available in current implementation
+                "{standard_response}", standard_resp
             ).replace(
                 "{criteria}", response_reference
             ).replace(
@@ -129,7 +134,7 @@ class OpenAIJudgeClient:
 {student_response}
 -----------------------
 ## Standard Respones
-
+{standard_resp}
 ----------------------
 ## Evalaution Criteria
 {response_reference}

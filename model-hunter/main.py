@@ -356,7 +356,8 @@ async def judge_reference(session_id: str):
             response_reference=notebook.response_reference,  # Against the criteria (now fresh from Colab)
             judge_system_prompt=notebook.judge_system_prompt,
             judge_prompt_template=notebook.judge_prompt_template,
-            model="gpt-5"
+            model="gpt-5",
+            standard_response=notebook.response  # Standard response from [response] cell
         )
         
         print(f"DEBUG: judge_reference - Judge returned criteria: {list(judge_result.get('criteria', {}).keys())}")

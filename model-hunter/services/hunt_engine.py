@@ -300,7 +300,8 @@ class HuntEngine:
                 judge_system_prompt=judge_system,
                 judge_prompt_template=session.notebook.judge_prompt_template,
                 model=session.config.judge_model,
-                independent_judging=True  # Always use independent judging
+                independent_judging=True,  # Always use independent judging
+                standard_response=session.notebook.response  # Standard response from [response] cell
             )
             
             result.judge_score = judge_result.get("score")
@@ -316,7 +317,8 @@ class HuntEngine:
                     response_reference=session.notebook.response_reference,
                     judge_system_prompt=judge_system,
                     judge_prompt_template=session.notebook.judge_prompt_template,
-                    model=session.config.judge_model
+                    model=session.config.judge_model,
+                    standard_response=session.notebook.response  # Standard response from [response] cell
                 )
                 result.judge_score = judge_result.get("score")
             
