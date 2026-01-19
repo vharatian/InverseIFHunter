@@ -2312,9 +2312,9 @@ async function submitHumanReview(huntId, card, slotNum, rowNumber) {
     submitBtn.textContent = overallJudgment === 'pass' ? '✅ Submitted: PASS' : '❌ Submitted: FAIL';
     submitBtn.style.background = overallJudgment === 'pass' ? 'var(--success)' : 'var(--danger)';
     
-    // Show detailed status
+    // Show detailed status (v is already uppercase 'PASS' or 'FAIL' from line 2264)
     const gradingDisplay = Object.entries(grading).map(([k, v]) => 
-        `${k}: ${v === 'pass' ? '✅' : '❌'}`
+        `${k}: ${v.toUpperCase() === 'PASS' ? '✅' : '❌'}`
     ).join(' | ');
     statusEl.innerHTML = `<strong>${overallJudgment.toUpperCase()}</strong> - ${gradingDisplay}`;
     statusEl.style.color = overallJudgment === 'pass' ? 'var(--success)' : 'var(--danger)';

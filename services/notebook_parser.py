@@ -518,11 +518,11 @@ class NotebookParser:
         def get_cell_type_and_slot(heading_lower):
             if not heading_lower:
                 return None, None
-            model_match = self.MODEL_PATTERN.match(heading_lower)
-            if model_match:
+                model_match = self.MODEL_PATTERN.match(heading_lower)
+                if model_match:
                 return 'model', int(model_match.group(2))
-            judge_match = self.LLM_JUDGE_PATTERN.match(heading_lower)
-            if judge_match:
+                judge_match = self.LLM_JUDGE_PATTERN.match(heading_lower)
+                if judge_match:
                 return 'llm_judge', int(judge_match.group(1))
             human_match = self.HUMAN_JUDGE_PATTERN.match(heading_lower)
             if human_match:
@@ -534,43 +534,65 @@ class NotebookParser:
         
         # Helper function to format LLM judge content
         def format_llm_judge_content(result):
-            judge_criteria = result.get('judge_criteria', {}) if result else {}
-            judge_score = (result.get('judge_score') or result.get('score', 0)) if result else 0
-            judge_explanation = result.get('judge_explanation', '') if result else ''
-            judge_output_raw = result.get('judge_output', '') if result else ''
+                    judge_criteria = result.get('judge_criteria', {}) if result else {}
+                    judge_score = (result.get('judge_score') or result.get('score', 0)) if result else 0
+                    judge_explanation = result.get('judge_explanation', '') if result else ''
+                    judge_output_raw = result.get('judge_output', '') if result else ''
+                    
+                    # If judge_criteria is empty, try to parse from judge_output
+                    if not judge_criteria and judge_output_raw:
+                        import json as json_module
+                        try:
+                            json_match = re.search(r'\{[^{}]*"criteria"[^{}]*\}', judge_output_raw, re.DOTALL)
+                            if json_match:
+                                parsed = json_module.loads(json_match.group(0))
+                                judge_criteria = parsed.get('criteria', {})
+                        except:
+                            pass
+                    
+                    if not judge_criteria:
+                        judge_criteria = {}
             
-            # If judge_criteria is empty, try to parse from judge_output
-            if not judge_criteria and judge_output_raw:
-                import json as json_module
-                try:
-                    json_match = re.search(r'\{[^{}]*"criteria"[^{}]*\}', judge_output_raw, re.DOTALL)
-                    if json_match:
-                        parsed = json_module.loads(json_match.group(0))
-                        judge_criteria = parsed.get('criteria', {})
-                except:
-                    pass
+            # Calculate pass rate
+            total_criteria = len(judge_criteria)
+            pass_count = sum(1 for v in judge_criteria.values() if str(v).upper() == 'PASS')
+            pass_rate_text = f"The pass rate is {pass_count}/{total_criteria}" if total_criteria > 0 else "No criteria evaluated"
             
-            if not judge_criteria:
-                judge_criteria = {}
-            grading_json = json.dumps({k: v.upper() for k, v in judge_criteria.items()}, indent=2)
+            # Build criteria details list (ALL criteria, not just failed ones)
+            criteria_details = []
+            if judge_criteria:
+                # Sort criteria by ID (C1, C2, C3, etc.)
+                def get_criterion_number(criterion_id):
+                    match = re.search(r'(\d+)', str(criterion_id))
+                    return int(match.group(1)) if match else 999
+                
+                sorted_criteria = sorted(judge_criteria.items(), key=lambda x: get_criterion_number(x[0]))
+                for criterion_id, status in sorted_criteria:
+                    status_upper = str(status).upper()
+                    criteria_details.append(f"- {criterion_id}: {status_upper}")
             
-            formatted_explanation = judge_explanation or judge_output_raw or "No explanation provided"
-            if formatted_explanation and not formatted_explanation.strip().startswith('•'):
-                lines = formatted_explanation.split('\n')
-                formatted_lines = []
-                for line in lines:
-                    line = line.strip()
-                    if line:
-                        criterion_match = re.search(r'\b(C\d+)\s+(PASS|FAIL|pass|fail)', line, re.IGNORECASE)
-                        if criterion_match:
-                            criterion_id = criterion_match.group(1)
-                            status = criterion_match.group(2).upper()
-                            formatted_lines.append(f"• {criterion_id} {status}: {line}")
-                        else:
-                            formatted_lines.append(f"• {line}")
-                if formatted_lines:
-                    formatted_explanation = '\n'.join(formatted_lines)
+            # Combine pass rate summary with criteria details
+            criteria_summary = f"{pass_rate_text}, here are the details:\n\n" + "\n".join(criteria_details) if criteria_details else pass_rate_text
             
+                    grading_json = json.dumps({k: v.upper() for k, v in judge_criteria.items()}, indent=2)
+                    
+                    formatted_explanation = judge_explanation or judge_output_raw or "No explanation provided"
+                    if formatted_explanation and not formatted_explanation.strip().startswith('•'):
+                        lines = formatted_explanation.split('\n')
+                        formatted_lines = []
+                        for line in lines:
+                            line = line.strip()
+                            if line:
+                                criterion_match = re.search(r'\b(C\d+)\s+(PASS|FAIL|pass|fail)', line, re.IGNORECASE)
+                                if criterion_match:
+                                    criterion_id = criterion_match.group(1)
+                                    status = criterion_match.group(2).upper()
+                                    formatted_lines.append(f"• {criterion_id} {status}: {line}")
+                                else:
+                                    formatted_lines.append(f"• {line}")
+                        if formatted_lines:
+                            formatted_explanation = '\n'.join(formatted_lines)
+                    
             return f"""[Grading Basis]:
 
 {grading_json}
@@ -581,21 +603,43 @@ class NotebookParser:
 
 [Explanation]:
 
+{criteria_summary}
+
 {formatted_explanation}"""
                     
         # Helper function to format human judge content
         def format_human_judge_content(review):
-            grading_basis = review.get('grading_basis', {}) if review else {}
+                    grading_basis = review.get('grading_basis', {}) if review else {}
+                    if grading_basis:
+                        grading_json = json.dumps({k: v.upper() for k, v in grading_basis.items()}, indent=2)
+                    else:
+                        grading_json = "{}"
+                    
+            # Calculate pass rate
+            total_criteria = len(grading_basis)
+            pass_count = sum(1 for v in grading_basis.values() if str(v).upper() == 'PASS')
+            pass_rate_text = f"The pass rate is {pass_count}/{total_criteria}" if total_criteria > 0 else "No criteria evaluated"
+            
+            # Build criteria details list (ALL criteria, not just failed ones)
+            criteria_details = []
             if grading_basis:
-                grading_json = json.dumps({k: v.upper() for k, v in grading_basis.items()}, indent=2)
-            else:
-                grading_json = "{}"
+                # Sort criteria by ID (C1, C2, C3, etc.)
+                def get_criterion_number(criterion_id):
+                    match = re.search(r'(\d+)', str(criterion_id))
+                    return int(match.group(1)) if match else 999
+                
+                sorted_criteria = sorted(grading_basis.items(), key=lambda x: get_criterion_number(x[0]))
+                for criterion_id, status in sorted_criteria:
+                    status_upper = str(status).upper()
+                    criteria_details.append(f"- {criterion_id}: {status_upper}")
             
-            pass_count = sum(1 for v in grading_basis.values() if v.upper() == 'PASS')
-            score = 1 if pass_count > len(grading_basis) / 2 else 0
+            # Combine pass rate summary with criteria details
+            criteria_summary = f"{pass_rate_text}, here are the details:\n\n" + "\n".join(criteria_details) if criteria_details else pass_rate_text
             
-            explanation = (review.get('explanation', '') or review.get('notes', '')) if review else ''
-            
+                    score = 1 if pass_count > len(grading_basis) / 2 else 0
+                    
+                    explanation = (review.get('explanation', '') or review.get('notes', '')) if review else ''
+                    
             return f"""[Grading Basis]:
 
 {grading_json}
@@ -605,6 +649,8 @@ class NotebookParser:
 [JSON]: {{"answer_score": {score}}}
 
 [Explanation]:
+
+{criteria_summary}
 
 {explanation}"""
         
@@ -676,12 +722,12 @@ class NotebookParser:
                 
                 elif cell_type == 'reasoning_trace':
                     if include_reasoning:
-                        result = slot_to_result.get(slot_num)
-                        if not result and slot_num <= len(results):
+                    result = slot_to_result.get(slot_num)
+                    if not result and slot_num <= len(results):
                             result = results[slot_num - 1]
-                        reasoning_trace = result.get('reasoning_trace', '') if result else ''
-                        cell['source'] = [f"**[{heading_original}]**\n\n{reasoning_trace}"]
-                        updated_slots.add(f"reasoning_{slot_num}")
+                    reasoning_trace = result.get('reasoning_trace', '') if result else ''
+                    cell['source'] = [f"**[{heading_original}]**\n\n{reasoning_trace}"]
+                    updated_slots.add(f"reasoning_{slot_num}")
                         slot_cells_dict[(slot_num, 'reasoning_trace')] = cell
                         print(f"DEBUG: Updated reasoning_trace_{slot_num} cell")
                     else:
@@ -758,10 +804,10 @@ class NotebookParser:
             if include_reasoning and (slot_num, 'reasoning_trace') not in slot_cells_dict:
                 reasoning_trace = slot_result.get('reasoning_trace', '') if slot_result else ''
                 slot_cells_dict[(slot_num, 'reasoning_trace')] = {
-                    "cell_type": "markdown",
-                    "id": f"auto_reasoning_trace_{slot_num}",
-                    "metadata": {},
-                    "source": [f"**[reasoning_trace_{slot_num}]**\n\n{reasoning_trace}"]
+                        "cell_type": "markdown",
+                        "id": f"auto_reasoning_trace_{slot_num}",
+                        "metadata": {},
+                        "source": [f"**[reasoning_trace_{slot_num}]**\n\n{reasoning_trace}"]
                 }
                 print(f"DEBUG: Created reasoning_trace_{slot_num} cell")
         
@@ -783,7 +829,7 @@ class NotebookParser:
             heading_lower, _ = get_cell_heading(cell)
             if heading_lower == 'number_of_attempts_made':
                 insertion_index = i
-                break
+                    break
         
         # Step 5: Insert slot cells at the correct position
         final_cells = non_slot_cells[:insertion_index] + ordered_slot_cells + non_slot_cells[insertion_index:]
