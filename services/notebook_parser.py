@@ -454,27 +454,47 @@ class NotebookParser:
         # Capitalize model prefix for heading (Nemotron, Qwen, Model)
         model_prefix_capitalized = model_prefix.capitalize()
         
-        # Build a mapping from slot number (1-4) to result and review
-        slot_to_result = {}
-        print(f"DEBUG: Building slot_to_result mapping from {len(results)} results")
-        for i, result in enumerate(results[:4]):  # Max 4 slots
-            slot_num = i + 1
-            slot_to_result[slot_num] = result
-            response_len = len(result.get('response', ''))
-            reasoning_len = len(result.get('reasoning_trace', ''))
-            print(f"DEBUG: Mapped slot {slot_num} -> hunt_id {result.get('hunt_id')}, response_len={response_len}, reasoning_len={reasoning_len}")
-        
-        if len(results) < 4:
-            print(f"WARNING: Only {len(results)} results provided, but creating 4 slots. Slots {len(results)+1}-4 will be empty.")
-        
-        # Build mapping from slot number to human review
+        # Build mapping from hunt_id to human review (first, to use for slot mapping)
         huntid_to_review = {}
+        huntid_to_slotnum = {}  # Map hunt_id -> slotNum
         print(f"DEBUG: human_reviews received: {human_reviews}")
         for hunt_id_str, review in human_reviews.items():
             slot_num = review.get('slotNum')
             if slot_num is not None:
-                huntid_to_review[int(slot_num)] = review
-                print(f"DEBUG: Slot {slot_num} has review: {review.get('judgment')}, notes: {review.get('notes', '')[:30]}...")
+                hunt_id = int(hunt_id_str) if hunt_id_str.isdigit() else None
+                if hunt_id is not None:
+                    huntid_to_slotnum[hunt_id] = int(slot_num)
+                    huntid_to_review[int(slot_num)] = review
+                    print(f"DEBUG: hunt_id {hunt_id} -> slot {slot_num}, judgment: {review.get('judgment')}")
+        
+        # Build a mapping from slot number (1-4) to result
+        # Priority: Use slotNum from human_reviews if available, otherwise use index
+        slot_to_result = {}
+        used_slots = set()
+        print(f"DEBUG: Building slot_to_result mapping from {len(results)} results")
+        
+        # First pass: Map results using slotNum from human_reviews
+        for result in results:
+            hunt_id = result.get('hunt_id')
+            if hunt_id in huntid_to_slotnum:
+                slot_num = huntid_to_slotnum[hunt_id]
+                if slot_num not in used_slots and 1 <= slot_num <= 4:
+                    slot_to_result[slot_num] = result
+                    used_slots.add(slot_num)
+                    print(f"DEBUG: Mapped hunt_id {hunt_id} -> slot {slot_num} (from human_reviews)")
+        
+        # Second pass: Fill remaining slots by index
+        result_index = 0
+        for slot_num in range(1, 5):
+            if slot_num not in used_slots and result_index < len(results):
+                result = results[result_index]
+                slot_to_result[slot_num] = result
+                used_slots.add(slot_num)
+                print(f"DEBUG: Mapped slot {slot_num} -> hunt_id {result.get('hunt_id')} (by index)")
+                result_index += 1
+        
+        if len(results) < 4:
+            print(f"WARNING: Only {len(results)} results provided, but creating 4 slots. Slots {len(results)+1}-4 will be empty.")
         
         # Helper function to get cell heading
         def get_cell_heading(cell):
@@ -649,11 +669,12 @@ class NotebookParser:
             else:
                 # Not a slot cell - check if it's number_of_attempts_made
                 if heading_lower == 'number_of_attempts_made':
+                    # Use total_hunts_ran which should be len(all_results) - total completed hunts
                     new_attempts = total_hunts_ran
-                    new_attempts = max(1, min(8, new_attempts))
+                    # Don't clamp - show actual count
                     cell['source'] = [f"**[{heading_original}]**:\n\n{new_attempts}"]
                     updated_slots.add('number_of_attempts_made')
-                    print(f"DEBUG: Updated number_of_attempts_made cell to {new_attempts}")
+                    print(f"DEBUG: Updated number_of_attempts_made cell to {new_attempts} (total completed hunts)")
                 # Keep all non-slot cells in their original order (for now)
                 non_slot_cells.append(cell)
         
@@ -734,15 +755,16 @@ class NotebookParser:
         # Step 6: Add number_of_attempts_made cell at the end if it doesn't exist
         attempts_cell_found = 'number_of_attempts_made' in updated_slots
         if not attempts_cell_found:
+            # Use total_hunts_ran which should be len(all_results) - total completed hunts
             new_attempts = total_hunts_ran
-            new_attempts = max(1, min(8, new_attempts))
+            # Don't clamp - show actual count
             final_cells.append({
                 "cell_type": "markdown",
                 "id": "auto_attempts_counter",
                 "metadata": {},
                 "source": [f"**[number_of_attempts_made]**:\n\n{new_attempts}"]
             })
-            print(f"DEBUG: Created number_of_attempts_made cell with count={new_attempts}")
+            print(f"DEBUG: Created number_of_attempts_made cell with count={new_attempts} (total completed hunts)")
         
         notebook['cells'] = final_cells
         print(f"DEBUG: Final notebook has {len(final_cells)} cells")

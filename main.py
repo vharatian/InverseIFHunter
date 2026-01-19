@@ -484,7 +484,8 @@ async def export_notebook(session_id: str, include_reasoning: bool = True):
         
         # Get human reviews (saved via /api/save-reviews)
         human_reviews = getattr(session, 'human_reviews', {})
-        total_hunts_ran = session.total_hunts  # Total hunts ran across all attempts
+        # Total hunts = total number of completed hunts (rows in hunt progress table)
+        total_hunts_ran = len(results)  # Total completed hunts across all runs
         
         # Generate modified notebook
         modified_content = notebook_parser.export_notebook(
@@ -607,7 +608,9 @@ async def save_to_drive(session_id: str, request: Request):
             print(f"WARNING: No selected_hunt_ids provided, saving all {len(results)} results")
         
         human_reviews = getattr(session, 'human_reviews', {})
-        total_hunts_ran = session.total_hunts  # Total hunts ran across all attempts
+        # Total hunts = total number of completed hunts (rows in hunt progress table)
+        # Use all_results count, not just selected results
+        total_hunts_ran = len(all_results)  # Total completed hunts across all runs
         
         modified_content = notebook_parser.export_notebook(
             original_content=original_content,
