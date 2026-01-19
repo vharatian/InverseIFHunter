@@ -171,7 +171,7 @@ class OpenAIJudgeClient:
                     # Note: temperature not supported by GPT-5, using default (1)
                 )
                 break  # Success, exit retry loop
-            except (BrokenPipeError, ConnectionError, OSError) as e:
+            except (BrokenPipeError, ConnectionError, OSError, IOError) as e:
                 if attempt < max_retries - 1:
                     wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
                     print(f"WARNING: Connection error (attempt {attempt + 1}/{max_retries}): {str(e)}")
@@ -181,8 +181,19 @@ class OpenAIJudgeClient:
                     # Last attempt failed
                     raise
             except Exception as e:
-                # For other errors, don't retry
-                raise
+                # Check if it's a connection-related error by error message
+                error_str = str(e).lower()
+                if any(keyword in error_str for keyword in ['broken pipe', 'connection', 'timeout', 'network', 'reset', 'errno 32']):
+                    if attempt < max_retries - 1:
+                        wait_time = retry_delay * (2 ** attempt)
+                        print(f"WARNING: Connection-related error detected (attempt {attempt + 1}/{max_retries}): {str(e)}")
+                        print(f"Retrying in {wait_time} seconds...")
+                        await asyncio.sleep(wait_time)
+                    else:
+                        raise
+                else:
+                    # For other errors, don't retry
+                    raise
         
         # Process the response
         try:
@@ -228,7 +239,7 @@ class OpenAIJudgeClient:
             print(f"DEBUG: Got judge response of length {len(raw_output)}")
             return self._parse_judge_output(raw_output, response_reference)
             
-        except (BrokenPipeError, ConnectionError, OSError) as e:
+        except (BrokenPipeError, ConnectionError, OSError, IOError) as e:
             error_msg = f"Connection Error: {str(e)}"
             print(f"ERROR: Judge API connection failed: {error_msg}")
             return {
@@ -239,6 +250,18 @@ class OpenAIJudgeClient:
                 "error": error_msg
             }
         except Exception as e:
+            # Check if it's a connection-related error by error message
+            error_str = str(e).lower()
+            if any(keyword in error_str for keyword in ['broken pipe', 'connection', 'timeout', 'network', 'reset', 'errno 32']):
+                error_msg = f"Connection Error: {str(e)}"
+                print(f"ERROR: Judge API connection failed (detected from message): {error_msg}")
+                return {
+                    "score": None,
+                    "criteria": {},
+                    "explanation": f"Judge connection failed: {error_msg}. Please try again.",
+                    "raw_output": error_msg,
+                    "error": error_msg
+                }
             error_msg = f"API Error: {str(e)}"
             print(f"ERROR: Judge API failed: {error_msg}")
             return {
@@ -885,7 +908,7 @@ class OpenAIJudgeClient:
                     "status": data.get("status", "FAIL").upper(),
                     "reason": data.get("reason", "No reason")
                 }
-            except (BrokenPipeError, ConnectionError, OSError) as e:
+            except (BrokenPipeError, ConnectionError, OSError, IOError) as e:
                 if attempt < max_retries - 1:
                     wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
                     print(f"WARNING: Connection error evaluating criterion {c_id} (attempt {attempt + 1}/{max_retries}): {str(e)}")
@@ -899,8 +922,20 @@ class OpenAIJudgeClient:
                 print(f"ERROR: JSON decode error for criterion {c_id}: {e}")
                 return {"id": c_id, "status": "FAIL", "reason": f"JSON Error: {str(e)}"}
             except Exception as e:
-                print(f"ERROR evaluating criterion {c_id}: {e}")
-                return {"id": c_id, "status": "FAIL", "reason": f"Eval Error: {str(e)}"}
+                # Check if it's a connection-related error by error message
+                error_str = str(e).lower()
+                if any(keyword in error_str for keyword in ['broken pipe', 'connection', 'timeout', 'network', 'reset', 'errno 32']):
+                    if attempt < max_retries - 1:
+                        wait_time = retry_delay * (2 ** attempt)
+                        print(f"WARNING: Connection-related error detected for criterion {c_id} (attempt {attempt + 1}/{max_retries}): {str(e)}")
+                        print(f"Retrying in {wait_time} seconds...")
+                        await asyncio.sleep(wait_time)
+                    else:
+                        print(f"ERROR: Failed to evaluate criterion {c_id} after {max_retries} attempts: {e}")
+                        return {"id": c_id, "status": "FAIL", "reason": f"Connection Error: {str(e)}"}
+                else:
+                    print(f"ERROR evaluating criterion {c_id}: {e}")
+                    return {"id": c_id, "status": "FAIL", "reason": f"Eval Error: {str(e)}"}
 
 
 # Singleton instance

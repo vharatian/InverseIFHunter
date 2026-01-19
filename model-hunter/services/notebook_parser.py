@@ -149,10 +149,31 @@ class NotebookParser:
             from googleapiclient.discovery import build
             from googleapiclient.http import MediaIoBaseDownload
             import io
+            import os
             
             SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
+            
+            # Try multiple possible paths for service_account.json
+            service_account_paths = [
+                'service_account.json',  # Current directory
+                '../service_account.json',  # Parent directory (for VM)
+                os.path.join(os.path.dirname(__file__), '..', '..', 'service_account.json'),  # Relative to this file
+                os.getenv('GOOGLE_SERVICE_ACCOUNT_JSON_PATH', ''),  # From environment variable
+            ]
+            
+            service_account_path = None
+            for path in service_account_paths:
+                if path and os.path.exists(path):
+                    service_account_path = path
+                    break
+            
+            if not service_account_path:
+                raise FileNotFoundError(
+                    "service_account.json not found. Tried: " + ", ".join([p for p in service_account_paths if p])
+                )
+            
             credentials = service_account.Credentials.from_service_account_file(
-                'service_account.json', scopes=SCOPES
+                service_account_path, scopes=SCOPES
             )
             service = build('drive', 'v3', credentials=credentials)
             
@@ -179,12 +200,23 @@ class NotebookParser:
     
     def _get_service_account_email(self) -> str:
         """Get service account email for error messages."""
-        try:
-            with open('service_account.json', 'r') as f:
-                sa_info = json.load(f)
-                return sa_info.get('client_email', 'unknown')
-        except:
-            return 'unknown (service_account.json not found)'
+        import os
+        service_account_paths = [
+            'service_account.json',
+            '../service_account.json',
+            os.path.join(os.path.dirname(__file__), '..', '..', 'service_account.json'),
+            os.getenv('GOOGLE_SERVICE_ACCOUNT_JSON_PATH', ''),
+        ]
+        
+        for path in service_account_paths:
+            if path and os.path.exists(path):
+                try:
+                    with open(path, 'r') as f:
+                        sa_info = json.load(f)
+                        return sa_info.get('client_email', 'unknown')
+                except:
+                    continue
+        return 'unknown (service_account.json not found)'
     
     def load_from_file(self, content: str, filename: str = "notebook.ipynb") -> ParsedNotebook:
         """Load notebook from file content."""

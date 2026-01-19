@@ -1,6 +1,7 @@
 import re
 import io
 import json
+import os
 import logging
 from typing import Optional, Dict, Any
 from google.oauth2 import service_account
@@ -15,17 +16,52 @@ class GoogleDriveClient:
     SCOPES = ['https://www.googleapis.com/auth/drive']
     SERVICE_ACCOUNT_FILE = 'service_account.json'
     
-    def __init__(self, credentials_path: str = 'service_account.json'):
+    def __init__(self, credentials_path: str = None):
+        # Auto-detect service account path if not provided
+        if credentials_path is None:
+            credentials_path = self._find_service_account_file()
         self.credentials_path = credentials_path
         self.service = None
         self._authenticate()
+    
+    def _find_service_account_file(self) -> str:
+        """Find service_account.json in common locations."""
+        import os
+        service_account_paths = [
+            'service_account.json',  # Current directory
+            '../service_account.json',  # Parent directory (for VM)
+            os.path.join(os.path.dirname(__file__), '..', '..', 'service_account.json'),  # Relative to this file
+        ]
+        
+        # Check environment variable
+        env_path = os.getenv('GOOGLE_SERVICE_ACCOUNT_JSON_PATH', '')
+        if env_path:
+            service_account_paths.insert(0, env_path)
+        
+        for path in service_account_paths:
+            if path and os.path.exists(path):
+                logger.info(f"Found service_account.json at: {os.path.abspath(path)}")
+                return path
+        
+        # Default fallback
+        default_path = 'service_account.json'
+        logger.warning(f"service_account.json not found in common locations, using default: {default_path}")
+        return default_path
         
     def _authenticate(self):
         try:
+            if not os.path.exists(self.credentials_path):
+                raise FileNotFoundError(
+                    f"Service account file not found: {self.credentials_path}\n"
+                    f"Please ensure service_account.json exists in one of these locations:\n"
+                    f"- Current directory: {os.getcwd()}/service_account.json\n"
+                    f"- Parent directory: {os.path.join(os.getcwd(), '..', 'service_account.json')}\n"
+                    f"- Or set GOOGLE_SERVICE_ACCOUNT_JSON_PATH environment variable"
+                )
             self.credentials = service_account.Credentials.from_service_account_file(
                 self.credentials_path, scopes=self.SCOPES)
             self.service = build('drive', 'v3', credentials=self.credentials)
-            logger.info("Successfully authenticated with Google Drive")
+            logger.info(f"Successfully authenticated with Google Drive using {self.credentials_path}")
         except Exception as e:
             logger.error(f"Failed to authenticate with Google Drive: {e}")
             self.service = None
