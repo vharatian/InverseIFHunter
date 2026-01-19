@@ -15,7 +15,7 @@ After=network.target
 
 [Service]
 User=mandy
-WorkingDirectory=/home/mandy/InverseIFHunter
+WorkingDirectory=/home/mandy/InverseIFHunter/model-hunter
 Environment="PATH=/home/mandy/InverseIFHunter/venv/bin"
 ExecStart=/home/mandy/InverseIFHunter/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
 Restart=always
