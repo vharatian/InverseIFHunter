@@ -2533,14 +2533,18 @@ function formatLLMCriteria(criteria, fullExplanation) {
     }
     
     // Try to extract per-criterion explanations from the full explanation
-    const explanationLines = (fullExplanation || '').split('\n');
+    const explanationText = fullExplanation || '';
     const criteriaExplanations = {};
     
     // Try multiple patterns to extract explanations for each criterion
     for (const [key] of Object.entries(criteria)) {
         const patterns = [
+            // Pattern: "Failed Criteria Details: C1: explanation..." or "Passing Criteria: C1: explanation..."
+            new RegExp(`(?:Failed|Passing)\\s+Criteria\\s+Details?:\\s*${key}[:\\-]?\\s*(.+?)(?=\\s*C\\d|$)`, 'gi'),
             // Pattern: "C1: explanation..." or "C1 - explanation..."
-            new RegExp(`${key}[:\\-]\\s*(.+?)(?=C\\d|$)`, 'gi'),
+            new RegExp(`${key}[:\\-]\\s+(.+?)(?=\\s*C\\d|$)`, 'gi'),
+            // Pattern: "C1 PASS: explanation..." or "C1 FAIL: explanation..."
+            new RegExp(`${key}\\s+(?:PASS|FAIL)[:\\-]?\\s*(.+?)(?=\\s*C\\d|$)`, 'gi'),
             // Pattern: "**C1**: explanation..."
             new RegExp(`\\*\\*${key}\\*\\*[:\\-]?\\s*(.+?)(?=\\*\\*C\\d|$)`, 'gi'),
             // Pattern: Line starting with C1
@@ -2548,23 +2552,34 @@ function formatLLMCriteria(criteria, fullExplanation) {
         ];
         
         for (const pattern of patterns) {
-            for (const line of explanationLines) {
-                const match = pattern.exec(line);
-                if (match && match[1]) {
-                    criteriaExplanations[key] = match[1].trim().replace(/^\*\*\w+\*\*:?\s*/, '');
+            const match = pattern.exec(explanationText);
+            if (match && match[1]) {
+                let explanation = match[1].trim();
+                // Clean up the explanation (remove bullet points, extra whitespace, etc.)
+                explanation = explanation.replace(/^[•\-\*]\s*/, '');
+                explanation = explanation.replace(/\s+/g, ' ').trim();
+                if (explanation && explanation.length > 5) {  // Only use if meaningful
+                    criteriaExplanations[key] = explanation;
                     break;
                 }
             }
-            if (criteriaExplanations[key]) break;
         }
         
         // Fallback: look for the criterion in any line
         if (!criteriaExplanations[key]) {
+            const explanationLines = explanationText.split('\n');
             for (const line of explanationLines) {
                 if (line.toUpperCase().includes(key.toUpperCase()) && line.length > key.length + 10) {
-                    // Remove the criterion prefix
-                    criteriaExplanations[key] = line.replace(new RegExp(`^.*${key}[:\\-]?\\s*`, 'i'), '').trim();
-                    break;
+                    // Extract text after the criterion ID
+                    const match = line.match(new RegExp(`${key}[:\\-]?\\s*(.+)`, 'i'));
+                    if (match && match[1]) {
+                        let explanation = match[1].trim();
+                        explanation = explanation.replace(/^[•\-\*]\s*/, '');
+                        if (explanation && explanation.length > 5) {
+                            criteriaExplanations[key] = explanation;
+                            break;
+                        }
+                    }
                 }
             }
         }
