@@ -3125,19 +3125,29 @@ async function judgeReferenceResponse() {
             criteriaEntries = Object.entries(criteria);
         }
         
-        // Check for missing criteria: Compare initial criteria with current criteria
-        // If a criterion was in initial but not in current, it's MISSING
+        // Check for missing criteria: Compare initial criteria with what was actually judged
+        // With independent judging, ALL criteria in response_reference should be evaluated
+        // If a criterion was in initial but not in judge result, it's MISSING
         const initialCriteriaIds = new Set((state.initialCriteria || []).map(c => c.id));
-        const missingCriteriaIds = [...initialCriteriaIds].filter(id => !currentCriteriaIds.has(id));
+        // Use judgedCriteriaIds (what judge actually returned) instead of currentCriteriaIds
+        // This ensures we detect if judge didn't evaluate a criterion that should be there
+        const missingCriteriaIds = [...initialCriteriaIds].filter(id => !judgedCriteriaIds.has(id));
         
         console.log('🔍 POST-JUDGE MISSING CHECK:');
         console.log('   Initial criteria IDs:', Array.from(initialCriteriaIds));
         console.log('   Current criteria IDs (from response_reference):', Array.from(currentCriteriaIds));
         console.log('   Judged criteria IDs (from judge result):', Array.from(judgedCriteriaIds));
-        console.log('   Missing criteria IDs (in initial but not in current):', missingCriteriaIds);
+        console.log('   Missing criteria IDs (in initial but not in judge result):', missingCriteriaIds);
         console.log('   state.initialCriteria exists?', !!state.initialCriteria);
         console.log('   state.initialCriteria length:', state.initialCriteria?.length || 0);
         console.log('   state.initialCriteria:', state.initialCriteria);
+        
+        // Also check if criteria are in response_reference but not judged (shouldn't happen with independent judging)
+        const inResponseRefButNotJudged = [...currentCriteriaIds].filter(id => !judgedCriteriaIds.has(id));
+        if (inResponseRefButNotJudged.length > 0) {
+            console.warn('⚠️ WARNING: Criteria in response_reference but not in judge result:', inResponseRefButNotJudged);
+            console.warn('   This should not happen with independent judging - all criteria in response_reference should be evaluated');
+        }
         
         if (missingCriteriaIds.length > 0) {
             console.warn('⚠️ MISSING CRITERIA DETECTED:', missingCriteriaIds);
@@ -3172,7 +3182,7 @@ async function judgeReferenceResponse() {
             // Recalculate entries after adding MISSING
             criteriaEntries = Object.entries(criteria);
         } else {
-            console.log('✅ No missing criteria detected - all initial criteria are present in current response_reference');
+            console.log('✅ No missing criteria detected - all initial criteria were evaluated by judge');
             
             // Optional: Check for sequential gaps as a WARNING only (not marking as missing)
             // This helps identify potential issues but doesn't assume criteria should exist
@@ -3467,12 +3477,13 @@ async function saveAndRejudge() {
             criteriaEntries = Object.entries(criteria);
         }
         
-        // Check for missing criteria: Compare initial criteria with current criteria
-        // If a criterion was in initial but not in current, it's MISSING
+        // Check for missing criteria: Compare initial criteria with what was actually judged
+        // With independent judging, ALL criteria in response_reference should be evaluated
         const initialCriteriaIds = new Set((state.initialCriteria || []).map(c => c.id));
-        const missingCriteriaIds = [...initialCriteriaIds].filter(id => !currentCriteriaIds.has(id));
+        const judgedCriteriaIdsSet = new Set(Object.keys(criteria));
+        const missingCriteriaIds = [...initialCriteriaIds].filter(id => !judgedCriteriaIdsSet.has(id));
         
-        console.log('DEBUG: Missing criteria check (saveAndRejudge) - Initial:', Array.from(initialCriteriaIds), 'Current:', Array.from(currentCriteriaIds), 'Missing:', missingCriteriaIds);
+        console.log('DEBUG: Missing criteria check (saveAndRejudge) - Initial:', Array.from(initialCriteriaIds), 'Current:', Array.from(currentCriteriaIds), 'Judged:', Array.from(judgedCriteriaIdsSet), 'Missing:', missingCriteriaIds);
         
         if (missingCriteriaIds.length > 0) {
             console.warn('Missing criteria detected (saveAndRejudge):', missingCriteriaIds);
