@@ -210,18 +210,40 @@ function initFileUpload() {
         });
     }
     
-    // URL Fetch button
-    if (elements.fetchUrlBtn) {
-        console.log('Setting up fetch button event listener');
-        elements.fetchUrlBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            console.log('Fetch button clicked');
-            fetchFromUrl();
-        });
-    } else {
-        console.error('fetchUrlBtn element not found during initialization');
-    }
+    // URL Fetch button - ensure it's properly set up
+    const setupFetchButton = () => {
+        const fetchBtn = document.getElementById('fetchUrlBtn');
+        if (fetchBtn) {
+            // Remove any existing listeners by cloning the button
+            const newBtn = fetchBtn.cloneNode(true);
+            fetchBtn.parentNode.replaceChild(newBtn, fetchBtn);
+            elements.fetchUrlBtn = newBtn;
+            
+            console.log('Setting up fetch button event listener');
+            elements.fetchUrlBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('Fetch button clicked');
+                fetchFromUrl();
+            });
+            
+            // Ensure button is enabled
+            elements.fetchUrlBtn.disabled = false;
+            elements.fetchUrlBtn.type = 'button'; // Ensure it doesn't submit forms
+        } else {
+            console.error('fetchUrlBtn element not found during initialization');
+            // Retry after a short delay in case DOM isn't ready
+            setTimeout(() => {
+                const retryBtn = document.getElementById('fetchUrlBtn');
+                if (retryBtn) {
+                    console.log('Found fetch button on retry, setting up...');
+                    setupFetchButton();
+                }
+            }, 100);
+        }
+    };
+    
+    setupFetchButton();
     
     // Enter key in URL input
     if (elements.colabUrlInput) {
