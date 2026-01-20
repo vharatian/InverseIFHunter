@@ -31,7 +31,7 @@ const state = {
     config: {
         parallel_workers: 4,
         target_breaks: 4,
-        models: ['nvidia/nemotron-3-nano-30b-a3b'],
+        models: ['qwen/qwen3-235b-a22b-thinking-2507'],  // Default to Qwen instead of Nemotron
         reasoning_budget_percent: 0.9,
         max_retries: 3,
         judge_model: 'gpt-5',
@@ -47,13 +47,15 @@ const state = {
     llmRevealed: false,     // Whether LLM judgments have been revealed
     accumulatedHuntOffset: 0,  // Track total hunts for progress table numbering
     currentRunStartOffset: 0,  // Offset at start of current run (for row lookup during run)
+    originalNotebookJson: null,  // Original notebook JSON for WYSIWYG snapshot
     
     // Blind judging state
     blindJudging: {
         queue: [],           // Queue of results waiting for human judgment
         currentResult: null, // Current result being judged
         humanJudgments: {}   // Map of hunt_id -> human score
-    }
+    },
+    diversityCheckPassed: false  // Flag to track if diversity check passed at confirmation
 };
 
 
@@ -347,6 +349,12 @@ function handleNotebookLoaded(data, isUrl = false) {
     
     state.sessionId = data.session_id;
     state.notebook = data.notebook;
+    // Store original notebook JSON for WYSIWYG snapshot
+    state.originalNotebookJson = data.original_notebook_json || null;
+    // Store URL if this was fetched from URL
+    if (isUrl && data.notebook) {
+        state.notebook.url = elements.colabUrlInput?.value || null;
+    }
     
     // Toggle UI sections
     // Keep URL section visible (don't hide uploadSection)
@@ -401,6 +409,143 @@ function handleNotebookLoaded(data, isUrl = false) {
     
     // Show config section
     elements.configSection.classList.remove('hidden');
+    
+    // Preselect model based on notebook metadata or model_slots
+    let modelPrefix = null;
+    let modelSource = null; // Track where we got the model from
+    
+    // First, try to get model from metadata (most explicit) - PRIORITY 1
+    console.log('🔍 Checking metadata for model:', data.notebook.metadata);
+    if (data.notebook.metadata) {
+        const metadata = data.notebook.metadata;
+        console.log('   Metadata keys:', Object.keys(metadata));
+        console.log('   Full metadata:', JSON.stringify(metadata, null, 2));
+        
+        // Try multiple variations: Model, model, MODEL, and case-insensitive search
+        let rawModel = metadata.Model || metadata.model || metadata['Model'] || metadata['model'];
+        
+        // Also try case-insensitive search
+        if (!rawModel) {
+            const modelKey = Object.keys(metadata).find(k => k.toLowerCase() === 'model');
+            if (modelKey) {
+                rawModel = metadata[modelKey];
+                console.log(`   Found model key (case-insensitive): "${modelKey}" = "${rawModel}"`);
+            }
+        }
+        
+        if (rawModel) {
+            // Clean the value: remove leading dashes, spaces, colons, trim
+            // Handles cases like "Model: - qwen" -> "qwen", " - qwen" -> "qwen"
+            modelPrefix = rawModel.toString().trim().replace(/^[-:\s]+/, '').trim();
+            if (modelPrefix) {
+                console.log(`✅ Detected model from metadata: "${rawModel}" -> "${modelPrefix}"`);
+                modelSource = 'metadata';
+            } else {
+                console.warn(`⚠️ Model value in metadata was empty after cleaning: "${rawModel}"`);
+            }
+        } else {
+            console.log('   No Model field found in metadata');
+        }
+    } else {
+        console.log('   No metadata object found');
+    }
+    
+    // Fallback: extract from model_slots ONLY if metadata didn't provide a model - PRIORITY 2
+    if (!modelPrefix && data.notebook.model_prefix) {
+        modelPrefix = data.notebook.model_prefix;
+        modelSource = 'model_slots';
+        console.log(`⚠️ Using model prefix from model_slots (metadata had no valid Model field): ${modelPrefix}`);
+    }
+    
+    // Warn if there's a conflict between metadata and model_slots
+    if (modelSource === 'metadata' && data.notebook.model_prefix && 
+        modelPrefix.toLowerCase() !== data.notebook.model_prefix.toLowerCase()) {
+        console.warn(`⚠️ CONFLICT: Metadata says "${modelPrefix}" but model_slots say "${data.notebook.model_prefix}". Using metadata (PRIORITY).`);
+    }
+    
+    // If still no model, check if default should be used
+    if (!modelPrefix) {
+        console.log('⚠️ No model detected from metadata or model_slots. Will use default (Qwen).');
+        modelPrefix = 'qwen'; // Set default
+        modelSource = 'default';
+    }
+    
+    console.log(`📌 Final model selection: "${modelPrefix}" (source: ${modelSource})`);
+    
+    // Map model prefix to model ID
+    if (modelPrefix) {
+        const modelPrefixLower = modelPrefix.toLowerCase().trim();
+        let modelId = null;
+        let provider = 'openrouter'; // Default provider
+        
+        console.log(`🔍 Mapping model prefix: "${modelPrefix}" (lowercase: "${modelPrefixLower}")`);
+        
+        if (modelPrefixLower === 'nemotron' || modelPrefixLower.includes('nemotron')) {
+            modelId = 'nvidia/nemotron-3-nano-30b-a3b';
+            provider = 'openrouter';
+            console.log(`  → Mapped to Nemotron`);
+        } else if (modelPrefixLower === 'qwen' || modelPrefixLower.includes('qwen')) {
+            // Prefer openrouter if available, fallback to fireworks
+            if (PROVIDER_MODELS['openrouter']?.some(m => m.id.includes('qwen'))) {
+                modelId = 'qwen/qwen3-235b-a22b-thinking-2507';
+                provider = 'openrouter';
+                console.log(`  → Mapped to Qwen (OpenRouter)`);
+            } else if (PROVIDER_MODELS['fireworks']?.some(m => m.id.includes('qwen'))) {
+                modelId = 'accounts/fireworks/models/qwen3-235b-a22b-thinking';
+                provider = 'fireworks';
+                console.log(`  → Mapped to Qwen (Fireworks)`);
+            }
+        } else {
+            console.warn(`⚠️ Unknown model prefix: "${modelPrefix}". Will use default (Qwen).`);
+            // Default to Qwen if unknown
+            modelId = 'qwen/qwen3-235b-a22b-thinking-2507';
+            provider = 'openrouter';
+        }
+        
+        // Set the provider and model if found
+        if (modelId && elements.providerSelect && elements.modelSelect) {
+            console.log(`🎯 Setting model: ${modelId} for provider: ${provider} (source: ${modelSource})`);
+            // Set provider first
+            elements.providerSelect.value = provider;
+            // Update model dropdown options for the provider (skip default selection)
+            updateModelOptions(true); // Skip default - we'll set it manually
+            // Small delay to ensure dropdown is updated, then set model
+            setTimeout(() => {
+                const option = elements.modelSelect.querySelector(`option[value="${modelId}"]`);
+                if (option) {
+                    // Force selection
+                    option.selected = true;
+                    elements.modelSelect.value = modelId;
+                    // Update state config
+                    state.config.models = [modelId];
+                    console.log(`✅ Preselected model: ${modelId} (provider: ${provider}) based on: ${modelPrefix} (${modelSource})`);
+                    console.log(`   Dropdown value after setting: ${elements.modelSelect.value}`);
+                    console.log(`   Selected option: ${option.textContent}`);
+                    showToast(`Model preselected: ${modelPrefix}`, 'info');
+                } else {
+                    console.error(`❌ Model ${modelId} not found in dropdown. Available options:`, 
+                        Array.from(elements.modelSelect.options).map(o => ({value: o.value, text: o.textContent})));
+                    showToast(`Model ${modelPrefix} not available in dropdown`, 'warning');
+                }
+            }, 200); // Increased delay to ensure dropdown is populated
+        } else {
+            console.warn('⚠️ Provider or model select elements not found');
+        }
+    } else {
+        // No model detected - use default (Qwen)
+        console.log('ℹ️ No model detected, using default: Qwen');
+        if (elements.providerSelect && elements.modelSelect) {
+            elements.providerSelect.value = 'openrouter';
+            updateModelOptions();
+            setTimeout(() => {
+                const defaultModel = 'qwen/qwen3-235b-a22b-thinking-2507';
+                if (elements.modelSelect.querySelector(`option[value="${defaultModel}"]`)) {
+                    elements.modelSelect.value = defaultModel;
+                    state.config.models = [defaultModel];
+                }
+            }, 100);
+        }
+    }
     
     // Populate preview tabs
     populatePreviewTabs(data.notebook);
@@ -552,62 +697,14 @@ async function saveToDrive() {
         return;
     }
     
-    // ===== VALIDATION 3: Check for criterion diversity in LLM JUDGE ONLY (not human judge) =====
-    // Reuse selectedResults from line 454 (already computed above)
-    const criteriaVotes = {};  // Track votes per criterion from LLM judges: { C1: { pass: 0, fail: 0 }, ... }
-    
-    console.log('🔍 DIVERSITY CHECK - LLM Judge criteria from selected results:', selectedResults);
-    
-    // Check LLM judge criteria (not human judge)
-    for (const result of selectedResults) {
-        const judgeCriteria = result.judge_criteria || {};
-        console.log('  LLM Judge criteria:', judgeCriteria);
-        
-        for (const [criterionId, vote] of Object.entries(judgeCriteria)) {
-            if (!criteriaVotes[criterionId]) {
-                criteriaVotes[criterionId] = { pass: 0, fail: 0 };
-            }
-            const voteUpper = String(vote || '').toUpperCase();
-            if (voteUpper === 'PASS') {
-                criteriaVotes[criterionId].pass++;
-            } else if (voteUpper === 'FAIL') {
-                criteriaVotes[criterionId].fail++;
-            }
-        }
-    }
-    
-    console.log('  LLM Criteria votes summary:', criteriaVotes);
-    
-    // Check if ANY criterion has both a pass AND a fail in LLM judge results
-    const hasDiverseCriterion = Object.entries(criteriaVotes).some(
-        ([id, votes]) => votes.pass > 0 && votes.fail > 0
-    );
-    
-    console.log('  Has diverse criterion in LLM judges?', hasDiverseCriterion);
-    console.log('  Total criteria checked:', Object.keys(criteriaVotes).length);
-    
-    // CRITICAL: Must have at least one criterion with both PASS and FAIL in LLM judge results
-    if (!hasDiverseCriterion && Object.keys(criteriaVotes).length > 0) {
-        // Build a summary of votes for the error message
-        const votesSummary = Object.entries(criteriaVotes)
-            .map(([id, v]) => `${id}: ${v.pass} pass, ${v.fail} fail`)
-            .join('\n  ');
-        
-        console.error('❌ LLM JUDGE DIVERSITY CHECK FAILED:', votesSummary);
-        
-        showToast('LLM Judge criterion diversity required: At least one criterion must have both PASS and FAIL in LLM judge results. Run more hunts to get diverse LLM judgments.', 'error');
-        alert(
-            `Cannot save: Missing LLM Judge criterion diversity!\n\n` +
-            `Requirement: At least one criterion (C1, C2, etc.) must receive both a PASS and a FAIL from LLM judges across the selected responses.\n\n` +
-            `Current LLM judge votes:\n  ${votesSummary}\n\n` +
-            `⚠️ NOTE: This checks LLM judge diversity, not human judge diversity.\n` +
-            `Run more hunts until LLM judges give diverse results, then try saving again.`
-        );
-        // CRITICAL: Return here to prevent save
+    // ===== VALIDATION: Check if diversity check was already passed at confirmation =====
+    if (!state.diversityCheckPassed) {
+        console.warn('⚠️ Diversity check not passed at confirmation. This should not happen if user confirmed selection properly.');
+        showToast('Diversity check was not completed. Please confirm your selection again.', 'error');
         return;
     }
     
-    console.log('✅ LLM Judge diversity check passed');
+    console.log('✅ Diversity check already passed at confirmation - proceeding with save');
     
     // ===== All validations passed - proceed with save =====
     const btn = document.getElementById('saveDriveBtn');
@@ -626,26 +723,51 @@ async function saveToDrive() {
         const reviewsForBackend = {};
         const missingReviews = [];
         
+        console.log('DEBUG: Preparing reviews for backend:');
+        console.log('  selectedRowNumbers:', selectedRowNumbers);
+        console.log('  selectedResults hunt_ids:', selectedResults.map(r => r.hunt_id));
+        console.log('  state.humanReviews keys:', Object.keys(state.humanReviews || {}));
+        
         selectedRowNumbers.forEach((rn, index) => {
             const reviewKey = `row_${rn}`;
             const review = state.humanReviews[reviewKey];
+            const currentSlotNum = index + 1;
+            
+            console.log(`DEBUG: Processing slot ${currentSlotNum}:`);
+            console.log(`  row_number: ${rn}, reviewKey: ${reviewKey}`);
+            console.log(`  review exists: ${!!review}`);
+            console.log(`  selectedResults[${index}] exists: ${!!selectedResults[index]}`);
+            console.log(`  selectedResults[${index}].hunt_id: ${selectedResults[index]?.hunt_id}`);
+            
             if (review && selectedResults[index]) {
-                // Backend expects hunt_id as key
-                reviewsForBackend[selectedResults[index].hunt_id] = {
+                // CRITICAL FIX: Use slotNum as part of the key to handle duplicate hunt_ids
+                // Format: "hunt_id:slotNum" to ensure uniqueness
+                const uniqueKey = `${selectedResults[index].hunt_id}:${currentSlotNum}`;
+                reviewsForBackend[uniqueKey] = {
+                    hunt_id: selectedResults[index].hunt_id,  // Keep hunt_id for reference
                     judgment: review.judgment,
                     grading_basis: review.grading_basis,
                     explanation: review.explanation,
-                    slotNum: review.slotNum,
+                    slotNum: currentSlotNum,  // Use current position, not the old slotNum from review
                     timestamp: review.timestamp
                 };
+                console.log(`  ✓ Mapped review for hunt_id ${selectedResults[index].hunt_id} -> slot ${currentSlotNum} (key: ${uniqueKey}, old slotNum was ${review.slotNum})`);
             } else if (selectedResults[index]) {
                 // Review missing for this hunt
+                console.log(`  ✗ MISSING REVIEW for slot ${currentSlotNum}, hunt_id ${selectedResults[index].hunt_id}`);
                 missingReviews.push({
                     hunt_id: selectedResults[index].hunt_id,
-                    row_number: rn
+                    row_number: rn,
+                    slot_num: currentSlotNum
                 });
             }
         });
+        
+        console.log('DEBUG: Final reviewsForBackend:', Object.keys(reviewsForBackend).map(hid => ({
+            hunt_id: hid,
+            slotNum: reviewsForBackend[hid].slotNum,
+            judgment: reviewsForBackend[hid].judgment
+        })));
         
         // VALIDATION: Check if reviews are missing before saving
         if (missingReviews.length > 0) {
@@ -668,40 +790,104 @@ async function saveToDrive() {
             }
         }
         
-        // First save reviews (even if some are missing - save what we have)
-        const saveReviewsResponse = await fetch(`/api/save-reviews/${state.sessionId}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ reviews: reviewsForBackend })
-        });
-        
-        if (!saveReviewsResponse.ok) {
-            const err = await saveReviewsResponse.json();
-            throw new Error(`Failed to save reviews: ${err.detail || 'Unknown error'}`);
+        // ===== WYSIWYG SNAPSHOT APPROACH =====
+        // Validate selectedResults has all required fields and maintains order
+        if (selectedResults.length !== 4) {
+            throw new Error(`Expected exactly 4 selected results, got ${selectedResults.length}`);
         }
         
-        // Get selected results (already computed above)
-        const selectedHuntIds = selectedResults.map(r => r.hunt_id);
+        // Validate each result has required fields
+        selectedResults.forEach((result, index) => {
+            if (!result || typeof result !== 'object') {
+                throw new Error(`Invalid result at index ${index}: must be an object`);
+            }
+            if (!result.hunt_id) {
+                throw new Error(`Result at index ${index} missing 'hunt_id' field`);
+            }
+            if (result.response === undefined && result.response !== null) {
+                throw new Error(`Result at index ${index} missing 'response' field`);
+            }
+        });
         
-        // Then save to drive - ONLY the selected responses
-        // Pass total_hunts = total number of rows in hunt progress table (state.allResponses.length)
-        const response = await fetch(`/api/save-to-drive/${state.sessionId}`, {
+        console.log('📸 Creating snapshot:', {
+            selectedResults: selectedResults.length,
+            resultsOrder: selectedResults.map(r => r.hunt_id),
+            reviews: Object.keys(reviewsForBackend).length,
+            totalHunts: state.allResponses.length
+        });
+        
+        // Validate we have original notebook
+        // Get URL from notebook (stored when fetched)
+        const notebookUrl = state.notebook?.url || document.getElementById('colabUrlInput')?.value;
+        if (!notebookUrl) {
+            throw new Error('No Colab URL found. Please fetch notebook from URL.');
+        }
+        
+        // If original_notebook_json is missing, try to fetch it from the backend session storage
+        let originalNotebookJson = state.originalNotebookJson;
+        if (!originalNotebookJson && state.sessionId) {
+            console.warn('⚠️ originalNotebookJson missing, attempting to fetch from session storage...');
+            try {
+                const response = await fetch(`/api/get-original-notebook/${state.sessionId}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    originalNotebookJson = data.original_notebook_json;
+                    // Cache it in state for future use
+                    state.originalNotebookJson = originalNotebookJson;
+                    console.log('✅ Retrieved original notebook from session storage');
+                } else {
+                    console.error('Failed to fetch original notebook:', await response.text());
+                }
+            } catch (e) {
+                console.error('Failed to fetch original content from session:', e);
+            }
+        }
+        
+        if (!originalNotebookJson) {
+            throw new Error('Original notebook content not available. Please reload the notebook from URL or file.');
+        }
+        
+        // Create snapshot
+        // Note: selected_results order determines slots 1-4 (index 0 = slot 1, index 1 = slot 2, etc.)
+        const snapshot = {
+            original_notebook_json: originalNotebookJson,
+            url: notebookUrl,
+            selected_results: selectedResults,  // Order preserved - determines slot assignment
+            human_reviews: reviewsForBackend,
+            total_hunts_ran: state.allResponses.length,
+            include_reasoning: true,
+            metadata: {
+                parsed_notebook: {
+                    filename: state.notebook?.filename || 'notebook.ipynb',
+                    metadata: state.notebook?.metadata || {},
+                    prompt: state.notebook?.prompt || '',
+                    response: state.notebook?.response || '',
+                    response_reference: state.notebook?.response_reference || '',
+                    judge_system_prompt: state.notebook?.judge_system_prompt || '',
+                    judge_prompt_template: state.notebook?.judge_prompt_template || '',
+                    model_slots: state.notebook?.model_slots || []
+                }
+            }
+        };
+        
+        // Send snapshot to new endpoint
+        const response = await fetch('/api/save-snapshot', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                selected_hunt_ids: selectedHuntIds,
-                total_hunts: state.allResponses.length  // Total hunts across all runs (rows in progress table)
-            })
+            body: JSON.stringify(snapshot)
         });
         
         if (!response.ok) {
             const err = await response.json();
-            throw new Error(err.detail || 'Save failed');
+            throw new Error(err.detail || err.error || 'Save failed');
         }
+        
+        const result = await response.json();
+        console.log('✅ Snapshot saved successfully:', result);
         
         const successMessage = missingReviews.length > 0
             ? `✅ Saved to Google Drive! (Note: ${missingReviews.length} hunt(s) saved without reviews)`
-            : '✅ Successfully saved back to Google Drive!';
+            : '✅ Successfully saved to Colab notebook!';
         
         showToast(successMessage, missingReviews.length > 0 ? 'warning' : 'success');
         
@@ -1042,7 +1228,7 @@ function initPreviewTabs() {
 // ============== Hunt Configuration ==============
 
 function getConfig() {
-    const model = elements.modelSelect?.value || 'nvidia/nemotron-3-nano-30b-a3b';
+    const model = elements.modelSelect?.value || 'qwen/qwen3-235b-a22b-thinking-2507';
     const huntCount = parseInt(elements.parallelWorkers.value) || 4;
     
     // Create array with same model for all hunts
@@ -1588,12 +1774,16 @@ function toggleHuntSelection(rowNumber, row) {
         row.classList.add('selected');
         row.style.background = 'rgba(var(--accent-primary-rgb), 0.1)';
         row.style.borderLeft = '4px solid var(--accent-primary)';
+        // Reset diversity check flag when selection changes
+        state.diversityCheckPassed = false;
     } else {
         // Remove from selection
         state.selectedRowNumbers = state.selectedRowNumbers.filter(rn => rn !== rowNumber);
         row.classList.remove('selected');
         row.style.background = 'transparent';
         row.style.borderLeft = 'none';
+        // Reset diversity check flag when selection changes
+        state.diversityCheckPassed = false;
     }
     
     updateSelectionCount();
@@ -1705,6 +1895,62 @@ function confirmSelection() {
         return;
     }
     
+    // ===== DIVERSITY CHECK: Check for criterion diversity in LLM JUDGE ONLY =====
+    const criteriaVotes = {};  // Track votes per criterion from LLM judges: { C1: { pass: 0, fail: 0 }, ... }
+    
+    console.log('🔍 DIVERSITY CHECK - LLM Judge criteria from selected results:', selectedResults);
+    
+    // Check LLM judge criteria (not human judge)
+    for (const result of selectedResults) {
+        const judgeCriteria = result.judge_criteria || {};
+        console.log('  LLM Judge criteria:', judgeCriteria);
+        
+        for (const [criterionId, vote] of Object.entries(judgeCriteria)) {
+            if (!criteriaVotes[criterionId]) {
+                criteriaVotes[criterionId] = { pass: 0, fail: 0 };
+            }
+            const voteUpper = String(vote || '').toUpperCase();
+            if (voteUpper === 'PASS') {
+                criteriaVotes[criterionId].pass++;
+            } else if (voteUpper === 'FAIL') {
+                criteriaVotes[criterionId].fail++;
+            }
+        }
+    }
+    
+    console.log('  LLM Criteria votes summary:', criteriaVotes);
+    
+    // Check if ANY criterion has both a pass AND a fail in LLM judge results
+    const hasDiverseCriterion = Object.entries(criteriaVotes).some(
+        ([id, votes]) => votes.pass > 0 && votes.fail > 0
+    );
+    
+    console.log('  Has diverse criterion in LLM judges?', hasDiverseCriterion);
+    console.log('  Total criteria checked:', Object.keys(criteriaVotes).length);
+    
+    // CRITICAL: Must have at least one criterion with both PASS and FAIL in LLM judge results
+    if (!hasDiverseCriterion && Object.keys(criteriaVotes).length > 0) {
+        // Build a summary of votes for the error message
+        const votesSummary = Object.entries(criteriaVotes)
+            .map(([id, v]) => `${id}: ${v.pass} pass, ${v.fail} fail`)
+            .join('\n  ');
+        
+        console.error('❌ LLM JUDGE DIVERSITY CHECK FAILED:', votesSummary);
+        
+        showToast('LLM Judge criterion diversity required: At least one criterion must have both PASS and FAIL in LLM judge results. Run more hunts to get diverse LLM judgments.', 'error');
+        alert(
+            `Cannot confirm selection: Missing LLM Judge criterion diversity!\n\n` +
+            `Requirement: At least one criterion (C1, C2, etc.) must receive both a PASS and a FAIL from LLM judges across the selected responses.\n\n` +
+            `Current LLM judge votes:\n  ${votesSummary}\n\n` +
+            `⚠️ NOTE: This checks LLM judge diversity, not human judge diversity.\n` +
+            `Run more hunts until LLM judges give diverse results, then try selecting again.`
+        );
+        // CRITICAL: Return here to prevent confirmation
+        return;
+    }
+    
+    console.log('✅ LLM Judge diversity check passed');
+    
     // ===== SARCASTIC CONFIRMATION DIALOG =====
     const confirmed = confirm(
         `🎯 LOCKING IN YOUR SELECTION 🎯\n\n` +
@@ -1721,6 +1967,9 @@ function confirmSelection() {
         showToast('Good call. Make sure you have the right selection!', 'info');
         return;
     }
+    
+    // Mark diversity check as passed
+    state.diversityCheckPassed = true;
     
     // Hide selection, show results with blind review
     elements.selectionSection.classList.add('hidden');
@@ -2478,6 +2727,7 @@ async function exportNotebook() {
 function clearPreviousResults() {
     // Reset state
     state.results = [];
+    state.diversityCheckPassed = false;  // Reset diversity check flag
     state.isHunting = false;
     state.humanReviews = {};  // Reset human reviews
     state.allResponses = [];  // Reset accumulated responses
@@ -2485,6 +2735,7 @@ function clearPreviousResults() {
     state.llmRevealed = false;  // Reset reveal state
     state.accumulatedHuntOffset = 0;  // Reset hunt offset
     state.currentRunStartOffset = 0;  // Reset run offset
+    state.originalNotebookJson = null;  // Reset original notebook
     state.blindJudging = {
         queue: [],
         currentResult: null,
@@ -3659,29 +3910,60 @@ function init() {
 function initializeProviderLogic() {
     if (!elements.providerSelect || !elements.modelSelect) return;
 
-    // Initial population
+    // Set default provider to openrouter (has Qwen)
+    if (elements.providerSelect) {
+        elements.providerSelect.value = 'openrouter';
+    }
+
+    // Initial population (will select Qwen by default, but this can be overridden by notebook metadata)
     updateModelOptions();
 
     // Event listener
     elements.providerSelect.addEventListener('change', updateModelOptions);
 }
 
-function updateModelOptions() {
+function updateModelOptions(skipDefaultSelection = false) {
     const provider = elements.providerSelect.value;
     const models = PROVIDER_MODELS[provider] || [];
     
     // Clear current options
     elements.modelSelect.innerHTML = '';
     
+    // Determine default model based on provider (only if skipDefaultSelection is false)
+    let defaultModelId = 'qwen/qwen3-235b-a22b-thinking-2507'; // Default to Qwen
+    if (provider === 'fireworks') {
+        defaultModelId = 'accounts/fireworks/models/qwen3-235b-a22b-thinking';
+    }
+    
     // Add new options
     models.forEach(model => {
         const option = document.createElement('option');
         option.value = model.id;
         option.textContent = model.name;
+        // Only set default selection if skipDefaultSelection is false
+        if (!skipDefaultSelection) {
+            if (model.id === defaultModelId || (models.length > 0 && model.id.includes('qwen'))) {
+                option.selected = true;
+            }
+        }
         elements.modelSelect.appendChild(option);
     });
     
-    console.log(`Updated models for provider: ${provider}`);
+    // If no Qwen model was found and we're not skipping default, select first model
+    if (!skipDefaultSelection && elements.modelSelect.value !== defaultModelId && models.length > 0) {
+        // Check if default model exists in the list
+        const defaultExists = models.some(m => m.id === defaultModelId);
+        if (!defaultExists && models.length > 0) {
+            elements.modelSelect.value = models[0].id;
+        }
+    }
+    
+    // Update state config with selected model (only if we set a default)
+    if (!skipDefaultSelection && elements.modelSelect.value) {
+        state.config.models = [elements.modelSelect.value];
+    }
+    
+    console.log(`Updated models for provider: ${provider}, selected: ${elements.modelSelect.value} (skipDefault: ${skipDefaultSelection})`);
 }
 
 // Start app

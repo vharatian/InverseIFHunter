@@ -5,12 +5,15 @@ Main application with endpoints for:
 - Notebook upload/fetch
 - Hunt execution with SSE streaming
 - Results export
+- Snapshot-based WYSIWYG saving
 """
 import os
 import json
 import asyncio
+import logging
 from typing import Optional, Dict, Any
 from contextlib import asynccontextmanager
+from datetime import datetime
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, Query, Request
 from fastapi.staticfiles import StaticFiles
@@ -18,6 +21,13 @@ from fastapi.responses import FileResponse, StreamingResponse, JSONResponse, Res
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from sse_starlette.sse import EventSourceResponse
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 from models.schemas import (
     HuntConfig,
@@ -27,6 +37,7 @@ from models.schemas import (
 )
 from services.notebook_parser import notebook_parser
 from services.hunt_engine import hunt_engine
+from services.snapshot_service import snapshot_service, NotebookSnapshot
 
 # Load environment variables
 load_dotenv()
@@ -117,6 +128,29 @@ async def upload_notebook(file: UploadFile = File(...)):
             "filename": file.filename
         })
         
+        # Extract model prefix from model slots (nemotron, qwen, etc.)
+        # BUT: Only use if metadata doesn't have Model field
+        model_prefix = None
+        metadata_model = None
+        
+        # Check metadata first (has priority)
+        if parsed.metadata:
+            metadata_model = parsed.metadata.get('Model') or parsed.metadata.get('model')
+            if metadata_model:
+                # Clean the value (remove leading dashes, spaces)
+                import re
+                metadata_model = re.sub(r'^[-:\s]+', '', str(metadata_model).strip()).strip()
+                print(f"DEBUG: Found Model in metadata: '{metadata_model}'")
+        
+        # Only extract from slots if metadata doesn't have it
+        if not metadata_model:
+            model_prefix = notebook_parser.get_model_slot_prefix(parsed)
+            print(f"DEBUG: No Model in metadata, using model_prefix from slots: '{model_prefix}'")
+        else:
+            # Metadata has Model field - use that instead
+            model_prefix = metadata_model.lower()  # Use metadata value
+            print(f"DEBUG: Using Model from metadata as model_prefix: '{model_prefix}'")
+        
         return {
             "success": True,
             "session_id": session.session_id,
@@ -130,9 +164,11 @@ async def upload_notebook(file: UploadFile = File(...)):
                 "judge_prompt_template": parsed.judge_prompt_template,
                 "has_judge_prompt": bool(parsed.judge_system_prompt),
                 "model_slots": list(parsed.model_slots.keys()),
+                "model_prefix": model_prefix,  # Will be from metadata if available, otherwise from slots
                 "attempts_made": parsed.attempts_made,
                 "validation_warnings": parsed.validation_warnings
-            }
+            },
+            "original_notebook_json": content_str  # Include original notebook JSON for WYSIWYG
         }
     except Exception as e:
         raise HTTPException(400, f"Failed to parse notebook: {str(e)}")
@@ -155,6 +191,29 @@ async def fetch_notebook(request: NotebookURLRequest):
             "url": request.url
         })
         
+        # Extract model prefix from model slots (nemotron, qwen, etc.)
+        # BUT: Only use if metadata doesn't have Model field
+        model_prefix = None
+        metadata_model = None
+        
+        # Check metadata first (has priority)
+        if parsed.metadata:
+            metadata_model = parsed.metadata.get('Model') or parsed.metadata.get('model')
+            if metadata_model:
+                # Clean the value (remove leading dashes, spaces)
+                import re
+                metadata_model = re.sub(r'^[-:\s]+', '', str(metadata_model).strip()).strip()
+                print(f"DEBUG: Found Model in metadata: '{metadata_model}'")
+        
+        # Only extract from slots if metadata doesn't have it
+        if not metadata_model:
+            model_prefix = notebook_parser.get_model_slot_prefix(parsed)
+            print(f"DEBUG: No Model in metadata, using model_prefix from slots: '{model_prefix}'")
+        else:
+            # Metadata has Model field - use that instead
+            model_prefix = metadata_model.lower()  # Use metadata value
+            print(f"DEBUG: Using Model from metadata as model_prefix: '{model_prefix}'")
+        
         return {
             "success": True,
             "session_id": session.session_id,
@@ -169,8 +228,10 @@ async def fetch_notebook(request: NotebookURLRequest):
                 "judge_prompt_template": parsed.judge_prompt_template,
                 "has_judge_prompt": bool(parsed.judge_system_prompt),
                 "model_slots": list(parsed.model_slots.keys()),
+                "model_prefix": model_prefix,  # Will be from metadata if available, otherwise from slots
                 "attempts_made": parsed.attempts_made
-            }
+            },
+            "original_notebook_json": content_str  # Include original notebook JSON for WYSIWYG
         }
     except Exception as e:
         raise HTTPException(400, f"Failed to fetch notebook: {str(e)}")
@@ -464,6 +525,28 @@ async def hunt_stream(session_id: str, request: Request):
     return EventSourceResponse(event_generator())
 
 
+@app.get("/api/get-original-notebook/{session_id}")
+async def get_original_notebook(session_id: str):
+    """Get the original notebook JSON for a session."""
+    try:
+        storage = get_session_storage(session_id)
+        if not storage:
+            raise HTTPException(404, "Session not found")
+        
+        original_content = storage.get("original_content")
+        if not original_content:
+            raise HTTPException(404, "Original notebook content not available")
+        
+        return {
+            "success": True,
+            "original_notebook_json": original_content
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Failed to get original notebook: {str(e)}")
+
+
 @app.get("/api/export-notebook/{session_id}")
 async def export_notebook(session_id: str, include_reasoning: bool = True):
     """Export modified notebook with hunt results."""
@@ -540,6 +623,123 @@ async def save_reviews(session_id: str, request: Request):
     return {"success": True, "saved_count": len(reviews)}
 
 
+@app.post("/api/save-snapshot")
+async def save_snapshot(request: Request):
+    """
+    Save notebook snapshot to Colab (WYSIWYG approach).
+    
+    Frontend sends complete notebook JSON snapshot.
+    Backend validates, normalizes, queues, and writes.
+    """
+    try:
+        from services.google_drive_client import drive_client
+        
+        body = await request.json()
+        
+        # Validate snapshot
+        is_valid, error_msg, snapshot = snapshot_service.validate_snapshot(body)
+        if not is_valid:
+            logger.error(f"❌ Snapshot validation failed: {error_msg}")
+            raise HTTPException(400, f"Invalid snapshot: {error_msg}")
+        
+        # Normalize snapshot
+        snapshot = snapshot_service.normalize_snapshot(snapshot)
+        
+        # Get file_id from snapshot
+        file_id = snapshot.file_id
+        if not file_id and snapshot.url:
+            file_id = drive_client.get_file_id_from_url(snapshot.url)
+        
+        if not file_id:
+            raise HTTPException(400, "Could not determine file_id from snapshot")
+        
+        logger.info(f"📝 Received snapshot for file_id {file_id}")
+        logger.info(f"   - Timestamp: {datetime.now().isoformat()}")
+        logger.info(f"   - Results: {len(snapshot.selected_results)} (order preserved)")
+        
+        # Define write function
+        async def write_to_colab(file_id: str, snapshot: NotebookSnapshot):
+            """Write snapshot to Colab notebook."""
+            # Get original notebook content
+            original_content = snapshot.original_notebook_json
+            
+            # Reconstruct parsed notebook from metadata if available
+            # If metadata has parsed notebook info, use it; otherwise parse from original
+            if snapshot.metadata and 'parsed_notebook' in snapshot.metadata:
+                # Use provided parsed notebook data
+                from models.schemas import ParsedNotebook
+                parsed_data = snapshot.metadata['parsed_notebook'].copy()
+                
+                # Convert model_slots from list to dict if needed
+                # Frontend sends model_slots as a list of keys, but ParsedNotebook expects a dict
+                if 'model_slots' in parsed_data and isinstance(parsed_data['model_slots'], list):
+                    # Convert list of slot names to dict: {slot_name: ""}
+                    parsed_data['model_slots'] = {slot_name: "" for slot_name in parsed_data['model_slots']}
+                
+                # Same for judge_slots and human_judge_slots
+                if 'judge_slots' in parsed_data and isinstance(parsed_data['judge_slots'], list):
+                    parsed_data['judge_slots'] = {slot_name: "" for slot_name in parsed_data['judge_slots']}
+                
+                if 'human_judge_slots' in parsed_data and isinstance(parsed_data['human_judge_slots'], list):
+                    parsed_data['human_judge_slots'] = {slot_name: "" for slot_name in parsed_data['human_judge_slots']}
+                
+                parsed = ParsedNotebook(**parsed_data)
+            else:
+                # Parse from original content (fallback)
+                parsed = notebook_parser.load_from_file(original_content, "notebook.ipynb")
+            
+            # Use selected_results in exact order sent from frontend (no reordering)
+            results = snapshot.selected_results
+            
+            # Construct notebook using existing export_notebook logic
+            modified_content = notebook_parser.export_notebook(
+                original_content=original_content,
+                parsed=parsed,
+                results=results,
+                include_reasoning=snapshot.include_reasoning,
+                human_reviews=snapshot.human_reviews,
+                total_hunts_ran=snapshot.total_hunts_ran
+            )
+            
+            # Write to Drive (export_notebook returns JSON string)
+            success = drive_client.update_file_content(file_id, modified_content)
+            if not success:
+                raise Exception("Failed to update file on Google Drive")
+            
+            # Parse to count cells
+            notebook_json = json.loads(modified_content)
+            return {"file_id": file_id, "cells_updated": len(notebook_json.get('cells', []))}
+        
+        # Queue the write
+        queued = await snapshot_service.queue_write(file_id, snapshot)
+        if not queued:
+            raise HTTPException(503, "Write queue is full. Please try again in a moment.")
+        
+        # Process the queue (this will execute the write)
+        result = await snapshot_service.process_write_queue(file_id, write_to_colab)
+        
+        if not result.get("success"):
+            raise HTTPException(500, result.get("error", "Write failed"))
+        
+        logger.info(f"✅ Successfully saved snapshot to file_id {file_id}")
+        return {
+            "success": True,
+            "file_id": file_id,
+            "message": "Notebook saved successfully",
+            "details": result.get("result", {})
+        }
+        
+    except HTTPException:
+        raise
+    except ImportError:
+        raise HTTPException(500, "Google Drive dependencies not installed")
+    except Exception as e:
+        import traceback
+        logger.error(f"❌ Snapshot save error: {str(e)}", exc_info=True)
+        traceback.print_exc()
+        raise HTTPException(500, f"Snapshot save failed: {str(e)}")
+
+
 @app.post("/api/save-to-drive/{session_id}")
 async def save_to_drive(session_id: str, request: Request):
     """Save ONLY SELECTED results to the Google Drive notebook."""
@@ -608,6 +808,9 @@ async def save_to_drive(session_id: str, request: Request):
             # Fallback: use all if no selection provided
             results = all_results
             print(f"WARNING: No selected_hunt_ids provided, saving all {len(results)} results")
+        
+        # Results are already in the correct order (preserved from selected_hunt_ids order)
+        print(f"DEBUG: Using results in order: {[r.get('hunt_id') for r in results[:4]]}")
         
         human_reviews = getattr(session, 'human_reviews', {})
         # Total hunts = total number of rows in hunt progress table (from frontend)

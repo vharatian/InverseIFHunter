@@ -486,53 +486,57 @@ class NotebookParser:
         # Capitalize model prefix for heading (Nemotron, Qwen, Model)
         model_prefix_capitalized = model_prefix.capitalize()
         
-        # Build mapping from hunt_id to human review (first, to use for slot mapping)
-        huntid_to_review = {}
-        huntid_to_slotnum = {}  # Map hunt_id -> slotNum
+        # Build slot_to_review mapping: {slot_num: review}
+        # IMPORTANT: Use slotNum from the review itself, NOT hunt_id matching
+        # The frontend sends reviews with slotNum field indicating which slot they belong to
+        # NOTE: Keys may be "hunt_id:slotNum" format to handle duplicate hunt_ids
+        slot_to_review = {}  # {slot_num: review}
+        print(f"DEBUG: Building slot_to_review mapping from human_reviews")
         print(f"DEBUG: human_reviews received: {human_reviews}")
         print(f"DEBUG: human_reviews keys: {list(human_reviews.keys())}")
-        for hunt_id_str, review in human_reviews.items():
+        
+        for key_str, review in human_reviews.items():
+            # Get slotNum from the review (this is the source of truth)
             slot_num = review.get('slotNum')
             if slot_num is not None:
-                hunt_id = int(hunt_id_str) if hunt_id_str.isdigit() else None
-                if hunt_id is not None:
-                    slot_num_int = int(slot_num)
-                    huntid_to_slotnum[hunt_id] = slot_num_int
-                    # Store review by slot_num - if multiple reviews for same slot, keep the last one
-                    if slot_num_int in huntid_to_review:
-                        print(f"WARNING: Multiple reviews for slot {slot_num_int}, keeping the last one")
-                    huntid_to_review[slot_num_int] = review
-                    print(f"DEBUG: hunt_id {hunt_id} -> slot {slot_num_int}, judgment: {review.get('judgment')}, has_grading_basis: {bool(review.get('grading_basis'))}, has_explanation: {bool(review.get('explanation') or review.get('notes'))}")
-        print(f"DEBUG: Final huntid_to_review mapping: {list(huntid_to_review.keys())}")
+                slot_num = int(slot_num)
+                if 1 <= slot_num <= 4:
+                    # Create a deep copy of the review to avoid reference issues
+                    review_copy = {
+                        'judgment': review.get('judgment'),
+                        'grading_basis': dict(review.get('grading_basis', {})),  # Deep copy dict
+                        'explanation': review.get('explanation'),
+                        'slotNum': review.get('slotNum'),
+                        'timestamp': review.get('timestamp')
+                    }
+                    slot_to_review[slot_num] = review_copy
+                    # Extract hunt_id from key (may be "hunt_id:slotNum" or just "hunt_id")
+                    if ':' in key_str:
+                        hunt_id = int(key_str.split(':')[0]) if key_str.split(':')[0].isdigit() else None
+                    else:
+                        hunt_id = int(key_str) if key_str.isdigit() else None
+                    print(f"DEBUG:   ✓ Mapped review for key {key_str} (hunt_id {hunt_id}) -> slot {slot_num} (from review.slotNum)")
+                    print(f"DEBUG:     Review judgment: {review_copy.get('judgment')}, explanation preview: {review_copy.get('explanation', '')[:50]}")
+                else:
+                    print(f"WARNING: ✗ Invalid slotNum {slot_num} in review for key {key_str} (must be 1-4)")
+            else:
+                print(f"WARNING: ✗ Review for key {key_str} missing slotNum field")
         
-        # Build a mapping from slot number (1-4) to result
-        # Priority: Use slotNum from human_reviews if available, otherwise use index
+        # Build slot_to_result mapping using array index (results order determines slots 1-4)
+        # Frontend sends results in the exact order they should appear in slots
         slot_to_result = {}
-        used_slots = set()
-        print(f"DEBUG: Building slot_to_result mapping from {len(results)} results")
+        print(f"DEBUG: Building slot_to_result using array index (order preserved from frontend)")
+        for idx, result in enumerate(results[:4], start=1):
+            slot_to_result[idx] = result
+            print(f"DEBUG: Mapped slot {idx} -> hunt_id {result.get('hunt_id')} (by array index)")
         
-        # First pass: Map results using slotNum from human_reviews
-        for result in results:
-            hunt_id = result.get('hunt_id')
-            if hunt_id in huntid_to_slotnum:
-                slot_num = huntid_to_slotnum[hunt_id]
-                if slot_num not in used_slots and 1 <= slot_num <= 4:
-                    slot_to_result[slot_num] = result
-                    used_slots.add(slot_num)
-                    print(f"DEBUG: Mapped hunt_id {hunt_id} -> slot {slot_num} (from human_reviews)")
+        print(f"DEBUG: Final slot_to_review mapping: slots {list(slot_to_review.keys())}")
+        for slot_num, review in slot_to_review.items():
+            result_hunt_id = int(slot_to_result.get(slot_num, {}).get('hunt_id', 0)) if slot_num in slot_to_result else None
+            print(f"DEBUG:   Slot {slot_num}: judgment={review.get('judgment')}, result hunt_id={result_hunt_id}, review explanation preview={review.get('explanation', '')[:50]}")
         
-        # Second pass: Fill remaining slots by index
-        result_index = 0
-        for slot_num in range(1, 5):
-            if slot_num not in used_slots and result_index < len(results):
-                result = results[result_index]
-                slot_to_result[slot_num] = result
-                used_slots.add(slot_num)
-                print(f"DEBUG: Mapped slot {slot_num} -> hunt_id {result.get('hunt_id')} (by index)")
-                result_index += 1
-        
-        if len(results) < 4:
-            print(f"WARNING: Only {len(results)} results provided, but creating 4 slots. Slots {len(results)+1}-4 will be empty.")
+        if len(slot_to_result) < 4:
+            print(f"WARNING: Only {len(slot_to_result)} slots mapped, but creating 4 slots. Empty slots: {[s for s in range(1, 5) if s not in slot_to_result]}")
         
         # Helper function to get cell heading
         def get_cell_heading(cell):
@@ -837,22 +841,15 @@ class NotebookParser:
                     print(f"DEBUG: Updated llm_judge_{slot_num} cell")
                 
                 elif cell_type == 'human_judge':
-                    # Try to get review by slot_num first
-                    review = huntid_to_review.get(slot_num)
-                    # Fallback: if no review found by slot_num, try to find by hunt_id from slot_to_result
+                    # Get review for this slot using slot_to_review mapping
+                    review = slot_to_review.get(slot_num)
                     if review is None:
-                        result = slot_to_result.get(slot_num)
-                        if result:
-                            hunt_id = result.get('hunt_id')
-                            # Try to find review by hunt_id in original human_reviews dict
-                            if hunt_id and str(hunt_id) in human_reviews:
-                                review = human_reviews[str(hunt_id)]
-                                # Update huntid_to_review for future lookups
-                                if review.get('slotNum') == slot_num:
-                                    huntid_to_review[slot_num] = review
-                                    print(f"DEBUG: Found review for slot {slot_num} by hunt_id {hunt_id} (fallback)")
-                    if review is None:
-                        print(f"WARNING: No review found for slot {slot_num}. Available slots in huntid_to_review: {list(huntid_to_review.keys())}, Available hunt_ids in human_reviews: {list(human_reviews.keys())}")
+                        print(f"WARNING: No review found for slot {slot_num}. Available slots in slot_to_review: {list(slot_to_review.keys())}")
+                    else:
+                        # Get the result for this slot to verify hunt_id match
+                        slot_result = slot_to_result.get(slot_num)
+                        expected_hunt_id = int(slot_result.get('hunt_id', 0)) if slot_result else None
+                        print(f"DEBUG: Updating human_judge_{slot_num} cell - expected hunt_id: {expected_hunt_id}, review judgment: {review.get('judgment') if review else None}")
                     human_content = format_human_judge_content(review)
                     cell['source'] = [f"**[{heading_original}]**\n\n{human_content}"]
                     updated_slots.add(f"human_{slot_num}")
@@ -914,22 +911,14 @@ class NotebookParser:
             
             # Create human_judge cell if missing
             if (slot_num, 'human_judge') not in slot_cells_dict:
-                # Try to get review by slot_num first
-                review = huntid_to_review.get(slot_num)
-                # Fallback: if no review found by slot_num, try to find by hunt_id from slot_to_result
+                # Get review for this slot using slot_to_review mapping
+                review = slot_to_review.get(slot_num)
                 if review is None:
-                    result = slot_to_result.get(slot_num)
-                    if result:
-                        hunt_id = result.get('hunt_id')
-                        # Try to find review by hunt_id in original human_reviews dict
-                        if hunt_id and str(hunt_id) in human_reviews:
-                            review = human_reviews[str(hunt_id)]
-                            # Update huntid_to_review for future lookups
-                            if review.get('slotNum') == slot_num:
-                                huntid_to_review[slot_num] = review
-                                print(f"DEBUG: Found review for slot {slot_num} by hunt_id {hunt_id} when creating cell (fallback)")
-                if review is None:
-                    print(f"WARNING: No review found for slot {slot_num} when creating cell. Available slots: {list(huntid_to_review.keys())}, Available hunt_ids: {list(human_reviews.keys())}")
+                    print(f"WARNING: No review found for slot {slot_num} when creating cell. Available slots: {list(slot_to_review.keys())}")
+                else:
+                    # Get the result for this slot to verify hunt_id match
+                    expected_hunt_id = int(slot_result.get('hunt_id', 0)) if slot_result else None
+                    print(f"DEBUG: Creating human_judge_{slot_num} cell - expected hunt_id: {expected_hunt_id}, review judgment: {review.get('judgment') if review else None}")
                 human_content = format_human_judge_content(review)
                 slot_cells_dict[(slot_num, 'human_judge')] = {
                     "cell_type": "markdown",
