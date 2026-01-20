@@ -26,7 +26,7 @@ class FireworksClient:
     
     # Model configurations
     MODELS = {
-        "qwen3": "accounts/fireworks/models/qwen3-235b-a22b-thinking",  # Qwen3-235B (same as OpenRouter)
+        "qwen3": "accounts/fireworks/models/qwen3-235b-a22b-thinking-2507",  # Qwen3-235B (same as OpenRouter)
         # Note: Nemotron not available on Fireworks serverless
     }
     

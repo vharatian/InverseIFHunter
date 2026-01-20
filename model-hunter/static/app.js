@@ -17,7 +17,7 @@ const PROVIDER_MODELS = {
     ],
     'fireworks': [
         // Only Qwen3 for Fireworks (Nemotron not available on serverless)
-        { id: 'accounts/fireworks/models/qwen3-235b-a22b-thinking', name: 'Qwen3-235B (Thinking)' }
+        { id: 'accounts/fireworks/models/qwen3-235b-a22b-thinking-2507', name: 'Qwen3-235B (Thinking)' }
     ]
 };
 // ============== State ==============
@@ -491,7 +491,7 @@ function handleNotebookLoaded(data, isUrl = false) {
                 provider = 'openrouter';
                 console.log(`  → Mapped to Qwen (OpenRouter)`);
             } else if (PROVIDER_MODELS['fireworks']?.some(m => m.id.includes('qwen'))) {
-                modelId = 'accounts/fireworks/models/qwen3-235b-a22b-thinking';
+                modelId = 'accounts/fireworks/models/qwen3-235b-a22b-thinking-2507';
                 provider = 'fireworks';
                 console.log(`  → Mapped to Qwen (Fireworks)`);
             }
@@ -3932,7 +3932,7 @@ function updateModelOptions(skipDefaultSelection = false) {
     // Determine default model based on provider (only if skipDefaultSelection is false)
     let defaultModelId = 'qwen/qwen3-235b-a22b-thinking-2507'; // Default to Qwen
     if (provider === 'fireworks') {
-        defaultModelId = 'accounts/fireworks/models/qwen3-235b-a22b-thinking';
+        defaultModelId = 'accounts/fireworks/models/qwen3-235b-a22b-thinking-2507';
     }
     
     // Add new options
