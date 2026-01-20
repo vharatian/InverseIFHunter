@@ -778,10 +778,11 @@ class NotebookParser:
             else:
                 grading_json = "{}"
             
-            # Calculate score based on 50% rule
+            # Calculate score based on 50% rule: if MORE than 50% criteria are PASS, overall is PASS (score 1)
+            # If 50% or less pass, it's FAIL (score 0, breaking) - matches LLM judge logic
             total_criteria = len(grading_basis)
             pass_count = sum(1 for v in grading_basis.values() if str(v).upper() == 'PASS')
-            score = 1 if pass_count >= total_criteria / 2 else 0
+            score = 1 if pass_count > total_criteria / 2 else 0
             
             explanation = (review.get('explanation', '') or review.get('notes', '')) if review else ''
             

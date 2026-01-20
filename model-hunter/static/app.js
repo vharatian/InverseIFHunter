@@ -2519,11 +2519,12 @@ async function submitHumanReview(huntId, card, slotNum, rowNumber) {
         return;
     }
     
-    // Calculate pass/fail based on 50% rule: if 50% or more criteria are PASS, overall is PASS
+    // Calculate pass/fail based on 50% rule: if MORE than 50% criteria are PASS, overall is PASS
+    // If 50% or less pass, it's FAIL (breaking) - matches LLM judge logic
     const totalCriteria = Object.keys(grading).length;
     const passCount = Object.values(grading).filter(v => v.toUpperCase() === 'PASS').length;
     const passRate = totalCriteria > 0 ? passCount / totalCriteria : 0;
-    const overallJudgment = passRate >= 0.5 ? 'pass' : 'fail';
+    const overallJudgment = passRate > 0.5 ? 'pass' : 'fail';
     
     // ===== SARCASTIC CONFIRMATION DIALOG =====
     const gradingSummary = Object.entries(grading).map(([k, v]) => `${k}: ${v}`).join(', ');
