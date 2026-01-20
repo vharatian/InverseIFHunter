@@ -905,9 +905,31 @@ async def health_check():
 
 # ============== Static Files & Frontend ==============
 
+from starlette.types import Receive, Scope, Send
 
-# Mount static files
-app.mount("/static", StaticFiles(directory="static"), name="static")
+class NoCacheStaticFiles(StaticFiles):
+    """StaticFiles with no-cache headers to prevent browser caching.
+    
+    This ensures users always get the latest version with a regular reload,
+    without needing to hard reload (Cmd+Shift+R).
+    """
+    
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        async def send_wrapper(message: dict) -> None:
+            if message["type"] == "http.response.start":
+                # Add no-cache headers to prevent browser caching
+                headers = dict(message.get("headers", []))
+                headers[b"cache-control"] = b"no-cache, no-store, must-revalidate"
+                headers[b"pragma"] = b"no-cache"
+                headers[b"expires"] = b"0"
+                message["headers"] = list(headers.items())
+            await send(message)
+        
+        await super().__call__(scope, receive, send_wrapper)
+
+
+# Mount static files with no-cache headers
+app.mount("/static", NoCacheStaticFiles(directory="static"), name="static")
 
 
 @app.get("/")

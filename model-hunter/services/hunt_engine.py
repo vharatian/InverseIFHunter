@@ -197,13 +197,7 @@ class HuntEngine:
             provider = getattr(session.config, 'provider', 'openrouter')
             
             # Wrap prompt with explanation request
-            enhanced_prompt = (
-                f"{session.notebook.prompt}\n\n"
-                f"---\n"
-                f"IMPORTANT: After providing your response, also include a section titled "
-                f"'### Explanation' where you explain your reasoning and thought process "
-                f"for arriving at this response. This explanation is mandatory."
-            )
+            enhanced_prompt = f"{session.notebook.prompt}"
             
             if provider == 'fireworks':
                 from services.fireworks_client import get_fireworks_client
