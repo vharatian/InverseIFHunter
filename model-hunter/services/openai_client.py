@@ -769,14 +769,17 @@ class OpenAIJudgeClient:
         
         # Calculate scores
         # Calculate scores based on Fail Rate (missing criteria don't count as failures)
-        # Rule: If 50% or more criteria PASS, overall is PASS (equivalent to fail_rate <= 50%)
+        # Rule: If 50% or more criteria PASS, overall is PASS (score 1)
+        #       If 50% or less criteria PASS (i.e., 50% or more fail), it's BREAKING (score 0)
         fail_count = len(failed_criteria)
         total_count = len(criteria_list) if criteria_list else 1
         fail_rate = fail_count / total_count
+        pass_rate = 1 - fail_rate  # Calculate pass rate for clarity
         
-        # Threshold: If 50% or less fail (i.e., 50% or more pass), it's a Pass.
-        # This matches Human Judge logic: passRate >= 0.5 = PASS
-        score = 1 if fail_rate <= 0.5 else 0
+        # Threshold: If pass_rate > 50%, it's PASSING (score 1)
+        #            If pass_rate <= 50% (including exactly 50%), it's BREAKING (score 0)
+        # This means 50% pass rate = BREAKING, not passing
+        score = 1 if pass_rate > 0.5 else 0
         
         explanation = (
             f"Independent Judging Results:\n"
