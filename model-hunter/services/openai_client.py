@@ -719,14 +719,10 @@ class OpenAIJudgeClient:
             print(f"  - {c.get('id')}: {c.get('description', '')[:150]}...")
         
         # Step 2: Evaluate each criterion independently
-        # NOTE: Do NOT pass standard_response to independent evaluation - it causes the LLM
-        # to compare holistically and evaluate all criteria the same way, breaking diversity.
-        # Each criterion should be evaluated independently based only on the criterion itself.
-        # This restores the behavior from before commit a09f25f when diversity was working.
         tasks = []
         for criterion in criteria_list:
             tasks.append(self._evaluate_single_criterion(
-                prompt, student_response, criterion, model, standard_response=None
+                prompt, student_response, criterion, model, standard_response=standard_response
             ))
             
         # Run in parallel
@@ -897,6 +893,9 @@ class OpenAIJudgeClient:
         eval_prompt = f"""
         TASK: Evaluate if the Student Answer meets this SINGLE criterion.
         
+        IMPORTANT: You are evaluating ONLY this one criterion. Do NOT consider other criteria. 
+        A response can PASS some criteria while FAILING others - evaluate each criterion independently.
+        
         Criterion ({c_id}): {desc}
         
         Original Question:
@@ -905,10 +904,13 @@ class OpenAIJudgeClient:
         Student Answer:
         {student_response}{standard_section}
         
+        Evaluate ONLY whether the Student Answer meets the specific requirement stated in Criterion ({c_id}) above.
+        Do not consider other criteria or make holistic judgments.
+        
         Output JSON:
         {{
             "status": "PASS" or "FAIL",
-            "reason": "Brief explanation"
+            "reason": "Brief explanation focusing specifically on this criterion"
         }}
         """
         
