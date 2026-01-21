@@ -1623,6 +1623,7 @@ function displaySelectionCards() {
                 <th style="padding: 0.75rem; text-align: left; font-weight: 600;">Status</th>
                 <th style="padding: 0.75rem; text-align: left; font-weight: 600;">Model</th>
                 <th style="padding: 0.75rem; text-align: left; font-weight: 600;">Response Preview</th>
+                <th style="padding: 0.75rem; text-align: center; font-weight: 600; width: 100px;">Details</th>
             </tr>
         </thead>
         <tbody id="huntSelectionTableBody">
@@ -1687,15 +1688,51 @@ function displaySelectionCards() {
             <td style="padding: 0.75rem; font-size: 0.85rem; color: var(--text-muted); max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
                 ${escapeHtml(responsePreview)}...
             </td>
+            <td style="padding: 0.75rem; text-align: center;">
+                <button class="details-toggle-btn" data-row-number="${rowNumber}" 
+                        style="background: var(--bg-tertiary); border: 1px solid var(--border); 
+                               border-radius: 4px; padding: 0.4rem 0.75rem; cursor: pointer; 
+                               font-size: 0.85rem; color: var(--text-primary); 
+                               transition: all 0.2s; display: inline-flex; align-items: center; 
+                               gap: 0.25rem; white-space: nowrap;">
+                    <span class="details-icon">▼</span>
+                    <span class="details-text">Details</span>
+                </button>
+            </td>
         `;
         
-        // Click handler for row
+        // Click handler for row (but exclude details button)
         row.addEventListener('click', (e) => {
+            // Don't trigger selection if clicking the details button
+            if (e.target.closest('.details-toggle-btn')) {
+                return;
+            }
             if (e.target.type !== 'checkbox') {
                 const checkbox = row.querySelector('.hunt-selection-checkbox');
                 checkbox.checked = !checkbox.checked;
             }
             toggleHuntSelection(rowNumber, row);
+        });
+        
+        // Details button click handler
+        const detailsBtn = row.querySelector('.details-toggle-btn');
+        detailsBtn.addEventListener('click', (e) => {
+            e.stopPropagation(); // Prevent row selection
+            toggleDetailsRow(rowNumber, row, result);
+        });
+        
+        // Add hover effects to details button
+        detailsBtn.addEventListener('mouseenter', () => {
+            if (detailsBtn.style.background !== 'var(--accent-primary)') {
+                detailsBtn.style.background = 'var(--bg-hover)';
+                detailsBtn.style.borderColor = 'var(--border-hover)';
+            }
+        });
+        detailsBtn.addEventListener('mouseleave', () => {
+            if (detailsBtn.style.background !== 'var(--accent-primary)') {
+                detailsBtn.style.background = 'var(--bg-tertiary)';
+                detailsBtn.style.borderColor = 'var(--border)';
+            }
         });
         
         tbody.appendChild(row);
@@ -1787,6 +1824,76 @@ function toggleHuntSelection(rowNumber, row) {
     }
     
     updateSelectionCount();
+}
+
+function toggleDetailsRow(rowNumber, row, result) {
+    const tbody = row.parentElement;
+    const detailRowId = `detail-row-${rowNumber}`;
+    let detailRow = document.getElementById(detailRowId);
+    const detailsBtn = row.querySelector('.details-toggle-btn');
+    const detailsIcon = detailsBtn.querySelector('.details-icon');
+    const detailsText = detailsBtn.querySelector('.details-text');
+    
+    if (detailRow && detailRow.style.display !== 'none') {
+        // Collapse: hide the detail row
+        detailRow.style.display = 'none';
+        detailsIcon.textContent = '▼';
+        detailsText.textContent = 'Details';
+        detailsBtn.style.background = 'var(--bg-tertiary)';
+        detailsBtn.style.color = 'var(--text-primary)';
+        detailsBtn.style.borderColor = 'var(--border)';
+    } else {
+        // Expand: show or create the detail row
+        if (!detailRow) {
+            // Create new detail row
+            detailRow = document.createElement('tr');
+            detailRow.id = detailRowId;
+            detailRow.className = 'detail-row';
+            detailRow.style.cssText = `
+                display: table-row;
+                background: var(--bg-secondary);
+                border-top: 2px solid var(--border);
+                animation: slideDown 0.3s ease-out;
+            `;
+            
+            const fullResponse = result.response || 'No response available';
+            
+            detailRow.innerHTML = `
+                <td colspan="6" style="padding: 0;">
+                    <div style="padding: 1.5rem; background: var(--bg-secondary);">
+                        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;">
+                            <span style="font-size: 1.1rem;">📄</span>
+                            <h3 style="margin: 0; font-size: 1rem; font-weight: 600; color: var(--text-primary);">
+                                Model Response - Hunt #${rowNumber + 1}
+                            </h3>
+                        </div>
+                        <div style="background: var(--bg-primary); border: 1px solid var(--border); 
+                                    border-radius: 8px; padding: 1.25rem; max-height: 600px; 
+                                    overflow-y: auto; overflow-x: auto; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+                            <pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word; 
+                                       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 
+                                       'Helvetica Neue', Arial, sans-serif; font-size: 0.9rem; 
+                                       line-height: 1.6; color: var(--text-primary);">${escapeHtml(fullResponse)}</pre>
+                        </div>
+                    </div>
+                </td>
+            `;
+            
+            // Insert after the main row
+            row.parentNode.insertBefore(detailRow, row.nextSibling);
+        } else {
+            // Show existing detail row with animation
+            detailRow.style.display = 'table-row';
+            detailRow.style.animation = 'slideDown 0.3s ease-out';
+        }
+        
+        // Update button state
+        detailsIcon.textContent = '▲';
+        detailsText.textContent = 'Hide';
+        detailsBtn.style.background = 'var(--accent-primary)';
+        detailsBtn.style.color = 'white';
+        detailsBtn.style.borderColor = 'var(--accent-primary)';
+    }
 }
 
 function updateSelectionCount() {

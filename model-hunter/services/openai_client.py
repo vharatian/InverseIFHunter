@@ -722,7 +722,7 @@ class OpenAIJudgeClient:
         tasks = []
         for criterion in criteria_list:
             tasks.append(self._evaluate_single_criterion(
-                prompt, student_response, criterion, model
+                prompt, student_response, criterion, model, standard_response=standard_response
             ))
             
         # Run in parallel
@@ -873,11 +873,22 @@ class OpenAIJudgeClient:
         prompt: str, 
         student_response: str, 
         criterion: Dict[str, str], 
-        model: str
+        model: str,
+        standard_response: Optional[str] = None
     ) -> Dict[str, str]:
         """Evaluate a single criterion."""
         c_id = criterion.get('id', 'Unknown')
         desc = criterion.get('description', '')
+        
+        # Build prompt with standard response as reference context if available
+        standard_section = ""
+        if standard_response and standard_response.strip():
+            standard_section = f"""
+        
+        Standard/Expected Answer (for reference context):
+        {standard_response}
+        
+        Note: Use the standard answer as context to understand the expected format and approach, but evaluate the student answer strictly against the criterion below."""
         
         eval_prompt = f"""
         TASK: Evaluate if the Student Answer meets this SINGLE criterion.
@@ -888,7 +899,7 @@ class OpenAIJudgeClient:
         {prompt}
         
         Student Answer:
-        {student_response}
+        {student_response}{standard_section}
         
         Output JSON:
         {{

@@ -1108,6 +1108,20 @@ input[type="range"]::-moz-range-thumb:hover {
     }
 }
 
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        max-height: 0;
+        transform: translateY(-10px);
+    }
+
+    to {
+        opacity: 1;
+        max-height: 1000px;
+        transform: translateY(0);
+    }
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar {
     width: 8px;

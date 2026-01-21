@@ -72,16 +72,24 @@ class FireworksClient:
                     timeout=timeout
                 )
                 
-                if reasoning:
-                    accumulated_reasoning += reasoning + "\n"
+                # Accumulate reasoning only if we don't have a response yet (to avoid duplicates across retries)
+                # If we get a response, use the reasoning from this attempt only
+                if reasoning and reasoning.strip():
+                    if not accumulated_reasoning:
+                        accumulated_reasoning = reasoning
+                    else:
+                        # Only append if it's different (avoid duplicates)
+                        if reasoning not in accumulated_reasoning:
+                            accumulated_reasoning += "\n" + reasoning
                 
                 if response_text and response_text.strip():
-                    return response_text, accumulated_reasoning.strip(), None
+                    # Return response with reasoning from this attempt (most recent)
+                    return response_text, (reasoning.strip() if reasoning else accumulated_reasoning.strip()), None
                 
                 # For thinking models: if content is empty but we have reasoning,
                 # the reasoning IS the response - use it
-                if reasoning.strip() and not response_text.strip():
-                    return reasoning, accumulated_reasoning.strip(), None
+                if reasoning and reasoning.strip() and not response_text.strip():
+                    return reasoning, reasoning.strip(), None
                     
             except Exception as e:
                 last_error = f"Error: {str(e)}"
@@ -138,10 +146,63 @@ class FireworksClient:
             message = choices[0].get("message", {})
             response_text = message.get("content", "") or ""
             
-            # Extract reasoning trace - check both "reasoning" and "thinking" fields
-            # Fireworks AI thinking models (like qwen3-235b-a22b-thinking-2507) return reasoning
-            # in the same format as OpenRouter
-            reasoning_trace = message.get("reasoning", "") or message.get("thinking", "") or ""
+            # Extract reasoning trace - check multiple possible formats
+            # Fireworks AI may use different fields depending on the model/API version
+            reasoning_trace = ""
+            
+            # Priority 1: Check reasoning_content field (Fireworks-specific)
+            if "reasoning_content" in message and message["reasoning_content"]:
+                reasoning_trace = message["reasoning_content"]
+                print(f"DEBUG Fireworks: Found reasoning in 'reasoning_content' field")
+            
+            # Priority 2: Check reasoning_details array (similar to OpenRouter format)
+            if not reasoning_trace and "reasoning_details" in message and message["reasoning_details"]:
+                print(f"DEBUG Fireworks: Found reasoning_details array with {len(message['reasoning_details'])} items")
+                for detail in message["reasoning_details"]:
+                    if isinstance(detail, dict) and "text" in detail:
+                        reasoning_trace += detail["text"]
+                if reasoning_trace:
+                    print(f"DEBUG Fireworks: Extracted reasoning from 'reasoning_details' array")
+            
+            # Priority 3: Check direct reasoning/thinking fields (fallback, like OpenRouter)
+            if not reasoning_trace:
+                reasoning_trace = message.get("reasoning", "") or message.get("thinking", "") or ""
+                if reasoning_trace:
+                    print(f"DEBUG Fireworks: Found reasoning in 'reasoning' or 'thinking' field")
+            
+            # Priority 4: Check if content contains <think> tags and extract reasoning from there
+            # Sometimes reasoning is embedded in content as <think>...</think>
+            import re
+            think_pattern = r'<think>(.*?)</think>'
+            think_matches = re.findall(think_pattern, response_text, re.DOTALL)
+            if think_matches:
+                # Extract reasoning from <think> tags
+                extracted_reasoning = "\n".join(think_matches)
+                if not reasoning_trace:
+                    reasoning_trace = extracted_reasoning
+                    print(f"DEBUG Fireworks: Extracted reasoning from <think> tags in content")
+                # Remove <think> tags from response_text to get clean final answer
+                response_text = re.sub(think_pattern, '', response_text, flags=re.DOTALL).strip()
+            
+            # Priority 5: If we still don't have reasoning but response_text is very long,
+            # it might be that the entire content is reasoning (some thinking models do this)
+            # This is handled in call_with_retry where if content is empty but reasoning exists,
+            # we use reasoning as the response. But we should still try to separate if possible.
+            
+            # Debug: Log what we're extracting
+            print(f"DEBUG Fireworks: message keys: {list(message.keys())}")
+            print(f"DEBUG Fireworks: response_text length: {len(response_text)}")
+            print(f"DEBUG Fireworks: reasoning_trace length: {len(reasoning_trace)}")
+            print(f"DEBUG Fireworks: has 'reasoning_content' key: {'reasoning_content' in message}")
+            print(f"DEBUG Fireworks: has 'reasoning' key: {'reasoning' in message}")
+            print(f"DEBUG Fireworks: has 'thinking' key: {'thinking' in message}")
+            print(f"DEBUG Fireworks: has 'reasoning_details' key: {'reasoning_details' in message}")
+            if response_text:
+                print(f"DEBUG Fireworks: response_text preview (first 200 chars): {response_text[:200]}")
+            if reasoning_trace:
+                print(f"DEBUG Fireworks: reasoning_trace preview (first 200 chars): {reasoning_trace[:200]}")
+            else:
+                print(f"DEBUG Fireworks: ⚠️ No reasoning trace extracted from any field!")
             
             return response_text.strip(), reasoning_trace.strip()
 

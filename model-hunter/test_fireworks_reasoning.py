@@ -69,9 +69,11 @@ async def test_fireworks_reasoning():
         print("=" * 80)
         print("🔍 DEBUG INFO:")
         print("=" * 80)
-        print("The code checks for reasoning in:")
-        print("  - message.reasoning")
-        print("  - message.thinking")
+        print("The code checks for reasoning in (priority order):")
+        print("  1. message.reasoning_content (Fireworks-specific)")
+        print("  2. message.reasoning_details (array format, like OpenRouter)")
+        print("  3. message.reasoning or message.thinking (fallback)")
+        print("  4. <think>...</think> tags in content field")
         print()
         
     except Exception as e:
