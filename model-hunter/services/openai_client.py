@@ -719,10 +719,14 @@ class OpenAIJudgeClient:
             print(f"  - {c.get('id')}: {c.get('description', '')[:150]}...")
         
         # Step 2: Evaluate each criterion independently
+        # NOTE: Do NOT pass standard_response to independent evaluation - it causes the LLM
+        # to compare holistically and evaluate all criteria the same way, breaking diversity.
+        # Each criterion should be evaluated independently based only on the criterion itself.
+        # This restores the behavior from before commit a09f25f when diversity was working.
         tasks = []
         for criterion in criteria_list:
             tasks.append(self._evaluate_single_criterion(
-                prompt, student_response, criterion, model, standard_response=standard_response
+                prompt, student_response, criterion, model, standard_response=None
             ))
             
         # Run in parallel
