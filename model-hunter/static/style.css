@@ -44,25 +44,26 @@
 }
 
 [data-theme="light"] {
-    --bg-primary: #f5f5fa;
-    --bg-secondary: #ffffff;
-    --bg-tertiary: #eeeef5;
+    /* Soft lavender and grey palette - elegant, calming, and easy on the eyes */
+    --bg-primary: #f5f3ff;
+    --bg-secondary: #faf9ff;
+    --bg-tertiary: #ede9fe;
     --bg-card: #ffffff;
-    --bg-hover: #f0f0f8;
+    --bg-hover: #e9d5ff;
 
-    --text-primary: #1a1a2e;
-    --text-secondary: #4a4a6a;
-    --text-muted: #8a8aa0;
+    --text-primary: #1e1b4b;
+    --text-secondary: #4c1d95;
+    --text-muted: #6b7280;
 
-    --border: rgba(0, 0, 0, 0.08);
-    --border-hover: rgba(0, 0, 0, 0.15);
+    --border: rgba(139, 92, 246, 0.15);
+    --border-hover: rgba(139, 92, 246, 0.25);
 
-    --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.06);
-    --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.08);
-    --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.12);
+    --shadow-sm: 0 2px 8px rgba(139, 92, 246, 0.08);
+    --shadow-md: 0 4px 16px rgba(139, 92, 246, 0.1);
+    --shadow-lg: 0 8px 32px rgba(139, 92, 246, 0.12);
 
-    --glass: rgba(255, 255, 255, 0.8);
-    --glass-border: rgba(0, 0, 0, 0.06);
+    --glass: rgba(250, 249, 255, 0.95);
+    --glass-border: rgba(139, 92, 246, 0.15);
 }
 
 /* Reset & Base */

@@ -94,8 +94,20 @@ class OpenRouterClient:
             "temperature": 0.8
         }
         
-        # Note: For thinking models, reasoning is returned automatically
-        # We don't need to configure it explicitly - it's part of the model behavior
+        # Add reasoning parameter to control reasoning trace output
+        # If reasoning_budget_percent is 0, exclude reasoning; otherwise include it
+        if reasoning_budget_percent > 0:
+            payload["reasoning"] = {
+                "exclude": False,  # Include reasoning traces in response
+                "effort": "high"  # Use high effort for reasoning
+            }
+        else:
+            payload["reasoning"] = {
+                "exclude": True  # Exclude reasoning when budget is 0
+            }
+        
+        # Note: For thinking models, reasoning is enabled by default, but we need to
+        # explicitly set exclude: false to ensure reasoning traces are included in the response
         
         async with httpx.AsyncClient(timeout=timeout) as client:
             if stream:
@@ -111,6 +123,11 @@ class OpenRouterClient:
         """Handle streaming response and collect chunks."""
         response_text = ""
         reasoning_trace = ""
+        reasoning_by_id = {}  # Track reasoning by ID to avoid duplicates
+        final_message_reasoning = None  # Store final message reasoning if present
+        
+        # Debug: Print payload to verify reasoning parameter is included
+        print(f"DEBUG OpenRouter: Payload includes reasoning: {payload.get('reasoning', 'NOT FOUND')}")
         
         try:
             async with client.stream(
@@ -147,19 +164,66 @@ class OpenRouterClient:
                             choices = chunk.get("choices", [])
                             if choices:
                                 delta = choices[0].get("delta", {})
+                                message = choices[0].get("message", {})
+                                
+                                # Check for final message with reasoning_details (authoritative source)
+                                if message and "reasoning_details" in message and message["reasoning_details"]:
+                                    # Final message has complete reasoning - store it and use at the end
+                                    final_message_reasoning = message["reasoning_details"]
+                                    print(f"DEBUG OpenRouter: Found final reasoning_details in message: {len(final_message_reasoning)} items")
+                                
+                                # During streaming, collect incremental reasoning from delta
+                                # But only if we haven't seen the final message yet
+                                if delta and not final_message_reasoning:
+                                    # Check for reasoning_details array (OpenRouter streaming format)
+                                    if "reasoning_details" in delta and delta["reasoning_details"]:
+                                        for detail in delta["reasoning_details"]:
+                                            if isinstance(detail, dict):
+                                                detail_id = detail.get("id", None)
+                                                detail_text = detail.get("text", "")
+                                                
+                                                if detail_id and detail_text:
+                                                    # Track by ID - only keep the LONGEST version (most complete)
+                                                    # This handles cumulative text where each chunk contains full text so far
+                                                    current_text = reasoning_by_id.get(detail_id, "")
+                                                    if len(detail_text) > len(current_text):
+                                                        reasoning_by_id[detail_id] = detail_text
+                                                        print(f"DEBUG OpenRouter: Updated reasoning detail {detail_id}: {len(detail_text)} chars")
+                                    
+                                    # Also check for direct reasoning/thinking fields (fallback - incremental)
+                                    if "reasoning" in delta and delta["reasoning"]:
+                                        reasoning_trace += delta["reasoning"]
+                                    if "thinking" in delta and delta["thinking"]:
+                                        reasoning_trace += delta["thinking"]
                                 
                                 # Handle content
-                                if "content" in delta and delta["content"]:
+                                if delta and "content" in delta and delta["content"]:
                                     response_text += delta["content"]
                                 
-                                # Handle reasoning/thinking tokens (model-specific)
-                                if "reasoning" in delta and delta["reasoning"]:
-                                    reasoning_trace += delta["reasoning"]
-                                elif "thinking" in delta and delta["thinking"]:
-                                    reasoning_trace += delta["thinking"]
+                                # Check for direct reasoning/thinking in final message (fallback)
+                                if message and not final_message_reasoning:
+                                    if "reasoning" in message and message["reasoning"]:
+                                        reasoning_trace += message["reasoning"]
+                                    elif "thinking" in message and message["thinking"]:
+                                        reasoning_trace += message["thinking"]
                             
                         except json.JSONDecodeError:
                             continue
+                
+                # Build final reasoning trace
+                if final_message_reasoning:
+                    # Use final message reasoning (authoritative, no duplicates)
+                    reasoning_parts = []
+                    for detail in final_message_reasoning:
+                        if isinstance(detail, dict) and "text" in detail:
+                            reasoning_parts.append(detail["text"])
+                    reasoning_trace = "".join(reasoning_parts)
+                    print(f"DEBUG OpenRouter: Using final message reasoning: {len(reasoning_trace)} chars")
+                elif reasoning_by_id:
+                    # Use reasoning collected from deltas (deduplicated by ID)
+                    sorted_ids = sorted(reasoning_by_id.keys())
+                    reasoning_trace = "".join([reasoning_by_id[id] for id in sorted_ids])
+                    print(f"DEBUG OpenRouter: Using delta reasoning (deduplicated): {len(reasoning_trace)} chars from {len(reasoning_by_id)} details")
         except httpx.HTTPStatusError as e:
             # Re-raise with more context
             raise
@@ -180,6 +244,9 @@ class OpenRouterClient:
         """Handle non-streaming response."""
         payload["stream"] = False
         
+        # Debug: Print payload to verify reasoning parameter is included
+        print(f"DEBUG OpenRouter: Payload includes reasoning: {payload.get('reasoning', 'NOT FOUND')}")
+        
         response = await client.post(
             self.BASE_URL,
             headers=self._get_headers(),
@@ -188,6 +255,18 @@ class OpenRouterClient:
         response.raise_for_status()
         
         data = response.json()
+        
+        # Debug: Print response structure
+        print(f"DEBUG OpenRouter: Response keys: {list(data.keys())}")
+        if "choices" in data and data["choices"]:
+            choice = data["choices"][0]
+            print(f"DEBUG OpenRouter: Choice keys: {list(choice.keys())}")
+            message = choice.get("message", {})
+            print(f"DEBUG OpenRouter: Message keys: {list(message.keys())}")
+            if "reasoning" in message:
+                print(f"DEBUG OpenRouter: Found reasoning in message: {len(str(message['reasoning']))} chars")
+            if "thinking" in message:
+                print(f"DEBUG OpenRouter: Found thinking in message: {len(str(message['thinking']))} chars")
         
         # Check for API errors
         if "error" in data:
@@ -198,7 +277,24 @@ class OpenRouterClient:
         message = choice.get("message", {})
         
         response_text = message.get("content", "") or ""
-        reasoning_trace = message.get("reasoning", "") or message.get("thinking", "") or ""
+        
+        # Extract reasoning - check multiple possible formats
+        reasoning_trace = ""
+        
+        # Check for reasoning_details array (OpenRouter format)
+        if "reasoning_details" in message and message["reasoning_details"]:
+            print(f"DEBUG OpenRouter: Found reasoning_details array with {len(message['reasoning_details'])} items")
+            for detail in message["reasoning_details"]:
+                if isinstance(detail, dict) and "text" in detail:
+                    reasoning_trace += detail["text"]
+        
+        # Fallback to direct reasoning/thinking fields
+        if not reasoning_trace:
+            reasoning_trace = message.get("reasoning", "") or message.get("thinking", "") or ""
+        
+        # Debug: Print what we extracted
+        print(f"DEBUG OpenRouter: Extracted response_text: {len(response_text)} chars")
+        print(f"DEBUG OpenRouter: Extracted reasoning_trace: {len(reasoning_trace)} chars")
         
         # No backend deduplication - frontend handles UI display
         # Export gets the full original trace

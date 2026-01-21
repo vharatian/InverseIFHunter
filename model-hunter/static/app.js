@@ -2179,24 +2179,29 @@ function createResultCard(result, slotIndex, rowNumber) {
     const traceClean = reasoningTrace.trim().toLowerCase();
     
     // Debug logging
-    console.log(`Slot ${slotNum} dedup check:`, {
-        responseLen: responseClean.length,
-        traceLen: traceClean.length,
-        first50Match: responseClean.substring(0, 50) === traceClean.substring(0, 50),
-        hasTrace: !!reasoningTrace
+    console.log(`Slot ${slotNum} reasoning trace check:`, {
+        hasTrace: !!reasoningTrace,
+        traceLength: reasoningTrace.length,
+        responseLength: responseText.length,
+        tracePreview: reasoningTrace.substring(0, 100),
+        responsePreview: responseText.substring(0, 100),
+        traceInResult: 'reasoning_trace' in result,
+        resultKeys: Object.keys(result)
     });
     
     // Check for duplicates in UI only - export still gets full trace
+    // Only hide if trace is EXACTLY the same as response (not if one contains the other)
+    // This is less aggressive - thinking models often have reasoning that overlaps with response
     if (reasoningTrace && traceClean.length > 0) {
-        const isDuplicate = (
-            traceClean === responseClean ||
-            responseClean.includes(traceClean) ||
-            traceClean.includes(responseClean)
-        );
-        if (isDuplicate) {
-            console.log(`Slot ${slotNum}: Hiding duplicate trace in UI (export has full trace)`);
+        const isExactDuplicate = traceClean === responseClean;
+        if (isExactDuplicate) {
+            console.log(`Slot ${slotNum}: Hiding exact duplicate trace in UI (export has full trace)`);
             reasoningTrace = ''; // Hide from UI only
+        } else {
+            console.log(`Slot ${slotNum}: Showing reasoning trace (${reasoningTrace.length} chars)`);
         }
+    } else if (!reasoningTrace) {
+        console.log(`Slot ${slotNum}: No reasoning trace found in result`);
     }
     
     // Store LLM judge data as JSON in data attribute

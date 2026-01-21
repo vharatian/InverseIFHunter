@@ -59,22 +59,29 @@ class FireworksClient:
         Returns: (response_text, reasoning_trace, error_message)
         """
         last_error = None
+        accumulated_reasoning = ""
         
         # Resolve short model names if needed
         # But we expect full IDs from frontend mostly
         
         for attempt in range(max_retries):
             try:
-                response = await self.call_model(
+                response_text, reasoning = await self.call_model(
                     prompt=prompt,
                     model=model,
                     timeout=timeout
                 )
                 
-                if response and response.strip():
-                    # Fireworks models (Llama3) don't have separate reasoning trace typically
-                    # unless using DeepSeek R1 on Fireworks (if available)
-                    return response, "", None
+                if reasoning:
+                    accumulated_reasoning += reasoning + "\n"
+                
+                if response_text and response_text.strip():
+                    return response_text, accumulated_reasoning.strip(), None
+                
+                # For thinking models: if content is empty but we have reasoning,
+                # the reasoning IS the response - use it
+                if reasoning.strip() and not response_text.strip():
+                    return reasoning, accumulated_reasoning.strip(), None
                     
             except Exception as e:
                 last_error = f"Error: {str(e)}"
@@ -84,15 +91,21 @@ class FireworksClient:
                 import asyncio
                 await asyncio.sleep(2 ** attempt)
                 
-        return "", "", last_error or "Empty response"
+        return "", accumulated_reasoning.strip(), last_error or "Empty response"
 
     async def call_model(
         self,
         prompt: str,
         model: str,
         timeout: float = 120.0
-    ) -> str:
-        """Call Fireworks API."""
+    ) -> Tuple[str, str]:
+        """
+        Call Fireworks API and return (response_text, reasoning_trace).
+        
+        Fireworks AI returns reasoning traces in the same format as OpenRouter:
+        - For thinking models, reasoning may be in message.reasoning or message.thinking
+        - For streaming, reasoning may be in delta.reasoning or delta.thinking
+        """
         payload = {
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
@@ -112,11 +125,25 @@ class FireworksClient:
                 raise ValueError(f"Fireworks API Error {response.status_code}: {response.text}")
                 
             data = response.json()
+            
+            # Check for API errors
+            if "error" in data:
+                error_msg = data["error"].get("message", str(data["error"]))
+                raise ValueError(f"API Error: {error_msg}")
+            
             choices = data.get("choices", [])
             if not choices:
-                return ""
-                
-            return choices[0].get("message", {}).get("content", "")
+                return "", ""
+            
+            message = choices[0].get("message", {})
+            response_text = message.get("content", "") or ""
+            
+            # Extract reasoning trace - check both "reasoning" and "thinking" fields
+            # Fireworks AI thinking models (like qwen3-235b-a22b-thinking-2507) return reasoning
+            # in the same format as OpenRouter
+            reasoning_trace = message.get("reasoning", "") or message.get("thinking", "") or ""
+            
+            return response_text.strip(), reasoning_trace.strip()
 
 
 # Singleton
