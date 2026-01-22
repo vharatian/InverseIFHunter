@@ -12,6 +12,13 @@ import uuid
 from typing import List, Dict, Any, Optional, AsyncGenerator, Callable
 from datetime import datetime
 
+# Telemetry import - wrapped to never fail
+try:
+    from services.telemetry_logger import get_telemetry
+    _telemetry_enabled = True
+except ImportError:
+    _telemetry_enabled = False
+
 from models.schemas import (
     HuntConfig, 
     HuntResult, 
@@ -80,6 +87,18 @@ class HuntEngine:
         session.results = []
         session.status = HuntStatus.RUNNING
         
+        # Telemetry: Log hunt start
+        if _telemetry_enabled:
+            try:
+                get_telemetry().log_hunt_start(
+                    session_id=session_id,
+                    workers=session.config.parallel_workers,
+                    models=session.config.models,
+                    target_breaks=session.config.target_breaks
+                )
+            except Exception:
+                pass
+        
         # Emit start event
         if progress_callback:
             await progress_callback(HuntEvent(
@@ -133,6 +152,18 @@ class HuntEngine:
         # Final status
         if session.status != HuntStatus.FAILED:
             session.status = HuntStatus.COMPLETED
+        
+        # Telemetry: Log hunt completion
+        if _telemetry_enabled:
+            try:
+                get_telemetry().log_hunt_complete(
+                    session_id=session_id,
+                    completed_hunts=session.completed_hunts,
+                    breaks_found=session.breaks_found,
+                    success=session.breaks_found >= session.config.target_breaks
+                )
+            except Exception:
+                pass
         
         # Emit complete event
         if progress_callback:
@@ -226,11 +257,21 @@ class HuntEngine:
                 result.is_breaking = False
                 result.error = f"⚠️ Model failed after 3 tries: {error}"
                 result.response = ""
+                result.reasoning_trace = reasoning or ""
+            elif not response or not response.strip():
+                # Empty response (possibly due to timeout or token limit)
+                # Per manager: treat as ERROR, not breaking - judgment not useful
+                result.status = HuntStatus.FAILED
+                result.judge_score = None  # No score, not a break
+                result.is_breaking = False
+                result.error = "⚠️ Model returned empty response (possible timeout or token limit exceeded)"
+                result.response = ""
+                result.reasoning_trace = reasoning or ""
             else:
                 result.response = response
                 result.reasoning_trace = reasoning
                 
-                # Step 2: Judge the response
+                # Step 2: Judge the response (only if we have actual content)
                 await self._judge_response(session, result)
             
         except Exception as e:
@@ -260,6 +301,20 @@ class HuntEngine:
             completed = session.completed_hunts
             total = session.total_hunts
             breaks = session.breaks_found
+        
+        # Telemetry: Log hunt result
+        if _telemetry_enabled:
+            try:
+                get_telemetry().log_hunt_result(
+                    session_id=session.session_id,
+                    hunt_id=result.hunt_id,
+                    model=result.model,
+                    score=result.judge_score,
+                    is_breaking=result.is_breaking,
+                    error=result.error
+                )
+            except Exception:
+                pass
         
         # Emit result (outside lock to avoid deadlock)
         if progress_callback:
