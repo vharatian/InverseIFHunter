@@ -171,7 +171,7 @@ class OpenAIJudgeClient:
                         {"role": "user", "content": user_prompt}
                     ],
                     max_completion_tokens=max_tokens,
-                    timeout=120.0  # 2 minute timeout
+                    timeout=180.0  # 3 minute timeout
                     # Note: temperature not supported by GPT-5, using default (1)
                 )
                 break  # Success, exit retry loop
@@ -925,7 +925,7 @@ class OpenAIJudgeClient:
                     model=model,
                     messages=[{"role": "user", "content": eval_prompt}],
                     response_format={"type": "json_object"},
-                    timeout=60.0  # 1 minute timeout per criterion
+                    timeout=120.0  # 2 minute timeout per criterion
                 )
                 content = response.choices[0].message.content
                 data = json.loads(content)
