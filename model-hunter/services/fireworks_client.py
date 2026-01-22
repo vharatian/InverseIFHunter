@@ -110,9 +110,10 @@ class FireworksClient:
         """
         Call Fireworks API and return (response_text, reasoning_trace).
         
-        Fireworks AI returns reasoning traces in the same format as OpenRouter:
-        - For thinking models, reasoning may be in message.reasoning or message.thinking
-        - For streaming, reasoning may be in delta.reasoning or delta.thinking
+        Fireworks Qwen thinking models return reasoning embedded in content:
+        - Format: "Reasoning text here...</think>\n\nFinal answer here"
+        - No opening <think> tag, only closing </think>
+        - We split on </think> to separate reasoning from answer
         """
         payload = {
             "model": model,
@@ -170,24 +171,40 @@ class FireworksClient:
                 if reasoning_trace:
                     print(f"DEBUG Fireworks: Found reasoning in 'reasoning' or 'thinking' field")
             
-            # Priority 4: Check if content contains <think> tags and extract reasoning from there
-            # Sometimes reasoning is embedded in content as <think>...</think>
-            import re
-            think_pattern = r'<think>(.*?)</think>'
-            think_matches = re.findall(think_pattern, response_text, re.DOTALL)
-            if think_matches:
-                # Extract reasoning from <think> tags
-                extracted_reasoning = "\n".join(think_matches)
-                if not reasoning_trace:
+            # Priority 4: Check if content contains </think> tag (Qwen thinking model pattern)
+            # Fireworks Qwen returns: "Reasoning here...</think>\n\nAnswer here"
+            # Note: There's NO opening <think> tag, only closing </think>
+            print(f"DEBUG Fireworks: Checking for </think> tag in response...")
+            print(f"DEBUG Fireworks: '</think>' in response_text: {'</think>' in response_text}")
+            if not reasoning_trace and '</think>' in response_text:
+                parts = response_text.split('</think>', 1)
+                extracted_reasoning = parts[0].strip()
+                extracted_answer = parts[1].strip() if len(parts) > 1 else ""
+                
+                if extracted_reasoning:
                     reasoning_trace = extracted_reasoning
-                    print(f"DEBUG Fireworks: Extracted reasoning from <think> tags in content")
-                # Remove <think> tags from response_text to get clean final answer
-                response_text = re.sub(think_pattern, '', response_text, flags=re.DOTALL).strip()
+                    response_text = extracted_answer
+                    print(f"DEBUG Fireworks: Extracted reasoning by splitting on </think>")
+                    print(f"DEBUG Fireworks: Reasoning: {len(reasoning_trace)} chars, Answer: {len(response_text)} chars")
             
-            # Priority 5: If we still don't have reasoning but response_text is very long,
+            # Priority 5: Fallback - Check for <think>...</think> pattern (both tags)
+            # Some models might use both opening and closing tags
+            import re
+            if not reasoning_trace:
+                think_pattern = r'<think>(.*?)</think>'
+                think_matches = re.findall(think_pattern, response_text, re.DOTALL)
+                if think_matches:
+                    # Extract reasoning from <think> tags
+                    extracted_reasoning = "\n".join(think_matches)
+                    reasoning_trace = extracted_reasoning
+                    print(f"DEBUG Fireworks: Extracted reasoning from <think>...</think> tags")
+                    # Remove <think> tags from response_text to get clean final answer
+                    response_text = re.sub(think_pattern, '', response_text, flags=re.DOTALL).strip()
+            
+            # Priority 6: If we still don't have reasoning but response_text is very long,
             # it might be that the entire content is reasoning (some thinking models do this)
             # This is handled in call_with_retry where if content is empty but reasoning exists,
-            # we use reasoning as the response. But we should still try to separate if possible.
+            # we use reasoning as the response.
             
             # Debug: Log what we're extracting
             print(f"DEBUG Fireworks: message keys: {list(message.keys())}")
@@ -199,6 +216,7 @@ class FireworksClient:
             print(f"DEBUG Fireworks: has 'reasoning_details' key: {'reasoning_details' in message}")
             if response_text:
                 print(f"DEBUG Fireworks: response_text preview (first 200 chars): {response_text[:200]}")
+                print(f"DEBUG Fireworks: response_text END (last 300 chars): {response_text[-300:]}")
             if reasoning_trace:
                 print(f"DEBUG Fireworks: reasoning_trace preview (first 200 chars): {reasoning_trace[:200]}")
             else:
