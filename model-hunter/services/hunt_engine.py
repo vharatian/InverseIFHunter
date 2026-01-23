@@ -302,7 +302,7 @@ class HuntEngine:
             total = session.total_hunts
             breaks = session.breaks_found
         
-        # Telemetry: Log hunt result
+        # Telemetry: Log hunt result with searchable content
         if _telemetry_enabled:
             try:
                 get_telemetry().log_hunt_result(
@@ -311,7 +311,10 @@ class HuntEngine:
                     model=result.model,
                     score=result.judge_score,
                     is_breaking=result.is_breaking,
-                    error=result.error
+                    error=result.error,
+                    response_preview=result.response,
+                    reasoning_preview=result.reasoning_trace,
+                    criteria=result.judge_criteria
                 )
             except Exception:
                 pass

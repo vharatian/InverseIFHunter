@@ -13,8 +13,16 @@ Features:
 import os
 import json
 import httpx
+import time
 from typing import Tuple, Optional, Dict, Any
 from dotenv import load_dotenv
+
+# Telemetry import - wrapped to never fail
+try:
+    from services.telemetry_logger import log_api_call_start, log_api_call_end
+    _telemetry_enabled = True
+except ImportError:
+    _telemetry_enabled = False
 
 load_dotenv()
 
@@ -61,6 +69,14 @@ class FireworksClient:
         last_error = None
         accumulated_reasoning = ""
         
+        # Telemetry: Log API call start
+        _start_time = time.time()
+        if _telemetry_enabled:
+            try:
+                log_api_call_start("fireworks", model)
+            except Exception:
+                pass
+        
         # Resolve short model names if needed
         # But we expect full IDs from frontend mostly
         
@@ -83,12 +99,27 @@ class FireworksClient:
                             accumulated_reasoning += "\n" + reasoning
                 
                 if response_text and response_text.strip():
+                    # Telemetry: Log successful API call with token estimates
+                    if _telemetry_enabled:
+                        try:
+                            tokens_in = len(prompt) // 4
+                            tokens_out = len(response_text) // 4
+                            log_api_call_end("fireworks", model, _start_time, success=True,
+                                           tokens_in=tokens_in, tokens_out=tokens_out)
+                        except Exception:
+                            pass
                     # Return response with reasoning from this attempt (most recent)
                     return response_text, (reasoning.strip() if reasoning else accumulated_reasoning.strip()), None
                 
                 # For thinking models: if content is empty but we have reasoning,
                 # the reasoning IS the response - use it
                 if reasoning and reasoning.strip() and not response_text.strip():
+                    # Telemetry: Log successful API call (reasoning as response)
+                    if _telemetry_enabled:
+                        try:
+                            log_api_call_end("fireworks", model, _start_time, success=True)
+                        except Exception:
+                            pass
                     return reasoning, reasoning.strip(), None
                     
             except Exception as e:
@@ -98,6 +129,14 @@ class FireworksClient:
             if attempt < max_retries - 1:
                 import asyncio
                 await asyncio.sleep(2 ** attempt)
+        
+        # Telemetry: Log failed API call
+        if _telemetry_enabled:
+            try:
+                log_api_call_end("fireworks", model, _start_time, success=False,
+                                error=last_error or "Empty response")
+            except Exception:
+                pass
                 
         return "", accumulated_reasoning.strip(), last_error or "Empty response"
 

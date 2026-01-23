@@ -17,6 +17,13 @@ from openai import AsyncOpenAI
 from dotenv import load_dotenv
 import time
 
+# Telemetry import - wrapped to never fail
+try:
+    from services.telemetry_logger import get_telemetry
+    _telemetry_enabled = True
+except ImportError:
+    _telemetry_enabled = False
+
 load_dotenv()
 
 
@@ -701,6 +708,9 @@ class OpenAIJudgeClient:
         """
         Judge response by splitting criteria into independent API calls.
         """
+        # Telemetry: Start timing judge call
+        _judge_start_time = time.time()
+        
         print(f"DEBUG: Starting INDEPENDENT judging mode.")
         
         # Step 1: Extract criteria
@@ -793,6 +803,18 @@ class OpenAIJudgeClient:
             explanation += "\nFailed Criteria Details:\n" + "\n".join(failed_criteria)
         elif not missing_criteria and not passed_criteria:
             explanation += "\nAll criteria passed."
+        
+        # Telemetry: Log judge call completion
+        if _telemetry_enabled:
+            try:
+                get_telemetry().log_judge_call(
+                    model=model,
+                    start_time=_judge_start_time,
+                    score=score,
+                    success=True
+                )
+            except Exception:
+                pass
             
         return {
             "score": score,

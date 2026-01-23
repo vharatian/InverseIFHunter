@@ -15,8 +15,16 @@ import os
 import json
 import asyncio
 import httpx
+import time
 from typing import Tuple, Optional, AsyncGenerator, Dict, Any
 from dotenv import load_dotenv
+
+# Telemetry import - wrapped to never fail
+try:
+    from services.telemetry_logger import log_api_call_start, log_api_call_end
+    _telemetry_enabled = True
+except ImportError:
+    _telemetry_enabled = False
 
 load_dotenv()
 
@@ -323,6 +331,14 @@ class OpenRouterClient:
         last_error = None
         accumulated_reasoning = ""
         
+        # Telemetry: Log API call start
+        _start_time = time.time()
+        if _telemetry_enabled:
+            try:
+                log_api_call_start("openrouter", model)
+            except Exception:
+                pass
+        
         for attempt in range(max_retries):
             try:
                 response, reasoning = await self.call_model(
@@ -337,11 +353,30 @@ class OpenRouterClient:
                 
                 # Check for valid response
                 if response.strip():
+                    # Telemetry: Log successful API call
+                    if _telemetry_enabled:
+                        try:
+                            # Estimate tokens (rough: 1 token ≈ 4 chars)
+                            tokens_in = len(prompt) // 4
+                            tokens_out = len(response) // 4
+                            log_api_call_end("openrouter", model, _start_time, success=True,
+                                           tokens_in=tokens_in, tokens_out=tokens_out)
+                        except Exception:
+                            pass
                     return response, accumulated_reasoning.strip(), None
                 
                 # For thinking models: if content is empty but we have reasoning,
                 # the reasoning IS the response - use it
                 if reasoning.strip() and not response.strip():
+                    # Telemetry: Log successful API call (reasoning as response)
+                    if _telemetry_enabled:
+                        try:
+                            tokens_in = len(prompt) // 4
+                            tokens_out = len(reasoning) // 4
+                            log_api_call_end("openrouter", model, _start_time, success=True,
+                                           tokens_in=tokens_in, tokens_out=tokens_out)
+                        except Exception:
+                            pass
                     return reasoning, accumulated_reasoning.strip(), None
                 
                 # Empty response - if we have reasoning, try to get response from it
@@ -361,6 +396,12 @@ class OpenRouterClient:
                     )
                     
                     if response.strip():
+                        # Telemetry: Log successful API call (after retry with reasoning)
+                        if _telemetry_enabled:
+                            try:
+                                log_api_call_end("openrouter", model, _start_time, success=True)
+                            except Exception:
+                                pass
                         return response, accumulated_reasoning, None
                 
             except httpx.HTTPStatusError as e:
@@ -380,6 +421,14 @@ class OpenRouterClient:
             # Wait before retry with exponential backoff
             if attempt < max_retries - 1:
                 await asyncio.sleep(2 ** attempt)
+        
+        # Telemetry: Log failed API call
+        if _telemetry_enabled:
+            try:
+                log_api_call_end("openrouter", model, _start_time, success=False, 
+                                error=last_error or "Empty response after all retries")
+            except Exception:
+                pass
         
         return "", accumulated_reasoning, last_error or "Empty response after all retries"
     

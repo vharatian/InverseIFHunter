@@ -18,8 +18,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Create storage directory
-RUN mkdir -p .storage
+# Create storage and telemetry directories
+RUN mkdir -p .storage .telemetry
 
 # Expose port (Cloud Run uses PORT env var)
 EXPOSE 8080

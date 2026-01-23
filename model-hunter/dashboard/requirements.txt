@@ -1,0 +1,5 @@
+# Model Hunter Dashboard Dependencies
+# Run: pip install -r requirements.txt
+
+fastapi>=0.100.0
+uvicorn>=0.23.0
