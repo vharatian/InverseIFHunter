@@ -30,6 +30,9 @@ build/
 # Storage (session data)
 .storage/
 
+# Maintenance mode flag
+.maintenance
+
 # Logs
 *.log
 *.tmp

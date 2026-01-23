@@ -39,6 +39,13 @@ from services.notebook_parser import notebook_parser
 from services.hunt_engine import hunt_engine
 from services.snapshot_service import snapshot_service, NotebookSnapshot
 
+# Telemetry import - wrapped to never fail
+try:
+    from services.telemetry_logger import get_telemetry
+    _telemetry_enabled = True
+except ImportError:
+    _telemetry_enabled = False
+
 # Load environment variables
 load_dotenv()
 
@@ -122,6 +129,17 @@ async def upload_notebook(file: UploadFile = File(...)):
         config = HuntConfig()
         session = hunt_engine.create_session(parsed, config)
         
+        # Telemetry: Log session creation
+        if _telemetry_enabled:
+            try:
+                get_telemetry().log_session_created(
+                    session_id=session.session_id,
+                    notebook=file.filename,
+                    source="upload"
+                )
+            except Exception:
+                pass
+        
         # Store original content for export
         save_session_storage(session.session_id, {
             "original_content": content_str,
@@ -183,6 +201,17 @@ async def fetch_notebook(request: NotebookURLRequest):
         # Create session
         config = HuntConfig()
         session = hunt_engine.create_session(parsed, config)
+        
+        # Telemetry: Log session creation (from URL fetch)
+        if _telemetry_enabled:
+            try:
+                get_telemetry().log_session_created(
+                    session_id=session.session_id,
+                    notebook=parsed.filename,
+                    source="url"
+                )
+            except Exception:
+                pass
         
         # We don't have original content for URL fetches, recreate from parsed
         save_session_storage(session.session_id, {
@@ -932,9 +961,52 @@ class NoCacheStaticFiles(StaticFiles):
 app.mount("/static", NoCacheStaticFiles(directory="static"), name="static")
 
 
+# ============== Maintenance Mode ==============
+
+# Maintenance mode flag (can be toggled via environment variable or API)
+MAINTENANCE_MODE = os.getenv("MAINTENANCE_MODE", "false").lower() == "true"
+_maintenance_file = os.path.join(os.getcwd(), ".maintenance")
+
+def is_maintenance_mode() -> bool:
+    """Check if maintenance mode is enabled."""
+    # Check environment variable first
+    if os.getenv("MAINTENANCE_MODE", "").lower() == "true":
+        return True
+    # Check for maintenance file (easier to toggle)
+    return os.path.exists(_maintenance_file)
+
+
+@app.get("/maintenance")
+async def maintenance_page():
+    """Serve the maintenance/downtime page."""
+    return FileResponse("static/maintenance.html")
+
+
+@app.post("/api/toggle-maintenance")
+async def toggle_maintenance():
+    """Toggle maintenance mode on/off (simple toggle, no auth needed)."""
+    global MAINTENANCE_MODE
+    
+    if is_maintenance_mode():
+        # Disable maintenance mode
+        if os.path.exists(_maintenance_file):
+            os.remove(_maintenance_file)
+        return {"maintenance_mode": False, "message": "Maintenance mode disabled. Door is open!"}
+    else:
+        # Enable maintenance mode
+        with open(_maintenance_file, 'w') as f:
+            f.write("maintenance")
+        return {"maintenance_mode": True, "message": "Maintenance mode enabled. Door is closed!"}
+
+
 @app.get("/")
-async def root():
-    """Serve the main frontend page."""
+async def root(request: Request):
+    """Serve the main frontend page or redirect to maintenance."""
+    # If maintenance mode is enabled, show maintenance page
+    # Users can bypass by adding ?door=open (handled by maintenance page)
+    if is_maintenance_mode():
+        return FileResponse("static/maintenance.html")
+    
     return FileResponse("static/index.html")
 
 
