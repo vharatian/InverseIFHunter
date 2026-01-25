@@ -149,18 +149,43 @@ class FireworksClient:
         """
         Call Fireworks API and return (response_text, reasoning_trace).
         
-        Fireworks Qwen thinking models return reasoning embedded in content:
-        - Format: "Reasoning text here...</think>\n\nFinal answer here"
-        - No opening <think> tag, only closing </think>
-        - We split on </think> to separate reasoning from answer
+        With reasoning_effort="high", Fireworks returns:
+        - message.reasoning_content: The reasoning/thinking trace
+        - message.content: The final answer
+        
+        Fallback: If reasoning_content is empty, we try parsing </think> tags from content.
         """
+        # Fireworks doesn't support reasoning_effort parameter (causes 400 error)
+        # Instead, we use prompt engineering with system message + explicit format instructions
+        
+        system_message = """You MUST format your response in exactly this structure:
+
+<think>
+[Your step-by-step reasoning, analysis, and thought process goes here]
+</think>
+
+[Your final answer goes here - concise and direct]
+
+CRITICAL: Always use <think> and </think> tags to wrap your reasoning. Your final answer must come AFTER the </think> tag."""
+
+        user_message = f"""Question: {prompt}
+
+Remember: Put ALL your thinking inside <think>...</think> tags, then give your final answer after.</s>"""
+        
         payload = {
             "model": model,
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 4096, # Default max
-            "temperature": 0.7,
-            "stream": False # Simple non-streaming for now
+            "messages": [
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": user_message}
+            ],
+            "max_tokens": 8192,  # Increased for thinking + answer
+            "temperature": 0.6,  # Slightly lower for more consistent formatting
+            "stream": False
         }
+        
+        # Debug: Log the payload being sent
+        print(f"DEBUG Fireworks: Using system message + prompt engineering for reasoning separation")
+        print(f"DEBUG Fireworks: Model: {model}")
         
         async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.post(
@@ -173,6 +198,11 @@ class FireworksClient:
                 raise ValueError(f"Fireworks API Error {response.status_code}: {response.text}")
                 
             data = response.json()
+            
+            # Debug: Log the raw response structure
+            print(f"DEBUG Fireworks: Raw response keys: {list(data.keys())}")
+            if "choices" in data and data["choices"]:
+                print(f"DEBUG Fireworks: First choice keys: {list(data['choices'][0].keys())}")
             
             # Check for API errors
             if "error" in data:
@@ -210,14 +240,32 @@ class FireworksClient:
                 if reasoning_trace:
                     print(f"DEBUG Fireworks: Found reasoning in 'reasoning' or 'thinking' field")
             
-            # Priority 4: Check if content contains </think> tag (Qwen thinking model pattern)
-            # Fireworks Qwen returns: "Reasoning here...</think>\n\nAnswer here"
-            # Note: There's NO opening <think> tag, only closing </think>
-            print(f"DEBUG Fireworks: Checking for </think> tag in response...")
+            # Priority 4: Check for <think>...</think> pattern (both tags) - PREFERRED
+            # We now explicitly prompt the model to use this format
+            import re
+            print(f"DEBUG Fireworks: Checking for <think>...</think> tags in response...")
+            print(f"DEBUG Fireworks: '<think>' in response_text: {'<think>' in response_text}")
             print(f"DEBUG Fireworks: '</think>' in response_text: {'</think>' in response_text}")
+            
+            if not reasoning_trace and '<think>' in response_text and '</think>' in response_text:
+                # Use regex with DOTALL to match across newlines
+                think_pattern = r'<think>(.*?)</think>'
+                think_match = re.search(think_pattern, response_text, re.DOTALL)
+                if think_match:
+                    reasoning_trace = think_match.group(1).strip()
+                    # Remove the entire <think>...</think> block from response
+                    response_text = re.sub(think_pattern, '', response_text, flags=re.DOTALL).strip()
+                    print(f"DEBUG Fireworks: Extracted reasoning from <think>...</think> tags")
+                    print(f"DEBUG Fireworks: Reasoning: {len(reasoning_trace)} chars, Answer: {len(response_text)} chars")
+            
+            # Priority 5: Fallback - Split on </think> only (no opening tag)
+            # Some Qwen responses have: "Reasoning here...</think>\n\nAnswer here"
             if not reasoning_trace and '</think>' in response_text:
                 parts = response_text.split('</think>', 1)
                 extracted_reasoning = parts[0].strip()
+                # Remove leading <think> if present
+                if extracted_reasoning.startswith('<think>'):
+                    extracted_reasoning = extracted_reasoning[7:].strip()
                 extracted_answer = parts[1].strip() if len(parts) > 1 else ""
                 
                 if extracted_reasoning:
@@ -226,9 +274,7 @@ class FireworksClient:
                     print(f"DEBUG Fireworks: Extracted reasoning by splitting on </think>")
                     print(f"DEBUG Fireworks: Reasoning: {len(reasoning_trace)} chars, Answer: {len(response_text)} chars")
             
-            # Priority 5: Fallback - Check for <think>...</think> pattern (both tags)
-            # Some models might use both opening and closing tags
-            import re
+            # Priority 6: Legacy fallback - Check for additional <think>...</think> patterns
             if not reasoning_trace:
                 think_pattern = r'<think>(.*?)</think>'
                 think_matches = re.findall(think_pattern, response_text, re.DOTALL)
