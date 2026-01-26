@@ -62,6 +62,58 @@ class OpenRouterClient:
     def _get_max_tokens(self, model: str) -> int:
         return self.MAX_TOKENS.get(model, 8192)
     
+    def _parse_think_tags(self, content: str) -> Tuple[str, str]:
+        """
+        Parse reasoning tags from content.
+        Handles multiple tag variations: <think>, <reasoning>, <REASONING>, etc.
+        Returns (cleaned_content, extracted_reasoning).
+        """
+        import re
+        
+        if not content:
+            return content, ""
+        
+        # List of tag patterns to try (case-insensitive, handles spaces)
+        # Order matters - try most specific first
+        tag_patterns = [
+            (r'<\s*think\s*>(.*?)<\s*/\s*think\s*>', 'think'),
+            (r'<\s*thinking\s*>(.*?)<\s*/\s*thinking\s*>', 'thinking'),
+            (r'<\s*reasoning\s*>(.*?)<\s*/\s*reasoning\s*>', 'reasoning'),
+            (r'<\s*reason\s*>(.*?)<\s*/\s*reason\s*>', 'reason'),
+        ]
+        
+        # Try each pattern (case-insensitive)
+        for pattern, tag_name in tag_patterns:
+            match = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
+            if match:
+                extracted_reasoning = match.group(1).strip()
+                # Remove the entire tag block from content
+                cleaned_content = re.sub(pattern, '', content, flags=re.DOTALL | re.IGNORECASE).strip()
+                print(f"DEBUG OpenRouter: Extracted reasoning from <{tag_name}> tags: {len(extracted_reasoning)} chars")
+                return cleaned_content, extracted_reasoning
+        
+        # Fallback: Try splitting on closing tags only (handles malformed opening tags)
+        closing_tags = ['</think>', '</thinking>', '</reasoning>', '</reason>']
+        content_lower = content.lower()
+        
+        for closing_tag in closing_tags:
+            if closing_tag in content_lower:
+                # Find the actual position (case-insensitive)
+                idx = content_lower.find(closing_tag)
+                extracted_reasoning = content[:idx].strip()
+                cleaned_content = content[idx + len(closing_tag):].strip()
+                
+                # Remove any opening tag variations from reasoning
+                opening_patterns = [r'^<\s*think\s*>', r'^<\s*thinking\s*>', r'^<\s*reasoning\s*>', r'^<\s*reason\s*>']
+                for op in opening_patterns:
+                    extracted_reasoning = re.sub(op, '', extracted_reasoning, flags=re.IGNORECASE).strip()
+                
+                if extracted_reasoning and cleaned_content:
+                    print(f"DEBUG OpenRouter: Extracted reasoning via closing tag fallback: {len(extracted_reasoning)} chars")
+                    return cleaned_content, extracted_reasoning
+        
+        return content, ""
+    
     async def call_model(
         self,
         prompt: str,
@@ -94,12 +146,27 @@ class OpenRouterClient:
         
         reasoning_budget = int(max_tokens * reasoning_budget_percent)
         
+        # Build messages - add system prompt only for Nemotron to separate reasoning from answer
+        is_nemotron = 'nemotron' in model.lower()
+        
+        if is_nemotron:
+            system_message = """Always put your reasoning inside <think></think> tags first, then give your final answer after the closing tag. Do not include any reasoning outside the tags."""
+            
+            messages = [
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": prompt}  # Original prompt as-is
+            ]
+            print(f"DEBUG OpenRouter: Using system prompt for Nemotron to separate reasoning")
+        else:
+            # Qwen and other models - no system prompt, just user message
+            messages = [{"role": "user", "content": prompt}]
+        
         payload = {
             "model": model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": messages,
             "max_tokens": max_tokens,
             "stream": stream,
-            "temperature": 0.8
+            "temperature": 0.8 if not is_nemotron else 0.6  # Lower temp for Nemotron for consistent formatting
         }
         
         # Add reasoning parameter to control reasoning trace output
@@ -239,6 +306,18 @@ class OpenRouterClient:
         response_text = response_text.strip()
         reasoning_trace = reasoning_trace.strip()
         
+        # Parse <think>...</think> tags from content (for Nemotron with system prompt)
+        # This extracts reasoning from content and cleans the response
+        response_text, extracted_reasoning = self._parse_think_tags(response_text)
+        if extracted_reasoning and not reasoning_trace:
+            reasoning_trace = extracted_reasoning
+            print(f"DEBUG OpenRouter: Extracted reasoning from <think> tags: {len(reasoning_trace)} chars")
+        elif extracted_reasoning and reasoning_trace:
+            # Prefer extracted reasoning if API reasoning is empty or much shorter
+            if len(extracted_reasoning) > len(reasoning_trace):
+                reasoning_trace = extracted_reasoning
+                print(f"DEBUG OpenRouter: Using <think> tag reasoning (longer than API reasoning)")
+        
         # No backend deduplication - frontend handles UI display
         # Export gets the full original trace
             
@@ -303,6 +382,17 @@ class OpenRouterClient:
         # Debug: Print what we extracted
         print(f"DEBUG OpenRouter: Extracted response_text: {len(response_text)} chars")
         print(f"DEBUG OpenRouter: Extracted reasoning_trace: {len(reasoning_trace)} chars")
+        
+        # Parse <think>...</think> tags from content (for Nemotron with system prompt)
+        response_text, extracted_reasoning = self._parse_think_tags(response_text)
+        if extracted_reasoning and not reasoning_trace:
+            reasoning_trace = extracted_reasoning
+            print(f"DEBUG OpenRouter: Extracted reasoning from <think> tags: {len(reasoning_trace)} chars")
+        elif extracted_reasoning and reasoning_trace:
+            # Prefer extracted reasoning if API reasoning is empty or much shorter
+            if len(extracted_reasoning) > len(reasoning_trace):
+                reasoning_trace = extracted_reasoning
+                print(f"DEBUG OpenRouter: Using <think> tag reasoning (longer than API reasoning)")
         
         # No backend deduplication - frontend handles UI display
         # Export gets the full original trace
