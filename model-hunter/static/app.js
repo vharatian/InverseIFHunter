@@ -19,6 +19,7 @@ const PROVIDER_MODELS = {
         // Only Qwen3 for Fireworks (Nemotron not available on serverless)
         { id: 'accounts/fireworks/models/qwen3-235b-a22b-thinking-2507', name: 'Qwen3-235B (Thinking)' }
     ]
+    // Alibaba Cloud removed - no fix for reasoning/response separation yet
 };
 // ============== State ==============
 

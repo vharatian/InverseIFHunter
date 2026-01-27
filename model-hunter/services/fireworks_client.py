@@ -111,16 +111,35 @@ class FireworksClient:
                     # Return response with reasoning from this attempt (most recent)
                     return response_text, (reasoning.strip() if reasoning else accumulated_reasoning.strip()), None
                 
-                # For thinking models: if content is empty but we have reasoning,
-                # the reasoning IS the response - use it
+                # Two-pass approach: if content is empty but we have reasoning,
+                # make a second call to extract just the answer
                 if reasoning and reasoning.strip() and not response_text.strip():
-                    # Telemetry: Log successful API call (reasoning as response)
-                    if _telemetry_enabled:
-                        try:
-                            log_api_call_end("fireworks", model, _start_time, success=True)
-                        except Exception:
-                            pass
-                    return reasoning, reasoning.strip(), None
+                    print(f"DEBUG Fireworks: Qwen has reasoning ({len(reasoning)} chars) but empty response")
+                    print(f"DEBUG Fireworks: Using two-pass approach - asking for summary")
+                    
+                    # Second pass: Ask for just the final answer based on reasoning
+                    # Truncate reasoning if too long (keep last 30k chars to fit in context)
+                    reasoning_for_summary = reasoning[-30000:] if len(reasoning) > 30000 else reasoning
+                    
+                    summary_response, _ = await self._get_summary(
+                        reasoning=reasoning_for_summary,
+                        original_prompt=prompt,
+                        model=model,
+                        timeout=60.0
+                    )
+                    
+                    if summary_response and summary_response.strip():
+                        print(f"DEBUG Fireworks: Two-pass successful! Got summary: {len(summary_response)} chars")
+                        # Telemetry: Log successful API call
+                        if _telemetry_enabled:
+                            try:
+                                log_api_call_end("fireworks", model, _start_time, success=True)
+                            except Exception:
+                                pass
+                        # Return: summary as response, full reasoning as trace
+                        return summary_response, accumulated_reasoning.strip(), None
+                    else:
+                        print(f"DEBUG Fireworks: Two-pass summary also empty, will retry")
                     
             except Exception as e:
                 last_error = f"Error: {str(e)}"
@@ -308,6 +327,74 @@ Remember: Put ALL your thinking inside <think>...</think> tags, then give your f
                 print(f"DEBUG Fireworks: ⚠️ No reasoning trace extracted from any field!")
             
             return response_text.strip(), reasoning_trace.strip()
+    
+    async def _get_summary(
+        self,
+        reasoning: str,
+        original_prompt: str,
+        model: str,
+        timeout: float = 60.0
+    ) -> Tuple[str, str]:
+        """
+        Second pass: Ask for just the final answer based on reasoning.
+        Used when first pass returns empty content but has reasoning.
+        """
+        summary_prompt = f"""Based on the following reasoning/analysis, provide ONLY the final answer.
+
+REASONING:
+{reasoning}
+
+ORIGINAL QUESTION:
+{original_prompt}
+
+INSTRUCTIONS:
+- Provide ONLY the final, definitive answer
+- Do NOT include any reasoning or explanation
+- Do NOT start with "Based on..." or "The answer is..."
+- Just give the direct answer/response"""
+
+        # Simple payload without reasoning - just get the answer
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "user", "content": summary_prompt}
+            ],
+            "max_tokens": 4096,  # Shorter for summary
+            "temperature": 0.3,  # Lower for more focused answer
+            "stream": False
+        }
+        
+        print(f"DEBUG Fireworks: Making summary call for two-pass approach")
+        
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.post(
+                self.BASE_URL,
+                headers=self._get_headers(),
+                json=payload
+            )
+            
+            if response.status_code != 200:
+                print(f"DEBUG Fireworks: Summary call failed with status {response.status_code}")
+                return "", ""
+                
+            data = response.json()
+            
+            if "error" in data:
+                print(f"DEBUG Fireworks: Summary call returned error: {data['error']}")
+                return "", ""
+            
+            choices = data.get("choices", [])
+            if not choices:
+                return "", ""
+            
+            message = choices[0].get("message", {})
+            summary_text = message.get("content", "") or ""
+            
+            # Clean any remaining <think> tags from summary (shouldn't be any)
+            import re
+            summary_text = re.sub(r'<think>.*?</think>', '', summary_text, flags=re.DOTALL).strip()
+            
+            return summary_text.strip(), ""
 
 
 # Singleton

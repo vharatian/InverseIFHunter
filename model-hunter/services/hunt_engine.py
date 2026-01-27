@@ -239,6 +239,16 @@ class HuntEngine:
                     max_retries=session.config.max_retries
                     # No reasoning budget for Fireworks currently
                 )
+            # Alibaba Cloud removed - no fix for reasoning/response separation yet
+            # elif provider == 'alibaba':
+            #     from services.alibaba_client import get_alibaba_client
+            #     alibaba = get_alibaba_client()
+            #     response, reasoning, error = await alibaba.call_with_retry(
+            #         prompt=enhanced_prompt,
+            #         model=result.model,
+            #         max_retries=session.config.max_retries,
+            #         reasoning_budget_percent=session.config.reasoning_budget_percent
+            #     )
             else:
                 # Default to OpenRouter
                 openrouter = get_openrouter_client()

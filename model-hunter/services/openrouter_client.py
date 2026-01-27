@@ -146,35 +146,67 @@ class OpenRouterClient:
         
         reasoning_budget = int(max_tokens * reasoning_budget_percent)
         
-        # Build messages - add system prompt only for Nemotron to separate reasoning from answer
+        # Build messages
         is_nemotron = 'nemotron' in model.lower()
+        is_qwen = 'qwen' in model.lower()
+        is_thinking_model = is_nemotron or is_qwen
         
-        if is_nemotron:
-            system_message = """Always put your reasoning inside <think></think> tags first, then give your final answer after the closing tag. Do not include any reasoning outside the tags."""
-            
+        if is_thinking_model:
+            # Strong system prompt to force thinking models to separate reasoning from answer
+            system_prompt = """Answer the following request directly.
+
+DO NOT:
+- Include your thought process
+- Show step-by-step reasoning
+- Explain how you arrived at the answer
+- Use thinking phrases or preambles
+
+DO:
+- Provide only the final, complete answer
+- Be direct and concise
+- Start immediately with the answer content"""
             messages = [
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": prompt}  # Original prompt as-is
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt}
             ]
-            print(f"DEBUG OpenRouter: Using system prompt for Nemotron to separate reasoning")
+            model_name = "Nemotron" if is_nemotron else "Qwen"
+            print(f"DEBUG OpenRouter: Using strong system prompt for {model_name} (Option 4)")
         else:
-            # Qwen and other models - no system prompt, just user message
+            # Other models - just user message
             messages = [{"role": "user", "content": prompt}]
+            print(f"DEBUG OpenRouter: No system prompt for {model}")
         
         payload = {
             "model": model,
             "messages": messages,
             "max_tokens": max_tokens,
             "stream": stream,
-            "temperature": 0.8 if not is_nemotron else 0.6  # Lower temp for Nemotron for consistent formatting
+            "temperature": 0.8  # Standard temperature for all models
         }
         
         # Add reasoning parameter to control reasoning trace output
-        # If reasoning_budget_percent is 0, exclude reasoning; otherwise include it
+        # Dynamic effort based on prompt length (for Nemotron to avoid token exhaustion)
         if reasoning_budget_percent > 0:
+            # Calculate prompt word count for dynamic effort
+            prompt_word_count = len(prompt.split())
+            
+            if is_nemotron:
+                # Nemotron has 32k token limit - adjust effort based on prompt length
+                if prompt_word_count > 500:
+                    effort_level = "low"      # ~20% for long prompts
+                elif prompt_word_count > 300:
+                    effort_level = "medium"   # ~50% for medium prompts
+                else:
+                    effort_level = "high"     # ~90% for short prompts
+                print(f"DEBUG OpenRouter: Nemotron prompt has {prompt_word_count} words → effort: '{effort_level}'")
+            else:
+                # Other models (Qwen has 128k limit) - use high effort
+                effort_level = "high"
+                print(f"DEBUG OpenRouter: {model} using effort: 'high' (prompt: {prompt_word_count} words)")
+            
             payload["reasoning"] = {
                 "exclude": False,  # Include reasoning traces in response
-                "effort": "high"  # Use high effort for reasoning
+                "effort": effort_level
             }
         else:
             payload["reasoning"] = {
@@ -306,17 +338,30 @@ class OpenRouterClient:
         response_text = response_text.strip()
         reasoning_trace = reasoning_trace.strip()
         
-        # Parse <think>...</think> tags from content (for Nemotron with system prompt)
-        # This extracts reasoning from content and cleans the response
-        response_text, extracted_reasoning = self._parse_think_tags(response_text)
-        if extracted_reasoning and not reasoning_trace:
-            reasoning_trace = extracted_reasoning
-            print(f"DEBUG OpenRouter: Extracted reasoning from <think> tags: {len(reasoning_trace)} chars")
-        elif extracted_reasoning and reasoning_trace:
-            # Prefer extracted reasoning if API reasoning is empty or much shorter
-            if len(extracted_reasoning) > len(reasoning_trace):
+        # For models with native reasoning_details (like Nemotron, Qwen), skip <think> tag parsing
+        # The API already separates reasoning into reasoning_details
+        model_name = payload.get("model", "").lower()
+        if 'nemotron' not in model_name and 'qwen' not in model_name:
+            # Parse <think>...</think> tags from content (for models that embed reasoning in content)
+            response_text, extracted_reasoning = self._parse_think_tags(response_text)
+            if extracted_reasoning and not reasoning_trace:
                 reasoning_trace = extracted_reasoning
-                print(f"DEBUG OpenRouter: Using <think> tag reasoning (longer than API reasoning)")
+                print(f"DEBUG OpenRouter: Extracted reasoning from <think> tags: {len(reasoning_trace)} chars")
+            elif extracted_reasoning and reasoning_trace:
+                # Prefer extracted reasoning if API reasoning is empty or much shorter
+                if len(extracted_reasoning) > len(reasoning_trace):
+                    reasoning_trace = extracted_reasoning
+                    print(f"DEBUG OpenRouter: Using <think> tag reasoning (longer than API reasoning)")
+        else:
+            model_display = "Nemotron" if 'nemotron' in model_name else "Qwen"
+            print(f"DEBUG OpenRouter: Skipping <think> tag parsing for {model_display} (uses native reasoning_details)")
+        
+        # Debug: Log what we're returning
+        print(f"DEBUG OpenRouter: Final response_text length: {len(response_text)} chars")
+        print(f"DEBUG OpenRouter: Final reasoning_trace length: {len(reasoning_trace)} chars")
+        if not response_text:
+            print(f"DEBUG OpenRouter: WARNING - response_text is EMPTY!")
+            print(f"DEBUG OpenRouter: reasoning_trace preview: {reasoning_trace[:200] if reasoning_trace else 'ALSO EMPTY'}...")
         
         # No backend deduplication - frontend handles UI display
         # Export gets the full original trace
@@ -383,16 +428,22 @@ class OpenRouterClient:
         print(f"DEBUG OpenRouter: Extracted response_text: {len(response_text)} chars")
         print(f"DEBUG OpenRouter: Extracted reasoning_trace: {len(reasoning_trace)} chars")
         
-        # Parse <think>...</think> tags from content (for Nemotron with system prompt)
-        response_text, extracted_reasoning = self._parse_think_tags(response_text)
-        if extracted_reasoning and not reasoning_trace:
-            reasoning_trace = extracted_reasoning
-            print(f"DEBUG OpenRouter: Extracted reasoning from <think> tags: {len(reasoning_trace)} chars")
-        elif extracted_reasoning and reasoning_trace:
-            # Prefer extracted reasoning if API reasoning is empty or much shorter
-            if len(extracted_reasoning) > len(reasoning_trace):
+        # For models with native reasoning_details (like Nemotron, Qwen), skip <think> tag parsing
+        model_name = payload.get("model", "").lower()
+        if 'nemotron' not in model_name and 'qwen' not in model_name:
+            # Parse <think>...</think> tags from content (for models that embed reasoning in content)
+            response_text, extracted_reasoning = self._parse_think_tags(response_text)
+            if extracted_reasoning and not reasoning_trace:
                 reasoning_trace = extracted_reasoning
-                print(f"DEBUG OpenRouter: Using <think> tag reasoning (longer than API reasoning)")
+                print(f"DEBUG OpenRouter: Extracted reasoning from <think> tags: {len(reasoning_trace)} chars")
+            elif extracted_reasoning and reasoning_trace:
+                # Prefer extracted reasoning if API reasoning is empty or much shorter
+                if len(extracted_reasoning) > len(reasoning_trace):
+                    reasoning_trace = extracted_reasoning
+                    print(f"DEBUG OpenRouter: Using <think> tag reasoning (longer than API reasoning)")
+        else:
+            model_display = "Nemotron" if 'nemotron' in model_name else "Qwen"
+            print(f"DEBUG OpenRouter: Skipping <think> tag parsing for {model_display} (uses native reasoning_details)")
         
         # No backend deduplication - frontend handles UI display
         # Export gets the full original trace
@@ -455,44 +506,97 @@ class OpenRouterClient:
                             pass
                     return response, accumulated_reasoning.strip(), None
                 
-                # For thinking models: if content is empty but we have reasoning,
-                # the reasoning IS the response - use it
-                if reasoning.strip() and not response.strip():
-                    # Telemetry: Log successful API call (reasoning as response)
-                    if _telemetry_enabled:
-                        try:
-                            tokens_in = len(prompt) // 4
-                            tokens_out = len(reasoning) // 4
-                            log_api_call_end("openrouter", model, _start_time, success=True,
-                                           tokens_in=tokens_in, tokens_out=tokens_out)
-                        except Exception:
-                            pass
-                    return reasoning, accumulated_reasoning.strip(), None
+                # For models with native reasoning_details (like Nemotron, Qwen), 
+                # use two-pass approach: if content is empty but reasoning exists,
+                # make a second call to extract just the answer
+                is_native_reasoning_model = 'nemotron' in model.lower() or 'qwen' in model.lower()
                 
-                # Empty response - if we have reasoning, try to get response from it
-                if accumulated_reasoning and attempt < max_retries - 1:
-                    # Send accumulated reasoning back and ask for final response
-                    retry_prompt = (
-                        f"Based on your previous reasoning:\n\n{accumulated_reasoning}\n\n"
-                        f"Please provide your final response to this question:\n\n{prompt}\n\n"
-                        f"Give only the final answer, no additional reasoning."
-                    )
-                    
-                    response, _ = await self.call_model(
-                        prompt=retry_prompt,
-                        model=model,
-                        reasoning_budget_percent=0,
-                        timeout=timeout
-                    )
-                    
-                    if response.strip():
-                        # Telemetry: Log successful API call (after retry with reasoning)
+                if is_native_reasoning_model:
+                    # Two-pass approach for Nemotron/Qwen
+                    if reasoning.strip() and not response.strip():
+                        model_name = "Nemotron" if 'nemotron' in model.lower() else "Qwen"
+                        print(f"DEBUG OpenRouter: {model_name} has reasoning ({len(reasoning)} chars) but empty response")
+                        print(f"DEBUG OpenRouter: Using two-pass approach - asking for summary")
+                        
+                        # Second pass: Ask for just the final answer based on reasoning
+                        # Truncate reasoning if too long (keep last 30k chars to fit in context)
+                        reasoning_for_summary = reasoning[-30000:] if len(reasoning) > 30000 else reasoning
+                        
+                        summary_prompt = f"""Based on the following reasoning/analysis, provide ONLY the final answer.
+
+REASONING:
+{reasoning_for_summary}
+
+ORIGINAL QUESTION:
+{prompt}
+
+INSTRUCTIONS:
+- Provide ONLY the final, definitive answer
+- Do NOT include any reasoning or explanation
+- Do NOT start with "Based on..." or "The answer is..."
+- Just give the direct answer/response"""
+
+                        summary_response, _ = await self.call_model(
+                            prompt=summary_prompt,
+                            model=model,
+                            reasoning_budget_percent=0,  # No reasoning for summary
+                            timeout=60.0  # Shorter timeout for summary
+                        )
+                        
+                        if summary_response.strip():
+                            print(f"DEBUG OpenRouter: Two-pass successful! Got summary: {len(summary_response)} chars")
+                            # Telemetry: Log successful API call
+                            if _telemetry_enabled:
+                                try:
+                                    log_api_call_end("openrouter", model, _start_time, success=True)
+                                except Exception:
+                                    pass
+                            # Return: summary as response, full reasoning as trace
+                            return summary_response, accumulated_reasoning.strip(), None
+                        else:
+                            print(f"DEBUG OpenRouter: Two-pass summary also empty, will retry")
+                    else:
+                        model_name = "Nemotron" if 'nemotron' in model.lower() else "Qwen"
+                        print(f"DEBUG OpenRouter: {model_name} returned empty response and no reasoning, will retry (attempt {attempt + 1}/{max_retries})")
+                else:
+                    # For other thinking models: if content is empty but we have reasoning,
+                    # the reasoning IS the response - use it (legacy behavior)
+                    if reasoning.strip() and not response.strip():
+                        # Telemetry: Log successful API call (reasoning as response)
                         if _telemetry_enabled:
                             try:
-                                log_api_call_end("openrouter", model, _start_time, success=True)
+                                tokens_in = len(prompt) // 4
+                                tokens_out = len(reasoning) // 4
+                                log_api_call_end("openrouter", model, _start_time, success=True,
+                                               tokens_in=tokens_in, tokens_out=tokens_out)
                             except Exception:
                                 pass
-                        return response, accumulated_reasoning, None
+                        return reasoning, accumulated_reasoning.strip(), None
+                    
+                    # Empty response - if we have reasoning, try to get response from it
+                    if accumulated_reasoning and attempt < max_retries - 1:
+                        # Send accumulated reasoning back and ask for final response
+                        retry_prompt = (
+                            f"Based on your previous reasoning:\n\n{accumulated_reasoning}\n\n"
+                            f"Please provide your final response to this question:\n\n{prompt}\n\n"
+                            f"Give only the final answer, no additional reasoning."
+                        )
+                        
+                        response, _ = await self.call_model(
+                            prompt=retry_prompt,
+                            model=model,
+                            reasoning_budget_percent=0,
+                            timeout=timeout
+                        )
+                        
+                        if response.strip():
+                            # Telemetry: Log successful API call (after retry with reasoning)
+                            if _telemetry_enabled:
+                                try:
+                                    log_api_call_end("openrouter", model, _start_time, success=True)
+                                except Exception:
+                                    pass
+                            return response, accumulated_reasoning, None
                 
             except httpx.HTTPStatusError as e:
                 try:
