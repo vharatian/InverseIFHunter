@@ -148,11 +148,9 @@ class OpenRouterClient:
         
         # Build messages
         is_nemotron = 'nemotron' in model.lower()
-        is_qwen = 'qwen' in model.lower()
-        is_thinking_model = is_nemotron or is_qwen
         
-        if is_thinking_model:
-            # Strong system prompt to force thinking models to separate reasoning from answer
+        if is_nemotron:
+            # Strong system prompt for Nemotron only to separate reasoning from answer
             system_prompt = """Answer the following request directly.
 
 DO NOT:
@@ -169,10 +167,9 @@ DO:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}
             ]
-            model_name = "Nemotron" if is_nemotron else "Qwen"
-            print(f"DEBUG OpenRouter: Using strong system prompt for {model_name} (Option 4)")
+            print(f"DEBUG OpenRouter: Using strong system prompt for Nemotron")
         else:
-            # Other models - just user message
+            # Qwen and other models - just user message (no system prompt)
             messages = [{"role": "user", "content": prompt}]
             print(f"DEBUG OpenRouter: No system prompt for {model}")
         
@@ -506,35 +503,35 @@ DO:
                             pass
                     return response, accumulated_reasoning.strip(), None
                 
-                # For models with native reasoning_details (like Nemotron, Qwen), 
-                # use two-pass approach: if content is empty but reasoning exists,
-                # make a second call to extract just the answer
-                is_native_reasoning_model = 'nemotron' in model.lower() or 'qwen' in model.lower()
+                # For Nemotron: use two-pass approach if content is empty but reasoning exists
+                # (Qwen returns response directly, no two-pass needed)
+                is_nemotron = 'nemotron' in model.lower()
                 
-                if is_native_reasoning_model:
-                    # Two-pass approach for Nemotron/Qwen
+                if is_nemotron:
+                    # Two-pass approach for Nemotron only
                     if reasoning.strip() and not response.strip():
-                        model_name = "Nemotron" if 'nemotron' in model.lower() else "Qwen"
-                        print(f"DEBUG OpenRouter: {model_name} has reasoning ({len(reasoning)} chars) but empty response")
-                        print(f"DEBUG OpenRouter: Using two-pass approach - asking for summary")
+                        print(f"DEBUG OpenRouter: Nemotron has reasoning ({len(reasoning)} chars) but empty response")
+                        print(f"DEBUG OpenRouter: Using two-pass approach - asking for complete response")
                         
                         # Second pass: Ask for just the final answer based on reasoning
                         # Truncate reasoning if too long (keep last 30k chars to fit in context)
                         reasoning_for_summary = reasoning[-30000:] if len(reasoning) > 30000 else reasoning
                         
-                        summary_prompt = f"""Based on the following reasoning/analysis, provide ONLY the final answer.
+                        summary_prompt = f"""Based on the following reasoning/analysis, provide a COMPLETE response that fully answers the original question.
 
-REASONING:
+REASONING/ANALYSIS:
 {reasoning_for_summary}
 
 ORIGINAL QUESTION:
 {prompt}
 
 INSTRUCTIONS:
-- Provide ONLY the final, definitive answer
-- Do NOT include any reasoning or explanation
-- Do NOT start with "Based on..." or "The answer is..."
-- Just give the direct answer/response"""
+- Provide a COMPLETE, standalone response that fully answers the question
+- Include all relevant details, examples, explanations, and structure from your analysis
+- This response should be comprehensive enough to be evaluated on its own
+- Do NOT reference your reasoning process (no "Based on my analysis..." or "After thinking...")
+- Do NOT include meta-commentary about your thinking
+- Write as if you're directly answering the question for the first time"""
 
                         summary_response, _ = await self.call_model(
                             prompt=summary_prompt,
@@ -544,7 +541,7 @@ INSTRUCTIONS:
                         )
                         
                         if summary_response.strip():
-                            print(f"DEBUG OpenRouter: Two-pass successful! Got summary: {len(summary_response)} chars")
+                            print(f"DEBUG OpenRouter: Two-pass successful! Got complete response: {len(summary_response)} chars")
                             # Telemetry: Log successful API call
                             if _telemetry_enabled:
                                 try:
@@ -554,10 +551,9 @@ INSTRUCTIONS:
                             # Return: summary as response, full reasoning as trace
                             return summary_response, accumulated_reasoning.strip(), None
                         else:
-                            print(f"DEBUG OpenRouter: Two-pass summary also empty, will retry")
+                            print(f"DEBUG OpenRouter: Two-pass response also empty, will retry")
                     else:
-                        model_name = "Nemotron" if 'nemotron' in model.lower() else "Qwen"
-                        print(f"DEBUG OpenRouter: {model_name} returned empty response and no reasoning, will retry (attempt {attempt + 1}/{max_retries})")
+                        print(f"DEBUG OpenRouter: Nemotron returned empty response and no reasoning, will retry (attempt {attempt + 1}/{max_retries})")
                 else:
                     # For other thinking models: if content is empty but we have reasoning,
                     # the reasoning IS the response - use it (legacy behavior)
