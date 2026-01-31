@@ -52,6 +52,7 @@ class HuntConfig(BaseModel):
     custom_judge_system_prompt: Optional[str] = None
     provider: str = Field(default="openrouter")
     independent_judging: bool = Field(default=True)
+    hunt_offset: int = Field(default=0, ge=0)  # Starting hunt_id offset (from frontend's hunt count)
 
 
 class HuntResult(BaseModel):
@@ -75,9 +76,11 @@ class HuntSession(BaseModel):
     notebook: Optional[ParsedNotebook] = None
     config: HuntConfig = HuntConfig()
     results: List[HuntResult] = []
+    all_results: List[HuntResult] = []  # Accumulated results across ALL runs
     total_hunts: int = 0
     completed_hunts: int = 0
     breaks_found: int = 0
+    accumulated_hunt_count: int = 0  # Total hunts ever run (for unique IDs)
     status: HuntStatus = HuntStatus.PENDING
     human_reviews: Dict[str, Any] = {}  # Store human review data
 

@@ -15,7 +15,7 @@ from typing import Optional, Dict, Any, List
 from contextlib import asynccontextmanager
 from datetime import datetime
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, Query, Request
+from fastapi import FastAPI, File, UploadFile, HTTPException, Query, Request, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse, Response
 from pydantic import BaseModel
@@ -62,6 +62,140 @@ except ImportError:
 
 # Load environment variables
 load_dotenv()
+
+
+# ============== Shared Constants ==============
+
+# Heading map for notebook cell types
+HEADING_MAP = {
+    "prompt": "**[prompt]**",
+    "response": "**[response]**",
+    "response_reference": "**[response_reference]**",
+    "judge_system_prompt": "**[judge_system_prompt]**"
+}
+
+# Cell order for notebook structure
+CELL_ORDER = ["prompt", "response", "response_reference", "judge_system_prompt"]
+
+
+# ============== Notebook Cell Helpers ==============
+
+def _find_metadata_cell_index(notebook_data: dict) -> int:
+    """
+    Find the index of the metadata cell in a notebook.
+    
+    Returns:
+        Index of metadata cell, or -1 if not found
+    """
+    for i, cell in enumerate(notebook_data.get("cells", [])):
+        if cell.get("cell_type") == "markdown":
+            source = "".join(cell.get("source", []))
+            if "# Metadata" in source or "Metadata" in source:
+                return i
+    return -1
+
+
+def _find_cell_insertion_index(
+    notebook_data: dict,
+    target_cell_type: str,
+    metadata_index: int = -1
+) -> int:
+    """
+    Find the correct insertion index for a new cell based on cell order.
+    
+    Ensures cells are in correct order: prompt, response, response_reference, judge_system_prompt.
+    
+    Args:
+        notebook_data: The notebook data dict
+        target_cell_type: The cell type being inserted (e.g., "response")
+        metadata_index: Index of metadata cell (pass -1 to auto-detect)
+    
+    Returns:
+        The index where the new cell should be inserted
+    """
+    if metadata_index == -1:
+        metadata_index = _find_metadata_cell_index(notebook_data)
+    
+    # Start insertion after metadata if found, otherwise at start
+    insert_index = metadata_index + 1 if metadata_index >= 0 else 0
+    
+    # Get target cell's position in order
+    current_cell_index = CELL_ORDER.index(target_cell_type) if target_cell_type in CELL_ORDER else -1
+    
+    if current_cell_index == -1:
+        return insert_index
+    
+    # Find where to insert based on cell order
+    for i, cell in enumerate(notebook_data.get("cells", [])):
+        if i <= (metadata_index if metadata_index >= 0 else -1):
+            continue  # Skip metadata and cells before it
+            
+        if cell.get("cell_type") == "markdown":
+            source = "".join(cell.get("source", []))
+            
+            # Check if this cell is one of our ordered cells
+            for j, cell_type in enumerate(CELL_ORDER):
+                if cell_type == target_cell_type:
+                    continue  # Skip the cell we're creating
+                    
+                heading = HEADING_MAP.get(cell_type, "")
+                if heading and heading.lower() in source.lower():
+                    if j < current_cell_index:
+                        # This cell comes before ours - insert after it
+                        insert_index = i + 1
+                    elif j > current_cell_index:
+                        # Found a cell that comes after - insert before it
+                        return i
+                    break
+    
+    # Ensure we don't insert before metadata
+    if metadata_index >= 0 and insert_index <= metadata_index:
+        insert_index = metadata_index + 1
+    
+    return insert_index
+
+
+def _create_notebook_cell(heading_pattern: str, content: str) -> dict:
+    """
+    Create a new markdown cell with proper Jupyter format.
+    
+    Args:
+        heading_pattern: The heading pattern (e.g., "**[response]**")
+        content: The cell content
+    
+    Returns:
+        A dict representing the notebook cell
+    """
+    full_content = f"{heading_pattern}\n\n{content}"
+    content_lines = full_content.split("\n")
+    
+    # Jupyter format: each line as separate string with newline except last
+    source = [line + "\n" for line in content_lines[:-1]] + [content_lines[-1]] if content_lines else [""]
+    
+    return {
+        "cell_type": "markdown",
+        "metadata": {},
+        "source": source
+    }
+
+
+def _update_session_notebook_field(session: HuntSession, cell_type: str, content: str):
+    """
+    Update the appropriate field in session.notebook based on cell type.
+    
+    Args:
+        session: The hunt session
+        cell_type: The cell type (prompt, response, response_reference, judge_system_prompt)
+        content: The new content
+    """
+    if cell_type == "prompt":
+        session.notebook.prompt = content
+    elif cell_type == "response":
+        session.notebook.response = content
+    elif cell_type == "response_reference":
+        session.notebook.response_reference = content
+    elif cell_type == "judge_system_prompt":
+        session.notebook.judge_system_prompt = content
 
 
 # Lifespan handler
@@ -148,14 +282,8 @@ def _reorder_notebook_cells(notebook_data: dict, heading_map: dict, cell_order: 
     if "cells" not in notebook_data:
         return
     
-    # Find metadata cell index
-    metadata_index = -1
-    for i, cell in enumerate(notebook_data["cells"]):
-        if cell.get("cell_type") == "markdown":
-            source = "".join(cell.get("source", []))
-            if "# Metadata" in source or "Metadata" in source:
-                metadata_index = i
-                break
+    # Find metadata cell index using shared helper
+    metadata_index = _find_metadata_cell_index(notebook_data)
     
     # Separate cells into ordered cells and other cells
     ordered_cells = []  # List of (index_in_order, cell, original_index)
@@ -283,28 +411,9 @@ async def upload_notebook(file: UploadFile = File(...)):
             "session_data": session.model_dump()  # Store full session for restoration
         })
         
-        # Extract model prefix from model slots (nemotron, qwen, etc.)
-        # BUT: Only use if metadata doesn't have Model field
-        model_prefix = None
-        metadata_model = None
-        
-        # Check metadata first (has priority)
-        if parsed.metadata:
-            metadata_model = parsed.metadata.get('Model') or parsed.metadata.get('model')
-            if metadata_model:
-                # Clean the value (remove leading dashes, spaces)
-                import re
-                metadata_model = re.sub(r'^[-:\s]+', '', str(metadata_model).strip()).strip()
-                print(f"DEBUG: Found Model in metadata: '{metadata_model}'")
-        
-        # Only extract from slots if metadata doesn't have it
-        if not metadata_model:
-            model_prefix = notebook_parser.get_model_slot_prefix(parsed)
-            print(f"DEBUG: No Model in metadata, using model_prefix from slots: '{model_prefix}'")
-        else:
-            # Metadata has Model field - use that instead
-            model_prefix = metadata_model.lower()  # Use metadata value
-            print(f"DEBUG: Using Model from metadata as model_prefix: '{model_prefix}'")
+        # Extract model prefix from metadata or model slots
+        model_prefix = notebook_parser.extract_model_prefix(parsed)
+        print(f"DEBUG: Extracted model_prefix: '{model_prefix}'")
         
         return {
             "success": True,
@@ -358,28 +467,9 @@ async def fetch_notebook(request: NotebookURLRequest):
             "session_data": session.model_dump()  # Store full session for restoration
         })
         
-        # Extract model prefix from model slots (nemotron, qwen, etc.)
-        # BUT: Only use if metadata doesn't have Model field
-        model_prefix = None
-        metadata_model = None
-        
-        # Check metadata first (has priority)
-        if parsed.metadata:
-            metadata_model = parsed.metadata.get('Model') or parsed.metadata.get('model')
-            if metadata_model:
-                # Clean the value (remove leading dashes, spaces)
-                import re
-                metadata_model = re.sub(r'^[-:\s]+', '', str(metadata_model).strip()).strip()
-                print(f"DEBUG: Found Model in metadata: '{metadata_model}'")
-        
-        # Only extract from slots if metadata doesn't have it
-        if not metadata_model:
-            model_prefix = notebook_parser.get_model_slot_prefix(parsed)
-            print(f"DEBUG: No Model in metadata, using model_prefix from slots: '{model_prefix}'")
-        else:
-            # Metadata has Model field - use that instead
-            model_prefix = metadata_model.lower()  # Use metadata value
-            print(f"DEBUG: Using Model from metadata as model_prefix: '{model_prefix}'")
+        # Extract model prefix from metadata or model slots
+        model_prefix = notebook_parser.extract_model_prefix(parsed)
+        print(f"DEBUG: Extracted model_prefix: '{model_prefix}'")
         
         return {
             "success": True,
@@ -402,6 +492,30 @@ async def fetch_notebook(request: NotebookURLRequest):
         }
     except Exception as e:
         raise HTTPException(400, f"Failed to fetch notebook: {str(e)}")
+
+
+@app.post("/api/warmup-connections")
+async def warmup_connections(background_tasks: BackgroundTasks):
+    """
+    Warm up API connections for faster hunt execution.
+    Call this when notebook is loaded to pre-establish TCP/TLS connections.
+    Returns immediately, warm-up happens in background.
+    """
+    from services.http_config import warmup_all_connections
+    
+    # Run warm-up in background so it doesn't block
+    async def do_warmup():
+        try:
+            results = await warmup_all_connections()
+            logger.info(f"Connection warm-up completed: {results}")
+        except Exception as e:
+            logger.error(f"Connection warm-up failed: {e}")
+    
+    # Schedule warm-up
+    import asyncio
+    asyncio.create_task(do_warmup())
+    
+    return {"status": "warming_up", "message": "Connection warm-up started in background"}
 
 
 @app.get("/api/session/{session_id}")
@@ -498,93 +612,18 @@ async def update_response(session_id: str, request: UpdateResponseRequest):
                     updated = True
                     break
         
-        # If cell not found, create it
+        # If cell not found, create it using helper functions
         if not updated:
-            # Define cell order: prompt, response, response_reference, judge_system_prompt
-            cell_order = ["prompt", "response", "response_reference", "judge_system_prompt"]
-            current_cell_index = cell_order.index("response")
+            insert_index = _find_cell_insertion_index(notebook_data, "response")
+            new_cell = _create_notebook_cell("**[response]**", request.response)
             
-            # Find the position to insert the new cell
-            insert_index = len(notebook_data.get("cells", []))
-            
-            # First, try to find metadata cell
-            metadata_index = -1
-            for i, cell in enumerate(notebook_data.get("cells", [])):
-                if cell.get("cell_type") == "markdown":
-                    source = "".join(cell.get("source", []))
-                    if "# Metadata" in source or "Metadata" in source:
-                        metadata_index = i
-                        break
-            
-            # Start insertion after metadata if found, otherwise at start
-            if metadata_index >= 0:
-                insert_index = metadata_index + 1
-            else:
-                insert_index = 0
-            
-            # Find where to insert based on cell order
-            heading_map = {
-                "prompt": "**[prompt]**",
-                "response": "**[response]**",
-                "response_reference": "**[response_reference]**",
-                "judge_system_prompt": "**[judge_system_prompt]**"
-            }
-            
-            # We need to ensure cells are always in correct order: prompt, response, response_reference, judge_system_prompt
-            # Find the last cell that should come BEFORE the cell we're creating
-            last_before_index = insert_index - 1
-            found_after = False
-            
-            for i, cell in enumerate(notebook_data.get("cells", []), start=insert_index):
-                if cell.get("cell_type") == "markdown":
-                    source = "".join(cell.get("source", []))
-                    # Check if this cell is one of our ordered cells
-                    for j, cell_type in enumerate(cell_order):
-                        if cell_type == "response":
-                            # This is the cell we're creating, skip
-                            continue
-                        heading = heading_map.get(cell_type, "")
-                        if heading and heading.lower() in source.lower():
-                            # Found a cell in our order
-                            if j < current_cell_index:
-                                # This cell comes before ours - update insertion point to after it
-                                last_before_index = i
-                                insert_index = i + 1
-                            elif j > current_cell_index:
-                                # Found a cell that comes after - insert before it and stop
-                                insert_index = i
-                                found_after = True
-                                break
-                    # If we found a cell that comes after, stop searching
-                    if found_after:
-                        break
-            
-            # Ensure we don't insert before metadata
-            if metadata_index >= 0 and insert_index <= metadata_index:
-                insert_index = metadata_index + 1
-            
-            # Create new markdown cell
-            new_cell = {
-                "cell_type": "markdown",
-                "metadata": {},
-                "source": [f"**[response]**\n\n{request.response}"]
-            }
-            
-            # Insert the new cell
             if "cells" not in notebook_data:
                 notebook_data["cells"] = []
             notebook_data["cells"].insert(insert_index, new_cell)
             updated = True
             
             # After inserting, reorder cells to ensure correct order
-            heading_map = {
-                "prompt": "**[prompt]**",
-                "response": "**[response]**",
-                "response_reference": "**[response_reference]**",
-                "judge_system_prompt": "**[judge_system_prompt]**"
-            }
-            cell_order = ["prompt", "response", "response_reference", "judge_system_prompt"]
-            _reorder_notebook_cells(notebook_data, heading_map, cell_order)
+            _reorder_notebook_cells(notebook_data, HEADING_MAP, CELL_ORDER)
         
         # Save to Google Drive
         from services.google_drive_client import drive_client
@@ -629,18 +668,11 @@ async def update_notebook_cell(session_id: str, request: UpdateNotebookCellReque
     if not storage or "url" not in storage:
         raise HTTPException(400, "No source URL found - cannot save back to Colab")
     
-    # Map cell_type to heading pattern
-    heading_map = {
-        "prompt": "**[prompt]**",
-        "response": "**[response]**",
-        "response_reference": "**[response_reference]**",
-        "judge_system_prompt": "**[judge_system_prompt]**"
-    }
-    
-    if request.cell_type not in heading_map:
+    # Validate cell_type against shared heading map
+    if request.cell_type not in HEADING_MAP:
         raise HTTPException(400, f"Invalid cell_type: {request.cell_type}")
     
-    heading_pattern = heading_map[request.cell_type]
+    heading_pattern = HEADING_MAP[request.cell_type]
     
     try:
         # Parse original notebook content
@@ -654,85 +686,28 @@ async def update_notebook_cell(session_id: str, request: UpdateNotebookCellReque
                 source = "".join(cell.get("source", []))
                 if heading_pattern.lower() in source.lower():
                     # Update the cell content, preserving the heading
-                    lines = source.split("\n")
-                    new_source = lines[0] + "\n\n" + request.content
-                    cell["source"] = [new_source]
+                    heading_line = source.split("\n")[0]
+                    # Build new content with heading + blank line + content
+                    full_content = heading_line + "\n\n" + request.content
+                    # Split into lines for proper Jupyter format (each line as separate string)
+                    content_lines = full_content.split("\n")
+                    # Add newline to each line except the last (Jupyter format)
+                    cell["source"] = [line + "\n" for line in content_lines[:-1]] + [content_lines[-1]] if content_lines else [""]
                     updated = True
                     break
         
-        # If cell not found, create it
+        # If cell not found, create it using helper functions
         if not updated:
-            # Define cell order: prompt, response, response_reference, judge_system_prompt
-            cell_order = ["prompt", "response", "response_reference", "judge_system_prompt"]
-            current_cell_index = cell_order.index(request.cell_type) if request.cell_type in cell_order else -1
+            insert_index = _find_cell_insertion_index(notebook_data, request.cell_type)
+            new_cell = _create_notebook_cell(heading_pattern, request.content)
             
-            # Find the position to insert the new cell
-            insert_index = len(notebook_data.get("cells", []))
-            
-            # First, try to find metadata cell
-            metadata_index = -1
-            for i, cell in enumerate(notebook_data.get("cells", [])):
-                if cell.get("cell_type") == "markdown":
-                    source = "".join(cell.get("source", []))
-                    if "# Metadata" in source or "Metadata" in source:
-                        metadata_index = i
-                        break
-            
-            # Start insertion after metadata if found, otherwise at start
-            if metadata_index >= 0:
-                insert_index = metadata_index + 1
-            else:
-                insert_index = 0
-            
-            # Find where to insert based on cell order
-            # We need to ensure cells are always in correct order: prompt, response, response_reference, judge_system_prompt
-            # Find the last cell that should come BEFORE the cell we're creating
-            last_before_index = insert_index - 1
-            
-            for i, cell in enumerate(notebook_data.get("cells", []), start=insert_index):
-                if cell.get("cell_type") == "markdown":
-                    source = "".join(cell.get("source", []))
-                    # Check if this cell is one of our ordered cells
-                    found_after = False
-                    for j, cell_type in enumerate(cell_order):
-                        if cell_type == request.cell_type:
-                            # This is the cell we're creating, skip
-                            continue
-                        heading = heading_map.get(cell_type, "")
-                        if heading and heading.lower() in source.lower():
-                            # Found a cell in our order
-                            if j < current_cell_index:
-                                # This cell comes before ours - update insertion point to after it
-                                last_before_index = i
-                                insert_index = i + 1
-                            elif j > current_cell_index:
-                                # Found a cell that comes after - insert before it and stop
-                                insert_index = i
-                                found_after = True
-                                break
-                    # If we found a cell that comes after, stop searching
-                    if found_after:
-                        break
-            
-            # Ensure we don't insert before metadata
-            if metadata_index >= 0 and insert_index <= metadata_index:
-                insert_index = metadata_index + 1
-            
-            # Create new markdown cell
-            new_cell = {
-                "cell_type": "markdown",
-                "metadata": {},
-                "source": [f"{heading_pattern}\n\n{request.content}"]
-            }
-            
-            # Insert the new cell
             if "cells" not in notebook_data:
                 notebook_data["cells"] = []
             notebook_data["cells"].insert(insert_index, new_cell)
             updated = True
             
             # After inserting, reorder cells to ensure correct order
-            _reorder_notebook_cells(notebook_data, heading_map, cell_order)
+            _reorder_notebook_cells(notebook_data, HEADING_MAP, CELL_ORDER)
         
         # Save to Google Drive
         from services.google_drive_client import drive_client
@@ -748,15 +723,8 @@ async def update_notebook_cell(session_id: str, request: UpdateNotebookCellReque
         if not success:
             raise HTTPException(500, "Failed to update file on Google Drive")
         
-        # Update session's notebook
-        if request.cell_type == "prompt":
-            session.notebook.prompt = request.content
-        elif request.cell_type == "response":
-            session.notebook.response = request.content
-        elif request.cell_type == "response_reference":
-            session.notebook.response_reference = request.content
-        elif request.cell_type == "judge_system_prompt":
-            session.notebook.judge_system_prompt = request.content
+        # Update session's notebook using helper
+        _update_session_notebook_field(session, request.cell_type, request.content)
         
         # Update storage with new content
         storage["original_content"] = updated_content
@@ -784,14 +752,6 @@ async def update_notebook_cells(session_id: str, request: UpdateNotebookCellsReq
     if not storage or "url" not in storage:
         raise HTTPException(400, "No source URL found - cannot save back to Colab")
     
-    # Map cell_type to heading pattern
-    heading_map = {
-        "prompt": "**[prompt]**",
-        "response": "**[response]**",
-        "response_reference": "**[response_reference]**",
-        "judge_system_prompt": "**[judge_system_prompt]**"
-    }
-    
     try:
         # Parse original notebook content
         original_content = storage.get("original_content", "{}")
@@ -804,10 +764,10 @@ async def update_notebook_cells(session_id: str, request: UpdateNotebookCellsReq
         
         # Update each cell
         for cell_request in request.cells:
-            if cell_request.cell_type not in heading_map:
+            if cell_request.cell_type not in HEADING_MAP:
                 continue
             
-            heading_pattern = heading_map[cell_request.cell_type]
+            heading_pattern = HEADING_MAP[cell_request.cell_type]
             updated = False
             
             for cell in notebook_data.get("cells", []):
@@ -815,119 +775,43 @@ async def update_notebook_cells(session_id: str, request: UpdateNotebookCellsReq
                     source = "".join(cell.get("source", []))
                     if heading_pattern.lower() in source.lower():
                         # Update the cell content, preserving the heading
-                        lines = source.split("\n")
-                        new_source = lines[0] + "\n\n" + cell_request.content
-                        cell["source"] = [new_source]
+                        heading_line = source.split("\n")[0]
+                        full_content = heading_line + "\n\n" + cell_request.content
+                        content_lines = full_content.split("\n")
+                        cell["source"] = [line + "\n" for line in content_lines[:-1]] + [content_lines[-1]] if content_lines else [""]
                         updated = True
                         updated_cells.append(cell_request.cell_type)
                         
-                        # Update session's notebook
-                        if cell_request.cell_type == "prompt":
-                            session.notebook.prompt = cell_request.content
-                        elif cell_request.cell_type == "response":
-                            session.notebook.response = cell_request.content
-                        elif cell_request.cell_type == "response_reference":
-                            session.notebook.response_reference = cell_request.content
-                        elif cell_request.cell_type == "judge_system_prompt":
-                            session.notebook.judge_system_prompt = cell_request.content
+                        # Update session's notebook using helper
+                        _update_session_notebook_field(session, cell_request.cell_type, cell_request.content)
                         break
             
             # If cell not found, mark it for creation
             if not updated:
                 cells_to_create.append((cell_request, heading_pattern))
         
-        # Create cells that don't exist
+        # Create cells that don't exist using helper functions
         if cells_to_create:
-            # Define cell order: prompt, response, response_reference, judge_system_prompt
-            cell_order = ["prompt", "response", "response_reference", "judge_system_prompt"]
-            
-            # Find the position to insert new cells
-            insert_index = len(notebook_data.get("cells", []))
-            
-            # First, try to find metadata cell
-            metadata_index = -1
-            for i, cell in enumerate(notebook_data.get("cells", [])):
-                if cell.get("cell_type") == "markdown":
-                    source = "".join(cell.get("source", []))
-                    if "# Metadata" in source or "Metadata" in source:
-                        metadata_index = i
-                        break
-            
-            # Start insertion after metadata if found, otherwise at start
-            if metadata_index >= 0:
-                insert_index = metadata_index + 1
-            else:
-                insert_index = 0
-            
-            # Sort cells to create by their order in cell_order
+            # Sort cells to create by their order in CELL_ORDER
             cells_to_create_sorted = sorted(cells_to_create, key=lambda x: (
-                cell_order.index(x[0].cell_type) if x[0].cell_type in cell_order else 999
+                CELL_ORDER.index(x[0].cell_type) if x[0].cell_type in CELL_ORDER else 999
             ))
             
             # Create and insert new cells in correct order
             for cell_request, heading_pattern in cells_to_create_sorted:
-                current_cell_index = cell_order.index(cell_request.cell_type) if cell_request.cell_type in cell_order else 999
-                
-                # Find the correct insertion position for this cell
-                cell_insert_index = insert_index
-                last_before_index = insert_index - 1
-                
-                # Look for existing cells to determine insertion position
-                found_after = False
-                for i, cell in enumerate(notebook_data.get("cells", []), start=insert_index):
-                    if cell.get("cell_type") == "markdown":
-                        source = "".join(cell.get("source", []))
-                        # Check if this cell is one of our ordered cells
-                        for j, cell_type in enumerate(cell_order):
-                            if cell_type == cell_request.cell_type:
-                                # This is the cell we're creating, skip
-                                continue
-                            heading = heading_map.get(cell_type, "")
-                            if heading and heading.lower() in source.lower():
-                                # Found a cell in our order
-                                if j < current_cell_index:
-                                    # This cell comes before ours - update insertion point to after it
-                                    last_before_index = i
-                                    cell_insert_index = i + 1
-                                elif j > current_cell_index:
-                                    # Found a cell that comes after - insert before it and stop
-                                    cell_insert_index = i
-                                    found_after = True
-                                    break
-                        # If we found a cell that comes after, stop searching
-                        if found_after:
-                            break
-                
-                # Ensure we don't insert before metadata
-                if metadata_index >= 0 and cell_insert_index <= metadata_index:
-                    cell_insert_index = metadata_index + 1
-                
-                new_cell = {
-                    "cell_type": "markdown",
-                    "metadata": {},
-                    "source": [f"{heading_pattern}\n\n{cell_request.content}"]
-                }
+                insert_index = _find_cell_insertion_index(notebook_data, cell_request.cell_type)
+                new_cell = _create_notebook_cell(heading_pattern, cell_request.content)
                 
                 if "cells" not in notebook_data:
                     notebook_data["cells"] = []
-                notebook_data["cells"].insert(cell_insert_index, new_cell)
+                notebook_data["cells"].insert(insert_index, new_cell)
                 updated_cells.append(cell_request.cell_type)
                 
-                # Update session's notebook
-                if cell_request.cell_type == "prompt":
-                    session.notebook.prompt = cell_request.content
-                elif cell_request.cell_type == "response":
-                    session.notebook.response = cell_request.content
-                elif cell_request.cell_type == "response_reference":
-                    session.notebook.response_reference = cell_request.content
-                elif cell_request.cell_type == "judge_system_prompt":
-                    session.notebook.judge_system_prompt = cell_request.content
-                
-                # Update insert_index for next cell (after the one we just inserted)
-                insert_index = cell_insert_index + 1
+                # Update session's notebook using helper
+                _update_session_notebook_field(session, cell_request.cell_type, cell_request.content)
             
             # After creating all cells, reorder to ensure correct order
-            _reorder_notebook_cells(notebook_data, heading_map, cell_order)
+            _reorder_notebook_cells(notebook_data, HEADING_MAP, CELL_ORDER)
         
         if not updated_cells:
             raise HTTPException(400, "Could not find any matching cells in notebook")
@@ -1477,16 +1361,26 @@ async def save_to_drive(session_id: str, request: Request):
 
 @app.get("/api/results/{session_id}")
 async def get_all_results(session_id: str):
-    """Get ALL results for a session (for selection UI)."""
+    """Get ALL results for a session (for selection UI) - accumulated across all runs."""
     session = hunt_engine.sessions.get(session_id)
     if not session:
         return {"count": 0, "results": []}
     
-    # Return all completed results
-    completed = [r for r in session.results if r.status.value == "completed"]
+    # Return ALL accumulated results across all runs (not just current run)
+    # all_results contains completed results from all hunt runs
+    all_accumulated = session.all_results if session.all_results else []
+    
+    # Also include any completed results from current run that haven't been accumulated yet
+    current_completed = [r for r in session.results if r.status.value == "completed"]
+    
+    # Merge: all_accumulated + current_completed (avoiding duplicates by hunt_id)
+    existing_ids = {r.hunt_id for r in all_accumulated}
+    merged_results = list(all_accumulated) + [r for r in current_completed if r.hunt_id not in existing_ids]
+    
     return {
-        "count": len(completed),
-        "results": [r.model_dump() for r in completed]
+        "count": len(merged_results),
+        "results": [r.model_dump() for r in merged_results],
+        "accumulated_count": len(all_accumulated)
     }
 
 

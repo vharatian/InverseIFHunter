@@ -59,9 +59,17 @@ const state = {
     allResponses: [],       // All hunt responses (accumulated across runs)
     selectedRowNumbers: [], // Row numbers (0-based indices) of 4 selected hunts for review
     llmRevealed: false,     // Whether LLM judgments have been revealed
-    accumulatedHuntOffset: 0,  // Track total hunts for progress table numbering
-    currentRunStartOffset: 0,  // Offset at start of current run (for row lookup during run)
+    // NOTE: Row numbering now uses totalHuntsCount (from localStorage) as single source of truth
+    currentRunStartOffset: 0,  // Offset at start of current run (set from totalHuntsCount - requestedHunts)
     originalNotebookJson: null,  // Original notebook JSON for WYSIWYG snapshot
+    
+    // Hunt response data for slide-out panel
+    huntResponseData: {},  // Keyed by row number, stores {model, status, score, response}
+    
+    // 16 Hunt Limit tracking
+    totalHuntsCount: 0,     // Total hunts for current notebook (persisted in localStorage)
+    notebookId: null,       // Unique identifier for current notebook (file_id from Google Drive)
+    huntLimitReached: false, // Flag to prevent further hunts
     
     // Blind judging state
     blindJudging: {
@@ -116,6 +124,10 @@ const elements = {
     referencePreview: document.getElementById('referencePreview'),
     modelrefPreview: document.getElementById('modelrefPreview'),
     judgePreview: document.getElementById('judgePreview'),
+    // Markdown textareas (new split view editors)
+    promptMarkdown: document.getElementById('promptMarkdown'),
+    responseMarkdown: document.getElementById('responseMarkdown'),
+    judgeMarkdown: document.getElementById('judgeMarkdown'),
     judgeReferenceBtn: document.getElementById('judgeReferenceBtn'),
     saveResponseBtn: document.getElementById('saveReponseBtn'),  // Save Response button
     judgeBeforeHuntBtn: document.getElementById('judgeBeforeHuntBtn'),  // Judge button next to Start Hunt
@@ -181,8 +193,168 @@ const elements = {
     judgeMatch: document.getElementById('judgeMatch'),
     nextHuntBtn: document.getElementById('nextHuntBtn'),
     
-    toastContainer: document.getElementById('toastContainer')
+    toastContainer: document.getElementById('toastContainer'),
+    
+    // Response Slide-out Panel
+    responseSlideout: document.getElementById('responseSlideout'),
+    responseSlideoutBackdrop: document.getElementById('responseSlideoutBackdrop'),
+    slideoutTitle: document.getElementById('slideoutTitle'),
+    slideoutModel: document.getElementById('slideoutModel'),
+    slideoutStatus: document.getElementById('slideoutStatus'),
+    slideoutScore: document.getElementById('slideoutScore'),
+    slideoutResponseText: document.getElementById('slideoutResponseText'),
+    slideoutCloseBtn: document.getElementById('slideoutCloseBtn')
 };
+
+
+// ============== Hunt Limit Constants ==============
+const MAX_HUNTS_PER_NOTEBOOK = 16;
+const HUNT_COUNT_STORAGE_PREFIX = 'modelHunter_huntCount_';
+
+// ============== Hunt Limit Functions ==============
+
+function getHuntCountKey(notebookId) {
+    // Create a unique key for localStorage based on notebook ID
+    return `${HUNT_COUNT_STORAGE_PREFIX}${notebookId || 'unknown'}`;
+}
+
+function loadHuntCount(notebookId) {
+    if (!notebookId) return 0;
+    const key = getHuntCountKey(notebookId);
+    const stored = localStorage.getItem(key);
+    return stored ? parseInt(stored, 10) : 0;
+}
+
+function saveHuntCount(notebookId, count) {
+    if (!notebookId) return;
+    const key = getHuntCountKey(notebookId);
+    localStorage.setItem(key, count.toString());
+}
+
+function clearHuntCount(notebookId) {
+    if (!notebookId) return;
+    const key = getHuntCountKey(notebookId);
+    localStorage.removeItem(key);
+}
+
+function incrementHuntCount(notebookId, addCount) {
+    const current = loadHuntCount(notebookId);
+    const newCount = current + addCount;
+    saveHuntCount(notebookId, newCount);
+    state.totalHuntsCount = newCount;
+    updateHuntLimitUI();
+    return newCount;
+}
+
+function canStartMoreHunts(requestedHunts = 1) {
+    // Check if adding requestedHunts would exceed the limit
+    const projected = state.totalHuntsCount + requestedHunts;
+    return projected <= MAX_HUNTS_PER_NOTEBOOK;
+}
+
+function getRemainingHunts() {
+    return Math.max(0, MAX_HUNTS_PER_NOTEBOOK - state.totalHuntsCount);
+}
+
+function updateHuntLimitUI() {
+    // Update any UI elements that show hunt count
+    const remaining = getRemainingHunts();
+    const total = state.totalHuntsCount;
+    
+    // Update slider and input max values based on remaining hunts
+    const slider = document.getElementById('parallelWorkersSlider');
+    const numberInput = document.getElementById('parallelWorkers');
+    const maxAllowed = Math.min(6, remaining);
+    
+    if (slider) {
+        slider.max = maxAllowed > 0 ? maxAllowed : 1;
+        // Adjust current value if it exceeds new max
+        if (parseInt(slider.value) > maxAllowed) {
+            slider.value = maxAllowed > 0 ? maxAllowed : 1;
+        }
+    }
+    if (numberInput) {
+        numberInput.max = maxAllowed > 0 ? maxAllowed : 1;
+        // Adjust current value if it exceeds new max
+        if (parseInt(numberInput.value) > maxAllowed) {
+            numberInput.value = maxAllowed > 0 ? maxAllowed : 1;
+        }
+    }
+    
+    // Update preset buttons - disable those above remaining limit
+    const presetBtns = document.querySelectorAll('.preset-btn');
+    presetBtns.forEach(btn => {
+        const btnValue = parseInt(btn.dataset.value);
+        if (btnValue > remaining) {
+            btn.disabled = true;
+            btn.style.opacity = '0.4';
+            btn.title = `Only ${remaining} hunts remaining`;
+        } else {
+            btn.disabled = false;
+            btn.style.opacity = '1';
+            btn.title = '';
+        }
+    });
+    
+    // Find or create the hunt limit indicator
+    let indicator = document.getElementById('huntLimitIndicator');
+    
+    if (total > 0) {
+        if (!indicator) {
+            // Create indicator if it doesn't exist
+            const huntSection = document.querySelector('.hunt-action-section');
+            if (huntSection) {
+                indicator = document.createElement('div');
+                indicator.id = 'huntLimitIndicator';
+                indicator.style.cssText = 'margin-top: 0.75rem; font-size: 0.85rem; text-align: center;';
+                huntSection.appendChild(indicator);
+            }
+        }
+        
+        if (indicator) {
+            if (remaining === 0) {
+                indicator.innerHTML = `
+                    <span style="color: var(--danger); font-weight: 600;">
+                        ⛔ Hunt limit reached (${total}/${MAX_HUNTS_PER_NOTEBOOK})
+                    </span>
+                    <br>
+                    <span style="color: var(--text-muted); font-size: 0.8rem;">
+                        Please revise your prompt or criteria and load a new notebook.
+                    </span>
+                `;
+                state.huntLimitReached = true;
+            } else if (remaining <= 4) {
+                indicator.innerHTML = `
+                    <span style="color: var(--warning);">
+                        ⚠️ ${remaining} hunts remaining (${total}/${MAX_HUNTS_PER_NOTEBOOK})
+                    </span>
+                `;
+            } else {
+                indicator.innerHTML = `
+                    <span style="color: var(--text-muted);">
+                        📊 ${total}/${MAX_HUNTS_PER_NOTEBOOK} hunts used
+                    </span>
+                `;
+            }
+        }
+    } else if (indicator) {
+        indicator.innerHTML = '';
+    }
+    
+    // Disable Start Hunt button if limit reached
+    if (elements.startHuntBtn && state.huntLimitReached) {
+        elements.startHuntBtn.disabled = true;
+        elements.startHuntBtn.title = 'Hunt limit reached. Please revise prompt/criteria and load a new notebook.';
+    }
+}
+
+function showHuntLimitReachedError() {
+    showToast(
+        `⛔ Maximum ${MAX_HUNTS_PER_NOTEBOOK} hunts reached for this notebook. ` +
+        `Please revise your prompt or criteria and load a new notebook to continue.`,
+        'error'
+    );
+}
 
 
 // ============== Theme ==============
@@ -413,6 +585,9 @@ function handleNotebookLoaded(data, isUrl = false) {
     // Clear any previous results when loading a new notebook
     clearPreviousResults();
     
+    // Warm up API connections in background for faster hunt execution
+    warmupConnections();
+    
     state.sessionId = data.session_id;
     state.notebook = data.notebook;
     // Store original notebook JSON for WYSIWYG snapshot
@@ -421,6 +596,19 @@ function handleNotebookLoaded(data, isUrl = false) {
     if (isUrl && data.notebook) {
         state.notebook.url = elements.colabUrlInput?.value || null;
     }
+    
+    // Set notebook ID for hunt limit tracking (use file_id if available, or generate from URL/session)
+    const notebookUrl = elements.colabUrlInput?.value || '';
+    const fileIdMatch = notebookUrl.match(/\/d\/([a-zA-Z0-9_-]+)/);
+    state.notebookId = fileIdMatch ? fileIdMatch[1] : data.session_id;
+    
+    // Load existing hunt count for this notebook
+    state.totalHuntsCount = loadHuntCount(state.notebookId);
+    state.huntLimitReached = state.totalHuntsCount >= MAX_HUNTS_PER_NOTEBOOK;
+    console.log(`📊 Hunt count for notebook ${state.notebookId}: ${state.totalHuntsCount}/${MAX_HUNTS_PER_NOTEBOOK}`);
+    
+    // Update hunt limit UI
+    updateHuntLimitUI();
     
     // Save sessionId to localStorage for restoration on refresh
     if (data.session_id) {
@@ -943,23 +1131,31 @@ async function saveToDrive() {
 }
 
 function populatePreviewTabs(notebook) {
-    // Populate rich text editors (contentEditable divs)
-    if (elements.promptPreview) {
-        // For contentEditable, use textContent to set plain text (formatting will be added by user)
-        elements.promptPreview.textContent = notebook.prompt || '';
+    // Populate Markdown editors (textareas) and update previews
+    const promptTextarea = document.getElementById('promptMarkdown');
+    if (promptTextarea) {
+        promptTextarea.value = notebook.prompt || '';
+        // Update preview
+        updateMarkdownPreview(promptTextarea);
         // Reset unsaved changes
         state.unsavedChanges.prompt = false;
         // Update word count display after loading
         setTimeout(() => validatePromptLength(), 100);
     }
     
-    if (elements.referencePreview) {
-        elements.referencePreview.textContent = notebook.response || '';
+    const responseTextarea = document.getElementById('responseMarkdown');
+    if (responseTextarea) {
+        responseTextarea.value = notebook.response || '';
+        // Update preview
+        updateMarkdownPreview(responseTextarea);
         state.unsavedChanges.response = false;
     }
     
-    if (elements.judgePreview) {
-        elements.judgePreview.textContent = notebook.judge_system_prompt || '';
+    const judgeTextarea = document.getElementById('judgeMarkdown');
+    if (judgeTextarea) {
+        judgeTextarea.value = notebook.judge_system_prompt || '';
+        // Update preview
+        updateMarkdownPreview(judgeTextarea);
         state.unsavedChanges.judge = false;
     }
     
@@ -1079,6 +1275,9 @@ function populatePreviewTabs(notebook) {
     // Initialize rich text editors
     initRichTextEditors();
     
+    // Initialize resizable panels
+    initResizablePanels();
+    
     // Initialize structured input for Model Reference
     initStructuredInput();
     
@@ -1134,16 +1333,34 @@ function displayMetadata(metadata) {
         }
     }
     
-    // Extract model from metadata
-    const modelStr = (metadata && metadata['Model']) || (metadata && metadata['model']) || '';
+    // Extract model from metadata - check multiple possible keys
+    const modelKeys = ['Model', 'Model:', 'model', 'Target Model', 'target_model', 'target model'];
+    let modelStr = '';
+    if (metadata && typeof metadata === 'object') {
+        for (const key of modelKeys) {
+            if (metadata[key] !== undefined && metadata[key] !== null && metadata[key] !== '') {
+                modelStr = String(metadata[key]).trim();
+                break;
+            }
+        }
+    }
     if (modelStr) {
-        // Clean the model string (remove dashes, spaces, convert to lowercase)
-        const cleanedModel = modelStr.toString().trim().replace(/^[-:\s]+/, '').toLowerCase();
+        // Clean the model string (remove dashes at start, trim)
+        const cleanedModel = modelStr.replace(/^[-:\s]+/, '').trim();
         state.metadataModel = cleanedModel;
-        console.log('✅ Metadata model extracted:', state.metadataModel);
         
-        // Validate model match on initial load (after model is preselected)
-        setTimeout(() => validateModelMatch(), 500);
+        // Show locked indicator
+        showModelLockedIndicator(cleanedModel);
+        
+        // Refresh model options to disable non-matching models
+        setTimeout(() => {
+            updateModelOptions(true); // Skip default - preserve existing selection
+            validateModelMatch();
+        }, 300);
+    } else {
+        // No model in metadata - clear state
+        state.metadataModel = null;
+        hideModelLockedIndicator();
     }
     
     // Clear existing content
@@ -1289,92 +1506,301 @@ function displayMetadata(metadata) {
     }
 }
 
-// ============== Rich Text Editor ==============
+// ============== Markdown Split Editor ==============
 
-function initRichTextEditors() {
-    // Initialize toolbar buttons for all rich text editors
-    document.querySelectorAll('.rich-text-toolbar').forEach(toolbar => {
-        toolbar.querySelectorAll('.rich-text-btn').forEach(btn => {
+// Markdown editor elements mapping
+const markdownEditors = {
+    prompt: { textarea: 'promptMarkdown', preview: 'promptPreview' },
+    response: { textarea: 'responseMarkdown', preview: 'referencePreview' },
+    judge: { textarea: 'judgeMarkdown', preview: 'judgePreview' }
+};
+
+function initMarkdownEditors() {
+    // Initialize each Markdown toolbar
+    document.querySelectorAll('.markdown-toolbar').forEach(toolbar => {
+        const targetId = toolbar.dataset.target;
+        const textarea = document.getElementById(targetId);
+        
+        if (!textarea) return;
+        
+        // Add click handlers to toolbar buttons
+        toolbar.querySelectorAll('.md-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 e.preventDefault();
-                const command = btn.dataset.command;
-                const editor = toolbar.nextElementSibling;
-                
-                if (editor && editor.contentEditable === 'true') {
-                    editor.focus();
-                    document.execCommand(command, false, null);
-                    updateToolbarState(toolbar, editor);
-                }
+                const mdType = btn.dataset.md;
+                insertMarkdown(textarea, mdType);
+                updateMarkdownPreview(textarea);
             });
         });
+        
+        // Add preview toggle handler
+        const previewToggle = toolbar.querySelector('.preview-toggle');
+        if (previewToggle) {
+            previewToggle.addEventListener('change', (e) => {
+                const previewPaneId = previewToggle.dataset.preview;
+                const previewPane = document.getElementById(previewPaneId);
+                if (previewPane) {
+                    if (e.target.checked) {
+                        previewPane.classList.remove('collapsed');
+                    } else {
+                        previewPane.classList.add('collapsed');
+                    }
+                }
+            });
+        }
     });
     
-    // Add keyboard shortcuts
-    document.querySelectorAll('.rich-text-content').forEach(editor => {
-        editor.addEventListener('keydown', (e) => {
-            if (e.ctrlKey || e.metaKey) {
-                if (e.key === 'b') {
-                    e.preventDefault();
-                    document.execCommand('bold', false, null);
-                    updateToolbarState(editor.previousElementSibling, editor);
-                } else if (e.key === 'i') {
-                    e.preventDefault();
-                    document.execCommand('italic', false, null);
-                    updateToolbarState(editor.previousElementSibling, editor);
-                }
-            }
-        });
+    // Initialize live preview for each editor
+    Object.values(markdownEditors).forEach(({ textarea: textareaId, preview: previewId }) => {
+        const textarea = document.getElementById(textareaId);
+        const preview = document.getElementById(previewId);
         
-        // Track changes
-        editor.addEventListener('input', () => {
-            const editorId = editor.id;
-            if (editorId === 'promptPreview') {
+        if (!textarea || !preview) return;
+        
+        // Live preview on input
+        textarea.addEventListener('input', () => {
+            updateMarkdownPreview(textarea);
+            
+            // Track unsaved changes
+            if (textareaId === 'promptMarkdown') {
                 state.unsavedChanges.prompt = true;
-                // Update word count live as user types
                 validatePromptLength();
-            } else if (editorId === 'referencePreview') {
+            } else if (textareaId === 'responseMarkdown') {
                 state.unsavedChanges.response = true;
-            } else if (editorId === 'judgePreview') {
+            } else if (textareaId === 'judgeMarkdown') {
                 state.unsavedChanges.judge = true;
             }
         });
         
-        // Also validate on paste for prompt editor
-        if (editor.id === 'promptPreview') {
-            editor.addEventListener('paste', () => {
-                // Use setTimeout to allow paste to complete first
-                setTimeout(() => {
+        // Also update on paste
+        textarea.addEventListener('paste', () => {
+            setTimeout(() => {
+                updateMarkdownPreview(textarea);
+                if (textareaId === 'promptMarkdown') {
                     validatePromptLength();
-                }, 10);
-            });
-        }
-        
-        // Handle placeholder
-        editor.addEventListener('focus', () => {
-            if (editor.textContent.trim() === '') {
-                editor.textContent = '';
-            }
+                }
+            }, 10);
         });
         
-        editor.addEventListener('blur', () => {
-            if (editor.textContent.trim() === '') {
-                const placeholder = editor.dataset.placeholder || '';
-                if (placeholder) {
-                    editor.textContent = '';
+        // Keyboard shortcuts
+        textarea.addEventListener('keydown', (e) => {
+            if (e.ctrlKey || e.metaKey) {
+                if (e.key === 'b') {
+                    e.preventDefault();
+                    insertMarkdown(textarea, 'bold');
+                    updateMarkdownPreview(textarea);
+                } else if (e.key === 'i') {
+                    e.preventDefault();
+                    insertMarkdown(textarea, 'italic');
+                    updateMarkdownPreview(textarea);
+                } else if (e.key === 'k') {
+                    e.preventDefault();
+                    insertMarkdown(textarea, 'link');
+                    updateMarkdownPreview(textarea);
                 }
+            }
+            
+            // Tab key for indentation
+            if (e.key === 'Tab') {
+                e.preventDefault();
+                const start = textarea.selectionStart;
+                const end = textarea.selectionEnd;
+                textarea.value = textarea.value.substring(0, start) + '  ' + textarea.value.substring(end);
+                textarea.selectionStart = textarea.selectionEnd = start + 2;
+                updateMarkdownPreview(textarea);
             }
         });
     });
 }
 
-function updateToolbarState(toolbar, editor) {
-    if (!toolbar || !editor) return;
+function insertMarkdown(textarea, type) {
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const selectedText = textarea.value.substring(start, end);
+    let insertion = '';
+    let cursorOffset = 0;
     
-    toolbar.querySelectorAll('.rich-text-btn').forEach(btn => {
-        const command = btn.dataset.command;
-        if (command === 'bold' || command === 'italic') {
-            btn.classList.toggle('active', document.queryCommandState(command));
+    switch (type) {
+        case 'heading':
+            insertion = `## ${selectedText || 'Heading'}`;
+            cursorOffset = selectedText ? insertion.length : 3;
+            break;
+        case 'bold':
+            insertion = `**${selectedText || 'bold text'}**`;
+            cursorOffset = selectedText ? insertion.length : 2;
+            break;
+        case 'italic':
+            insertion = `*${selectedText || 'italic text'}*`;
+            cursorOffset = selectedText ? insertion.length : 1;
+            break;
+        case 'code':
+            insertion = `\`${selectedText || 'code'}\``;
+            cursorOffset = selectedText ? insertion.length : 1;
+            break;
+        case 'codeblock':
+            insertion = `\`\`\`\n${selectedText || 'code here'}\n\`\`\``;
+            cursorOffset = selectedText ? insertion.length : 4;
+            break;
+        case 'link':
+            insertion = `[${selectedText || 'link text'}](url)`;
+            cursorOffset = selectedText ? insertion.length - 4 : 1;
+            break;
+        case 'image':
+            insertion = `![${selectedText || 'alt text'}](image-url)`;
+            cursorOffset = selectedText ? insertion.length - 11 : 2;
+            break;
+        case 'quote':
+            insertion = `> ${selectedText || 'quote'}`;
+            cursorOffset = selectedText ? insertion.length : 2;
+            break;
+        case 'ul':
+            if (selectedText) {
+                insertion = selectedText.split('\n').map(line => `- ${line}`).join('\n');
+            } else {
+                insertion = '- list item';
+            }
+            cursorOffset = selectedText ? insertion.length : 2;
+            break;
+        case 'ol':
+            if (selectedText) {
+                insertion = selectedText.split('\n').map((line, i) => `${i + 1}. ${line}`).join('\n');
+            } else {
+                insertion = '1. list item';
+            }
+            cursorOffset = selectedText ? insertion.length : 3;
+            break;
+        case 'hr':
+            insertion = '\n---\n';
+            cursorOffset = insertion.length;
+            break;
+        case 'math':
+            insertion = `$${selectedText || 'formula'}$`;
+            cursorOffset = selectedText ? insertion.length : 1;
+            break;
+        default:
+            return;
+    }
+    
+    textarea.value = textarea.value.substring(0, start) + insertion + textarea.value.substring(end);
+    textarea.focus();
+    
+    // Set cursor position
+    if (selectedText) {
+        textarea.selectionStart = start;
+        textarea.selectionEnd = start + insertion.length;
+    } else {
+        textarea.selectionStart = textarea.selectionEnd = start + cursorOffset;
+    }
+}
+
+function updateMarkdownPreview(textarea) {
+    // Find corresponding preview element
+    let previewId = null;
+    for (const [key, { textarea: tid, preview: pid }] of Object.entries(markdownEditors)) {
+        if (tid === textarea.id) {
+            previewId = pid;
+            break;
         }
+    }
+    
+    const preview = document.getElementById(previewId);
+    if (!preview) return;
+    
+    const markdown = textarea.value;
+    
+    // Use marked.js to render Markdown
+    if (typeof marked !== 'undefined') {
+        try {
+            // Configure marked for safe rendering
+            marked.setOptions({
+                breaks: true,  // Convert \n to <br>
+                gfm: true,     // GitHub Flavored Markdown
+                sanitize: false
+            });
+            preview.innerHTML = marked.parse(markdown);
+        } catch (e) {
+            preview.innerHTML = `<p style="color: var(--danger);">Preview error: ${e.message}</p>`;
+        }
+    } else {
+        // Fallback: basic text display
+        preview.textContent = markdown;
+    }
+}
+
+// Legacy function name for backward compatibility
+function initRichTextEditors() {
+    initMarkdownEditors();
+}
+
+function updateToolbarState(toolbar, editor) {
+    // No-op for Markdown editors (kept for backward compatibility)
+}
+
+// Initialize resizable split view panels
+function initResizablePanels() {
+    document.querySelectorAll('.resize-handle').forEach(handle => {
+        let isResizing = false;
+        let startY = 0;
+        let startEditorHeight = 0;
+        let startPreviewHeight = 0;
+        
+        const splitView = handle.closest('.markdown-split-view');
+        const editorPane = splitView?.querySelector('.markdown-editor-pane');
+        const previewPane = splitView?.querySelector('.markdown-preview-pane');
+        
+        if (!splitView || !editorPane || !previewPane) return;
+        
+        const onMouseDown = (e) => {
+            isResizing = true;
+            startY = e.clientY || e.touches?.[0]?.clientY;
+            startEditorHeight = editorPane.offsetHeight;
+            startPreviewHeight = previewPane.offsetHeight;
+            
+            document.body.style.cursor = 'ns-resize';
+            document.body.style.userSelect = 'none';
+            
+            // Add active state
+            handle.style.background = 'var(--accent-primary)';
+        };
+        
+        const onMouseMove = (e) => {
+            if (!isResizing) return;
+            
+            const clientY = e.clientY || e.touches?.[0]?.clientY;
+            const delta = clientY - startY;
+            
+            const newEditorHeight = Math.max(100, startEditorHeight + delta);
+            
+            // Only resize editor - let preview auto-expand to fit content
+            editorPane.style.height = `${newEditorHeight}px`;
+            editorPane.style.flex = 'none';
+            
+            // IMPORTANT: Don't set fixed height on preview - let it auto-expand
+            previewPane.style.height = 'auto';
+            previewPane.style.flex = '1 1 auto';
+            previewPane.style.overflow = 'visible';
+        };
+        
+        const onMouseUp = () => {
+            if (!isResizing) return;
+            isResizing = false;
+            
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            
+            // Remove active state
+            handle.style.background = '';
+        };
+        
+        // Mouse events
+        handle.addEventListener('mousedown', onMouseDown);
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
+        
+        // Touch events for mobile
+        handle.addEventListener('touchstart', onMouseDown, { passive: true });
+        document.addEventListener('touchmove', onMouseMove, { passive: true });
+        document.addEventListener('touchend', onMouseUp);
     });
 }
 
@@ -1525,11 +1951,12 @@ function initPromptLengthValidation() {
 }
 
 function validatePromptLength() {
-    if (!elements.promptPreview) {
+    const promptTextarea = document.getElementById('promptMarkdown');
+    if (!promptTextarea) {
         return true; // No validation if element not found
     }
     
-    const text = elements.promptPreview.textContent || '';
+    const text = promptTextarea.value || '';
     const wordCount = text.trim().split(/\s+/).filter(w => w.length > 0).length;
     
     // Update live word count display
@@ -1592,37 +2019,65 @@ function validatePromptLength() {
     return true;
 }
 
+// ============== Model Locked Indicator ==============
+
+function showModelLockedIndicator(modelName) {
+    const indicator = document.getElementById('modelLockedIndicator');
+    const nameSpan = document.getElementById('modelLockedName');
+    if (indicator && nameSpan) {
+        nameSpan.textContent = modelName;
+        indicator.style.display = 'block';
+        indicator.classList.remove('hidden');
+        console.log(`🔒 Model locked to: ${modelName} (from notebook metadata)`);
+    }
+}
+
+function hideModelLockedIndicator() {
+    const indicator = document.getElementById('modelLockedIndicator');
+    if (indicator) {
+        indicator.style.display = 'none';
+        indicator.classList.add('hidden');
+    }
+}
+
 // ============== Model Matching Validation ==============
 
 function validateModelMatch() {
-    if (!state.metadataModel || !elements.modelSelect) {
-        return true; // No validation if metadata model not set
+    // If no metadata model set, allow (can't validate)
+    if (!state.metadataModel) {
+        state.modelMismatchWarning = false;
+        return true;
+    }
+    
+    if (!elements.modelSelect) {
+        return true;
     }
     
     const selectedModel = elements.modelSelect.value || '';
     if (!selectedModel) {
-        return true; // No model selected yet
+        // No model selected - BLOCK hunt
+        showModelMismatchWarning('(none selected)', state.metadataModel);
+        return false;
     }
     
-    const selectedModelLower = selectedModel.toLowerCase();
+    // Extract key model identifiers from both
+    const getModelKey = (modelStr) => {
+        const lower = (modelStr || '').toLowerCase();
+        // Check for known model families
+        if (lower.includes('nemotron')) return 'nemotron';
+        if (lower.includes('qwen')) return 'qwen';
+        if (lower.includes('llama')) return 'llama';
+        if (lower.includes('deepseek')) return 'deepseek';
+        if (lower.includes('mistral')) return 'mistral';
+        if (lower.includes('gpt')) return 'gpt';
+        if (lower.includes('claude')) return 'claude';
+        if (lower.includes('gemini')) return 'gemini';
+        // Return normalized string for comparison
+        return lower.replace(/[^a-z0-9]/g, '');
+    };
     
-    // Extract model name from selected model ID
-    let selectedModelName = '';
-    if (selectedModelLower.includes('nemotron')) {
-        selectedModelName = 'nemotron';
-    } else if (selectedModelLower.includes('qwen')) {
-        selectedModelName = 'qwen';
-    } else {
-        // Unknown model - allow it (might be a new model)
-        return true;
-    }
-    
-    // Check if selected model matches metadata model
-    const metadataModelLower = state.metadataModel.toLowerCase();
-    const matches = (
-        (metadataModelLower.includes('qwen') && selectedModelName === 'qwen') ||
-        (metadataModelLower.includes('nemotron') && selectedModelName === 'nemotron')
-    );
+    const selectedKey = getModelKey(selectedModel);
+    const metadataKey = getModelKey(state.metadataModel);
     
     // Remove any existing warning
     const existingWarning = document.getElementById('modelMismatchWarning');
@@ -1630,52 +2085,80 @@ function validateModelMatch() {
         existingWarning.remove();
     }
     
-    if (!matches && selectedModelName) {
-        // Model mismatch - show warning and disable save/start buttons
-        state.modelMismatchWarning = true;
-        
-        // Create warning element
-        const warning = document.createElement('div');
-        warning.id = 'modelMismatchWarning';
-        warning.className = 'model-mismatch-warning';
-        warning.innerHTML = `
-            ⚠️ <strong>Model Mismatch!</strong><br>
-            Metadata shows: <strong>${state.metadataModel}</strong> | Selected: <strong>${selectedModelName}</strong><br>
-            Please double-check the model in metadata before proceeding.
-        `;
-        
-        // Insert warning before model select
-        const modelGroup = elements.modelSelect.closest('.form-group');
-        if (modelGroup) {
-            modelGroup.appendChild(warning);
-        }
-        
-        // Disable start hunt button
-        if (elements.startHuntBtn) {
-            elements.startHuntBtn.disabled = true;
-            elements.startHuntBtn.title = 'Model mismatch detected. Please select the correct model from metadata.';
-        }
-        
-        // Disable save buttons
-        disableSaveButtons(true);
-        
-        showToast('⚠️ Model mismatch detected! Please select the correct model from metadata.', 'error');
+    // Check if models match
+    const matches = selectedKey === metadataKey;
+    
+    if (!matches) {
+        // Model mismatch - show warning and BLOCK
+        showModelMismatchWarning(selectedModel, state.metadataModel);
         return false;
     } else {
-        // Model matches or no model selected yet
-        state.modelMismatchWarning = false;
-        
-        // Enable start hunt button
-        if (elements.startHuntBtn) {
-            elements.startHuntBtn.disabled = false;
-            elements.startHuntBtn.title = '';
-        }
-        
-        // Enable save buttons
-        disableSaveButtons(false);
-        
+        // Model matches - clear warning state and restore UI
+        clearModelMismatchWarning();
         return true;
     }
+}
+
+function clearModelMismatchWarning() {
+    state.modelMismatchWarning = false;
+    
+    // Remove warning element
+    const existingWarning = document.getElementById('modelMismatchWarning');
+    if (existingWarning) {
+        existingWarning.remove();
+    }
+    
+    // Restore start hunt button styling (but don't enable - other validations may apply)
+    if (elements.startHuntBtn) {
+        elements.startHuntBtn.style.opacity = '';
+        elements.startHuntBtn.style.cursor = '';
+        // Note: Don't enable the button here - other validations may still require it disabled
+    }
+    
+    // Re-enable save buttons
+    disableSaveButtons(false);
+}
+
+function showModelMismatchWarning(selectedModel, metadataModel) {
+    state.modelMismatchWarning = true;
+    
+    // Remove any existing warning first
+    const existingWarning = document.getElementById('modelMismatchWarning');
+    if (existingWarning) {
+        existingWarning.remove();
+    }
+    
+    // Create warning element
+    const warning = document.createElement('div');
+    warning.id = 'modelMismatchWarning';
+    warning.className = 'model-mismatch-warning';
+    warning.innerHTML = `
+        <div style="background: var(--danger-bg, #fee2e2); border: 2px solid var(--danger, #ef4444); border-radius: 8px; padding: 12px; margin-top: 8px;">
+            <strong style="color: var(--danger, #ef4444);">⛔ MODEL MISMATCH - HUNT BLOCKED</strong><br><br>
+            <strong>Required (from metadata):</strong> ${metadataModel}<br>
+            <strong>Currently selected:</strong> ${selectedModel}<br><br>
+            <em>Select the correct model to enable hunting.</em>
+        </div>
+    `;
+    
+    // Insert warning after model select
+    const modelGroup = elements.modelSelect?.closest('.form-group');
+    if (modelGroup) {
+        modelGroup.appendChild(warning);
+    }
+    
+    // FORCE disable start hunt button
+    if (elements.startHuntBtn) {
+        elements.startHuntBtn.disabled = true;
+        elements.startHuntBtn.title = 'MODEL MISMATCH: Select the correct model from metadata to hunt.';
+        elements.startHuntBtn.style.opacity = '0.5';
+        elements.startHuntBtn.style.cursor = 'not-allowed';
+    }
+    
+    // Disable save buttons too
+    disableSaveButtons(true);
+    
+    showToast('⛔ Model mismatch! Select the correct model to hunt.', 'error');
 }
 
 function disableSaveButtons(disable) {
@@ -1749,12 +2232,15 @@ async function saveCell(cellType) {
     
     switch (cellType) {
         case 'prompt':
-            // Get text content from contentEditable div (strips HTML formatting for now)
-            content = elements.promptPreview?.textContent || elements.promptPreview?.innerText || '';
+            // Get raw Markdown from textarea (preserves formatting directly)
+            const promptTextarea = document.getElementById('promptMarkdown');
+            content = promptTextarea ? promptTextarea.value : '';
             cellHeading = 'prompt';
             break;
         case 'response':
-            content = elements.referencePreview?.textContent || elements.referencePreview?.innerText || '';
+            // Get raw Markdown from textarea
+            const responseTextarea = document.getElementById('responseMarkdown');
+            content = responseTextarea ? responseTextarea.value : '';
             cellHeading = 'response';
             break;
         case 'response_reference':
@@ -1770,7 +2256,9 @@ async function saveCell(cellType) {
             cellHeading = 'response_reference';
             break;
         case 'judge_system_prompt':
-            content = elements.judgePreview?.textContent || elements.judgePreview?.innerText || '';
+            // Get raw Markdown from textarea
+            const judgeTextarea = document.getElementById('judgeMarkdown');
+            content = judgeTextarea ? judgeTextarea.value : '';
             cellHeading = 'judge_system_prompt';
             break;
         default:
@@ -1876,8 +2364,9 @@ async function saveAllCells() {
     
     const cellsToSave = [];
     
-    // Collect all edited content
-    const promptContent = elements.promptPreview?.textContent || elements.promptPreview?.innerText || '';
+    // Collect all edited content from Markdown textareas
+    const promptTextarea = document.getElementById('promptMarkdown');
+    const promptContent = promptTextarea ? promptTextarea.value : '';
     if (promptContent.trim()) {
         cellsToSave.push({
             cell_type: 'prompt',
@@ -1885,7 +2374,8 @@ async function saveAllCells() {
         });
     }
     
-    const responseContent = elements.referencePreview?.textContent || elements.referencePreview?.innerText || '';
+    const responseTextarea = document.getElementById('responseMarkdown');
+    const responseContent = responseTextarea ? responseTextarea.value : '';
     if (responseContent.trim()) {
         cellsToSave.push({
             cell_type: 'response',
@@ -1904,7 +2394,8 @@ async function saveAllCells() {
         });
     }
     
-    const judgeContent = elements.judgePreview?.textContent || elements.judgePreview?.innerText || '';
+    const judgeTextarea = document.getElementById('judgeMarkdown');
+    const judgeContent = judgeTextarea ? judgeTextarea.value : '';
     if (judgeContent.trim()) {
         cellsToSave.push({
             cell_type: 'judge_system_prompt',
@@ -2359,15 +2850,71 @@ async function startHunt() {
         return;
     }
     
-    // Validate model match before starting
-    if (!validateModelMatch()) {
-        showToast('⚠️ Model mismatch detected! Please select the correct model from metadata.', 'error');
+    // FINAL CHECK: Validate model match before starting
+    if (state.metadataModel) {
+        const selectedModel = elements.modelSelect?.value || '';
+        const getKey = (s) => {
+            const l = (s || '').toLowerCase();
+            if (l.includes('nemotron')) return 'nemotron';
+            if (l.includes('qwen')) return 'qwen';
+            if (l.includes('llama')) return 'llama';
+            if (l.includes('deepseek')) return 'deepseek';
+            if (l.includes('mistral')) return 'mistral';
+            return l.replace(/[^a-z0-9]/g, '');
+        };
+        
+        if (getKey(selectedModel) !== getKey(state.metadataModel)) {
+            showToast(`⛔ BLOCKED: Model mismatch! Required: ${state.metadataModel}, Selected: ${selectedModel}`, 'error');
+            if (elements.startHuntBtn) {
+                elements.startHuntBtn.disabled = true;
+            }
+            return;
+        }
+    }
+    
+    // CHECK HUNT LIMIT: Block if maximum hunts reached for this notebook
+    const requestedHunts = parseInt(elements.parallelWorkers?.value) || 4;
+    if (state.huntLimitReached) {
+        showHuntLimitReachedError();
         return;
     }
     
-    state.isHunting = true;
+    if (!canStartMoreHunts(requestedHunts)) {
+        const remaining = getRemainingHunts();
+        if (remaining === 0) {
+            showHuntLimitReachedError();
+            state.huntLimitReached = true;
+            updateHuntLimitUI();
+            return;
+        } else {
+            showToast(
+                `⚠️ Only ${remaining} hunts remaining. Reduce hunt count to ${remaining} or less.`,
+                'warning'
+            );
+            return;
+        }
+    }
+    
+    // CRITICAL: Calculate hunt offset BEFORE incrementing count
+    // This is the starting hunt_id for this run (previous total hunts)
+    const huntOffset = state.totalHuntsCount;
+    
+    // CRITICAL FIX: Capture config BEFORE incrementing count
+    // incrementHuntCount calls updateHuntLimitUI which modifies the UI input values!
+    // If we call getConfig() after, it reads the modified (lower) values.
     state.config = getConfig();
+    console.log(`📊 Config captured with ${state.config.parallel_workers} workers BEFORE increment`);
+    
+    // Increment hunt count immediately (before the hunt starts)
+    // This will update UI but we already captured the config
+    incrementHuntCount(state.notebookId, requestedHunts);
+    console.log(`📊 Hunt count incremented: ${state.totalHuntsCount}/${MAX_HUNTS_PER_NOTEBOOK}, offset for this run: ${huntOffset}`);
+    
+    state.isHunting = true;
     state.results = [];
+    
+    // Store the offset for this run (used in initProgressUI)
+    state.currentRunStartOffset = huntOffset;
     
     // Add loading state to button
     elements.startHuntBtn.classList.add('loading');
@@ -2387,11 +2934,15 @@ async function startHunt() {
     document.querySelector('.section')?.classList.add('hidden'); // Hide upload section
     elements.configSection?.classList.add('hidden'); // Hide config section
     
-    // Update config on server
+    // Update config on server WITH hunt offset for unique hunt_id generation
+    const configWithOffset = {
+        ...state.config,
+        hunt_offset: huntOffset  // Tell backend where to start hunt_ids
+    };
     await fetch(`/api/update-config/${state.sessionId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(state.config)
+        body: JSON.stringify(configWithOffset)
     });
     
     // Show progress section and reset it
@@ -2427,6 +2978,11 @@ async function startHunt() {
         eventSource.addEventListener('hunt_start', (event) => {
             const data = JSON.parse(event.data);
             updateTableRow(data.hunt_id, { status: 'running', model: data.model });
+        });
+        
+        eventSource.addEventListener('hunt_progress', (event) => {
+            const data = JSON.parse(event.data);
+            handleHuntProgress(data);
         });
         
         eventSource.addEventListener('hunt_result', (event) => {
@@ -2491,8 +3047,10 @@ async function startHunt() {
 function initProgressUI() {
     const { parallel_workers, target_breaks } = state.config;
     
-    // Save offset at start of THIS run for row lookup during hunt
-    state.currentRunStartOffset = state.accumulatedHuntOffset;
+    // Use the offset that was set BEFORE incrementing (in startHunt)
+    const offset = state.currentRunStartOffset;
+    
+    console.log(`📊 initProgressUI: totalHuntsCount=${state.totalHuntsCount}, parallel_workers=${parallel_workers}, offset=${offset}`);
     
     // Reset progress for THIS run only
     elements.progressFill.style.width = '0%';
@@ -2510,7 +3068,6 @@ function initProgressUI() {
     
     // APPEND table rows (don't clear!) - use offset for proper numbering
     const models = state.config.models;
-    const offset = state.accumulatedHuntOffset;
     
     for (let i = 1; i <= parallel_workers; i++) {
         const globalRowNum = offset + i;
@@ -2538,10 +3095,12 @@ function initProgressUI() {
 }
 
 function updateTableRow(huntId, data) {
-    // Use global row number (offset + huntId)
-    const globalRowNum = state.currentRunStartOffset + huntId;
-    const row = document.getElementById(`hunt-row-${globalRowNum}`);
-    if (!row) return;
+    // hunt_id from backend is already globally unique (no offset needed)
+    const row = document.getElementById(`hunt-row-${huntId}`);
+    if (!row) {
+        console.warn(`Row hunt-row-${huntId} not found`);
+        return;
+    }
     
     if (data.model) {
         const shortModel = data.model.split('/').pop().split('-')[0];
@@ -2557,11 +3116,37 @@ function updateTableRow(huntId, data) {
     }
 }
 
-function handleHuntResult(data) {
-    const { hunt_id, status, score, is_breaking, error, completed, total, breaks, response } = data;
+function handleHuntProgress(data) {
+    const { hunt_id, step, message } = data;
     
-    // Calculate global row number: offset at run start + hunt_id
-    const globalRowNum = state.currentRunStartOffset + hunt_id;
+    // Find the row by hunt_id (already globally unique)
+    const row = document.getElementById(`hunt-row-${hunt_id}`);
+    if (!row) return;
+    
+    // Map step to display text and style
+    const stepDisplay = {
+        'calling_model': { icon: '🔄', text: 'Calling API...', color: 'var(--warning)' },
+        'received_response': { icon: '📥', text: 'Got Response', color: 'var(--info)' },
+        'judging': { icon: '⚖️', text: 'Judging...', color: 'var(--accent-primary)' }
+    };
+    
+    const display = stepDisplay[step] || { icon: '⏳', text: step, color: 'var(--text-muted)' };
+    
+    // Update status cell with detailed progress
+    row.querySelector('.status-cell').innerHTML = `
+        <span class="score-badge pending" style="font-size: 0.75rem;">
+            <span class="spinner"></span> ${display.icon} ${display.text}
+        </span>
+    `;
+    
+    console.log(`Hunt ${hunt_id} progress: ${step} - ${message}`);
+}
+
+function handleHuntResult(data) {
+    const { hunt_id, status, score, is_breaking, error, completed, total, breaks, response, model } = data;
+    
+    // hunt_id from backend is already globally unique (no offset calculation needed)
+    const globalRowNum = hunt_id;
     
     // Debug log
     console.log('Hunt Result:', { 
@@ -2569,8 +3154,7 @@ function handleHuntResult(data) {
         status, 
         score, 
         is_breaking, 
-        globalRowNum,
-        currentRunStartOffset: state.currentRunStartOffset 
+        globalRowNum
     });
     
     // Store result with response data
@@ -2634,64 +3218,33 @@ function handleHuntResult(data) {
             row.querySelector('.issues-cell').textContent = '-';
         }
         
-        // Response - SHOW IMMEDIATELY (expandable)
+        // Response - SHOW "View" BUTTON that opens slide-out panel
         const responseCell = row.querySelector('.response-cell');
         if (responseCell && response) {
             const responseText = response.trim();
-            const responseId = `response-${globalRowNum}`;
+            const shortModel = model ? model.split('/').pop().substring(0, 20) : 'Unknown';
             
-            // Check if already initialized
-            const isInitialized = responseCell.dataset.initialized === 'true';
-            const isExpanded = responseCell.dataset.expanded === 'true';
+            // Store response data for slide-out panel
+            state.huntResponseData[globalRowNum] = {
+                huntNum: globalRowNum,
+                model: model || 'Unknown',
+                status: status || 'pending',
+                score: score,
+                is_breaking: is_breaking,
+                response: responseText,
+                error: error
+            };
             
-            if (!isInitialized) {
-                // Initialize expandable response
-                responseCell.innerHTML = `
-                    <div class="response-container" style="position: relative;">
-                        <div class="response-preview" id="${responseId}" style="
-                            max-height: 60px;
-                            overflow: hidden;
-                            white-space: pre-wrap;
-                            word-break: break-word;
-                            font-size: 0.85rem;
-                            line-height: 1.4;
-                            color: var(--text-primary);
-                            cursor: pointer;
-                            padding: 0.5rem;
-                            background: var(--bg-tertiary);
-                            border-radius: 4px;
-                            transition: max-height 0.3s ease;
-                        " onclick="toggleResponse(${globalRowNum})">
-                            <span class="response-text">${escapeHtml(responseText)}</span>
-                        </div>
-                        <button class="response-toggle-btn" onclick="toggleResponse(${globalRowNum})" style="
-                            position: absolute;
-                            top: 0.25rem;
-                            right: 0.25rem;
-                            background: var(--bg-primary);
-                            border: 1px solid var(--border);
-                            border-radius: 4px;
-                            padding: 0.25rem 0.5rem;
-                            font-size: 0.75rem;
-                            cursor: pointer;
-                            color: var(--text-primary);
-                            z-index: 10;
-                        ">▼ Expand</button>
-                    </div>
-                `;
-                responseCell.dataset.initialized = 'true';
-                responseCell.dataset.expanded = 'false';
-            } else {
-                // Update existing response text
-                const preview = responseCell.querySelector('.response-preview');
-                const toggleBtn = responseCell.querySelector('.response-toggle-btn');
-                if (preview) {
-                    const textSpan = preview.querySelector('.response-text');
-                    if (textSpan) {
-                        textSpan.textContent = responseText;
-                    }
-                }
-            }
+            // Render simple "View" button
+            const previewText = responseText.length > 50 ? responseText.substring(0, 50) + '...' : responseText;
+            responseCell.innerHTML = `
+                <button class="response-view-btn" onclick="window.openResponseSlideout(${globalRowNum})">
+                    👁️ View
+                </button>
+                <span style="color: var(--text-muted); font-size: 0.75rem; margin-left: 0.5rem;">
+                    ${escapeHtml(previewText)}
+                </span>
+            `;
         } else if (responseCell && error) {
             responseCell.innerHTML = `
                 <span style="color: var(--danger); font-size: 0.85rem;">Error: ${escapeHtml(error.substring(0, 100))}</span>
@@ -2712,33 +3265,475 @@ function handleHuntResult(data) {
     }
 }
 
-// Toggle response expansion in progress table
-function toggleResponse(rowNum) {
-    const row = document.getElementById(`hunt-row-${rowNum}`);
-    if (!row) return;
+// ============== Response Slide-out Panel ==============
+
+function openResponseSlideout(rowNum) {
+    console.log('openResponseSlideout called with rowNum:', rowNum);
     
-    const responseCell = row.querySelector('.response-cell');
-    if (!responseCell) return;
+    const data = state.huntResponseData[rowNum];
+    if (!data) {
+        console.warn(`No response data found for row ${rowNum}`);
+        showToast('Response data not available yet', 'warning');
+        return;
+    }
     
-    const isExpanded = responseCell.dataset.expanded === 'true';
-    const preview = responseCell.querySelector('.response-preview');
-    const toggleBtn = responseCell.querySelector('.response-toggle-btn');
+    console.log('Response data found:', data);
     
-    if (preview && toggleBtn) {
-        if (isExpanded) {
-            preview.style.maxHeight = '60px';
-            toggleBtn.textContent = '▼ Expand';
-            responseCell.dataset.expanded = 'false';
-        } else {
-            preview.style.maxHeight = 'none';
-            toggleBtn.textContent = '▲ Collapse';
-            responseCell.dataset.expanded = 'true';
+    // Get elements directly from DOM (backup in case elements object not updated)
+    const slideout = document.getElementById('responseSlideout');
+    const backdrop = document.getElementById('responseSlideoutBackdrop');
+    const titleEl = document.getElementById('slideoutTitle');
+    const modelEl = document.getElementById('slideoutModel');
+    const statusEl = document.getElementById('slideoutStatus');
+    const scoreEl = document.getElementById('slideoutScore');
+    const responseTextEl = document.getElementById('slideoutResponseText');
+    
+    if (!slideout) {
+        console.error('Slideout panel element not found!');
+        showToast('Error: Panel not found', 'error');
+        return;
+    }
+    
+    // Update slide-out content
+    if (titleEl) {
+        titleEl.textContent = `Hunt #${data.huntNum} Response`;
+    }
+    
+    if (modelEl) {
+        const shortModel = data.model.split('/').pop();
+        modelEl.textContent = shortModel;
+    }
+    
+    if (statusEl) {
+        statusEl.textContent = data.status;
+        statusEl.className = 'response-slideout-meta-value';
+        if (data.status === 'completed') {
+            // is_breaking = true means model broke = GOOD for hunt = 'pass' styling
+            statusEl.classList.add(data.is_breaking ? 'pass' : 'fail');
         }
+    }
+    
+    if (scoreEl) {
+        if (data.score !== null && data.score !== undefined) {
+            scoreEl.textContent = `${data.score}/4`;
+            scoreEl.className = 'response-slideout-meta-value';
+            // Score 0 = breaking = GOOD for hunt = 'pass' styling
+            // Score 1-4 = passing = BAD for hunt = 'fail' styling
+            scoreEl.classList.add(data.score === 0 ? 'pass' : 'fail');
+        } else {
+            scoreEl.textContent = '-';
+            scoreEl.className = 'response-slideout-meta-value';
+        }
+    }
+    
+    if (responseTextEl) {
+        responseTextEl.textContent = data.response || 'No response';
+    }
+    
+    // Open the slide-out (reset right position for opening)
+    slideout.style.right = '0';
+    slideout.classList.add('open');
+    if (backdrop) {
+        backdrop.classList.add('visible');
+    }
+    
+    // Prevent body scroll when panel is open
+    document.body.style.overflow = 'hidden';
+    
+    console.log('Slideout panel opened');
+}
+
+function closeResponseSlideout() {
+    const slideout = document.getElementById('responseSlideout');
+    const backdrop = document.getElementById('responseSlideoutBackdrop');
+    
+    if (slideout) {
+        // Set right position to fully hide based on current width
+        const currentWidth = slideout.offsetWidth;
+        slideout.style.right = `-${currentWidth + 10}px`;
+        slideout.classList.remove('open');
+    }
+    if (backdrop) {
+        backdrop.classList.remove('visible');
+    }
+    
+    // Restore body scroll
+    document.body.style.overflow = '';
+}
+
+// Open slide-out for selection table details
+function openSelectionDetailSlideout(rowNumber, result) {
+    console.log('Opening selection detail slideout for row:', rowNumber);
+    
+    const slideout = document.getElementById('responseSlideout');
+    const backdrop = document.getElementById('responseSlideoutBackdrop');
+    const titleEl = document.getElementById('slideoutTitle');
+    const modelEl = document.getElementById('slideoutModel');
+    const statusEl = document.getElementById('slideoutStatus');
+    const scoreEl = document.getElementById('slideoutScore');
+    const responseTextEl = document.getElementById('slideoutResponseText');
+    
+    if (!slideout) {
+        console.error('Slideout panel element not found!');
+        return;
+    }
+    
+    // Determine if breaking
+    const judgeScore = result.judge_score !== undefined && result.judge_score !== null ? Number(result.judge_score) : null;
+    const score = result.score !== undefined && result.score !== null ? Number(result.score) : null;
+    const isBreaking = (judgeScore !== null && judgeScore === 0) || (score !== null && score === 0);
+    
+    // Update slide-out content
+    if (titleEl) {
+        titleEl.textContent = `Hunt #${rowNumber + 1} Response`;
+    }
+    
+    if (modelEl) {
+        const shortModel = (result.model || 'Unknown').split('/').pop();
+        modelEl.textContent = shortModel;
+    }
+    
+    if (statusEl) {
+        statusEl.textContent = isBreaking ? 'BREAK' : 'PASS';
+        statusEl.className = 'response-slideout-meta-value';
+        statusEl.classList.add(isBreaking ? 'pass' : 'fail');
+    }
+    
+    if (scoreEl) {
+        const displayScore = judgeScore !== null ? judgeScore : (score !== null ? score : '-');
+        scoreEl.textContent = displayScore;
+        scoreEl.className = 'response-slideout-meta-value';
+        if (displayScore !== '-') {
+            scoreEl.classList.add(displayScore === 0 ? 'pass' : 'fail');
+        }
+    }
+    
+    if (responseTextEl) {
+        responseTextEl.textContent = result.response || 'No response available';
+    }
+    
+    // Open the slide-out (reset right position for opening)
+    slideout.style.right = '0';
+    slideout.classList.add('open');
+    if (backdrop) {
+        backdrop.classList.add('visible');
+    }
+    
+    document.body.style.overflow = 'hidden';
+}
+
+// ============== Grading Slide-out Panel ==============
+
+function openGradingSlideout(result, slotIndex, rowNumber) {
+    const slideout = document.getElementById('gradingSlideout');
+    const backdrop = document.getElementById('gradingSlideoutBackdrop');
+    const slotBadge = document.getElementById('gradingSlotBadge');
+    const slotModel = document.getElementById('gradingSlotModel');
+    const body = document.getElementById('gradingSlideoutBody');
+    
+    if (!slideout || !body) {
+        console.error('Grading slideout elements not found!');
+        return;
+    }
+    
+    // Check if we're in read-only mode (after LLM reveal)
+    const isReadOnly = state.llmRevealed;
+    
+    const shortModel = result.model.split('/').pop();
+    const slotNum = slotIndex !== undefined ? slotIndex + 1 : result.hunt_id;
+    const responseText = result.response || 'No response available';
+    const reasoningTrace = result.reasoning_trace || '';
+    const huntId = result.hunt_id;
+    
+    // Get existing review data if any
+    const existingReview = state.humanReviews?.[huntId] || {};
+    const existingNotes = existingReview.notes || '';
+    const existingGrades = existingReview.grades || {};
+    
+    // Update header
+    slotBadge.textContent = `Slot ${slotNum}`;
+    slotModel.textContent = shortModel;
+    
+    // Build body content
+    const disabledAttr = isReadOnly ? 'disabled' : '';
+    const disabledStyle = isReadOnly ? 'opacity: 0.6; cursor: not-allowed; pointer-events: none;' : '';
+    const textareaStyle = isReadOnly ? 'background: var(--bg-tertiary); opacity: 0.7;' : '';
+    
+    body.innerHTML = `
+        ${isReadOnly ? `
+        <!-- Locked Banner -->
+        <div style="padding: 0.75rem 1rem; background: linear-gradient(135deg, rgba(251, 191, 36, 0.15), rgba(251, 191, 36, 0.05)); border: 1px solid var(--warning); border-radius: 8px; margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+            <span style="font-size: 1.2rem;">🔒</span>
+            <span style="color: var(--warning); font-weight: 600;">Reviews are locked - View only mode</span>
+        </div>
+        ` : ''}
+        
+        <!-- Response Section -->
+        <div class="grading-section">
+            <div class="grading-section-title">📄 Model Response</div>
+            <div class="grading-response-box">${escapeHtml(responseText)}</div>
+        </div>
+        
+        <!-- Reasoning Section (Collapsible) -->
+        <div class="grading-section">
+            <button class="reasoning-toggle-btn" style="width: 100%; padding: 0.75rem; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font-weight: 600; color: var(--text-primary); display: flex; align-items: center; justify-content: space-between;">
+                <span>🧠 Model Reasoning (Reference)</span>
+                <span class="reasoning-arrow">▼</span>
+            </button>
+            <div class="reasoning-content" style="display: none; margin-top: 0.75rem;">
+                ${reasoningTrace ? `
+                    <div class="grading-response-box" style="max-height: 200px;">${escapeHtml(reasoningTrace)}</div>
+                ` : `
+                    <div style="padding: 1rem; background: var(--bg-tertiary); border-radius: 8px; color: var(--text-muted); text-align: center; font-style: italic;">
+                        No reasoning trace available
+                    </div>
+                `}
+            </div>
+        </div>
+        
+        <!-- Criteria Grading Section -->
+        <div class="grading-section">
+            <div class="grading-section-title">✅ Grade Each Criterion ${isReadOnly ? '<span style="color: var(--warning); font-size: 0.8rem;">(Locked)</span>' : ''}</div>
+            <div class="grading-criteria-list" data-hunt-id="${huntId}">
+                ${(state.criteria || []).map(c => {
+                    const existingGrade = existingGrades[c.id];
+                    const passActive = existingGrade === 1 ? 'active' : '';
+                    const failActive = existingGrade === 0 ? 'active' : '';
+                    return `
+                        <div class="grading-criterion" data-criterion-id="${c.id}">
+                            <span class="grading-criterion-id">${c.id}:</span>
+                            <span class="grading-criterion-text">${escapeHtml(c.criteria)}</span>
+                            <div class="grading-criterion-buttons" style="${disabledStyle}">
+                                <button class="grading-btn grading-btn-pass ${passActive}" data-hunt-id="${huntId}" data-criterion="${c.id}" ${disabledAttr}>
+                                    ✅ Pass
+                                </button>
+                                <button class="grading-btn grading-btn-fail ${failActive}" data-hunt-id="${huntId}" data-criterion="${c.id}" ${disabledAttr}>
+                                    ❌ Fail
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+        </div>
+        
+        <!-- Notes Section -->
+        <div class="grading-section">
+            <div class="grading-section-title">📝 Explanation ${isReadOnly ? '<span style="color: var(--warning); font-size: 0.8rem;">(Locked)</span>' : ''}</div>
+            <textarea class="grading-notes-textarea" data-hunt-id="${huntId}" 
+                placeholder="Explain your grading decisions..." ${disabledAttr} style="${textareaStyle}">${escapeHtml(existingNotes)}</textarea>
+        </div>
+        
+        <!-- Submit Button -->
+        <div class="grading-section">
+            ${isReadOnly ? `
+                <div style="padding: 0.75rem 1rem; background: var(--bg-tertiary); border-radius: 8px; text-align: center; color: var(--text-muted);">
+                    🔒 Review submitted and locked
+                </div>
+            ` : `
+                <button class="btn btn-primary grading-submit-btn" data-hunt-id="${huntId}" data-slot-index="${slotIndex}" data-row-number="${rowNumber}">
+                    ✅ Submit Review
+                </button>
+            `}
+            <div class="grading-status" data-hunt-id="${huntId}"></div>
+        </div>
+        
+        <!-- LLM Judge Section (Hidden until revealed) -->
+        <div class="llm-judge-section" data-hunt-id="${huntId}" style="display: ${state.llmRevealed ? 'block' : 'none'}; margin-top: 1.5rem; padding: 1.5rem; background: var(--bg-tertiary); border-radius: 12px; border: 2px solid var(--accent-primary);">
+            <div class="grading-section-title" style="color: var(--accent-primary);">🤖 LLM Judge Result</div>
+            <div style="margin-top: 0.75rem;">
+                <span class="score-badge score-${result.judge_score || 0}" style="padding: 0.5rem 1rem;">
+                    ${result.judge_score === 0 ? '🟢' : '🔴'} Score: ${result.judge_score ?? '-'}
+                </span>
+            </div>
+            ${result.judge_explanation ? `
+                <div style="margin-top: 1rem; padding: 1rem; background: var(--bg-card); border-radius: 8px; font-size: 0.9rem; line-height: 1.6; white-space: pre-wrap;">
+                    ${escapeHtml(result.judge_explanation)}
+                </div>
+            ` : ''}
+        </div>
+    `;
+    
+    // Set up event listeners
+    setupGradingSlideoutEvents(body, huntId, result, slotIndex, rowNumber);
+    
+    // Open the slideout (reset right position for opening)
+    slideout.style.right = '0';
+    slideout.classList.add('open');
+    backdrop.classList.add('visible');
+    document.body.style.overflow = 'hidden';
+    
+    // Store current slot for reference
+    state.currentGradingSlot = { result, slotIndex, rowNumber, huntId };
+}
+
+function setupGradingSlideoutEvents(container, huntId, result, slotIndex, rowNumber) {
+    // Reasoning toggle
+    const reasoningToggle = container.querySelector('.reasoning-toggle-btn');
+    const reasoningContent = container.querySelector('.reasoning-content');
+    const reasoningArrow = container.querySelector('.reasoning-arrow');
+    
+    if (reasoningToggle && reasoningContent) {
+        reasoningToggle.addEventListener('click', () => {
+            const isHidden = reasoningContent.style.display === 'none';
+            reasoningContent.style.display = isHidden ? 'block' : 'none';
+            reasoningArrow.textContent = isHidden ? '▲' : '▼';
+        });
+    }
+    
+    // Criteria buttons
+    container.querySelectorAll('.grading-btn-pass').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const criterion = btn.dataset.criterion;
+            const row = btn.closest('.grading-criterion');
+            row.querySelector('.grading-btn-pass').classList.add('active');
+            row.querySelector('.grading-btn-fail').classList.remove('active');
+            
+            // Store grade
+            if (!state.humanReviews[huntId]) {
+                state.humanReviews[huntId] = { grades: {}, notes: '', submitted: false };
+            }
+            state.humanReviews[huntId].grades[criterion] = 1;
+        });
+    });
+    
+    container.querySelectorAll('.grading-btn-fail').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const criterion = btn.dataset.criterion;
+            const row = btn.closest('.grading-criterion');
+            row.querySelector('.grading-btn-fail').classList.add('active');
+            row.querySelector('.grading-btn-pass').classList.remove('active');
+            
+            // Store grade
+            if (!state.humanReviews[huntId]) {
+                state.humanReviews[huntId] = { grades: {}, notes: '', submitted: false };
+            }
+            state.humanReviews[huntId].grades[criterion] = 0;
+        });
+    });
+    
+    // Notes textarea
+    const notesTextarea = container.querySelector('.grading-notes-textarea');
+    if (notesTextarea) {
+        notesTextarea.addEventListener('input', () => {
+            if (!state.humanReviews[huntId]) {
+                state.humanReviews[huntId] = { grades: {}, notes: '', submitted: false };
+            }
+            state.humanReviews[huntId].notes = notesTextarea.value;
+        });
+    }
+    
+    // Submit button
+    const submitBtn = container.querySelector('.grading-submit-btn');
+    if (submitBtn) {
+        submitBtn.addEventListener('click', () => {
+            submitGradingReview(huntId, result, slotIndex, rowNumber);
+        });
     }
 }
 
-// Make toggleResponse available globally
-window.toggleResponse = toggleResponse;
+function submitGradingReview(huntId, result, slotIndex, rowNumber) {
+    const review = state.humanReviews[huntId] || {};
+    const grades = review.grades || {};
+    const notes = review.notes || '';
+    
+    // Check if all criteria are graded
+    const allGraded = (state.criteria || []).every(c => grades[c.id] !== undefined);
+    
+    if (!allGraded) {
+        showToast('Please grade all criteria before submitting', 'warning');
+        return;
+    }
+    
+    // Calculate overall judgment based on grades (all pass = 1, any fail = 0)
+    const allPass = Object.values(grades).every(g => g === 1);
+    const overallJudgment = allPass ? 1 : 0;
+    
+    // Convert grades to grading_basis format (PASS/FAIL strings)
+    const gradingBasis = {};
+    Object.entries(grades).forEach(([key, value]) => {
+        gradingBasis[key] = value === 1 ? 'PASS' : 'FAIL';
+    });
+    
+    // Mark as submitted with huntId key (for backwards compatibility)
+    state.humanReviews[huntId] = {
+        ...review,
+        submitted: true
+    };
+    
+    // CRITICAL FIX: Also store with row_number key format for updateReviewProgress()
+    const rowKey = `row_${rowNumber}`;
+    state.humanReviews[rowKey] = {
+        hunt_id: huntId,
+        row_number: rowNumber,
+        judgment: overallJudgment,
+        grading_basis: gradingBasis,
+        explanation: notes,
+        slotNum: slotIndex + 1,
+        timestamp: new Date().toISOString(),
+        submitted: true
+    };
+    
+    console.log(`📝 Review submitted: huntId=${huntId}, rowNumber=${rowNumber}, rowKey=${rowKey}`);
+    
+    // Update status in slideout
+    const statusEl = document.querySelector(`.grading-status[data-hunt-id="${huntId}"]`);
+    if (statusEl) {
+        statusEl.innerHTML = '<span style="color: var(--success);">✅ Review Submitted!</span>';
+    }
+    
+    // Update the compact card
+    const card = document.querySelector(`.slot-compact-card[data-hunt-id="${huntId}"]`);
+    if (card) {
+        card.classList.add('reviewed');
+        const statusDiv = card.querySelector('.slot-compact-status');
+        if (statusDiv) {
+            statusDiv.textContent = '✅ Review Submitted';
+            statusDiv.classList.add('reviewed');
+        }
+        const btn = card.querySelector('.slot-open-btn');
+        if (btn) {
+            btn.textContent = '📝 Edit';
+        }
+    }
+    
+    // Update review progress
+    updateReviewProgress();
+    
+    showToast(`Review for Slot ${slotIndex + 1} submitted!`, 'success');
+    
+    // Close slideout after a short delay
+    setTimeout(() => {
+        closeGradingSlideout();
+    }, 500);
+}
+
+function closeGradingSlideout() {
+    const slideout = document.getElementById('gradingSlideout');
+    const backdrop = document.getElementById('gradingSlideoutBackdrop');
+    
+    if (slideout) {
+        // Set right position to fully hide based on current width
+        const currentWidth = slideout.offsetWidth;
+        slideout.style.right = `-${currentWidth + 10}px`;
+        slideout.classList.remove('open');
+    }
+    if (backdrop) {
+        backdrop.classList.remove('visible');
+    }
+    
+    document.body.style.overflow = '';
+    state.currentGradingSlot = null;
+}
+
+// Make slide-out functions available globally
+window.openResponseSlideout = openResponseSlideout;
+window.closeResponseSlideout = closeResponseSlideout;
+window.openSelectionDetailSlideout = openSelectionDetailSlideout;
+window.openGradingSlideout = openGradingSlideout;
+window.closeGradingSlideout = closeGradingSlideout;
 
 // Toggle response expansion in selection table
 function toggleSelectionResponse(rowNumber) {
@@ -2789,8 +3784,8 @@ function handleHuntComplete(data) {
     
     const { completed_hunts, breaks_found } = data;
     
-    // Update accumulated hunt offset for next run
-    state.accumulatedHuntOffset += completed_hunts;
+    // NOTE: totalHuntsCount is now the single source of truth (already incremented before hunt started)
+    // No need to update accumulatedHuntOffset separately
     
     // Update status
     elements.huntStatus.querySelector('.status-dot').className = 'status-dot completed';
@@ -2917,18 +3912,18 @@ function displaySelectionCards() {
         return;
     }
     
-    // Create a table showing all hunts with their row numbers
+    // Create a cleaner table with better column order
     const table = document.createElement('table');
-    table.style.cssText = 'width: 100%; border-collapse: collapse;';
+    table.className = 'selection-table';
     table.innerHTML = `
         <thead>
-            <tr style="background: var(--bg-secondary); border-bottom: 2px solid var(--border);">
-                <th style="padding: 0.75rem; text-align: left; font-weight: 600;">Select</th>
-                <th style="padding: 0.75rem; text-align: left; font-weight: 600;">Slot</th>
-                <th style="padding: 0.75rem; text-align: left; font-weight: 600;">Hunt #</th>
-                <th style="padding: 0.75rem; text-align: left; font-weight: 600;">Status</th>
-                <th style="padding: 0.75rem; text-align: left; font-weight: 600;">Model</th>
-                <th style="padding: 0.75rem; text-align: center; font-weight: 600; width: 100px;">Details</th>
+            <tr>
+                <th class="col-select">Select</th>
+                <th class="col-response">Response</th>
+                <th class="col-model">Model</th>
+                <th class="col-status">Status</th>
+                <th class="col-hunt">Hunt</th>
+                <th class="col-slot">Slot</th>
             </tr>
         </thead>
         <tbody id="huntSelectionTableBody">
@@ -2939,7 +3934,6 @@ function displaySelectionCards() {
     
     // Show all hunts in order (breaking first, then passing)
     const sortedHunts = [...state.allResponses].sort((a, b) => {
-        // Sort: breaking first (score 0), then passing (score > 0)
         const aJudgeScore = a.judge_score !== undefined && a.judge_score !== null ? Number(a.judge_score) : (a.score !== undefined && a.score !== null ? Number(a.score) : 999);
         const bJudgeScore = b.judge_score !== undefined && b.judge_score !== null ? Number(b.judge_score) : (b.score !== undefined && b.score !== null ? Number(b.score) : 999);
         const aIsBreaking = aJudgeScore === 0;
@@ -2950,108 +3944,73 @@ function displaySelectionCards() {
     });
     
     sortedHunts.forEach((result, index) => {
-        const rowNumber = state.allResponses.indexOf(result); // Get original index in allResponses
+        const rowNumber = state.allResponses.indexOf(result);
         const isSelected = state.selectedRowNumbers.includes(rowNumber);
         
-        // Get slot number if selected (1-based index in selectedRowNumbers array)
+        // Get slot number if selected
         const slotIndex = isSelected ? state.selectedRowNumbers.indexOf(rowNumber) : -1;
         const slotNumber = slotIndex >= 0 ? slotIndex + 1 : null;
-        const slotDisplay = slotNumber ? `Slot ${slotNumber}` : '-';
-        const slotStyle = slotNumber ? 
-            'background: var(--accent-primary); color: white; padding: 0.25rem 0.5rem; border-radius: 4px; font-weight: 600; font-size: 0.85rem;' :
-            'color: var(--text-muted);';
         
         // Determine if breaking or passing
         const judgeScore = result.judge_score !== undefined && result.judge_score !== null ? Number(result.judge_score) : null;
         const score = result.score !== undefined && result.score !== null ? Number(result.score) : null;
         const isBreaking = (judgeScore !== null && judgeScore === 0) || (score !== null && score === 0);
         
-        const shortModel = (result.model || 'unknown').split('/').pop().substring(0, 20);
+        const shortModel = (result.model || 'unknown').split('/').pop();
+        const responsePreview = (result.response || 'No response').substring(0, 120) + (result.response?.length > 120 ? '...' : '');
         
         const row = document.createElement('tr');
-        row.className = `hunt-selection-row ${isSelected ? 'selected' : ''}`;
+        row.className = isSelected ? 'selected' : '';
         row.dataset.rowNumber = rowNumber;
-        row.style.cssText = `
-            border-bottom: 1px solid var(--border);
-            cursor: pointer;
-            background: ${isSelected ? 'rgba(var(--accent-primary-rgb), 0.1)' : 'transparent'};
-            transition: background 0.2s;
-        `;
-        row.onmouseenter = () => {
-            if (!isSelected) row.style.background = 'var(--bg-secondary)';
-        };
-        row.onmouseleave = () => {
-            if (!isSelected) row.style.background = 'transparent';
-        };
         
-        // FIX 2: Disable checkbox if selection is confirmed
         const checkboxDisabled = state.selectionConfirmed ? 'disabled' : '';
-        const checkboxStyle = state.selectionConfirmed 
-            ? 'transform: scale(1.3); cursor: not-allowed; opacity: 0.6;' 
-            : 'transform: scale(1.3); cursor: pointer;';
         
         row.innerHTML = `
-            <td style="padding: 0.75rem; text-align: center;">
-                <input type="checkbox" class="hunt-selection-checkbox" ${isSelected ? 'checked' : ''} 
-                       ${checkboxDisabled}
-                       data-row-number="${rowNumber}" 
-                       style="${checkboxStyle}">
+            <td class="col-select">
+                <input type="checkbox" class="selection-checkbox hunt-selection-checkbox" 
+                       ${isSelected ? 'checked' : ''} ${checkboxDisabled}
+                       data-row-number="${rowNumber}">
             </td>
-            <td style="padding: 0.75rem; text-align: center;">
-                <span style="${slotStyle}">${slotDisplay}</span>
+            <td class="col-response">
+                <div class="response-preview-text">${escapeHtml(responsePreview)}</div>
+                <button class="view-details-btn" data-row-number="${rowNumber}">
+                    👁️ View Full
+                </button>
             </td>
-            <td style="padding: 0.75rem; font-weight: 600;">Hunt #${rowNumber + 1}</td>
-            <td style="padding: 0.75rem;">
-                <span class="score-badge" style="padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.85rem; background: ${isBreaking ? 'var(--success)' : 'var(--danger)'}; color: white;">
+            <td class="col-model">
+                <span class="model-name">${shortModel}</span>
+            </td>
+            <td class="col-status">
+                <span class="status-badge ${isBreaking ? 'break' : 'pass'}">
                     ${isBreaking ? '✅ BREAK' : '❌ PASS'}
                 </span>
             </td>
-            <td style="padding: 0.75rem; font-size: 0.9rem; color: var(--text-secondary);">${shortModel}</td>
-            <td style="padding: 0.75rem; text-align: center;">
-                <button class="details-toggle-btn" data-row-number="${rowNumber}" 
-                        style="background: var(--bg-tertiary); border: 1px solid var(--border); 
-                               border-radius: 4px; padding: 0.4rem 0.75rem; cursor: pointer; 
-                               font-size: 0.85rem; color: var(--text-primary); 
-                               transition: all 0.2s; display: inline-flex; align-items: center; 
-                               gap: 0.25rem; white-space: nowrap;">
-                    <span class="details-icon">▼</span>
-                    <span class="details-text">Details</span>
-                </button>
+            <td class="col-hunt">
+                <span class="hunt-number">#${rowNumber + 1}</span>
+            </td>
+            <td class="col-slot">
+                ${slotNumber 
+                    ? `<span class="slot-badge assigned">Slot ${slotNumber}</span>` 
+                    : `<span class="slot-badge empty">-</span>`}
             </td>
         `;
         
-        // Click handler for row (but exclude details button)
+        // Click handler for row selection (except buttons)
         row.addEventListener('click', (e) => {
-            // Don't trigger selection if clicking the details button
-            if (e.target.closest('.details-toggle-btn')) {
-                return;
-            }
+            if (e.target.closest('.view-details-btn')) return;
             if (e.target.type !== 'checkbox') {
-                const checkbox = row.querySelector('.hunt-selection-checkbox');
-                checkbox.checked = !checkbox.checked;
+                const checkbox = row.querySelector('.selection-checkbox');
+                if (!checkbox.disabled) checkbox.checked = !checkbox.checked;
             }
-            toggleHuntSelection(rowNumber, row);
+            if (!state.selectionConfirmed) {
+                toggleHuntSelection(rowNumber, row);
+            }
         });
         
-        // Details button click handler
-        const detailsBtn = row.querySelector('.details-toggle-btn');
-        detailsBtn.addEventListener('click', (e) => {
-            e.stopPropagation(); // Prevent row selection
-            toggleDetailsRow(rowNumber, row, result);
-        });
-        
-        // Add hover effects to details button
-        detailsBtn.addEventListener('mouseenter', () => {
-            if (detailsBtn.style.background !== 'var(--accent-primary)') {
-                detailsBtn.style.background = 'var(--bg-hover)';
-                detailsBtn.style.borderColor = 'var(--border-hover)';
-            }
-        });
-        detailsBtn.addEventListener('mouseleave', () => {
-            if (detailsBtn.style.background !== 'var(--accent-primary)') {
-                detailsBtn.style.background = 'var(--bg-tertiary)';
-                detailsBtn.style.borderColor = 'var(--border)';
-            }
+        // View button opens slide-out panel
+        row.querySelector('.view-details-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            openSelectionDetailSlideout(rowNumber, result);
         });
         
         tbody.appendChild(row);
@@ -3077,26 +4036,22 @@ function refreshSelectionTable() {
         const isSelected = state.selectedRowNumbers.includes(rowNumber);
         const slotIndex = isSelected ? state.selectedRowNumbers.indexOf(rowNumber) : -1;
         const slotNumber = slotIndex >= 0 ? slotIndex + 1 : null;
-        const slotDisplay = slotNumber ? `Slot ${slotNumber}` : '-';
-        const slotStyle = slotNumber ? 
-            'background: var(--accent-primary); color: white; padding: 0.25rem 0.5rem; border-radius: 4px; font-weight: 600; font-size: 0.85rem;' :
-            'color: var(--text-muted);';
         
-        // Update slot cell (second column)
-        const slotCell = row.querySelector('td:nth-child(2)');
+        // Update slot cell (use class selector for correct column)
+        const slotCell = row.querySelector('td.col-slot');
         if (slotCell) {
-            slotCell.innerHTML = `<span style="${slotStyle}">${slotDisplay}</span>`;
+            if (slotNumber) {
+                slotCell.innerHTML = `<span class="slot-badge assigned">Slot ${slotNumber}</span>`;
+            } else {
+                slotCell.innerHTML = `<span class="slot-badge empty">-</span>`;
+            }
         }
         
         // Update row selection styling
         if (isSelected) {
             row.classList.add('selected');
-            row.style.background = 'rgba(var(--accent-primary-rgb), 0.1)';
-            row.style.borderLeft = '4px solid var(--accent-primary)';
         } else {
             row.classList.remove('selected');
-            row.style.background = 'transparent';
-            row.style.borderLeft = 'none';
         }
         
         // Update checkbox state
@@ -3588,22 +4543,34 @@ function updateReviewProgress() {
     const reviewCount = reviewKeys.filter(key => state.humanReviews && state.humanReviews[key]).length;
     const selectedCount = selectedRowNumbers.length;
     
+    console.log(`📊 updateReviewProgress: ${reviewCount}/${selectedCount} reviews, keys:`, reviewKeys);
+    console.log(`📊 humanReviews keys:`, Object.keys(state.humanReviews || {}));
+    
     if (elements.reviewProgressText) {
         elements.reviewProgressText.textContent = `${reviewCount} / ${selectedCount} completed`;
         elements.reviewProgressText.style.color = reviewCount === selectedCount ? 'var(--success)' : 'var(--text-primary)';
     }
     
     // Enable reveal button only when all selected reviews are complete
+    const allComplete = reviewCount >= selectedCount && selectedCount > 0;
+    
     if (elements.revealLLMBtn) {
-        const allComplete = reviewCount >= selectedCount && selectedCount > 0;
         elements.revealLLMBtn.disabled = !allComplete || state.llmRevealed;
+        elements.revealLLMBtn.style.opacity = (!allComplete || state.llmRevealed) ? '0.5' : '1';
         
         if (state.llmRevealed) {
             elements.revealLLMBtn.textContent = '✅ LLM Judgments Revealed';
             elements.revealLLMBtn.disabled = true;
         } else if (allComplete) {
             elements.revealLLMBtn.textContent = '👁️ Reveal LLM Judgments';
+            console.log('✅ All reviews complete! Reveal button enabled.');
         }
+    }
+    
+    // Also enable save button when all reviews complete (not just after reveal)
+    if (allComplete && selectedCount === 4 && elements.saveDriveBtn) {
+        // Keep save button ready but user still needs to reveal first
+        console.log('✅ All 4 reviews complete! Ready to reveal LLM judgments.');
     }
     
     // Update top instructions
@@ -3662,7 +4629,7 @@ function revealLLMJudgments() {
         section.style.display = 'block';
     });
     
-    // Lock all human review inputs
+    // Lock all human review inputs (legacy sections)
     document.querySelectorAll('.human-review-section').forEach(section => {
         // Disable all buttons
         section.querySelectorAll('button').forEach(btn => {
@@ -3681,6 +4648,15 @@ function revealLLMJudgments() {
         section.appendChild(lockIndicator);
     });
     
+    // Update slot cards to show "View" instead of "Edit" (still clickable to view LLM judgment)
+    document.querySelectorAll('.slot-compact-card').forEach(card => {
+        card.classList.add('revealed');
+        const btn = card.querySelector('.slot-open-btn');
+        if (btn) {
+            btn.textContent = '👁️ View';
+        }
+    });
+    
     // Enable save button
     elements.saveDriveBtn.disabled = false;
     elements.saveDriveBtn.style.opacity = '1';
@@ -3688,7 +4664,7 @@ function revealLLMJudgments() {
     // Update progress display
     updateReviewProgress();
     
-    showToast('LLM Judgments revealed! Reviews are now locked. You can save to Drive.', 'success');
+    showToast('👁️ LLM Judgments revealed! Click any slot to view details. Reviews are locked.', 'success');
 }
 
 async function displayBreakingResults() {
@@ -3727,15 +4703,59 @@ async function displayBreakingResults() {
 
 function createResultCard(result, slotIndex, rowNumber) {
     const card = document.createElement('div');
-    card.className = 'expandable-card';
+    card.className = 'slot-compact-card';
     card.dataset.huntId = result.hunt_id;
     card.dataset.slotIndex = slotIndex || 0;
-    card.dataset.rowNumber = rowNumber !== undefined ? rowNumber : null; // Store row number for unique identification
+    card.dataset.rowNumber = rowNumber !== undefined ? rowNumber : null;
     
     const shortModel = result.model.split('/').pop();
     const score = result.judge_score ?? 0;
-    const isFailed = score === 0;  // isFailed means model BROKE (which is success in our case!)
-    const scoreEmoji = isFailed ? '🟢' : '🔴';  // Green = BREAK (good), Red = PASS (bad)
+    const isFailed = score === 0;
+    const slotNum = slotIndex !== undefined ? slotIndex + 1 : result.hunt_id;
+    
+    // Check if this slot has been reviewed
+    const huntId = result.hunt_id;
+    const isReviewed = state.humanReviews && state.humanReviews[huntId] && state.humanReviews[huntId].submitted;
+    
+    if (isReviewed) {
+        card.classList.add('reviewed');
+    }
+    
+    card.innerHTML = `
+        <div class="slot-compact-badge">Slot ${slotNum}</div>
+        <div class="slot-compact-info">
+            <div class="slot-compact-model">${shortModel}</div>
+            <div class="slot-compact-status ${isReviewed ? 'reviewed' : ''}">
+                ${isReviewed ? '✅ Review Submitted' : `${isFailed ? '🟢 BREAK' : '🔴 PASS'} - Click to Review`}
+            </div>
+        </div>
+        <div class="slot-compact-action">
+            <button class="slot-open-btn">
+                ${isReviewed ? '📝 Edit' : '⚖️ Grade'}
+            </button>
+        </div>
+    `;
+    
+    // Click handler - open grading slide-out
+    card.addEventListener('click', () => {
+        openGradingSlideout(result, slotIndex, rowNumber);
+    });
+    
+    return card;
+}
+
+// Legacy createResultCard function for full expandable card (keeping for reference)
+function createResultCardFull(result, slotIndex, rowNumber) {
+    const card = document.createElement('div');
+    card.className = 'expandable-card';
+    card.dataset.huntId = result.hunt_id;
+    card.dataset.slotIndex = slotIndex || 0;
+    card.dataset.rowNumber = rowNumber !== undefined ? rowNumber : null;
+    
+    const shortModel = result.model.split('/').pop();
+    const score = result.judge_score ?? 0;
+    const isFailed = score === 0;
+    const scoreEmoji = isFailed ? '🟢' : '🔴';
     const scoreClass = isFailed ? 'score-0' : 'score-1';
     const responseText = result.response || 'No response available';
     const slotNum = slotIndex !== undefined ? slotIndex + 1 : result.hunt_id;
@@ -4330,14 +5350,15 @@ function clearPreviousResults() {
     state.selectedRowNumbers = [];  // Reset selection
     state.selectionConfirmed = false;  // FIX 2: Reset selection lock
     state.llmRevealed = false;  // Reset reveal state
-    state.accumulatedHuntOffset = 0;  // Reset hunt offset
-    state.currentRunStartOffset = 0;  // Reset run offset
+    // NOTE: totalHuntsCount is the single source of truth, no separate offset to reset
+    state.currentRunStartOffset = 0;  // Reset run offset (will be set correctly in initProgressUI)
     state.originalNotebookJson = null;  // Reset original notebook
     state.blindJudging = {
         queue: [],
         currentResult: null,
         humanJudgments: {}
     };
+    state.huntResponseData = {};  // Reset response data for slide-out panel
     
     // Reset validation states (prevents carrying over from previous task)
     state.referenceValidated = false;  // Must re-validate new notebook
@@ -4352,6 +5373,16 @@ function clearPreviousResults() {
         judge: false
     };
     state.modelMismatchWarning = false;  // Reset warning flag
+    
+    // Hide model locked indicator (will be shown again if new notebook has model in metadata)
+    hideModelLockedIndicator();
+    
+    // Refresh model options to remove disabled state
+    setTimeout(() => {
+        if (elements.modelSelect && elements.providerSelect) {
+            updateModelOptions();
+        }
+    }, 100);
     
     // FIX 4: Re-enable model/provider selects when clearing (e.g., on model change before hunt)
     if (elements.modelSelect) {
@@ -4567,6 +5598,73 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+/**
+ * Convert HTML content from contentEditable to plain text while preserving line breaks.
+ * Browsers insert <br>, <div>, or <p> tags when user presses Enter.
+ * This function converts those back to \n for proper notebook formatting.
+ */
+function htmlToPlainText(element) {
+    if (!element) return '';
+    
+    // Clone the element to avoid modifying the original
+    const clone = element.cloneNode(true);
+    
+    // Replace <br> tags with newline markers
+    clone.querySelectorAll('br').forEach(br => {
+        br.replaceWith('\n');
+    });
+    
+    // Replace block elements (div, p, li) with newline + content
+    // These elements create new lines in contentEditable
+    clone.querySelectorAll('div, p').forEach(block => {
+        // Add newline before block content (unless it's the first element)
+        const text = block.textContent || '';
+        if (block.previousSibling) {
+            block.replaceWith('\n' + text);
+        } else {
+            block.replaceWith(text);
+        }
+    });
+    
+    // Handle list items
+    clone.querySelectorAll('li').forEach(li => {
+        const text = li.textContent || '';
+        li.replaceWith('\n• ' + text);
+    });
+    
+    // Get the text content and clean up
+    let text = clone.textContent || '';
+    
+    // Clean up multiple consecutive newlines (but keep double newlines for paragraphs)
+    text = text.replace(/\n{3,}/g, '\n\n');
+    
+    // Trim leading/trailing whitespace but preserve internal structure
+    text = text.trim();
+    
+    return text;
+}
+
+// ============== Connection Warm-up ==============
+
+/**
+ * Warm up API connections in background for faster hunt execution.
+ * Called automatically when notebook is loaded.
+ */
+async function warmupConnections() {
+    try {
+        const response = await fetch('/api/warmup-connections', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        if (response.ok) {
+            console.log('🔥 Connection warm-up initiated');
+        }
+    } catch (error) {
+        // Silent fail - warm-up is optional optimization
+        console.log('Connection warm-up skipped:', error.message);
+    }
 }
 
 function showToast(message, type = 'info') {
@@ -4826,11 +5924,56 @@ function initEventListeners() {
                 elements.modelSelect.value = previousModel;
                 return;
             }
+            
             // Full clear when model changes
             clearPreviousResults();
-            showToast('Model changed. Previous results cleared.', 'info');
-            // Validate model match with metadata
-            validateModelMatch();
+            
+            // IMMEDIATE CHECK: Does selected model match metadata?
+            const selectedModel = elements.modelSelect.value || '';
+            const metadataModel = state.metadataModel || '';
+            
+            if (metadataModel) {
+                // Get model keys for comparison
+                const getKey = (s) => {
+                    const l = (s || '').toLowerCase();
+                    if (l.includes('nemotron')) return 'nemotron';
+                    if (l.includes('qwen')) return 'qwen';
+                    if (l.includes('llama')) return 'llama';
+                    if (l.includes('deepseek')) return 'deepseek';
+                    if (l.includes('mistral')) return 'mistral';
+                    return l.replace(/[^a-z0-9]/g, '');
+                };
+                
+                const selectedKey = getKey(selectedModel);
+                const metadataKey = getKey(metadataModel);
+                
+                if (selectedKey !== metadataKey) {
+                    // MISMATCH - Disable button immediately
+                    if (elements.startHuntBtn) {
+                        elements.startHuntBtn.disabled = true;
+                        elements.startHuntBtn.style.opacity = '0.5';
+                        elements.startHuntBtn.style.cursor = 'not-allowed';
+                        elements.startHuntBtn.title = `Model mismatch! Metadata requires: ${metadataModel}`;
+                    }
+                    showToast(`⛔ Wrong model! Metadata requires: ${metadataModel}`, 'error');
+                    state.modelMismatchWarning = true;
+                } else {
+                    // Match - restore button (but other validations may still apply)
+                    if (elements.startHuntBtn) {
+                        elements.startHuntBtn.style.opacity = '';
+                        elements.startHuntBtn.style.cursor = '';
+                        // Only enable if reference was validated
+                        if (state.referenceValidated && state.modelRefValid) {
+                            elements.startHuntBtn.disabled = false;
+                            elements.startHuntBtn.title = '';
+                        }
+                    }
+                    state.modelMismatchWarning = false;
+                    showToast('Model changed. Previous results cleared.', 'info');
+                }
+            } else {
+                showToast('Model changed. Previous results cleared.', 'info');
+            }
         });
     }
     
@@ -4870,6 +6013,131 @@ function initEventListeners() {
     // NEW: Selection and Reveal buttons
     elements.confirmSelectionBtn?.addEventListener('click', confirmSelection);
     elements.revealLLMBtn?.addEventListener('click', revealLLMJudgments);
+    
+    // Response slide-out panel events
+    elements.slideoutCloseBtn?.addEventListener('click', closeResponseSlideout);
+    elements.responseSlideoutBackdrop?.addEventListener('click', closeResponseSlideout);
+    
+    // Grading slide-out panel events
+    document.getElementById('gradingSlideoutCloseBtn')?.addEventListener('click', closeGradingSlideout);
+    document.getElementById('gradingSlideoutBackdrop')?.addEventListener('click', closeGradingSlideout);
+    
+    // Close slide-outs with Escape key
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            if (elements.responseSlideout?.classList.contains('open')) {
+                closeResponseSlideout();
+            }
+            if (document.getElementById('gradingSlideout')?.classList.contains('open')) {
+                closeGradingSlideout();
+            }
+        }
+    });
+    
+    // Initialize slideout resize functionality
+    initSlideoutResize();
+}
+
+// ============== Slideout Resize Functionality ==============
+
+function initSlideoutResize() {
+    // Response slideout resize
+    const responseSlideout = document.getElementById('responseSlideout');
+    const responseResizeHandle = document.getElementById('responseSlideoutResizeHandle');
+    if (responseSlideout && responseResizeHandle) {
+        setupSlideoutResize(responseSlideout, responseResizeHandle, 300, window.innerWidth * 0.95);
+    }
+    
+    // Grading slideout resize
+    const gradingSlideout = document.getElementById('gradingSlideout');
+    const gradingResizeHandle = document.getElementById('gradingSlideoutResizeHandle');
+    if (gradingSlideout && gradingResizeHandle) {
+        setupSlideoutResize(gradingSlideout, gradingResizeHandle, 400, window.innerWidth * 0.95);
+    }
+}
+
+function setupSlideoutResize(slideout, resizeHandle, minWidth, maxWidth) {
+    let isResizing = false;
+    let startX = 0;
+    let startWidth = 0;
+    
+    // Mouse events
+    resizeHandle.addEventListener('mousedown', startResize);
+    
+    // Touch events for mobile
+    resizeHandle.addEventListener('touchstart', startResize, { passive: false });
+    
+    function startResize(e) {
+        e.preventDefault();
+        isResizing = true;
+        
+        // Get starting position (handle both mouse and touch)
+        startX = e.type === 'touchstart' ? e.touches[0].clientX : e.clientX;
+        startWidth = slideout.offsetWidth;
+        
+        // Add resizing class to disable transitions
+        slideout.classList.add('resizing');
+        resizeHandle.classList.add('active');
+        
+        // Prevent text selection during resize
+        document.body.style.userSelect = 'none';
+        document.body.style.cursor = 'ew-resize';
+        
+        // Add move and end listeners
+        document.addEventListener('mousemove', doResize);
+        document.addEventListener('mouseup', stopResize);
+        document.addEventListener('touchmove', doResize, { passive: false });
+        document.addEventListener('touchend', stopResize);
+    }
+    
+    function doResize(e) {
+        if (!isResizing) return;
+        e.preventDefault();
+        
+        // Get current position (handle both mouse and touch)
+        const currentX = e.type === 'touchmove' ? e.touches[0].clientX : e.clientX;
+        
+        // Calculate new width (dragging left increases width since panel is on the right)
+        const deltaX = startX - currentX;
+        let newWidth = startWidth + deltaX;
+        
+        // Clamp to min/max
+        newWidth = Math.max(minWidth, Math.min(maxWidth, newWidth));
+        
+        // Apply new width
+        slideout.style.width = `${newWidth}px`;
+    }
+    
+    function stopResize() {
+        if (!isResizing) return;
+        isResizing = false;
+        
+        // Remove resizing class
+        slideout.classList.remove('resizing');
+        resizeHandle.classList.remove('active');
+        
+        // Restore body styles
+        document.body.style.userSelect = '';
+        document.body.style.cursor = '';
+        
+        // Remove listeners
+        document.removeEventListener('mousemove', doResize);
+        document.removeEventListener('mouseup', stopResize);
+        document.removeEventListener('touchmove', doResize);
+        document.removeEventListener('touchend', stopResize);
+        
+        // Save the width to localStorage for persistence
+        const slideoutId = slideout.id;
+        if (slideoutId) {
+            localStorage.setItem(`${slideoutId}Width`, slideout.style.width);
+        }
+    }
+    
+    // Restore saved width on page load
+    const savedWidth = localStorage.getItem(`${slideout.id}Width`);
+    if (savedWidth) {
+        slideout.style.width = savedWidth;
+    }
 }
 
 // ============== Metadata Sidebar Toggle ==============
@@ -5938,26 +7206,63 @@ function updateModelOptions(skipDefaultSelection = false) {
         defaultModelId = 'accounts/fireworks/models/qwen3-235b-a22b-thinking-2507';
     }
     
+    // Helper function to extract model key for comparison
+    const getModelKey = (modelStr) => {
+        const lower = (modelStr || '').toLowerCase();
+        if (lower.includes('nemotron')) return 'nemotron';
+        if (lower.includes('qwen')) return 'qwen';
+        if (lower.includes('llama')) return 'llama';
+        if (lower.includes('deepseek')) return 'deepseek';
+        if (lower.includes('mistral')) return 'mistral';
+        if (lower.includes('gpt')) return 'gpt';
+        if (lower.includes('claude')) return 'claude';
+        if (lower.includes('gemini')) return 'gemini';
+        return lower.replace(/[^a-z0-9]/g, '');
+    };
+    
+    // Check if metadata specifies a model (for disabling non-matching options)
+    const metadataModelKey = state.metadataModel ? getModelKey(state.metadataModel) : null;
+    
     // Add new options
     models.forEach(model => {
         const option = document.createElement('option');
         option.value = model.id;
         option.textContent = model.name;
+        
+        // Check if this model matches the metadata model
+        const modelKey = getModelKey(model.id);
+        const matchesMetadata = !metadataModelKey || modelKey === metadataModelKey;
+        
+        // DISABLE non-matching models if metadata specifies a model
+        if (metadataModelKey && !matchesMetadata) {
+            option.disabled = true;
+            option.textContent = `${model.name} 🔒`;
+            option.title = `Notebook requires ${state.metadataModel} model. This model is disabled.`;
+            option.style.color = 'var(--text-muted)';
+        }
+        
         // Only set default selection if skipDefaultSelection is false
         if (!skipDefaultSelection) {
             if (model.id === defaultModelId || (models.length > 0 && model.id.includes('qwen'))) {
-                option.selected = true;
+                // Only select if it matches metadata (or no metadata model)
+                if (matchesMetadata) {
+                    option.selected = true;
+                }
             }
         }
         elements.modelSelect.appendChild(option);
     });
     
-    // If no Qwen model was found and we're not skipping default, select first model
-    if (!skipDefaultSelection && elements.modelSelect.value !== defaultModelId && models.length > 0) {
-        // Check if default model exists in the list
-        const defaultExists = models.some(m => m.id === defaultModelId);
-        if (!defaultExists && models.length > 0) {
-            elements.modelSelect.value = models[0].id;
+    // If no Qwen model was found and we're not skipping default, select first ENABLED model
+    if (!skipDefaultSelection && models.length > 0) {
+        // Check if current selection is disabled
+        const currentOption = elements.modelSelect.querySelector(`option[value="${elements.modelSelect.value}"]`);
+        if (!currentOption || currentOption.disabled) {
+            // Select first enabled option
+            const firstEnabled = Array.from(elements.modelSelect.options).find(opt => !opt.disabled);
+            if (firstEnabled) {
+                elements.modelSelect.value = firstEnabled.value;
+            }
         }
     }
     
@@ -5966,7 +7271,14 @@ function updateModelOptions(skipDefaultSelection = false) {
         state.config.models = [elements.modelSelect.value];
     }
     
-    console.log(`Updated models for provider: ${provider}, selected: ${elements.modelSelect.value} (skipDefault: ${skipDefaultSelection})`);
+    // Log for debugging
+    if (metadataModelKey) {
+        console.log(`Updated models for provider: ${provider}, metadata model: ${state.metadataModel} (key: ${metadataModelKey})`);
+        console.log(`  Non-matching models are DISABLED`);
+    } else {
+        console.log(`Updated models for provider: ${provider}, no metadata model restriction`);
+    }
+    console.log(`  Selected: ${elements.modelSelect.value} (skipDefault: ${skipDefaultSelection})`);
 }
 
 // Restore session on page load

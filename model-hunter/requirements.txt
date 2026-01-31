@@ -1,6 +1,8 @@
 fastapi>=0.109.0
 uvicorn[standard]>=0.27.0
-httpx[http2]>=0.26.0
+httpx>=0.26.0
+h2>=4.1.0  # For HTTP/2 support (optional but recommended)
+orjson>=3.9.0  # Fast JSON parsing (3-10x faster than stdlib)
 openai>=1.10.0
 python-multipart>=0.0.6
 pydantic>=2.5.0

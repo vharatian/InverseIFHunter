@@ -452,6 +452,34 @@ class NotebookParser:
                 return match.group(1).lower()
         return "model"  # Default prefix
     
+    def extract_model_prefix(self, parsed: ParsedNotebook) -> str:
+        """
+        Extract model prefix from metadata or model slots.
+        
+        Priority:
+        1. Metadata 'Model' field (if present)
+        2. Model slot prefix (nemotron, qwen, etc.)
+        
+        Args:
+            parsed: ParsedNotebook instance
+            
+        Returns:
+            Model prefix string (lowercase)
+        """
+        import re
+        
+        # Check metadata first (has priority)
+        if parsed.metadata:
+            metadata_model = parsed.metadata.get('Model') or parsed.metadata.get('model')
+            if metadata_model:
+                # Clean the value (remove leading dashes, spaces)
+                metadata_model = re.sub(r'^[-:\s]+', '', str(metadata_model).strip()).strip()
+                if metadata_model:
+                    return metadata_model.lower()
+        
+        # Fallback to model slot prefix
+        return self.get_model_slot_prefix(parsed)
+    
     def get_next_slot_number(self, parsed: ParsedNotebook) -> int:
         """Get the next available slot number."""
         max_slot = 0

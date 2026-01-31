@@ -22,28 +22,17 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-# Concurrency limits per provider (tune based on API tier limits)
-# These are conservative defaults - increase if you have higher rate limits
+# Shared HTTP config
+from services.http_config import POOL_LIMITS, TIMEOUTS, is_http2_available
+
+# Concurrency limits per provider - OPTIMIZED FOR SPEED
+# Increased from conservative defaults for better throughput
+# Can still be overridden via environment variables if rate limiting occurs
 CONCURRENCY_LIMITS = {
-    "openrouter": int(os.getenv("OPENROUTER_CONCURRENCY", "6")),
-    "fireworks": int(os.getenv("FIREWORKS_CONCURRENCY", "4")),
-    "openai": int(os.getenv("OPENAI_CONCURRENCY", "8")),
-    "default": 4
-}
-
-# Connection pool settings
-POOL_LIMITS = httpx.Limits(
-    max_connections=20,
-    max_keepalive_connections=10,
-    keepalive_expiry=30.0
-)
-
-# Default timeout settings per provider
-TIMEOUTS = {
-    "openrouter": httpx.Timeout(180.0, connect=10.0),  # Qwen can be slow
-    "fireworks": httpx.Timeout(120.0, connect=10.0),
-    "openai": httpx.Timeout(60.0, connect=10.0),  # Judge calls are fast
-    "default": httpx.Timeout(120.0, connect=10.0)
+    "openrouter": int(os.getenv("OPENROUTER_CONCURRENCY", "10")),  # Was 6
+    "fireworks": int(os.getenv("FIREWORKS_CONCURRENCY", "8")),     # Was 4
+    "openai": int(os.getenv("OPENAI_CONCURRENCY", "12")),          # Was 8
+    "default": 6  # Was 4
 }
 
 
@@ -112,12 +101,15 @@ class RateLimiter:
         """
         if provider not in self._clients:
             timeout = TIMEOUTS.get(provider, TIMEOUTS["default"])
+            # Use shared HTTP/2 availability check
+            use_http2 = is_http2_available()
+            
             self._clients[provider] = httpx.AsyncClient(
                 limits=POOL_LIMITS,
                 timeout=timeout,
-                http2=True  # Enable HTTP/2 for better performance
+                http2=use_http2
             )
-            logger.info(f"Created pooled HTTP client for {provider}")
+            logger.info(f"Created pooled HTTP client for {provider} (HTTP/2: {use_http2})")
         return self._clients[provider]
     
     @asynccontextmanager

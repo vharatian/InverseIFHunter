@@ -6,10 +6,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Model Hunter - Red Team LLM Models</title>
     <meta name="description" content="Red-team LLM models with parallel hunts and automated judging">
-    <link
-        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
-        rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=7">
+    <!-- Modern Hunter Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Source+Sans+3:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css?v=16">
+    <!-- Marked.js for Markdown parsing -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 
 <body>
@@ -102,24 +103,45 @@
                             </div>
                         </div>
                         <div id="promptLengthWarning" class="prompt-length-warning hidden"></div>
-                        <div class="rich-text-editor" id="promptEditor">
-                            <div class="rich-text-toolbar">
-                                <button type="button" class="rich-text-btn" data-command="bold" title="Bold (Ctrl+B)">
-                                    <strong>B</strong>
-                                </button>
-                                <button type="button" class="rich-text-btn" data-command="italic" title="Italic (Ctrl+I)">
-                                    <em>I</em>
-                                </button>
-                                <div style="width: 1px; background: var(--border); margin: 0 0.25rem;"></div>
-                                <button type="button" class="rich-text-btn" data-command="insertUnorderedList" title="Bullet List">
-                                    • List
-                                </button>
-                                <button type="button" class="rich-text-btn" data-command="insertOrderedList" title="Numbered List">
-                                    1. List
-                                </button>
+                        
+                        <!-- Markdown Split Editor -->
+                        <div class="markdown-editor-container">
+                            <!-- Toolbar -->
+                            <div class="markdown-toolbar" data-target="promptMarkdown">
+                                <button type="button" class="md-btn" data-md="heading" title="Heading">H</button>
+                                <button type="button" class="md-btn" data-md="bold" title="Bold (**text**)"><strong>B</strong></button>
+                                <button type="button" class="md-btn" data-md="italic" title="Italic (*text*)"><em>I</em></button>
+                                <button type="button" class="md-btn" data-md="code" title="Code (`code`)">&lt;&gt;</button>
+                                <div class="md-separator"></div>
+                                <button type="button" class="md-btn" data-md="link" title="Link [text](url)">🔗</button>
+                                <button type="button" class="md-btn" data-md="quote" title="Blockquote (> text)">❝</button>
+                                <div class="md-separator"></div>
+                                <button type="button" class="md-btn" data-md="ul" title="Bullet list">•</button>
+                                <button type="button" class="md-btn" data-md="ol" title="Numbered list">1.</button>
+                                <button type="button" class="md-btn" data-md="hr" title="Horizontal rule">—</button>
+                                <div class="md-separator"></div>
+                                <button type="button" class="md-btn" data-md="math" title="LaTeX math ($formula$)">Ψ</button>
+                                <button type="button" class="md-btn" data-md="codeblock" title="Code block">{ }</button>
+                                <label class="markdown-toggle">
+                                    <span>Preview</span>
+                                    <input type="checkbox" class="preview-toggle" data-preview="promptPreviewPane" checked>
+                                </label>
                             </div>
-                            <div class="rich-text-content" contenteditable="true" id="promptPreview" data-placeholder="Enter prompt here..."></div>
+                            
+                            <!-- Split View -->
+                            <div class="markdown-split-view" data-editor="prompt">
+                                <div class="markdown-editor-pane">
+                                    <div class="pane-header">📝 Edit (Markdown supported)</div>
+                                    <textarea id="promptMarkdown" class="markdown-textarea" placeholder="Enter prompt here...&#10;&#10;Markdown supported:&#10;**bold** *italic* `code`&#10;- bullet list&#10;1. numbered list"></textarea>
+                                </div>
+                                <div class="resize-handle" title="Drag to resize"></div>
+                                <div class="markdown-preview-pane" id="promptPreviewPane">
+                                    <div class="pane-header">👁️ Live Preview</div>
+                                    <div id="promptPreview" class="markdown-preview"></div>
+                                </div>
+                            </div>
                         </div>
+                        
                         <div class="save-section">
                             <button class="btn btn-primary save-btn-individual" id="savePromptBtn">
                                 💾 Save Prompt
@@ -130,32 +152,58 @@
                     <!-- Response Tab -->
                     <div id="previewReference" class="preview-panel">
                         <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Expected Response</label>
-                        <div class="rich-text-editor" id="responseEditor">
-                            <div class="rich-text-toolbar">
-                                <button type="button" class="rich-text-btn" data-command="bold" title="Bold (Ctrl+B)">
-                                    <strong>B</strong>
-                                </button>
-                                <button type="button" class="rich-text-btn" data-command="italic" title="Italic (Ctrl+I)">
-                                    <em>I</em>
-                                </button>
-                                <div style="width: 1px; background: var(--border); margin: 0 0.25rem;"></div>
-                                <button type="button" class="rich-text-btn" data-command="insertUnorderedList" title="Bullet List">
-                                    • List
-                                </button>
-                                <button type="button" class="rich-text-btn" data-command="insertOrderedList" title="Numbered List">
-                                    1. List
-                                </button>
+                        
+                        <!-- Markdown Split Editor -->
+                        <div class="markdown-editor-container">
+                            <!-- Toolbar -->
+                            <div class="markdown-toolbar" data-target="responseMarkdown">
+                                <button type="button" class="md-btn" data-md="heading" title="Heading">H</button>
+                                <button type="button" class="md-btn" data-md="bold" title="Bold (**text**)"><strong>B</strong></button>
+                                <button type="button" class="md-btn" data-md="italic" title="Italic (*text*)"><em>I</em></button>
+                                <button type="button" class="md-btn" data-md="code" title="Code (`code`)">&lt;&gt;</button>
+                                <div class="md-separator"></div>
+                                <button type="button" class="md-btn" data-md="link" title="Link [text](url)">🔗</button>
+                                <button type="button" class="md-btn" data-md="quote" title="Blockquote (> text)">❝</button>
+                                <div class="md-separator"></div>
+                                <button type="button" class="md-btn" data-md="ul" title="Bullet list">•</button>
+                                <button type="button" class="md-btn" data-md="ol" title="Numbered list">1.</button>
+                                <button type="button" class="md-btn" data-md="hr" title="Horizontal rule">—</button>
+                                <div class="md-separator"></div>
+                                <button type="button" class="md-btn" data-md="math" title="LaTeX math ($formula$)">Ψ</button>
+                                <button type="button" class="md-btn" data-md="codeblock" title="Code block">{ }</button>
+                                <label class="markdown-toggle">
+                                    <span>Preview</span>
+                                    <input type="checkbox" class="preview-toggle" data-preview="responsePreviewPane" checked>
+                                </label>
                             </div>
-                            <div class="rich-text-content" contenteditable="true" id="referencePreview" data-placeholder="Enter expected response here..."></div>
+                            
+                            <!-- Split View -->
+                            <div class="markdown-split-view" data-editor="response">
+                                <div class="markdown-editor-pane">
+                                    <div class="pane-header">📝 Edit (Markdown supported)</div>
+                                    <textarea id="responseMarkdown" class="markdown-textarea" placeholder="Enter expected response here..."></textarea>
+                                </div>
+                                <div class="resize-handle" title="Drag to resize"></div>
+                                <div class="markdown-preview-pane" id="responsePreviewPane">
+                                    <div class="pane-header">👁️ Live Preview</div>
+                                    <div id="referencePreview" class="markdown-preview"></div>
+                                </div>
+                            </div>
                         </div>
 
                         <div class="judge-reference-section">
-                            <button class="btn btn-primary save-btn-individual" id="saveReponseBtn" style="width: 100%;"
-                                title="Saves edited response to your Colab notebook">
-                                💾 Save Response
-                            </button>
-                            <p style="margin-top: 0.75rem; font-size: 0.85rem; color: var(--text-muted);">
-                                💾 <strong>Save Response</strong>: Saves your edits to Colab notebook.
+                            <div style="display: flex; gap: 0.75rem; margin-bottom: 0.75rem;">
+                                <button class="btn btn-primary save-btn-individual" id="saveReponseBtn" style="flex: 1;"
+                                    title="Saves edited response to your Colab notebook">
+                                    💾 Save Response
+                                </button>
+                                <button class="btn btn-secondary" id="judgeBeforeHuntBtn" style="flex: 1;"
+                                    title="Judge the reference response before starting hunt">
+                                    ⚖️ Judge Reference
+                                </button>
+                            </div>
+                            <p style="font-size: 0.85rem; color: var(--text-muted);">
+                                💾 <strong>Save</strong>: Saves edits to notebook. ⚖️ <strong>Judge</strong>: Validates response against criteria.
                             </p>
                         </div>
                         
@@ -195,24 +243,44 @@
                     <!-- Judge System Prompt Tab -->
                     <div id="previewJudge" class="preview-panel hidden">
                         <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Judge System Prompt</label>
-                        <div class="rich-text-editor" id="judgeEditor">
-                            <div class="rich-text-toolbar">
-                                <button type="button" class="rich-text-btn" data-command="bold" title="Bold (Ctrl+B)">
-                                    <strong>B</strong>
-                                </button>
-                                <button type="button" class="rich-text-btn" data-command="italic" title="Italic (Ctrl+I)">
-                                    <em>I</em>
-                                </button>
-                                <div style="width: 1px; background: var(--border); margin: 0 0.25rem;"></div>
-                                <button type="button" class="rich-text-btn" data-command="insertUnorderedList" title="Bullet List">
-                                    • List
-                                </button>
-                                <button type="button" class="rich-text-btn" data-command="insertOrderedList" title="Numbered List">
-                                    1. List
-                                </button>
+                        
+                        <!-- Markdown Split Editor -->
+                        <div class="markdown-editor-container">
+                            <!-- Toolbar -->
+                            <div class="markdown-toolbar" data-target="judgeMarkdown">
+                                <button type="button" class="md-btn" data-md="heading" title="Heading">H</button>
+                                <button type="button" class="md-btn" data-md="bold" title="Bold (**text**)"><strong>B</strong></button>
+                                <button type="button" class="md-btn" data-md="italic" title="Italic (*text*)"><em>I</em></button>
+                                <button type="button" class="md-btn" data-md="code" title="Code (`code`)">&lt;&gt;</button>
+                                <div class="md-separator"></div>
+                                <button type="button" class="md-btn" data-md="link" title="Link [text](url)">🔗</button>
+                                <button type="button" class="md-btn" data-md="quote" title="Blockquote (> text)">❝</button>
+                                <div class="md-separator"></div>
+                                <button type="button" class="md-btn" data-md="ul" title="Bullet list">•</button>
+                                <button type="button" class="md-btn" data-md="ol" title="Numbered list">1.</button>
+                                <button type="button" class="md-btn" data-md="hr" title="Horizontal rule">—</button>
+                                <div class="md-separator"></div>
+                                <button type="button" class="md-btn" data-md="codeblock" title="Code block">{ }</button>
+                                <label class="markdown-toggle">
+                                    <span>Preview</span>
+                                    <input type="checkbox" class="preview-toggle" data-preview="judgePreviewPane" checked>
+                                </label>
                             </div>
-                            <div class="rich-text-content" contenteditable="true" id="judgePreview" data-placeholder="Enter judge system prompt here..."></div>
+                            
+                            <!-- Split View -->
+                            <div class="markdown-split-view" data-editor="judge">
+                                <div class="markdown-editor-pane">
+                                    <div class="pane-header">📝 Edit (Markdown supported)</div>
+                                    <textarea id="judgeMarkdown" class="markdown-textarea" placeholder="Enter judge system prompt here..."></textarea>
+                                </div>
+                                <div class="resize-handle" title="Drag to resize"></div>
+                                <div class="markdown-preview-pane" id="judgePreviewPane">
+                                    <div class="pane-header">👁️ Live Preview</div>
+                                    <div id="judgePreview" class="markdown-preview"></div>
+                                </div>
+                            </div>
                         </div>
+                        
                         <div class="save-section">
                             <button class="btn btn-primary save-btn-individual" id="saveJudgeBtn">
                                 💾 Save Judge Prompt
@@ -282,6 +350,9 @@
                             <option value="nvidia/nemotron-3-nano-30b-a3b">Nemotron-3-Nano (Fast)</option>
                             <option value="qwen/qwen3-235b-a22b-thinking-2507">Qwen3-235B (Thinking)</option>
                         </select>
+                        <small id="modelLockedIndicator" class="model-locked-hint hidden" style="display: none; color: var(--warning); font-size: 0.8rem; margin-top: 0.25rem;">
+                            🔒 Locked to <strong id="modelLockedName">-</strong> (from notebook metadata)
+                        </small>
                     </div>
                     
                     <!-- Judge Model -->
@@ -295,11 +366,7 @@
                 </div>
 
                 <div class="hunt-action-section">
-                    <div style="display: flex; gap: 0.75rem; align-items: center;">
-                        <button class="btn btn-secondary btn-lg" id="judgeBeforeHuntBtn" 
-                            title="Judge the reference response before starting hunt">
-                            ⚖️ Judge Reference
-                        </button>
+                    <div style="display: flex; gap: 0.75rem; align-items: center; justify-content: center;">
                         <button class="btn btn-primary btn-lg" id="startHuntBtn">
                             🚀 Start Hunt
                         </button>
@@ -370,23 +437,17 @@
                     </h2>
                 </div>
 
-                <div style="padding: 1rem; background: var(--bg-tertiary); border-radius: 8px; margin-bottom: 1rem;">
-                    <p style="margin: 0; color: var(--text-secondary);">
-                        <strong>Instructions:</strong> Select exactly <strong>4 responses</strong> for human review.<br>
-                        <strong>Valid combinations:</strong> Either <strong>4 breaking</strong> OR <strong>3 breaking + 1 passing</strong>. No other combinations are allowed.
-                    </p>
+                <div class="selection-instructions">
+                    <p><strong>Instructions:</strong> Select exactly <strong>4 responses</strong> for human review.</p>
+                    <p><strong>Valid:</strong> <span class="valid-combo">4 breaking</span> OR <span class="valid-combo">3 breaking + 1 passing</span></p>
                 </div>
 
-                <div id="selectionGrid"
-                    style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem;">
-                    <!-- Selection cards added dynamically -->
+                <div id="selectionGrid" class="selection-table-container">
+                    <!-- Selection table added dynamically -->
                 </div>
 
-                <div
-                    style="margin-top: 1.5rem; text-align: center; padding-top: 1rem; border-top: 1px solid var(--border);">
-                    <div id="selectionCount" style="margin-bottom: 0.75rem; font-weight: 600;">
-                        Selected: 0 / 4
-                    </div>
+                <div class="selection-footer">
+                    <div id="selectionCount" class="selection-count">Selected: 0 / 4</div>
                     <button class="btn btn-primary btn-lg" id="confirmSelectionBtn" disabled>
                         ✅ Confirm Selection & Start Review
                     </button>
@@ -544,10 +605,58 @@
         </div>
     </div>
 
+    <!-- Response Slide-out Panel (for viewing responses during hunt) -->
+    <div class="response-slideout-backdrop" id="responseSlideoutBackdrop"></div>
+    <div class="response-slideout" id="responseSlideout">
+        <div class="slideout-resize-handle" id="responseSlideoutResizeHandle" title="Drag to resize"></div>
+        <div class="response-slideout-header">
+            <div class="response-slideout-title">
+                <span>📄</span>
+                <span id="slideoutTitle">Hunt #1 Response</span>
+            </div>
+            <button class="response-slideout-close" id="slideoutCloseBtn" title="Close">&times;</button>
+        </div>
+        <div class="response-slideout-meta" id="slideoutMeta">
+            <div class="response-slideout-meta-item">
+                <span class="response-slideout-meta-label">Model:</span>
+                <span class="response-slideout-meta-value" id="slideoutModel">-</span>
+            </div>
+            <div class="response-slideout-meta-item">
+                <span class="response-slideout-meta-label">Status:</span>
+                <span class="response-slideout-meta-value" id="slideoutStatus">-</span>
+            </div>
+            <div class="response-slideout-meta-item">
+                <span class="response-slideout-meta-label">Score:</span>
+                <span class="response-slideout-meta-value" id="slideoutScore">-</span>
+            </div>
+        </div>
+        <div class="response-slideout-content">
+            <div class="response-slideout-text" id="slideoutResponseText">
+                Loading response...
+            </div>
+        </div>
+    </div>
+
+    <!-- Grading Slide-out Panel (for human review of slots) -->
+    <div class="grading-slideout-backdrop" id="gradingSlideoutBackdrop"></div>
+    <div class="grading-slideout" id="gradingSlideout">
+        <div class="slideout-resize-handle" id="gradingSlideoutResizeHandle" title="Drag to resize"></div>
+        <div class="grading-slideout-header">
+            <div class="grading-slideout-title">
+                <span class="grading-slot-badge" id="gradingSlotBadge">Slot 1</span>
+                <span id="gradingSlotModel">Model</span>
+            </div>
+            <button class="grading-slideout-close" id="gradingSlideoutCloseBtn" title="Close">&times;</button>
+        </div>
+        <div class="grading-slideout-body" id="gradingSlideoutBody">
+            <!-- Content populated dynamically -->
+        </div>
+    </div>
+
     <!-- Toast Container -->
     <div id="toastContainer" style="position: fixed; bottom: 1rem; right: 1rem; z-index: 1000;"></div>
 
-    <script src="/static/app.js?v=200"></script>
+    <script src="/static/app.js?v=219"></script>
 </body>
 
 </html>

@@ -144,11 +144,20 @@ class HuntEngine:
         if not session:
             raise ValueError(f"Session {session_id} not found")
         
-        # RESET session counters for new run
+        # RESET session counters for new run (but keep all_results!)
         session.completed_hunts = 0
         session.breaks_found = 0
-        session.results = []
+        session.results = []  # Reset current run results only
         session.status = HuntStatus.RUNNING
+        
+        # Get the starting hunt ID from config (sent by frontend from its localStorage count)
+        # This ensures backend and frontend use the SAME hunt_id numbering
+        run_start_id = session.config.hunt_offset
+        
+        # Update total_hunts to match config (in case it wasn't synced)
+        session.total_hunts = session.config.parallel_workers
+        
+        logger.info(f"Session {session_id}: Starting hunt run with offset {run_start_id}, workers={session.config.parallel_workers}, total_hunts={session.total_hunts}")
         
         # Telemetry: Log hunt start
         if _telemetry_enabled:
@@ -169,14 +178,16 @@ class HuntEngine:
                 data={
                     "session_id": session_id,
                     "total_hunts": session.total_hunts,
-                    "target_breaks": session.config.target_breaks
+                    "target_breaks": session.config.target_breaks,
+                    "run_start_id": run_start_id  # Tell frontend the starting ID
                 }
             ))
         
-        # Create hunt tasks
+        # Create hunt tasks with GLOBALLY UNIQUE hunt IDs
         tasks = []
         for i in range(session.config.parallel_workers):
-            hunt_id = i + 1
+            # Use globally unique hunt_id: run_start_id + i + 1 (1-based)
+            hunt_id = run_start_id + i + 1
             model = session.config.models[i % len(session.config.models)]
             
             # Initialize result placeholder
@@ -216,6 +227,16 @@ class HuntEngine:
         if session.status != HuntStatus.FAILED:
             session.status = HuntStatus.COMPLETED
         
+        # Accumulate results into all_results (for history across runs)
+        for result in session.results:
+            if result.status == HuntStatus.COMPLETED:
+                session.all_results.append(result)
+        
+        # Update accumulated hunt count to match what frontend expects
+        # (hunt_offset + parallel_workers = new total)
+        session.accumulated_hunt_count = session.config.hunt_offset + session.config.parallel_workers
+        logger.info(f"Session {session_id}: Accumulated {len(session.all_results)} total results, total hunts now {session.accumulated_hunt_count}")
+        
         # Telemetry: Log hunt completion
         if _telemetry_enabled:
             try:
@@ -228,7 +249,7 @@ class HuntEngine:
             except Exception:
                 pass
         
-        # Emit complete event
+        # Emit complete event with all accumulated results
         if progress_callback:
             await progress_callback(HuntEvent(
                 event_type="complete",
@@ -236,7 +257,8 @@ class HuntEngine:
                     "session_id": session_id,
                     "completed_hunts": session.completed_hunts,
                     "breaks_found": session.breaks_found,
-                    "success": session.breaks_found >= session.config.target_breaks
+                    "success": session.breaks_found >= session.config.target_breaks,
+                    "total_accumulated": len(session.all_results)  # Tell frontend total count
                 }
             ))
         
@@ -300,6 +322,14 @@ class HuntEngine:
             # Use rate limiter if available
             rate_limiter = get_rate_limiter() if _rate_limiter_enabled else None
             
+            # Emit progress: calling model
+            if progress_callback:
+                await progress_callback(HuntEvent(
+                    event_type="hunt_progress",
+                    hunt_id=result.hunt_id,
+                    data={"step": "calling_model", "message": f"🔄 Calling {provider}..."}
+                ))
+            
             if provider == 'fireworks':
                 from services.fireworks_client import get_fireworks_client
                 fireworks = get_fireworks_client()
@@ -338,6 +368,14 @@ class HuntEngine:
                         reasoning_budget_percent=session.config.reasoning_budget_percent
                     )
             
+            # Emit progress: received response
+            if progress_callback and not error:
+                await progress_callback(HuntEvent(
+                    event_type="hunt_progress",
+                    hunt_id=result.hunt_id,
+                    data={"step": "received_response", "message": "📥 Response received"}
+                ))
+            
             if error:
                 # Model failed to respond after retries = FAILED (not breaking)
                 # Don't count as a break - just an error
@@ -359,6 +397,14 @@ class HuntEngine:
             else:
                 result.response = response
                 result.reasoning_trace = reasoning
+                
+                # Emit progress: starting judgment
+                if progress_callback:
+                    await progress_callback(HuntEvent(
+                        event_type="hunt_progress",
+                        hunt_id=result.hunt_id,
+                        data={"step": "judging", "message": "⚖️ Judging response..."}
+                    ))
                 
                 # Step 2: Judge the response (only if we have actual content)
                 await self._judge_response(session, result)
@@ -424,6 +470,7 @@ class HuntEngine:
                     "error": result.error,
                     "response": result.response,  # Include response for blind judging
                     "reasoning_trace": result.reasoning_trace,  # Include reasoning
+                    "model": result.model,  # Include model for display
                     "completed": completed,
                     "total": total,
                     "breaks": breaks
@@ -506,11 +553,21 @@ class HuntEngine:
             result.status = HuntStatus.FAILED
     
     def get_breaking_results(self, session_id: str) -> List[HuntResult]:
-        """Get all breaking (score 0) results from a session."""
+        """Get all breaking (score 0) results from a session (across all runs)."""
         session = self.sessions.get(session_id)
         if not session:
             return []
-        return [r for r in session.results if r.is_breaking]
+        
+        # Check all_results (accumulated across runs) + current run's results
+        all_results = self._get_all_accumulated_results(session)
+        return [r for r in all_results if r.is_breaking]
+    
+    def _get_all_accumulated_results(self, session: HuntSession) -> List[HuntResult]:
+        """Helper: Get all accumulated results including current run."""
+        all_accumulated = list(session.all_results) if session.all_results else []
+        existing_ids = {r.hunt_id for r in all_accumulated}
+        current_completed = [r for r in session.results if r.status == HuntStatus.COMPLETED and r.hunt_id not in existing_ids]
+        return all_accumulated + current_completed
     
     def get_selected_for_review(self, session_id: str, target_count: int = 4) -> List[HuntResult]:
         """
@@ -525,8 +582,11 @@ class HuntEngine:
         if not session:
             return []
         
+        # Use all accumulated results across all runs
+        all_results = self._get_all_accumulated_results(session)
+        
         # Separate completed results by score
-        completed = [r for r in session.results if r.status == HuntStatus.COMPLETED and r.judge_score is not None]
+        completed = [r for r in all_results if r.status == HuntStatus.COMPLETED and r.judge_score is not None]
         failed = [r for r in completed if r.judge_score == 0]  # Score 0 = failed/breaking
         passed = [r for r in completed if r.judge_score >= 1]  # Score 1+ = passed
         
@@ -543,10 +603,18 @@ class HuntEngine:
         return selected
     
     def export_results(self, session_id: str) -> List[Dict[str, Any]]:
-        """Export results in format suitable for notebook export."""
+        """Export ALL accumulated results in format suitable for notebook export."""
         session = self.sessions.get(session_id)
         if not session:
             return []
+        
+        # Use all_results (accumulated across all runs)
+        # Also include current run's completed results that haven't been accumulated yet
+        all_accumulated = list(session.all_results) if session.all_results else []
+        existing_ids = {r.hunt_id for r in all_accumulated}
+        
+        current_completed = [r for r in session.results if r.status == HuntStatus.COMPLETED and r.hunt_id not in existing_ids]
+        all_results = all_accumulated + current_completed
         
         return [
             {
@@ -561,8 +629,7 @@ class HuntEngine:
                 "score": r.judge_score,  # Keep score for backward compatibility
                 "is_breaking": r.is_breaking
             }
-            for r in session.results
-            if r.status == HuntStatus.COMPLETED
+            for r in all_results
         ]
 
 
