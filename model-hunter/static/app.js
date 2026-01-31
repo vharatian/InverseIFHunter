@@ -11,7 +11,7 @@
 
 // ============== Production Mode ==============
 // Set to false to enable console logging for debugging
-const DEBUG_MODE = false;
+const DEBUG_MODE = true;  // TEMP: Enable for debugging
 
 // Disable console logging in production
 if (!DEBUG_MODE) {
@@ -2096,6 +2096,11 @@ function validateModelReferenceJSON(responseReference) {
 // Only parses the JSON array between [ and ], ignoring any text outside
 // STRICT MODE: No fallback - throws error if parsing fails
 function parseCriteria(responseReference) {
+    console.log('=== parseCriteria DEBUG ===');
+    console.log('Input type:', typeof responseReference);
+    console.log('Input length:', responseReference ? responseReference.length : 0);
+    console.log('Input preview (first 500 chars):', responseReference ? responseReference.substring(0, 500) : 'NULL/UNDEFINED');
+    
     if (!responseReference || !responseReference.trim()) {
         const error = 'Empty response_reference - cannot parse criteria';
         console.error(error);
@@ -2104,6 +2109,9 @@ function parseCriteria(responseReference) {
     
     // Clean the input - remove any leading/trailing whitespace
     const cleaned = responseReference.trim();
+    console.log('Cleaned length:', cleaned.length);
+    console.log('Contains [:', cleaned.includes('['));
+    console.log('Contains ]:', cleaned.includes(']'));
     
     try {
         // First, try to parse the entire string as JSON (most common case)
