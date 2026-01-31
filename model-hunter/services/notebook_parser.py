@@ -240,7 +240,11 @@ class NotebookParser:
             parsed_cell = self._parse_cell(cell)
             result.raw_cells.append(parsed_cell)
             
-            if parsed_cell.heading:
+            # Always check for metadata first (even without heading pattern)
+            # Metadata cells use # Metadata header, not **[metadata]** pattern
+            if '# Metadata' in parsed_cell.content or parsed_cell.content.startswith('# Metadata'):
+                self._assign_cell_content(result, parsed_cell)
+            elif parsed_cell.heading:
                 self._assign_cell_content(result, parsed_cell)
         
         # Validate response_reference JSON format
@@ -337,9 +341,26 @@ class NotebookParser:
         heading = cell.heading
         content = cell.content.strip()
         
-        # Check for Metadata header
-        if heading == 'metadata' or content.startswith('# Metadata'):
-            result.metadata = self._parse_metadata(cell.content)
+        # Check for Metadata header - try multiple patterns
+        # 1. Check if heading is 'metadata'
+        # 2. Check if content starts with '# Metadata' or contains it
+        # 3. Check if it contains metadata-like content (Task ID, Domain, etc.)
+        is_metadata_cell = (
+            heading == 'metadata' or 
+            content.startswith('# Metadata') or
+            '# Metadata' in content or
+            ('Task ID' in content and ('Domain' in content or 'Use Case' in content))
+        )
+        
+        if is_metadata_cell:
+            # Use the full cell content (including the # Metadata header) for parsing
+            # The parser will handle the header line
+            parsed_metadata = self._parse_metadata(cell.content)
+            if parsed_metadata:  # Only set if we actually parsed something
+                result.metadata = parsed_metadata
+                print(f"DEBUG: Parsed metadata with {len(parsed_metadata)} fields: {list(parsed_metadata.keys())}")
+            else:
+                print(f"DEBUG: Metadata cell detected but parsing returned empty dict. Content preview: {cell.content[:200]}")
             return
         
         # Standard fields
@@ -395,6 +416,10 @@ class NotebookParser:
             if not line:
                 continue
             
+            # Skip the # Metadata header line
+            if line.startswith('# Metadata'):
+                continue
+            
             # Pattern 1: **Key:** Value or **Key:** - Value (with bold markers)
             # Match key before closing **, then optional colon
             match = re.match(r'\*\*([^*]+?)\*\*:?\s*-?\s*(.+)', line)
@@ -403,6 +428,7 @@ class NotebookParser:
                 value = match.group(2).strip()
                 if key and value:
                     metadata[key] = value
+                    print(f"DEBUG: Parsed metadata field: {key} = {value}")
                     continue
             
             # Pattern 2: Key: Value or Key: - Value (without bold markers)
@@ -412,8 +438,10 @@ class NotebookParser:
                 value = match.group(2).strip()
                 if key and value:
                     metadata[key] = value
+                    print(f"DEBUG: Parsed metadata field (no bold): {key} = {value}")
                     continue
         
+        print(f"DEBUG: Total metadata fields parsed: {len(metadata)}")
         return metadata
     
     def get_model_slot_prefix(self, parsed: ParsedNotebook) -> str:
@@ -471,17 +499,20 @@ class NotebookParser:
         cells = notebook.get('cells', [])
         human_reviews = human_reviews or {}
         
-        # Determine model prefix from existing notebook or from results
-        model_prefix = self.get_model_slot_prefix(parsed)
-        
-        # If notebook is empty, try to get model name from results
-        if model_prefix == "model" and results:
+        # Determine model prefix from results first (source of truth)
+        # This ensures we use the correct prefix even if notebook has old/wrong prefix
+        model_prefix = "model"  # Default
+        if results:
             # Extract model name from first result (e.g., "nvidia/nemotron-3-nano-30b-a3b" -> "nemotron")
             first_model = results[0].get('model', '')
             if 'nemotron' in first_model.lower():
                 model_prefix = 'nemotron'
             elif 'qwen' in first_model.lower():
                 model_prefix = 'qwen'
+        
+        # If no results, fall back to existing notebook prefix
+        if model_prefix == "model":
+            model_prefix = self.get_model_slot_prefix(parsed)
         
         # Capitalize model prefix for heading (Nemotron, Qwen, Model)
         model_prefix_capitalized = model_prefix.capitalize()
@@ -826,10 +857,12 @@ class NotebookParser:
                     if not result and slot_num <= len(results):
                         result = results[slot_num - 1]
                     response_text = result.get('response', '') if result else ''
-                    cell['source'] = [f"**[{heading_original}]**\n\n{response_text}"]
+                    # Use correct model prefix from results, not original heading
+                    correct_heading = f"{model_prefix_capitalized}_{slot_num}"
+                    cell['source'] = [f"**[{correct_heading}]**\n\n{response_text}"]
                     updated_slots.add(f"model_{slot_num}")
                     slot_cells_dict[(slot_num, 'model')] = cell
-                    print(f"DEBUG: Updated model_{slot_num} cell")
+                    print(f"DEBUG: Updated model_{slot_num} cell with heading {correct_heading}")
                 
                 elif cell_type == 'llm_judge':
                     result = slot_to_result.get(slot_num)
