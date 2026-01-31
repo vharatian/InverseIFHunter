@@ -16,11 +16,7 @@
     <!-- Header -->
     <header class="header">
         <div class="container header-content">
-            <div class="logo">
-                <span class="logo-icon">🔥</span>
-                <span class="logo-text">Model Hunter</span>
-            </div>
-            <div class="header-actions">
+            <div class="header-actions" style="margin-left: auto;">
                 <button class="theme-toggle" id="themeToggle" title="Toggle theme">
                     🌙
                 </button>
@@ -43,12 +39,10 @@
                 <div id="uploadTab" class="tab-content">
                     <div class="url-input-section">
                         <label for="colabUrlInput">Paste Colab Notebook URL</label>
-                        <div class="url-input-group" style="display: flex; flex-direction: column; gap: 0.75rem;">
+                        <div class="url-input-group">
                             <input type="url" id="colabUrlInput"
-                                placeholder="https://colab.research.google.com/drive/..." class="url-input"
-                                style="width: 100%;">
-                            <button type="button" id="fetchUrlBtn" class="btn btn-secondary"
-                                style="width: 100%; justify-content: center;">
+                                placeholder="https://colab.research.google.com/drive/..." class="url-input">
+                            <button type="button" id="fetchUrlBtn" class="btn btn-secondary fetch-btn-cute">
                                 📥 Fetch
                             </button>
                         </div>
@@ -58,36 +52,28 @@
                     </div>
                 </div>
 
-                <!-- Notebook Info (shown after load) -->
-                <div id="notebookInfo" class="hidden">
-                    <div class="alert alert-success">
-                        ✅ Notebook loaded successfully!
-                    </div>
-                    <div class="notebook-info">
-                        <div class="info-item">
-                            <div class="info-label">Filename</div>
-                            <div class="info-value" id="infoFilename">-</div>
-                        </div>
-                        <div class="info-item">
-                            <div class="info-label">Domain</div>
-                            <div class="info-value" id="infoDomain">-</div>
-                        </div>
-                        <div class="info-item">
-                            <div class="info-label">Prompt Length</div>
-                            <div class="info-value" id="infoPromptLength">-</div>
-                        </div>
-                        <div class="info-item">
-                            <div class="info-label">Previous Attempts</div>
-                            <div class="info-value" id="infoAttempts">-</div>
-                        </div>
-                    </div>
-                </div>
             </div>
         </section>
 
+        <!-- Fixed Left Sidebar for Metadata (Visible throughout) -->
+        <aside class="metadata-sidebar" id="metadataSidebar" style="display: none;">
+            <div class="metadata-sidebar-header">
+                <h3 class="metadata-sidebar-title">
+                    <span class="metadata-icon">📊</span>
+                    Metadata
+                </h3>
+                <button class="metadata-toggle-btn" id="metadataToggleBtn" title="Toggle metadata sidebar">
+                    <span class="metadata-toggle-icon">▼</span>
+                </button>
+            </div>
+            <div class="metadata-sidebar-content" id="metadataGrid">
+                <!-- Metadata fields will be populated dynamically -->
+            </div>
+        </aside>
+
         <!-- Configuration Section -->
         <section class="section hidden" id="configSection">
-            <!-- Notebook Preview Card (NOW FIRST) -->
+            <!-- Notebook Preview Card -->
             <div class="card" id="notebookPreviewCard">
                 <div class="card-header">
                     <h2 class="card-title">
@@ -104,43 +90,142 @@
                 </div>
 
                 <div id="previewContent" class="preview-content">
+                    <!-- Prompt Tab -->
                     <div id="previewPrompt" class="preview-panel hidden">
-                        <pre class="code-block" id="promptPreview">Loading...</pre>
-                    </div>
-                    <div id="previewReference" class="preview-panel">
-                        <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Expected Response
-                            (editable):</label>
-                        <textarea id="referencePreview" class="code-block"
-                            style="width: 100%; min-height: 400px; resize: vertical; font-family: monospace; padding: 0.75rem; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-primary); color: var(--text-primary); font-size: 0.9rem; line-height: 1.6;">Loading...</textarea>
-
-                        <div class="judge-reference-section">
-                            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                                <button class="btn btn-secondary" id="judgeReferenceBtn" style="flex: 1;"
-                                    title="Validates criteria against the expected response - won't modify notebook">
-                                    ⚖️ Judge Only
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                            <label style="font-weight: 600; display: block; margin: 0;">
+                                Prompt
+                            </label>
+                            <div id="promptWordCount" style="font-size: 0.9rem; font-weight: 600; padding: 0.25rem 0.75rem; border-radius: var(--radius-sm); transition: all var(--transition-fast);">
+                                <span id="promptWordCountText">0 words</span>
+                                <span id="promptWordCountRange" style="margin-left: 0.5rem; opacity: 0.7;"></span>
+                            </div>
+                        </div>
+                        <div id="promptLengthWarning" class="prompt-length-warning hidden"></div>
+                        <div class="rich-text-editor" id="promptEditor">
+                            <div class="rich-text-toolbar">
+                                <button type="button" class="rich-text-btn" data-command="bold" title="Bold (Ctrl+B)">
+                                    <strong>B</strong>
                                 </button>
-                                <button class="btn btn-primary" id="saveReponseBtn" style="flex: 1;"
-                                    title="Saves edited response to your Colab notebook and then validates it">
-                                    💾 Save to Colab & Re-judge
+                                <button type="button" class="rich-text-btn" data-command="italic" title="Italic (Ctrl+I)">
+                                    <em>I</em>
+                                </button>
+                                <div style="width: 1px; background: var(--border); margin: 0 0.25rem;"></div>
+                                <button type="button" class="rich-text-btn" data-command="insertUnorderedList" title="Bullet List">
+                                    • List
+                                </button>
+                                <button type="button" class="rich-text-btn" data-command="insertOrderedList" title="Numbered List">
+                                    1. List
                                 </button>
                             </div>
-                            <p style="margin-top: 0.75rem; font-size: 0.85rem; color: var(--text-muted);">
-                                💡 <strong>Judge Only</strong>: Checks if criteria are valid without modifying
-                                notebook.<br>
-                                📝 <strong>Save & Re-judge</strong>: Saves your edits to Colab, then validates.
-                            </p>
-                            <div id="referenceJudgeResult" class="hidden" style="margin-top: 1rem;"></div>
+                            <div class="rich-text-content" contenteditable="true" id="promptPreview" data-placeholder="Enter prompt here..."></div>
+                        </div>
+                        <div class="save-section">
+                            <button class="btn btn-primary save-btn-individual" id="savePromptBtn">
+                                💾 Save Prompt
+                            </button>
                         </div>
                     </div>
+
+                    <!-- Response Tab -->
+                    <div id="previewReference" class="preview-panel">
+                        <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Expected Response</label>
+                        <div class="rich-text-editor" id="responseEditor">
+                            <div class="rich-text-toolbar">
+                                <button type="button" class="rich-text-btn" data-command="bold" title="Bold (Ctrl+B)">
+                                    <strong>B</strong>
+                                </button>
+                                <button type="button" class="rich-text-btn" data-command="italic" title="Italic (Ctrl+I)">
+                                    <em>I</em>
+                                </button>
+                                <div style="width: 1px; background: var(--border); margin: 0 0.25rem;"></div>
+                                <button type="button" class="rich-text-btn" data-command="insertUnorderedList" title="Bullet List">
+                                    • List
+                                </button>
+                                <button type="button" class="rich-text-btn" data-command="insertOrderedList" title="Numbered List">
+                                    1. List
+                                </button>
+                            </div>
+                            <div class="rich-text-content" contenteditable="true" id="referencePreview" data-placeholder="Enter expected response here..."></div>
+                        </div>
+
+                        <div class="judge-reference-section">
+                            <button class="btn btn-primary save-btn-individual" id="saveReponseBtn" style="width: 100%;"
+                                title="Saves edited response to your Colab notebook">
+                                💾 Save Response
+                            </button>
+                            <p style="margin-top: 0.75rem; font-size: 0.85rem; color: var(--text-muted);">
+                                💾 <strong>Save Response</strong>: Saves your edits to Colab notebook.
+                            </p>
+                        </div>
+                        
+                        <!-- Judge Result (below response editor, always visible when shown) -->
+                        <div id="referenceJudgeResult" class="judge-result-container hidden"></div>
+                    </div>
+
+                    <!-- Model Reference Tab -->
                     <div id="previewModelref" class="preview-panel hidden">
-                        <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Response Reference
-                            (Grading Criteria):</label>
-                        <pre class="code-block" id="modelrefPreview"
-                            style="white-space: pre-wrap; word-break: break-word;">Loading...</pre>
+                        <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">
+                            Response Reference (Grading Criteria)
+                        </label>
+                        <div class="structured-input-container">
+                            <div class="structured-input-help">
+                                💡 <strong>Format:</strong> Enter criteria in this format (one per line):<br>
+                                <code>C1: Your first criterion description here</code><br>
+                                <code>C2: Your second criterion description here</code><br>
+                                The system will automatically convert this to JSON format.
+                            </div>
+                            <textarea class="structured-input-editor" id="modelrefPreview" 
+                                placeholder="C1: Does the response explicitly state that none of the provided options are correct?&#10;C2: Does the response identify the core flaw?&#10;C3: Does the response clarify the historical fact?&#10;C4: Does the response distinguish between real and fictional elements?"></textarea>
+                            <div class="json-preview">
+                                <div class="json-preview-header">
+                                    <span>JSON Preview</span>
+                                    <span id="jsonPreviewStatus"></span>
+                                </div>
+                                <pre class="json-preview-content" id="jsonPreviewContent">Enter criteria above to see JSON preview...</pre>
+                            </div>
+                        </div>
+                        <div class="save-section">
+                            <button class="btn btn-primary save-btn-individual" id="saveModelRefBtn">
+                                💾 Save Model Reference
+                            </button>
+                        </div>
                     </div>
+
+                    <!-- Judge System Prompt Tab -->
                     <div id="previewJudge" class="preview-panel hidden">
-                        <pre class="code-block" id="judgePreview">Loading...</pre>
+                        <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Judge System Prompt</label>
+                        <div class="rich-text-editor" id="judgeEditor">
+                            <div class="rich-text-toolbar">
+                                <button type="button" class="rich-text-btn" data-command="bold" title="Bold (Ctrl+B)">
+                                    <strong>B</strong>
+                                </button>
+                                <button type="button" class="rich-text-btn" data-command="italic" title="Italic (Ctrl+I)">
+                                    <em>I</em>
+                                </button>
+                                <div style="width: 1px; background: var(--border); margin: 0 0.25rem;"></div>
+                                <button type="button" class="rich-text-btn" data-command="insertUnorderedList" title="Bullet List">
+                                    • List
+                                </button>
+                                <button type="button" class="rich-text-btn" data-command="insertOrderedList" title="Numbered List">
+                                    1. List
+                                </button>
+                            </div>
+                            <div class="rich-text-content" contenteditable="true" id="judgePreview" data-placeholder="Enter judge system prompt here..."></div>
+                        </div>
+                        <div class="save-section">
+                            <button class="btn btn-primary save-btn-individual" id="saveJudgeBtn">
+                                💾 Save Judge Prompt
+                            </button>
+                        </div>
                     </div>
+                </div>
+
+                <!-- Save All Button (outside tabs, always visible) -->
+                <div style="margin-top: 1rem; padding-top: 1rem; border-top: var(--border-width) solid var(--border);">
+                    <button class="btn save-all-btn" id="saveAllBtn" style="width: 100%;">
+                        💾 Save All Changes to Colab
+                    </button>
                 </div>
             </div>
 
@@ -154,11 +239,12 @@
                 </div>
 
                 <div class="config-grid">
+                    <!-- Number of Hunts -->
                     <div class="form-group" style="grid-column: 1 / -1;">
                         <label for="parallelWorkers">Number of Hunts</label>
                         
                         <!-- Quick Preset Buttons -->
-                        <div class="hunt-presets" style="display: flex; gap: 0.5rem; margin-bottom: 0.75rem; flex-wrap: wrap;">
+                        <div class="hunt-presets">
                             <button type="button" class="preset-btn" data-value="1">1</button>
                             <button type="button" class="preset-btn" data-value="2">2</button>
                             <button type="button" class="preset-btn" data-value="4">4</button>
@@ -166,38 +252,21 @@
                         </div>
                         
                         <!-- Slider + Number Input Container -->
-                        <div class="hunt-input-container" style="display: flex; align-items: center; gap: 1rem; margin-bottom: 0.5rem;">
-                            <!-- Decrease Button -->
-                            <button type="button" class="hunt-btn hunt-btn-decrease" aria-label="Decrease">
-                                <span style="font-size: 1.2rem; font-weight: 600;">−</span>
-                            </button>
-                            
-                            <!-- Slider -->
-                            <div style="flex: 1; position: relative;">
-                                <input type="range" id="parallelWorkersSlider" min="1" max="6" value="4" step="1" 
-                                    style="width: 100%; height: 8px; cursor: pointer;">
-                                <div class="slider-labels" style="display: flex; justify-content: space-between; margin-top: 0.25rem; font-size: 0.75rem; color: var(--text-muted);">
+                        <div class="hunt-input-container">
+                            <button type="button" class="hunt-btn hunt-btn-decrease" aria-label="Decrease">−</button>
+                            <div class="hunt-slider-wrapper">
+                                <input type="range" id="parallelWorkersSlider" min="1" max="6" value="4" step="1" class="hunt-slider">
+                                <div class="slider-labels">
                                     <span>1</span>
                                     <span>6</span>
                                 </div>
                             </div>
-                            
-                            <!-- Number Input -->
-                            <div style="position: relative; min-width: 80px;">
-                                <input type="number" id="parallelWorkers" min="1" max="6" value="4" 
-                                    style="width: 100%; text-align: center; font-size: 1.1rem; font-weight: 600; padding: 0.75rem 0.5rem;">
-                            </div>
-                            
-                            <!-- Increase Button -->
-                            <button type="button" class="hunt-btn hunt-btn-increase" aria-label="Increase">
-                                <span style="font-size: 1.2rem; font-weight: 600;">+</span>
-                            </button>
+                            <input type="number" id="parallelWorkers" min="1" max="6" value="4" class="hunt-number-input">
+                            <button type="button" class="hunt-btn hunt-btn-increase" aria-label="Increase">+</button>
                         </div>
-                        
-                        <small style="color: var(--text-secondary); font-size: 0.8rem; display: block; text-align: center;">
-                            Drag slider, use buttons, or click presets above
-                        </small>
                     </div>
+                    
+                    <!-- Provider -->
                     <div class="form-group">
                         <label for="providerSelect">Provider</label>
                         <select id="providerSelect">
@@ -205,39 +274,36 @@
                             <option value="fireworks">Fireworks AI</option>
                         </select>
                     </div>
+                    
+                    <!-- Model -->
                     <div class="form-group">
                         <label for="modelSelect">Model</label>
                         <select id="modelSelect">
-                            <!-- Populated by JS based on provider -->
                             <option value="nvidia/nemotron-3-nano-30b-a3b">Nemotron-3-Nano (Fast)</option>
                             <option value="qwen/qwen3-235b-a22b-thinking-2507">Qwen3-235B (Thinking)</option>
                         </select>
                     </div>
-                </div>
-
-                <div class="config-grid" style="margin-top: 1rem;">
+                    
+                    <!-- Judge Model -->
                     <div class="form-group">
                         <label for="judgeModel">Judge Model</label>
                         <select id="judgeModel" disabled>
                             <option value="gpt-5">GPT-5</option>
                         </select>
-                        <small
-                            style="display: block; margin-top: 0.5rem; color: var(--text-secondary); font-size: 0.8rem;">
-                            ✓ Independent Criteria Judging Enabled
-                        </small>
-                    </div>
-                    <div class="form-group">
-                        <!-- Spacer for alignment -->
-                    </div>
-                    <div class="form-group">
-                        <!-- Spacer for alignment -->
+                        <small class="judge-status">✓ Independent Criteria Judging Enabled</small>
                     </div>
                 </div>
 
-                <div style="margin-top: 1.5rem; text-align: center;">
-                    <button class="btn btn-primary btn-lg" id="startHuntBtn">
-                        🚀 Start Hunt
-                    </button>
+                <div class="hunt-action-section">
+                    <div style="display: flex; gap: 0.75rem; align-items: center;">
+                        <button class="btn btn-secondary btn-lg" id="judgeBeforeHuntBtn" 
+                            title="Judge the reference response before starting hunt">
+                            ⚖️ Judge Reference
+                        </button>
+                        <button class="btn btn-primary btn-lg" id="startHuntBtn">
+                            🚀 Start Hunt
+                        </button>
+                    </div>
                 </div>
             </div>
         </section>
@@ -283,6 +349,7 @@
                                 <th>Status</th>
                                 <th>Score</th>
                                 <th>Issues</th>
+                                <th>Response</th>
                             </tr>
                         </thead>
                         <tbody id="resultsTableBody">
@@ -305,7 +372,8 @@
 
                 <div style="padding: 1rem; background: var(--bg-tertiary); border-radius: 8px; margin-bottom: 1rem;">
                     <p style="margin: 0; color: var(--text-secondary);">
-                        <strong>Instructions:</strong> Select exactly <strong>4 responses</strong> for human review.
+                        <strong>Instructions:</strong> Select exactly <strong>4 responses</strong> for human review.<br>
+                        <strong>Valid combinations:</strong> Either <strong>4 breaking</strong> OR <strong>3 breaking + 1 passing</strong>. No other combinations are allowed.
                     </p>
                 </div>
 
@@ -479,7 +547,7 @@
     <!-- Toast Container -->
     <div id="toastContainer" style="position: fixed; bottom: 1rem; right: 1rem; z-index: 1000;"></div>
 
-    <script src="/static/app.js?v=151"></script>
+    <script src="/static/app.js?v=200"></script>
 </body>
 
 </html>
