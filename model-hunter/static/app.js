@@ -11,7 +11,7 @@
 
 // ============== Production Mode ==============
 // Set to false to enable console logging for debugging
-const DEBUG_MODE = true;  // TEMP: Enable for debugging
+const DEBUG_MODE = false;
 
 // Disable console logging in production
 if (!DEBUG_MODE) {
@@ -2093,8 +2093,9 @@ function validateModelReferenceJSON(responseReference) {
 }
 
 // Parse criteria from response_reference text
-// Only parses the JSON array between [ and ], ignoring any text outside
-// STRICT MODE: No fallback - throws error if parsing fails
+// Supports multiple formats:
+// 1. JSON array: [{"id": "C1", "criteria1": "..."}, ...]
+// 2. Plain text: "C1: ...\nC2: ...\nC3: ..."
 function parseCriteria(responseReference) {
     console.log('=== parseCriteria DEBUG ===');
     console.log('Input type:', typeof responseReference);
@@ -2117,6 +2118,7 @@ function parseCriteria(responseReference) {
         // First, try to parse the entire string as JSON (most common case)
         let criteriaArray = null;
         let jsonArrayStr = null;
+        let isPlainTextFormat = false;
         
         try {
             const parsed = JSON.parse(cleaned);
@@ -2173,14 +2175,30 @@ function parseCriteria(responseReference) {
                 } catch (parseError) {
                     console.error('Failed to parse extracted array:', parseError);
                     console.error('Extracted string:', arrayMatch.substring(0, 200));
-                    throw new Error(`JSON parse error in response_reference: ${parseError.message}`);
+                    // Fall through to try plain text format
                 }
-            } else {
-                // No array found at all
-                const error = 'No JSON array found between [ and ] brackets in response_reference';
-                console.error(error);
-                console.error('Response reference content (first 500 chars):', cleaned.substring(0, 500));
-                throw new Error(error);
+            }
+            
+            // If still no criteriaArray, try plain text format: "C1: ...\nC2: ..."
+            if (!criteriaArray) {
+                console.log('Trying plain text format (C1: ..., C2: ..., etc.)');
+                const plainTextPattern = /^(C\d+)\s*[:：]\s*(.+)$/gim;
+                const matches = [...cleaned.matchAll(plainTextPattern)];
+                
+                if (matches.length > 0) {
+                    criteriaArray = matches.map((match, idx) => ({
+                        id: match[1].toUpperCase(),
+                        [`criteria${idx + 1}`]: match[2].trim()
+                    }));
+                    isPlainTextFormat = true;
+                    console.log(`✅ Parsed ${matches.length} criteria from plain text format`);
+                } else {
+                    // No format matched
+                    const error = 'No JSON array or plain text criteria (C1:, C2:, etc.) found in response_reference';
+                    console.error(error);
+                    console.error('Response reference content (first 500 chars):', cleaned.substring(0, 500));
+                    throw new Error(error);
+                }
             }
         }
         
