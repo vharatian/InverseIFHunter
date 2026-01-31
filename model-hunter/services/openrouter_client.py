@@ -13,9 +13,7 @@ Features:
 - Captures thinking tokens separately
 """
 import os
-import asyncio
 import httpx
-import time
 import logging
 from typing import Tuple, Optional, Dict, Any
 from dotenv import load_dotenv
@@ -26,13 +24,6 @@ from services.base_client import BaseAPIClient
 from services.fast_json import json_loads, json_dumps, JSONDecodeError
 
 logger = logging.getLogger(__name__)
-
-# Telemetry import - wrapped to never fail
-try:
-    from services.telemetry_logger import log_api_call_start, log_api_call_end
-    _telemetry_enabled = True
-except ImportError:
-    _telemetry_enabled = False
 
 load_dotenv()
 
@@ -102,18 +93,9 @@ class OpenRouterClient(BaseAPIClient):
         if max_tokens is None:
             max_tokens = self._get_max_tokens(model)
         
-        # Build messages - add system prompt only for Nemotron
+        # Build messages - just user prompt, no system prompt
         is_nemotron = 'nemotron' in model.lower()
-        
-        if is_nemotron:
-            system_message = """Always put your reasoning inside <think></think> tags first, then give your final answer after the closing tag. Do not include any reasoning outside the tags."""
-            messages = [
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": prompt}
-            ]
-            logger.debug(f"OpenRouter: Using system prompt for Nemotron to separate reasoning")
-        else:
-            messages = [{"role": "user", "content": prompt}]
+        messages = [{"role": "user", "content": prompt}]
         
         payload = {
             "model": model,
@@ -309,121 +291,8 @@ class OpenRouterClient(BaseAPIClient):
 
         return response_text.strip(), reasoning_trace.strip()
     
-    async def call_with_retry(
-        self,
-        prompt: str,
-        model: str,
-        max_retries: int = 3,
-        reasoning_budget_percent: float = 0.9,
-        timeout: float = 120.0
-    ) -> Tuple[str, str, Optional[str]]:
-        """
-        Call model with retry logic.
-        
-        On empty or error response:
-        1. First retries with same settings
-        2. If still failing, retry without reasoning tokens
-        3. Capture all reasoning and resend asking for response only
-        
-        Returns:
-            Tuple of (response_text, reasoning_trace, error_message)
-        """
-        last_error = None
-        accumulated_reasoning = ""
-        
-        # Telemetry: Log API call start
-        _start_time = time.time()
-        if _telemetry_enabled:
-            try:
-                log_api_call_start("openrouter", model)
-            except Exception:
-                pass
-        
-        for attempt in range(max_retries):
-            try:
-                response, reasoning = await self.call_model(
-                    prompt=prompt,
-                    model=model,
-                    reasoning_budget_percent=reasoning_budget_percent if attempt < max_retries - 1 else 0,
-                    timeout=timeout
-                )
-                
-                if reasoning:
-                    accumulated_reasoning += reasoning + "\n"
-                
-                # Check for valid response
-                if response.strip():
-                    if _telemetry_enabled:
-                        try:
-                            tokens_in = len(prompt) // 4
-                            tokens_out = len(response) // 4
-                            log_api_call_end("openrouter", model, _start_time, success=True,
-                                           tokens_in=tokens_in, tokens_out=tokens_out)
-                        except Exception:
-                            pass
-                    return response, accumulated_reasoning.strip(), None
-                
-                # For thinking models: reasoning as response
-                if reasoning.strip() and not response.strip():
-                    if _telemetry_enabled:
-                        try:
-                            tokens_in = len(prompt) // 4
-                            tokens_out = len(reasoning) // 4
-                            log_api_call_end("openrouter", model, _start_time, success=True,
-                                           tokens_in=tokens_in, tokens_out=tokens_out)
-                        except Exception:
-                            pass
-                    return reasoning, accumulated_reasoning.strip(), None
-                
-                # Empty response - try to get response from accumulated reasoning
-                if accumulated_reasoning and attempt < max_retries - 1:
-                    retry_prompt = (
-                        f"Based on your previous reasoning:\n\n{accumulated_reasoning}\n\n"
-                        f"Please provide your final response to this question:\n\n{prompt}\n\n"
-                        f"Give only the final answer, no additional reasoning."
-                    )
-                    
-                    response, _ = await self.call_model(
-                        prompt=retry_prompt,
-                        model=model,
-                        reasoning_budget_percent=0,
-                        timeout=timeout
-                    )
-                    
-                    if response.strip():
-                        if _telemetry_enabled:
-                            try:
-                                log_api_call_end("openrouter", model, _start_time, success=True)
-                            except Exception:
-                                pass
-                        return response, accumulated_reasoning, None
-                
-            except httpx.HTTPStatusError as e:
-                try:
-                    error_body = e.response.text if hasattr(e.response, 'text') else str(e)
-                    last_error = f"HTTP {e.response.status_code}: {error_body}"
-                except:
-                    last_error = f"HTTP Error: {str(e)}"
-            except httpx.TimeoutException:
-                last_error = f"Request timed out after {timeout}s"
-            except ValueError as e:
-                last_error = str(e)
-            except Exception as e:
-                last_error = f"Error: {str(e)}"
-            
-            # Exponential backoff before retry
-            if attempt < max_retries - 1:
-                await asyncio.sleep(2 ** attempt)
-        
-        # Telemetry: Log failed API call
-        if _telemetry_enabled:
-            try:
-                log_api_call_end("openrouter", model, _start_time, success=False, 
-                                error=last_error or "Empty response after all retries")
-            except Exception:
-                pass
-        
-        return "", accumulated_reasoning, last_error or "Empty response after all retries"
+    # Note: Uses BaseAPIClient.call_with_retry which passes **kwargs to call_model
+    # This allows reasoning_budget_percent to be passed through
     
     def get_available_models(self) -> Dict[str, str]:
         """Return available models."""

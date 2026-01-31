@@ -215,15 +215,8 @@ class BaseAPIClient(ABC):
                             pass
                     return response_text, (reasoning.strip() if reasoning else accumulated_reasoning.strip()), None
                 
-                # For thinking models: if content is empty but we have reasoning,
-                # the reasoning IS the response
-                if reasoning and reasoning.strip() and not response_text.strip():
-                    if _telemetry_enabled:
-                        try:
-                            log_api_call_end(self.PROVIDER_NAME, model, _start_time, success=True)
-                        except Exception:
-                            pass
-                    return reasoning, reasoning.strip(), None
+                # Empty response - will retry automatically via loop
+                last_error = "Empty response from model"
                 
             except httpx.HTTPStatusError as e:
                 try:

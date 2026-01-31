@@ -12,6 +12,9 @@ import json
 import asyncio
 import logging
 from typing import Optional, Dict, Any, List
+
+# App version - increment this on each deployment for update prompt
+APP_VERSION = "1.0.3"
 from contextlib import asynccontextmanager
 from datetime import datetime
 
@@ -1205,6 +1208,11 @@ async def save_snapshot(request: Request):
             # Use selected_results in exact order sent from frontend (no reordering)
             results = snapshot.selected_results
             
+            # Calculate valid response count on backend (excludes empty/error responses)
+            # This ensures correct count even if frontend sends old value
+            valid_response_count = count_valid_responses(results)
+            logger.info(f"📊 Valid response count: {valid_response_count} (frontend sent: {snapshot.total_hunts_ran})")
+            
             # Construct notebook using existing export_notebook logic
             modified_content = notebook_parser.export_notebook(
                 original_content=original_content,
@@ -1212,7 +1220,7 @@ async def save_snapshot(request: Request):
                 results=results,
                 include_reasoning=snapshot.include_reasoning,
                 human_reviews=snapshot.human_reviews,
-                total_hunts_ran=snapshot.total_hunts_ran
+                total_hunts_ran=valid_response_count  # Use backend-calculated count
             )
             
             # Write to Drive (export_notebook returns JSON string)
@@ -1327,11 +1335,10 @@ async def save_to_drive(session_id: str, request: Request):
         print(f"DEBUG: Using results in order: {[r.get('hunt_id') for r in results[:4]]}")
         
         human_reviews = getattr(session, 'human_reviews', {})
-        # Total hunts = total number of rows in hunt progress table (from frontend)
-        # Frontend has the correct count (state.allResponses.length) which accumulates across all runs
-        # Backend session.results resets each run, so we use frontend's count
-        total_hunts_ran = total_hunts_from_frontend if total_hunts_from_frontend is not None else len(all_results)
-        print(f"DEBUG: total_hunts_ran = {total_hunts_ran} (from frontend: {total_hunts_from_frontend}, from backend: {len(all_results)})")
+        # Calculate valid response count on backend (excludes empty/error responses)
+        # This ensures correct count even if frontend sends old value
+        valid_response_count = count_valid_responses(all_results)
+        print(f"DEBUG: valid_response_count = {valid_response_count} (frontend sent: {total_hunts_from_frontend}, total results: {len(all_results)})")
         
         modified_content = notebook_parser.export_notebook(
             original_content=original_content,
@@ -1339,7 +1346,7 @@ async def save_to_drive(session_id: str, request: Request):
             results=results,
             include_reasoning=True,
             human_reviews=human_reviews,
-            total_hunts_ran=total_hunts_ran
+            total_hunts_ran=valid_response_count  # Use backend-calculated count
         )
         
         # Update file (export_notebook returns JSON string already)
@@ -1452,6 +1459,28 @@ async def health_check():
             health["rate_limiter"] = {"status": "error", "error": str(e)}
     
     return health
+
+
+@app.get("/api/version")
+async def get_version():
+    """Get app version for soft-reload detection."""
+    return {"version": APP_VERSION}
+
+
+def count_valid_responses(results: List[Dict[str, Any]]) -> int:
+    """
+    Count only valid responses (exclude empty/error responses).
+    This ensures number_of_attempts_made only counts actual model responses.
+    """
+    count = 0
+    for r in results:
+        # Check if response has actual content and no error
+        response = r.get("response", "") if isinstance(r, dict) else getattr(r, "response", "")
+        error = r.get("error") if isinstance(r, dict) else getattr(r, "error", None)
+        
+        if response and response.strip() and not error:
+            count += 1
+    return count
 
 
 @app.get("/api/admin/status")

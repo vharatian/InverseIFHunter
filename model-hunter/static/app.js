@@ -22,6 +22,114 @@ if (!DEBUG_MODE) {
     // Keep console.warn and console.error for actual issues
 }
 
+// ============== Version Check & Update Prompt ==============
+let currentVersion = null;
+let pendingUpdateVersion = null; // Tracks if there's a new version available
+const VERSION_CHECK_INTERVAL = 30000; // Check every 30 seconds
+
+async function checkVersion() {
+    try {
+        const response = await fetch('/api/version');
+        const data = await response.json();
+        
+        if (currentVersion === null) {
+            // First check - just store the version
+            currentVersion = data.version;
+            console.log('📦 App version:', currentVersion);
+        } else if (data.version !== currentVersion) {
+            // Version changed - store it for later prompt
+            pendingUpdateVersion = data.version;
+            console.warn('🔄 New version detected:', data.version, '(will prompt before next task)');
+        }
+    } catch (e) {
+        // Silently fail - server might be updating
+    }
+}
+
+function hasPendingUpdate() {
+    return pendingUpdateVersion !== null;
+}
+
+function showUpdatePrompt() {
+    return new Promise((resolve) => {
+        // Create overlay
+        const overlay = document.createElement('div');
+        overlay.id = 'update-prompt-overlay';
+        overlay.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.6);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 10000;
+        `;
+        
+        // Create dialog
+        const dialog = document.createElement('div');
+        dialog.style.cssText = `
+            background: var(--bg-secondary, #1e1e2e);
+            border-radius: 12px;
+            padding: 24px 32px;
+            max-width: 450px;
+            text-align: center;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+            border: 1px solid var(--border, #333);
+        `;
+        
+        dialog.innerHTML = `
+            <div style="font-size: 48px; margin-bottom: 16px;">🔄</div>
+            <h3 style="margin: 0 0 12px 0; color: var(--text-primary, #fff); font-size: 18px;">New Version Available</h3>
+            <p style="margin: 0 0 24px 0; color: var(--text-secondary, #aaa); font-size: 14px; line-height: 1.5;">
+                A new version has been deployed. It's recommended to refresh before starting a new task for the latest changes.
+            </p>
+            <div style="display: flex; gap: 12px; justify-content: center;">
+                <button id="update-refresh-btn" style="
+                    background: linear-gradient(90deg, #2563eb, #7c3aed);
+                    color: white;
+                    border: none;
+                    padding: 10px 24px;
+                    border-radius: 8px;
+                    cursor: pointer;
+                    font-weight: 600;
+                    font-size: 14px;
+                ">Refresh Now</button>
+                <button id="update-continue-btn" style="
+                    background: transparent;
+                    color: var(--text-secondary, #aaa);
+                    border: 1px solid var(--border, #444);
+                    padding: 10px 24px;
+                    border-radius: 8px;
+                    cursor: pointer;
+                    font-size: 14px;
+                ">Continue Anyway</button>
+            </div>
+        `;
+        
+        overlay.appendChild(dialog);
+        document.body.appendChild(overlay);
+        
+        // Handle buttons
+        dialog.querySelector('#update-refresh-btn').onclick = () => {
+            window.location.reload();
+        };
+        
+        dialog.querySelector('#update-continue-btn').onclick = () => {
+            overlay.remove();
+            resolve(true); // Continue with action
+        };
+    });
+}
+
+// Start version checking after page load
+document.addEventListener('DOMContentLoaded', () => {
+    checkVersion();
+    setInterval(checkVersion, VERSION_CHECK_INTERVAL);
+});
+
 // ============== Provider Models ==============
 
 const PROVIDER_MODELS = {
@@ -1039,11 +1147,16 @@ async function saveToDrive() {
             }
         });
         
+        // Count only valid responses (exclude empty response errors)
+        const validResponseCount = state.allResponses.filter(r => 
+            r.response && r.response.trim() && !r.error
+        ).length;
+        
         console.log('📸 Creating snapshot:', {
             selectedResults: selectedResults.length,
             resultsOrder: selectedResults.map(r => r.hunt_id),
             reviews: Object.keys(reviewsForBackend).length,
-            totalHunts: state.allResponses.length
+            totalHunts: validResponseCount
         });
         
         // Validate we have original notebook
@@ -1084,7 +1197,7 @@ async function saveToDrive() {
             url: notebookUrl,
             selected_results: selectedResults,  // Order preserved - determines slot assignment
             human_reviews: reviewsForBackend,
-            total_hunts_ran: state.allResponses.length,
+            total_hunts_ran: validResponseCount,
             include_reasoning: true,
             metadata: {
                 parsed_notebook: {
@@ -2834,16 +2947,16 @@ async function startHunt() {
         return;
     }
     
-    // MANDATORY: Check if reference was judged and all criteria passed (100%)
-    if (!state.referenceValidated) {
-        showToast('❌ You must judge the reference response first! Click "Judge Only" or "Save & Re-judge" before starting hunt.', 'error');
-        return;
+    // Check for pending update before starting new hunt
+    if (hasPendingUpdate()) {
+        await showUpdatePrompt();
+        // If user chose "Continue Anyway", we proceed
+        // If user chose "Refresh Now", page reloads (won't reach here)
     }
     
     // MANDATORY: Check if reference was judged and all criteria passed (100%)
     if (!state.referenceValidated) {
         showToast('❌ You must judge the reference response first! All criteria must pass (100%) before starting hunt. Click "Judge Only" or "Save & Re-judge".', 'error');
-        // Ensure button is disabled
         if (elements.startHuntBtn) {
             elements.startHuntBtn.disabled = true;
         }
