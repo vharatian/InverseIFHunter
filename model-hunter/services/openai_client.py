@@ -77,38 +77,54 @@ class OpenAIJudgeClient:
             raise ValueError(error_msg)
         
         try:
-            # Extract only the JSON array between [ and ], ignoring any text outside
+            # Try to extract JSON array between [ and ]
             array_match = re.search(r'\[.*?\]', response_reference, re.DOTALL)
             
-            if not array_match:
-                raise ValueError("Reference Answer must contain a JSON array between [ and ] brackets")
-            
-            json_array_str = array_match.group(0)
-            
-            # Try to parse as JSON to validate
-            parsed = json.loads(json_array_str)
-            
-            # Must be a list/array
-            if not isinstance(parsed, list):
-                raise ValueError(f"Reference JSON must be a JSON array (list), got {type(parsed).__name__}")
-            
-            if len(parsed) == 0:
-                raise ValueError("Reference JSON array cannot be empty")
+            if array_match:
+                json_array_str = array_match.group(0)
+                
+                # Try to parse as JSON to validate
+                parsed = json.loads(json_array_str)
+                
+                # Must be a list/array
+                if not isinstance(parsed, list):
+                    raise ValueError(f"Reference JSON must be a JSON array (list), got {type(parsed).__name__}")
+                
+                if len(parsed) == 0:
+                    raise ValueError("Reference JSON array cannot be empty")
+                
+                print(f"DEBUG: Validated JSON array format with {len(parsed)} criteria")
+            else:
+                # No JSON array - try plain text format (C1: ..., C2: ...)
+                plain_text_pattern = re.compile(r'^(C\d+)\s*[:：]\s*(.+)$', re.MULTILINE | re.IGNORECASE)
+                matches = plain_text_pattern.findall(response_reference)
+                
+                if matches and len(matches) > 0:
+                    print(f"DEBUG: Validated plain text format with {len(matches)} criteria")
+                else:
+                    raise ValueError("Reference Answer must contain either a JSON array or plain text criteria (C1: description, C2: description, etc.)")
                 
         except json.JSONDecodeError as e:
-            error_msg = f"CRITICAL: Reference Answer must be VALID JSON. Parse Error: {e}"
-            print(error_msg)
-            raise ValueError(error_msg)
+            # JSON parse error - check if there's plain text format as fallback
+            plain_text_pattern = re.compile(r'^(C\d+)\s*[:：]\s*(.+)$', re.MULTILINE | re.IGNORECASE)
+            matches = plain_text_pattern.findall(response_reference)
+            
+            if matches and len(matches) > 0:
+                print(f"DEBUG: JSON parse failed but found plain text format with {len(matches)} criteria")
+            else:
+                error_msg = f"CRITICAL: Reference Answer must be valid JSON or plain text format. Parse Error: {e}"
+                print(error_msg)
+                raise ValueError(error_msg)
         except ValueError as e:
             # Re-raise ValueError as-is (it's already a CRITICAL message)
             if "CRITICAL" in str(e):
                 raise
             # Otherwise, wrap it
-            error_msg = f"CRITICAL: Failed to process Reference JSON: {e}"
+            error_msg = f"CRITICAL: Failed to process Reference: {e}"
             print(error_msg)
             raise ValueError(error_msg)
         except Exception as e:
-            error_msg = f"CRITICAL: Failed to process Reference JSON: {e}"
+            error_msg = f"CRITICAL: Failed to process Reference: {e}"
             print(error_msg)
             raise ValueError(error_msg)
         
@@ -826,15 +842,34 @@ class OpenAIJudgeClient:
     async def _extract_criteria(self, reference: str, model: str) -> List[Dict[str, str]]:
         """
         Extract criteria list from reference text.
-        STRICT MODE: Only extracts and validates the JSON array between [ and ].
-        Ignores any text outside the brackets.
+        Supports multiple formats:
+        1. JSON array: [{"id": "C1", "criteria1": "..."}, ...]
+        2. Plain text: "C1: description\nC2: description\n..."
         """
         
-        # Extract only the JSON array between [ and ], ignoring any text outside
+        # First, try to extract JSON array between [ and ]
         array_match = re.search(r'\[.*?\]', reference, re.DOTALL)
         
         if not array_match:
-            error_msg = "CRITICAL: Reference Answer must contain a JSON array between [ and ] brackets"
+            # No JSON array found - try plain text format (C1: ..., C2: ...)
+            print("DEBUG: No JSON array found, trying plain text format (C1:, C2:, etc.)")
+            plain_text_pattern = re.compile(r'^(C\d+)\s*[:：]\s*(.+)$', re.MULTILINE | re.IGNORECASE)
+            matches = plain_text_pattern.findall(reference)
+            
+            if matches:
+                normalized = []
+                for match in matches:
+                    c_id = match[0].upper()
+                    description = match[1].strip()
+                    normalized.append({"id": c_id, "description": description})
+                
+                if normalized:
+                    criteria_ids = [c.get('id') for c in normalized]
+                    print(f"DEBUG: _extract_criteria - Parsed {len(normalized)} criteria from plain text format: {criteria_ids}")
+                    return normalized
+            
+            # No format matched
+            error_msg = "CRITICAL: Reference Answer must contain either a JSON array between [ and ] brackets, or plain text criteria in format 'C1: description'"
             print(error_msg)
             raise ValueError(error_msg)
         
