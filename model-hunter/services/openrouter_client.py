@@ -10,14 +10,18 @@ Features:
 - Configurable reasoning budget (90% default)
 - Retry logic with fallback (no reasoning on fail)
 - Captures thinking tokens separately
+- Connection pooling for better performance
 """
 import os
 import json
 import asyncio
 import httpx
 import time
+import logging
 from typing import Tuple, Optional, AsyncGenerator, Dict, Any
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 # Telemetry import - wrapped to never fail
 try:
@@ -28,9 +32,19 @@ except ImportError:
 
 load_dotenv()
 
+# Connection pool settings for better performance
+POOL_LIMITS = httpx.Limits(
+    max_connections=20,
+    max_keepalive_connections=10,
+    keepalive_expiry=30.0
+)
+
+# Timeout settings (Qwen can be slow)
+DEFAULT_TIMEOUT = httpx.Timeout(180.0, connect=10.0)
+
 
 class OpenRouterClient:
-    """Async client for OpenRouter API with streaming and retry support."""
+    """Async client for OpenRouter API with streaming, retry support, and connection pooling."""
     
     BASE_URL = "https://openrouter.ai/api/v1/chat/completions"
     
@@ -50,6 +64,29 @@ class OpenRouterClient:
         self.api_key = api_key or os.getenv("OPENROUTER_API_KEY")
         if not self.api_key:
             raise ValueError("OpenRouter API key not found. Set OPENROUTER_API_KEY in .env")
+        
+        # Pooled HTTP client for better performance
+        self._client: Optional[httpx.AsyncClient] = None
+        self._client_lock = asyncio.Lock()
+    
+    async def _get_client(self) -> httpx.AsyncClient:
+        """Get or create the pooled HTTP client."""
+        if self._client is None or self._client.is_closed:
+            async with self._client_lock:
+                if self._client is None or self._client.is_closed:
+                    self._client = httpx.AsyncClient(
+                        limits=POOL_LIMITS,
+                        timeout=DEFAULT_TIMEOUT,
+                        http2=True
+                    )
+                    logger.info("Created pooled HTTP client for OpenRouter")
+        return self._client
+    
+    async def close(self):
+        """Close the HTTP client."""
+        if self._client and not self._client.is_closed:
+            await self._client.aclose()
+            self._client = None
     
     def _get_headers(self) -> Dict[str, str]:
         return {
@@ -89,7 +126,7 @@ class OpenRouterClient:
                 extracted_reasoning = match.group(1).strip()
                 # Remove the entire tag block from content
                 cleaned_content = re.sub(pattern, '', content, flags=re.DOTALL | re.IGNORECASE).strip()
-                print(f"DEBUG OpenRouter: Extracted reasoning from <{tag_name}> tags: {len(extracted_reasoning)} chars")
+                logger.debug(f"OpenRouter: Extracted reasoning from <{tag_name}> tags: {len(extracted_reasoning)} chars")
                 return cleaned_content, extracted_reasoning
         
         # Fallback: Try splitting on closing tags only (handles malformed opening tags)
@@ -109,7 +146,7 @@ class OpenRouterClient:
                     extracted_reasoning = re.sub(op, '', extracted_reasoning, flags=re.IGNORECASE).strip()
                 
                 if extracted_reasoning and cleaned_content:
-                    print(f"DEBUG OpenRouter: Extracted reasoning via closing tag fallback: {len(extracted_reasoning)} chars")
+                    logger.debug(f"OpenRouter: Extracted reasoning via closing tag fallback: {len(extracted_reasoning)} chars")
                     return cleaned_content, extracted_reasoning
         
         return content, ""
@@ -156,7 +193,7 @@ class OpenRouterClient:
                 {"role": "system", "content": system_message},
                 {"role": "user", "content": prompt}  # Original prompt as-is
             ]
-            print(f"DEBUG OpenRouter: Using system prompt for Nemotron to separate reasoning")
+            logger.debug(f"OpenRouter: Using system prompt for Nemotron to separate reasoning")
         else:
             # Qwen and other models - no system prompt, just user message
             messages = [{"role": "user", "content": prompt}]
@@ -184,16 +221,18 @@ class OpenRouterClient:
         # Note: For thinking models, reasoning is enabled by default, but we need to
         # explicitly set exclude: false to ensure reasoning traces are included in the response
         
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            if stream:
-                return await self._stream_response(client, payload)
-            else:
-                return await self._simple_response(client, payload)
+        # Use pooled client for better performance
+        client = await self._get_client()
+        if stream:
+            return await self._stream_response(client, payload, timeout)
+        else:
+            return await self._simple_response(client, payload, timeout)
     
     async def _stream_response(
         self, 
         client: httpx.AsyncClient, 
-        payload: Dict[str, Any]
+        payload: Dict[str, Any],
+        timeout: float = 180.0
     ) -> Tuple[str, str]:
         """Handle streaming response and collect chunks."""
         response_text = ""
@@ -201,15 +240,16 @@ class OpenRouterClient:
         reasoning_by_id = {}  # Track reasoning by ID to avoid duplicates
         final_message_reasoning = None  # Store final message reasoning if present
         
-        # Debug: Print payload to verify reasoning parameter is included
-        print(f"DEBUG OpenRouter: Payload includes reasoning: {payload.get('reasoning', 'NOT FOUND')}")
+        # Debug: Log payload (use logger instead of print)
+        logger.debug(f"OpenRouter: Payload includes reasoning: {payload.get('reasoning', 'NOT FOUND')}")
         
         try:
             async with client.stream(
                 "POST",
                 self.BASE_URL,
                 headers=self._get_headers(),
-                json=payload
+                json=payload,
+                timeout=timeout
             ) as response:
                 # Check for HTTP errors first
                 if response.status_code >= 400:
@@ -245,7 +285,7 @@ class OpenRouterClient:
                                 if message and "reasoning_details" in message and message["reasoning_details"]:
                                     # Final message has complete reasoning - store it and use at the end
                                     final_message_reasoning = message["reasoning_details"]
-                                    print(f"DEBUG OpenRouter: Found final reasoning_details in message: {len(final_message_reasoning)} items")
+                                    logger.debug(f"OpenRouter: Found final reasoning_details in message: {len(final_message_reasoning)} items")
                                 
                                 # During streaming, collect incremental reasoning from delta
                                 # But only if we haven't seen the final message yet
@@ -263,7 +303,7 @@ class OpenRouterClient:
                                                     current_text = reasoning_by_id.get(detail_id, "")
                                                     if len(detail_text) > len(current_text):
                                                         reasoning_by_id[detail_id] = detail_text
-                                                        print(f"DEBUG OpenRouter: Updated reasoning detail {detail_id}: {len(detail_text)} chars")
+                                                        logger.debug(f"OpenRouter: Updated reasoning detail {detail_id}: {len(detail_text)} chars")
                                     
                                     # Also check for direct reasoning/thinking fields (fallback - incremental)
                                     if "reasoning" in delta and delta["reasoning"]:
@@ -293,12 +333,12 @@ class OpenRouterClient:
                         if isinstance(detail, dict) and "text" in detail:
                             reasoning_parts.append(detail["text"])
                     reasoning_trace = "".join(reasoning_parts)
-                    print(f"DEBUG OpenRouter: Using final message reasoning: {len(reasoning_trace)} chars")
+                    logger.debug(f"OpenRouter: Using final message reasoning: {len(reasoning_trace)} chars")
                 elif reasoning_by_id:
                     # Use reasoning collected from deltas (deduplicated by ID)
                     sorted_ids = sorted(reasoning_by_id.keys())
                     reasoning_trace = "".join([reasoning_by_id[id] for id in sorted_ids])
-                    print(f"DEBUG OpenRouter: Using delta reasoning (deduplicated): {len(reasoning_trace)} chars from {len(reasoning_by_id)} details")
+                    logger.debug(f"OpenRouter: Using delta reasoning (deduplicated): {len(reasoning_trace)} chars from {len(reasoning_by_id)} details")
         except httpx.HTTPStatusError as e:
             # Re-raise with more context
             raise
@@ -311,12 +351,12 @@ class OpenRouterClient:
         response_text, extracted_reasoning = self._parse_think_tags(response_text)
         if extracted_reasoning and not reasoning_trace:
             reasoning_trace = extracted_reasoning
-            print(f"DEBUG OpenRouter: Extracted reasoning from <think> tags: {len(reasoning_trace)} chars")
+            logger.debug(f"OpenRouter: Extracted reasoning from <think> tags: {len(reasoning_trace)} chars")
         elif extracted_reasoning and reasoning_trace:
             # Prefer extracted reasoning if API reasoning is empty or much shorter
             if len(extracted_reasoning) > len(reasoning_trace):
                 reasoning_trace = extracted_reasoning
-                print(f"DEBUG OpenRouter: Using <think> tag reasoning (longer than API reasoning)")
+                logger.debug(f"OpenRouter: Using <think> tag reasoning (longer than API reasoning)")
         
         # No backend deduplication - frontend handles UI display
         # Export gets the full original trace
@@ -326,34 +366,36 @@ class OpenRouterClient:
     async def _simple_response(
         self, 
         client: httpx.AsyncClient, 
-        payload: Dict[str, Any]
+        payload: Dict[str, Any],
+        timeout: float = 180.0
     ) -> Tuple[str, str]:
         """Handle non-streaming response."""
         payload["stream"] = False
         
-        # Debug: Print payload to verify reasoning parameter is included
-        print(f"DEBUG OpenRouter: Payload includes reasoning: {payload.get('reasoning', 'NOT FOUND')}")
+        # Debug: Log payload
+        logger.debug(f"OpenRouter: Payload includes reasoning: {payload.get('reasoning', 'NOT FOUND')}")
         
         response = await client.post(
             self.BASE_URL,
             headers=self._get_headers(),
-            json=payload
+            json=payload,
+            timeout=timeout
         )
         response.raise_for_status()
         
         data = response.json()
         
         # Debug: Print response structure
-        print(f"DEBUG OpenRouter: Response keys: {list(data.keys())}")
+        logger.debug(f"OpenRouter: Response keys: {list(data.keys())}")
         if "choices" in data and data["choices"]:
             choice = data["choices"][0]
-            print(f"DEBUG OpenRouter: Choice keys: {list(choice.keys())}")
+            logger.debug(f"OpenRouter: Choice keys: {list(choice.keys())}")
             message = choice.get("message", {})
-            print(f"DEBUG OpenRouter: Message keys: {list(message.keys())}")
+            logger.debug(f"OpenRouter: Message keys: {list(message.keys())}")
             if "reasoning" in message:
-                print(f"DEBUG OpenRouter: Found reasoning in message: {len(str(message['reasoning']))} chars")
+                logger.debug(f"OpenRouter: Found reasoning in message: {len(str(message['reasoning']))} chars")
             if "thinking" in message:
-                print(f"DEBUG OpenRouter: Found thinking in message: {len(str(message['thinking']))} chars")
+                logger.debug(f"OpenRouter: Found thinking in message: {len(str(message['thinking']))} chars")
         
         # Check for API errors
         if "error" in data:
@@ -370,7 +412,7 @@ class OpenRouterClient:
         
         # Check for reasoning_details array (OpenRouter format)
         if "reasoning_details" in message and message["reasoning_details"]:
-            print(f"DEBUG OpenRouter: Found reasoning_details array with {len(message['reasoning_details'])} items")
+            logger.debug(f"OpenRouter: Found reasoning_details array with {len(message['reasoning_details'])} items")
             for detail in message["reasoning_details"]:
                 if isinstance(detail, dict) and "text" in detail:
                     reasoning_trace += detail["text"]
@@ -380,19 +422,19 @@ class OpenRouterClient:
             reasoning_trace = message.get("reasoning", "") or message.get("thinking", "") or ""
         
         # Debug: Print what we extracted
-        print(f"DEBUG OpenRouter: Extracted response_text: {len(response_text)} chars")
-        print(f"DEBUG OpenRouter: Extracted reasoning_trace: {len(reasoning_trace)} chars")
+        logger.debug(f"OpenRouter: Extracted response_text: {len(response_text)} chars")
+        logger.debug(f"OpenRouter: Extracted reasoning_trace: {len(reasoning_trace)} chars")
         
         # Parse <think>...</think> tags from content (for Nemotron with system prompt)
         response_text, extracted_reasoning = self._parse_think_tags(response_text)
         if extracted_reasoning and not reasoning_trace:
             reasoning_trace = extracted_reasoning
-            print(f"DEBUG OpenRouter: Extracted reasoning from <think> tags: {len(reasoning_trace)} chars")
+            logger.debug(f"OpenRouter: Extracted reasoning from <think> tags: {len(reasoning_trace)} chars")
         elif extracted_reasoning and reasoning_trace:
             # Prefer extracted reasoning if API reasoning is empty or much shorter
             if len(extracted_reasoning) > len(reasoning_trace):
                 reasoning_trace = extracted_reasoning
-                print(f"DEBUG OpenRouter: Using <think> tag reasoning (longer than API reasoning)")
+                logger.debug(f"OpenRouter: Using <think> tag reasoning (longer than API reasoning)")
         
         # No backend deduplication - frontend handles UI display
         # Export gets the full original trace

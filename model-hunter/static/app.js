@@ -9,6 +9,20 @@
  * - Results display
  */
 
+// ============== Production Mode ==============
+// Set to false to enable console logging for debugging
+const DEBUG_MODE = false;
+
+// Disable console logging in production
+if (!DEBUG_MODE) {
+    const noop = () => {};
+    console.log = noop;
+    console.debug = noop;
+    console.info = noop;
+    // Keep console.warn and console.error for actual issues
+}
+
+// ============== Provider Models ==============
 
 const PROVIDER_MODELS = {
     'openrouter': [
@@ -55,7 +69,20 @@ const state = {
         currentResult: null, // Current result being judged
         humanJudgments: {}   // Map of hunt_id -> human score
     },
-    diversityCheckPassed: false  // Flag to track if diversity check passed at confirmation
+    diversityCheckPassed: false,  // Flag to track if diversity check passed at confirmation
+    selectionConfirmed: false,     // Flag to track if selection is confirmed and locked
+    
+    // Metadata and editing state
+    metadata: null,  // Parsed metadata from notebook
+    metadataModel: null,  // Model from metadata (e.g., 'qwen', 'nemotron')
+    promptLengthRange: null,  // {min: number, max: number} from metadata
+    unsavedChanges: {
+        prompt: false,
+        response: false,
+        modelRef: false,
+        judge: false
+    },
+    modelMismatchWarning: false  // Track if model mismatch warning is shown
 };
 
 
@@ -69,7 +96,6 @@ const elements = {
     fileInput: document.getElementById('fileInput'),
     colabUrlInput: document.getElementById('colabUrlInput'),
     fetchUrlBtn: document.getElementById('fetchUrlBtn'),
-    notebookInfo: document.getElementById('notebookInfo'),
     uploadSection: document.getElementById('uploadSection'),
     
     // Tabs (for preview)
@@ -91,8 +117,23 @@ const elements = {
     modelrefPreview: document.getElementById('modelrefPreview'),
     judgePreview: document.getElementById('judgePreview'),
     judgeReferenceBtn: document.getElementById('judgeReferenceBtn'),
-    saveResponseBtn: document.getElementById('saveReponseBtn'),  // Save & Re-judge button
+    saveResponseBtn: document.getElementById('saveReponseBtn'),  // Save Response button
+    judgeBeforeHuntBtn: document.getElementById('judgeBeforeHuntBtn'),  // Judge button next to Start Hunt
     referenceJudgeResult: document.getElementById('referenceJudgeResult'),
+    metadataToggleBtn: document.getElementById('metadataToggleBtn'),
+    
+    // New editable elements
+    metadataSidebar: document.getElementById('metadataSidebar'),
+    metadataCard: document.getElementById('metadataCard'), // Keep for backward compatibility
+    metadataGrid: document.getElementById('metadataGrid'),
+    promptLengthWarning: document.getElementById('promptLengthWarning'),
+    promptLengthInfo: document.getElementById('promptLengthInfo'),
+    savePromptBtn: document.getElementById('savePromptBtn'),
+    saveModelRefBtn: document.getElementById('saveModelRefBtn'),
+    saveJudgeBtn: document.getElementById('saveJudgeBtn'),
+    saveAllBtn: document.getElementById('saveAllBtn'),
+    jsonPreviewContent: document.getElementById('jsonPreviewContent'),
+    jsonPreviewStatus: document.getElementById('jsonPreviewStatus'),
     
     // Progress
     progressSection: document.getElementById('progressSection'),
@@ -214,24 +255,39 @@ function initFileUpload() {
     
     // URL Fetch button - ensure it's properly set up
     const setupFetchButton = () => {
-        const fetchBtn = document.getElementById('fetchUrlBtn');
+        // Get button element (try elements first, then DOM)
+        let fetchBtn = elements.fetchUrlBtn || document.getElementById('fetchUrlBtn');
+        
         if (fetchBtn) {
-            // Remove any existing listeners by cloning the button
-            const newBtn = fetchBtn.cloneNode(true);
-            fetchBtn.parentNode.replaceChild(newBtn, fetchBtn);
-            elements.fetchUrlBtn = newBtn;
+            // Update elements reference
+            elements.fetchUrlBtn = fetchBtn;
             
-            console.log('Setting up fetch button event listener');
-            elements.fetchUrlBtn.addEventListener('click', (e) => {
+            // Remove any existing listeners
+            fetchBtn.onclick = null;
+            
+            // Create a new handler function
+            const handleFetchClick = (e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 console.log('Fetch button clicked');
                 fetchFromUrl();
-            });
+            };
             
-            // Ensure button is enabled
-            elements.fetchUrlBtn.disabled = false;
-            elements.fetchUrlBtn.type = 'button'; // Ensure it doesn't submit forms
+            // Add click event listener with capture phase to ensure it fires
+            fetchBtn.addEventListener('click', handleFetchClick, true);
+            
+            // Also add onclick as fallback
+            fetchBtn.onclick = handleFetchClick;
+            
+            // Ensure button is enabled and has correct type
+            fetchBtn.disabled = false;
+            fetchBtn.type = 'button'; // Ensure it doesn't submit forms
+            
+            // Make sure button is not hidden or has pointer-events disabled
+            fetchBtn.style.pointerEvents = 'auto';
+            fetchBtn.style.cursor = 'pointer';
+            
+            console.log('✅ Fetch button setup complete', fetchBtn);
         } else {
             console.error('fetchUrlBtn element not found during initialization');
             // Retry after a short delay in case DOM isn't ready
@@ -240,6 +296,8 @@ function initFileUpload() {
                 if (retryBtn) {
                     console.log('Found fetch button on retry, setting up...');
                     setupFetchButton();
+                } else {
+                    console.error('❌ Fetch button still not found after retry');
                 }
             }, 100);
         }
@@ -284,6 +342,14 @@ async function uploadFile(file) {
 
 async function fetchFromUrl() {
     console.log('fetchFromUrl called');
+    
+    // Re-get elements in case they changed
+    if (!elements.colabUrlInput) {
+        elements.colabUrlInput = document.getElementById('colabUrlInput');
+    }
+    if (!elements.fetchUrlBtn) {
+        elements.fetchUrlBtn = document.getElementById('fetchUrlBtn');
+    }
     
     if (!elements.colabUrlInput) {
         console.error('colabUrlInput element not found');
@@ -356,6 +422,12 @@ function handleNotebookLoaded(data, isUrl = false) {
         state.notebook.url = elements.colabUrlInput?.value || null;
     }
     
+    // Save sessionId to localStorage for restoration on refresh
+    if (data.session_id) {
+        localStorage.setItem('modelHunter_sessionId', data.session_id);
+        console.log('💾 Saved sessionId to localStorage:', data.session_id);
+    }
+    
     // Toggle UI sections
     // Keep URL section visible (don't hide uploadSection)
     elements.huntSection.classList.remove('hidden');
@@ -370,42 +442,6 @@ function handleNotebookLoaded(data, isUrl = false) {
     }
     
     showToast('Notebook loaded! Configure hunt settings.', 'success');
-
-    
-    // Show notebook info
-    elements.notebookInfo.classList.remove('hidden');
-    const filenameEl = document.getElementById('infoFilename');
-    const filename = data.notebook.filename || '-';
-    filenameEl.textContent = filename;
-    filenameEl.title = filename; // Show full name on hover
-    
-    // Extract domain from metadata or filename
-    let domain = '';
-    if (data.notebook.metadata) {
-        // Try multiple variations of the domain key (case-insensitive)
-        const metadata = data.notebook.metadata;
-        // First try exact matches
-        domain = metadata.Domain || metadata.domain || metadata['Domain'] || metadata['domain'];
-        
-        // If not found, search case-insensitively
-        if (!domain) {
-            const domainKey = Object.keys(metadata).find(key => key.toLowerCase() === 'domain');
-            if (domainKey) {
-                domain = metadata[domainKey];
-            }
-        }
-    }
-    
-    if (!domain && filename !== '-') {
-        // Try to extract domain from filename pattern like "single_turn_,,,Domain,UseCase_..."
-        const parts = filename.split(',');
-        if (parts.length >= 2) {
-            domain = parts[parts.length - 2] || parts[1] || '';
-        }
-    }
-    document.getElementById('infoDomain').textContent = domain || 'Unknown';
-    document.getElementById('infoPromptLength').textContent = `${data.notebook.prompt_length} chars`;
-    document.getElementById('infoAttempts').textContent = data.notebook.attempts_made || 0;
     
     // Show config section
     elements.configSection.classList.remove('hidden');
@@ -522,6 +558,9 @@ function handleNotebookLoaded(data, isUrl = false) {
                     console.log(`   Dropdown value after setting: ${elements.modelSelect.value}`);
                     console.log(`   Selected option: ${option.textContent}`);
                     showToast(`Model preselected: ${modelPrefix}`, 'info');
+                    
+                    // Validate model match after preselection
+                    setTimeout(() => validateModelMatch(), 100);
                 } else {
                     console.error(`❌ Model ${modelId} not found in dropdown. Available options:`, 
                         Array.from(elements.modelSelect.options).map(o => ({value: o.value, text: o.textContent})));
@@ -545,6 +584,12 @@ function handleNotebookLoaded(data, isUrl = false) {
                 }
             }, 100);
         }
+    }
+    
+    // Reset Start Hunt button state (must validate new notebook first)
+    if (elements.startHuntBtn) {
+        elements.startHuntBtn.disabled = true;
+        elements.startHuntBtn.title = 'Judge the reference response first (click "Judge Reference Response")';
     }
     
     // Populate preview tabs
@@ -590,7 +635,7 @@ async function saveToDrive() {
         `No undo button. No "oops, let me fix that".\n` +
         `This is it. The point of no return.\n\n` +
         `Did you:\n` +
-        `✅ Review all 4 responses carefully?\n` +
+        `✅ Review all selected responses carefully?\n` +
         `✅ Grade all criteria correctly?\n` +
         `✅ Write explanations that make sense?\n` +
         `✅ Double-check everything?\n\n` +
@@ -610,10 +655,15 @@ async function saveToDrive() {
         return;
     }
     
-    // ===== VALIDATION 1: Check that all selected hunts have reviews =====
+    // FIX 3: Require exactly 4 reviews before allowing save
     const selectedRowNumbers = state.selectedRowNumbers || [];
+    if (selectedRowNumbers.length === 0) {
+        showToast(`Please select hunts for review.`, 'error');
+        return;
+    }
+    
     if (selectedRowNumbers.length !== 4) {
-        showToast(`Please select exactly 4 hunts for review. Currently selected: ${selectedRowNumbers.length}`, 'error');
+        showToast(`Must have exactly 4 hunts selected. Currently: ${selectedRowNumbers.length}`, 'error');
         return;
     }
     
@@ -634,8 +684,8 @@ async function saveToDrive() {
     // Get reviews only for selected row numbers
     const reviews = reviewKeys.map(key => state.humanReviews[key]).filter(r => r);
     
-    if (reviews.length !== 4) {
-        showToast(`Only ${reviews.length}/4 reviews found for selected hunts. Please complete all reviews.`, 'error');
+    if (reviews.length !== selectedRowNumbers.length) {
+        showToast(`Only ${reviews.length}/${selectedRowNumbers.length} review(s) found for selected hunts. Please complete all reviews.`, 'error');
         return;
     }
     
@@ -681,21 +731,13 @@ async function saveToDrive() {
         return;
     }
     
-    // ===== VALIDATION 2: Check for valid combination (4 failing OR 3 failing + 1 passing) =====
+    // ===== VALIDATION 2: Removed - no longer require specific combination =====
+    // Allow any combination of hunts to be saved
     const failCount = reviews.filter(r => r.judgment === 'bad' || r.judgment === 'fail').length;
     const passCount = reviews.filter(r => r.judgment === 'good' || r.judgment === 'pass').length;
     
-    const validCombination = (failCount === 4) || (failCount === 3 && passCount === 1);
-    if (!validCombination) {
-        showToast(`Invalid combination: ${failCount} fail + ${passCount} pass. Need 4 failing OR 3 failing + 1 passing.`, 'error');
-        alert(
-            `Cannot save: Invalid response combination!\n\n` +
-            `Current: ${failCount} failing + ${passCount} passing\n\n` +
-            `Required: Either 4 failing responses OR 3 failing + 1 passing.\n\n` +
-            `Please adjust your human reviews to meet this requirement.`
-        );
-        return;
-    }
+    // Log combination for informational purposes only
+    console.log(`Saving ${reviews.length} review(s): ${failCount} failing, ${passCount} passing`);
     
     // ===== VALIDATION: Check if diversity check was already passed at confirmation =====
     if (!state.diversityCheckPassed) {
@@ -792,8 +834,8 @@ async function saveToDrive() {
         
         // ===== WYSIWYG SNAPSHOT APPROACH =====
         // Validate selectedResults has all required fields and maintains order
-        if (selectedResults.length !== 4) {
-            throw new Error(`Expected exactly 4 selected results, got ${selectedResults.length}`);
+        if (selectedResults.length === 0) {
+            throw new Error(`No selected results to save. Please select at least 1 hunt.`);
         }
         
         // Validate each result has required fields
@@ -901,14 +943,76 @@ async function saveToDrive() {
 }
 
 function populatePreviewTabs(notebook) {
-    elements.promptPreview.textContent = notebook.prompt || 'No prompt found';
-    elements.referencePreview.textContent = notebook.response || 'No expected response found';
-    elements.judgePreview.textContent = notebook.judge_system_prompt || 'No judge prompt found';
-    
-    // Populate Model Reference tab with response_reference (grading criteria)
-    if (elements.modelrefPreview) {
-        elements.modelrefPreview.textContent = notebook.response_reference || 'No model reference criteria found';
+    // Populate rich text editors (contentEditable divs)
+    if (elements.promptPreview) {
+        // For contentEditable, use textContent to set plain text (formatting will be added by user)
+        elements.promptPreview.textContent = notebook.prompt || '';
+        // Reset unsaved changes
+        state.unsavedChanges.prompt = false;
+        // Update word count display after loading
+        setTimeout(() => validatePromptLength(), 100);
     }
+    
+    if (elements.referencePreview) {
+        elements.referencePreview.textContent = notebook.response || '';
+        state.unsavedChanges.response = false;
+    }
+    
+    if (elements.judgePreview) {
+        elements.judgePreview.textContent = notebook.judge_system_prompt || '';
+        state.unsavedChanges.judge = false;
+    }
+    
+    // Populate Model Reference with structured input
+    if (elements.modelrefPreview) {
+        // Convert JSON to structured text format if it's JSON
+        const responseRef = notebook.response_reference || '';
+        if (responseRef.trim().startsWith('[') || responseRef.trim().startsWith('{')) {
+            // It's JSON, convert to structured format
+            try {
+                const json = JSON.parse(responseRef);
+                if (Array.isArray(json)) {
+                    const structured = json.map(item => {
+                        const id = item.id || 'C1';
+                        const criteriaKey = Object.keys(item).find(k => k.startsWith('criteria'));
+                        const description = criteriaKey ? item[criteriaKey] : '';
+                        return `${id}: ${description}`;
+                    }).join('\n');
+                    elements.modelrefPreview.value = structured;
+                } else {
+                    elements.modelrefPreview.value = responseRef;
+                }
+            } catch (e) {
+                // If parsing fails, use as-is
+                elements.modelrefPreview.value = responseRef;
+            }
+        } else {
+            // Already in structured format or plain text
+            elements.modelrefPreview.value = responseRef;
+        }
+    }
+    
+    // Display metadata FIRST - before any validation that might cause early return
+    // This ensures metadata is always shown even if other parts of the notebook are invalid
+    console.log('📊 Notebook metadata received:', notebook.metadata);
+    console.log('📊 Metadata type:', typeof notebook.metadata);
+    console.log('📊 Metadata keys:', notebook.metadata ? Object.keys(notebook.metadata) : 'null');
+    console.log('📊 Full notebook object keys:', Object.keys(notebook));
+    
+    // Try multiple ways to get metadata
+    let metadataToDisplay = null;
+    if (notebook.metadata && typeof notebook.metadata === 'object' && Object.keys(notebook.metadata).length > 0) {
+        metadataToDisplay = notebook.metadata;
+    } else if (notebook.metadata) {
+        // Metadata exists but might be empty
+        metadataToDisplay = notebook.metadata;
+    } else {
+        console.warn('⚠️ No metadata found in notebook object');
+        metadataToDisplay = {};
+    }
+    
+    console.log('📊 Calling displayMetadata with:', metadataToDisplay);
+    displayMetadata(metadataToDisplay);
     
     // Validate Model Reference is valid JSON format
     const modelRefValidation = validateModelReferenceJSON(notebook.response_reference || '');
@@ -936,7 +1040,7 @@ function populatePreviewTabs(notebook) {
     let parsedCriteria;
     try {
         parsedCriteria = parseCriteria(notebook.response_reference || '');
-    state.criteria = parsedCriteria;
+        state.criteria = parsedCriteria;
     } catch (error) {
         console.error('Failed to parse criteria:', error);
         showToast(`❌ Failed to parse criteria: ${error.message}. Please fix the response_reference format.`, 'error');
@@ -946,27 +1050,911 @@ function populatePreviewTabs(notebook) {
             elements.startHuntBtn.disabled = true;
             elements.startHuntBtn.title = `Criteria Parse Error: ${error.message}`;
         }
+        // Don't return early - continue to initialize other features
+        // Metadata is already displayed above
+    }
+    
+    // Only continue with criteria-related code if parsing succeeded
+    if (parsedCriteria && Array.isArray(parsedCriteria)) {
+        // Store initial criteria to detect missing ones later
+        // CRITICAL: Only set initialCriteria ONCE when notebook is first loaded
+        // This must happen BEFORE any modifications to response_reference
+        if (!state.initialCriteria || !Array.isArray(state.initialCriteria) || state.initialCriteria.length === 0) {
+            state.initialCriteria = JSON.parse(JSON.stringify(parsedCriteria)); // Deep copy
+            console.log('✅ INITIAL CRITERIA SET (first time):', state.initialCriteria.map(c => c.id));
+            console.log('   Full initial criteria:', state.initialCriteria);
+        } else {
+            console.log('✅ INITIAL CRITERIA PRESERVED (not overwritten):', state.initialCriteria.map(c => c.id));
+            console.log('   Current criteria:', parsedCriteria.map(c => c.id));
+            console.log('   Missing from current:', state.initialCriteria
+                .filter(c => !parsedCriteria.find(pc => pc.id === c.id))
+                .map(c => c.id));
+        }
+        console.log('Parsed current criteria:', state.criteria);
+        
+        // Validate Model Reference: Check JSON format AND criteria completeness
+        validateModelReferenceAndCriteria(notebook.response_reference || '');
+    }
+    
+    // Initialize rich text editors
+    initRichTextEditors();
+    
+    // Initialize structured input for Model Reference
+    initStructuredInput();
+    
+    // Initialize prompt length validation
+    initPromptLengthValidation();
+    
+    // Setup save button handlers
+    setupSaveHandlers();
+}
+
+// ============== Metadata Display ==============
+
+function displayMetadata(metadata) {
+    console.log('📊 displayMetadata called with:', metadata);
+    console.log('📊 metadataSidebar element:', elements.metadataSidebar);
+    console.log('📊 metadataGrid element:', elements.metadataGrid);
+    
+    if (!elements.metadataSidebar || !elements.metadataGrid) {
+        console.error('❌ Metadata sidebar elements not found!', {
+            sidebar: !!elements.metadataSidebar,
+            grid: !!elements.metadataGrid
+        });
         return;
     }
     
-    // Store initial criteria to detect missing ones later
-    // CRITICAL: Only set initialCriteria ONCE when notebook is first loaded
-    // This must happen BEFORE any modifications to response_reference
-    if (!state.initialCriteria || !Array.isArray(state.initialCriteria) || state.initialCriteria.length === 0) {
-        state.initialCriteria = JSON.parse(JSON.stringify(parsedCriteria)); // Deep copy
-        console.log('✅ INITIAL CRITERIA SET (first time):', state.initialCriteria.map(c => c.id));
-        console.log('   Full initial criteria:', state.initialCriteria);
-    } else {
-        console.log('✅ INITIAL CRITERIA PRESERVED (not overwritten):', state.initialCriteria.map(c => c.id));
-        console.log('   Current criteria:', parsedCriteria.map(c => c.id));
-        console.log('   Missing from current:', state.initialCriteria
-            .filter(c => !parsedCriteria.find(pc => pc.id === c.id))
-            .map(c => c.id));
-    }
-    console.log('Parsed current criteria:', state.criteria);
+    console.log('📊 Displaying metadata:', metadata);
+    console.log('📊 Metadata keys:', metadata ? Object.keys(metadata) : 'null');
+    console.log('📊 Full metadata object:', JSON.stringify(metadata, null, 2));
     
-    // Validate Model Reference: Check JSON format AND criteria completeness
-    validateModelReferenceAndCriteria(notebook.response_reference || '');
+    state.metadata = metadata || {};
+    
+    // Don't return early if metadata is empty - still try to display what we can
+    if (!metadata || (typeof metadata === 'object' && Object.keys(metadata).length === 0)) {
+        console.warn('⚠️ No metadata to display or empty object, but will still try to show sidebar if elements exist');
+        // Don't return - continue to try to display fields
+    }
+    
+    // Parse prompt length range - try multiple key variations
+    const promptLengthStr = (metadata && metadata['User Prompt Length']) || 
+                           (metadata && metadata['User Prompt length']) || 
+                           (metadata && metadata['user prompt length']) ||
+                           (metadata && metadata['UserPromptLength']) || '';
+    if (promptLengthStr) {
+        const match = promptLengthStr.match(/(\d+)\s*-\s*(\d+)/);
+        if (match) {
+            state.promptLengthRange = {
+                min: parseInt(match[1]),
+                max: parseInt(match[2])
+            };
+            console.log('✅ Prompt length range set:', state.promptLengthRange);
+            // Update word count display after range is set
+            setTimeout(() => validatePromptLength(), 100);
+        }
+    }
+    
+    // Extract model from metadata
+    const modelStr = (metadata && metadata['Model']) || (metadata && metadata['model']) || '';
+    if (modelStr) {
+        // Clean the model string (remove dashes, spaces, convert to lowercase)
+        const cleanedModel = modelStr.toString().trim().replace(/^[-:\s]+/, '').toLowerCase();
+        state.metadataModel = cleanedModel;
+        console.log('✅ Metadata model extracted:', state.metadataModel);
+        
+        // Validate model match on initial load (after model is preselected)
+        setTimeout(() => validateModelMatch(), 500);
+    }
+    
+    // Clear existing content
+    elements.metadataGrid.innerHTML = '';
+    
+    // Helper function to find value by multiple possible keys
+    const getValue = (possibleKeys) => {
+        if (!metadata || typeof metadata !== 'object') return null;
+        for (const key of possibleKeys) {
+            if (metadata[key] !== undefined && metadata[key] !== null && metadata[key] !== '') {
+                return String(metadata[key]).trim();
+            }
+        }
+        return null;
+    };
+    
+    // Define metadata fields to display with multiple key variations
+    const fields = [
+        { 
+            keys: ['Task ID', 'Task ID:', 'task id', 'TaskID'], 
+            icon: '🆔', 
+            label: 'Task ID',
+            badge: true 
+        },
+        { 
+            keys: ['Domain', 'Domain:', 'domain'], 
+            icon: '🌐', 
+            label: 'Domain' 
+        },
+        { 
+            keys: ['Use Case', 'Use Case:', 'use case', 'UseCase'], 
+            icon: '💼', 
+            label: 'Use Case' 
+        },
+        { 
+            keys: ['L1 Taxonomy', 'L1 Taxonomy:', 'l1 taxonomy', 'L1Taxonomy'], 
+            icon: '📚', 
+            label: 'L1 Taxonomy' 
+        },
+        { 
+            keys: ['User Prompt Length', 'User Prompt length', 'User Prompt Length:', 'user prompt length'], 
+            icon: '📏', 
+            label: 'User Prompt Length' 
+        },
+        { 
+            keys: ['Model', 'Model:', 'model'], 
+            icon: '🤖', 
+            label: 'Model' 
+        }
+    ];
+    
+    let hasAnyData = false;
+    let itemsAdded = 0;
+    
+    fields.forEach(field => {
+        const value = getValue(field.keys);
+        
+        // Always show the field, even if value is null (will show N/A)
+        const displayValue = value || 'N/A';
+        
+        // Skip Task ID only if it's truly missing (not just N/A)
+        if (field.label === 'Task ID' && !value) {
+            console.log('⚠️ Task ID not found, skipping Task ID field');
+            return; // Skip Task ID if not found
+        }
+        
+        if (value) hasAnyData = true;
+        
+        const item = document.createElement('div');
+        item.className = 'metadata-item';
+        
+        const label = document.createElement('div');
+        label.className = 'metadata-label';
+        // Create icon span and text separately for better styling
+        const iconSpan = document.createElement('span');
+        iconSpan.textContent = field.icon;
+        iconSpan.style.fontSize = '1rem';
+        const textSpan = document.createElement('span');
+        textSpan.textContent = field.label;
+        label.appendChild(iconSpan);
+        label.appendChild(textSpan);
+        
+        const valueDiv = document.createElement('div');
+        valueDiv.className = 'metadata-value';
+        
+        if (field.badge && value) {
+            const badge = document.createElement('span');
+            badge.className = 'metadata-badge';
+            badge.textContent = displayValue;
+            badge.style.cursor = 'pointer';
+            badge.title = 'Click to copy';
+            badge.addEventListener('click', () => {
+                navigator.clipboard.writeText(displayValue);
+                showToast('✅ Task ID copied to clipboard!', 'success');
+            });
+            valueDiv.appendChild(badge);
+        } else {
+            valueDiv.textContent = displayValue;
+        }
+        
+        item.appendChild(label);
+        item.appendChild(valueDiv);
+        elements.metadataGrid.appendChild(item);
+        itemsAdded++;
+    });
+    
+    console.log('📊 Metadata display summary:', {
+        hasAnyData,
+        itemsAdded,
+        childrenCount: elements.metadataGrid.children.length,
+        metadataKeys: Object.keys(metadata)
+    });
+    
+    // Show metadata sidebar if we have any data OR if we added any items
+    // This ensures sidebar shows even if some fields are missing
+    const shouldShow = hasAnyData || itemsAdded > 0 || elements.metadataGrid.children.length > 0;
+    
+    console.log('📊 Metadata sidebar visibility check:', {
+        hasAnyData,
+        itemsAdded,
+        childrenCount: elements.metadataGrid.children.length,
+        shouldShow,
+        sidebarElement: !!elements.metadataSidebar,
+        gridElement: !!elements.metadataGrid
+    });
+    
+    if (shouldShow) {
+        if (elements.metadataSidebar) {
+            elements.metadataSidebar.style.display = 'block';
+            elements.metadataSidebar.classList.remove('collapsed');
+            document.body.classList.add('sidebar-visible');
+            console.log('✅ Metadata sidebar displayed with', elements.metadataGrid.children.length, 'items');
+        } else {
+            console.error('❌ Metadata sidebar element not found!');
+        }
+    } else {
+        if (elements.metadataSidebar) {
+            elements.metadataSidebar.style.display = 'none';
+            elements.metadataSidebar.classList.remove('collapsed');
+            document.body.classList.remove('sidebar-visible');
+            console.warn('⚠️ No metadata items to display, hiding sidebar');
+        }
+    }
+}
+
+// ============== Rich Text Editor ==============
+
+function initRichTextEditors() {
+    // Initialize toolbar buttons for all rich text editors
+    document.querySelectorAll('.rich-text-toolbar').forEach(toolbar => {
+        toolbar.querySelectorAll('.rich-text-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                const command = btn.dataset.command;
+                const editor = toolbar.nextElementSibling;
+                
+                if (editor && editor.contentEditable === 'true') {
+                    editor.focus();
+                    document.execCommand(command, false, null);
+                    updateToolbarState(toolbar, editor);
+                }
+            });
+        });
+    });
+    
+    // Add keyboard shortcuts
+    document.querySelectorAll('.rich-text-content').forEach(editor => {
+        editor.addEventListener('keydown', (e) => {
+            if (e.ctrlKey || e.metaKey) {
+                if (e.key === 'b') {
+                    e.preventDefault();
+                    document.execCommand('bold', false, null);
+                    updateToolbarState(editor.previousElementSibling, editor);
+                } else if (e.key === 'i') {
+                    e.preventDefault();
+                    document.execCommand('italic', false, null);
+                    updateToolbarState(editor.previousElementSibling, editor);
+                }
+            }
+        });
+        
+        // Track changes
+        editor.addEventListener('input', () => {
+            const editorId = editor.id;
+            if (editorId === 'promptPreview') {
+                state.unsavedChanges.prompt = true;
+                // Update word count live as user types
+                validatePromptLength();
+            } else if (editorId === 'referencePreview') {
+                state.unsavedChanges.response = true;
+            } else if (editorId === 'judgePreview') {
+                state.unsavedChanges.judge = true;
+            }
+        });
+        
+        // Also validate on paste for prompt editor
+        if (editor.id === 'promptPreview') {
+            editor.addEventListener('paste', () => {
+                // Use setTimeout to allow paste to complete first
+                setTimeout(() => {
+                    validatePromptLength();
+                }, 10);
+            });
+        }
+        
+        // Handle placeholder
+        editor.addEventListener('focus', () => {
+            if (editor.textContent.trim() === '') {
+                editor.textContent = '';
+            }
+        });
+        
+        editor.addEventListener('blur', () => {
+            if (editor.textContent.trim() === '') {
+                const placeholder = editor.dataset.placeholder || '';
+                if (placeholder) {
+                    editor.textContent = '';
+                }
+            }
+        });
+    });
+}
+
+function updateToolbarState(toolbar, editor) {
+    if (!toolbar || !editor) return;
+    
+    toolbar.querySelectorAll('.rich-text-btn').forEach(btn => {
+        const command = btn.dataset.command;
+        if (command === 'bold' || command === 'italic') {
+            btn.classList.toggle('active', document.queryCommandState(command));
+        }
+    });
+}
+
+// ============== Structured Text to JSON Converter ==============
+
+function initStructuredInput() {
+    if (!elements.modelrefPreview) return;
+    
+    elements.modelrefPreview.addEventListener('input', () => {
+        state.unsavedChanges.modelRef = true;
+        convertStructuredToJSON();
+    });
+    
+    // Initial conversion if content exists
+    if (elements.modelrefPreview.value) {
+        convertStructuredToJSON();
+    }
+}
+
+function convertStructuredToJSON() {
+    if (!elements.modelrefPreview || !elements.jsonPreviewContent) return;
+    
+    const inputText = elements.modelrefPreview.value.trim();
+    
+    if (!inputText) {
+        elements.jsonPreviewContent.textContent = 'Enter criteria above to see JSON preview...';
+        elements.jsonPreviewContent.className = 'json-preview-content';
+        if (elements.jsonPreviewStatus) {
+            elements.jsonPreviewStatus.textContent = '';
+        }
+        state.convertedModelRefJSON = null;
+        return;
+    }
+    
+    try {
+        // First, try to parse as JSON directly (user might paste JSON)
+        let criteria = null;
+        let jsonString = null;
+        
+        try {
+            const parsed = JSON.parse(inputText);
+            
+            // Check if it's already a valid criteria array
+            if (Array.isArray(parsed) && parsed.length > 0) {
+                // Validate structure: should have id and criteria fields
+                const isValid = parsed.every(item => 
+                    item && 
+                    typeof item === 'object' && 
+                    item.id && 
+                    Object.keys(item).some(key => key.startsWith('criteria'))
+                );
+                
+                if (isValid) {
+                    // It's already valid JSON criteria format - use it directly
+                    criteria = parsed;
+                    jsonString = JSON.stringify(criteria, null, 2);
+                    console.log('✅ Detected valid JSON format, using directly');
+                } else {
+                    // Invalid structure, fall through to structured text parsing
+                    throw new Error('Invalid JSON structure');
+                }
+            } else {
+                // Not an array, fall through to structured text parsing
+                throw new Error('Not a valid criteria array');
+            }
+        } catch (jsonError) {
+            // Not valid JSON or not in expected format, try structured text format
+            console.log('Not valid JSON, trying structured text format');
+            
+            // Parse structured text format: C1: description, C2: description, etc.
+            const lines = inputText.split('\n').filter(line => line.trim());
+            criteria = [];
+            
+            lines.forEach((line, index) => {
+                line = line.trim();
+                if (!line) return;
+                
+                // Match pattern: C1: description or C1 description
+                const match = line.match(/^C(\d+)[:\s]+(.+)$/i);
+                if (match) {
+                    const id = `C${match[1]}`;
+                    const description = match[2].trim();
+                    criteria.push({
+                        id: id,
+                        [`criteria${match[1]}`]: description
+                    });
+                } else {
+                    // If no match, try to infer from line number
+                    const inferredId = `C${index + 1}`;
+                    criteria.push({
+                        id: inferredId,
+                        [`criteria${index + 1}`]: line
+                    });
+                }
+            });
+            
+            if (criteria.length === 0) {
+                throw new Error('No valid criteria found. Use format: C1: description, or paste valid JSON array');
+            }
+            
+            // Convert to JSON string
+            jsonString = JSON.stringify(criteria, null, 2);
+        }
+        
+        // Display and store the JSON
+        elements.jsonPreviewContent.textContent = jsonString;
+        elements.jsonPreviewContent.className = 'json-preview-content valid';
+        
+        if (elements.jsonPreviewStatus) {
+            elements.jsonPreviewStatus.textContent = `✅ Valid (${criteria.length} criteria)`;
+            elements.jsonPreviewStatus.style.color = 'var(--success)';
+        }
+        
+        // Store converted JSON in state for saving
+        state.convertedModelRefJSON = jsonString;
+        
+        // Validate the JSON and update button state
+        // Use the converted JSON for validation
+        validateModelReferenceAndCriteria(jsonString);
+        
+    } catch (error) {
+        elements.jsonPreviewContent.textContent = `Error: ${error.message}`;
+        elements.jsonPreviewContent.className = 'json-preview-content error';
+        
+        if (elements.jsonPreviewStatus) {
+            elements.jsonPreviewStatus.textContent = '❌ Invalid format';
+            elements.jsonPreviewStatus.style.color = 'var(--danger)';
+        }
+        
+        state.convertedModelRefJSON = null;
+        
+        // Mark JSON as invalid and disable hunt button
+        state.modelRefValid = false;
+        if (elements.startHuntBtn) {
+            elements.startHuntBtn.disabled = true;
+            elements.startHuntBtn.title = `Model Reference JSON Error: ${error.message}`;
+        }
+    }
+}
+
+// ============== Prompt Length Validation ==============
+
+function initPromptLengthValidation() {
+    if (!elements.promptPreview) return;
+    
+    // Validate on input
+    elements.promptPreview.addEventListener('input', validatePromptLength);
+}
+
+function validatePromptLength() {
+    if (!elements.promptPreview) {
+        return true; // No validation if element not found
+    }
+    
+    const text = elements.promptPreview.textContent || '';
+    const wordCount = text.trim().split(/\s+/).filter(w => w.length > 0).length;
+    
+    // Update live word count display
+    const wordCountEl = document.getElementById('promptWordCount');
+    const wordCountTextEl = document.getElementById('promptWordCountText');
+    const wordCountRangeEl = document.getElementById('promptWordCountRange');
+    
+    if (wordCountTextEl) {
+        wordCountTextEl.textContent = `${wordCount} word${wordCount !== 1 ? 's' : ''}`;
+    }
+    
+    // Show range if available
+    if (wordCountRangeEl && state.promptLengthRange) {
+        const { min, max } = state.promptLengthRange;
+        wordCountRangeEl.textContent = `(range: ${min}-${max})`;
+    } else if (wordCountRangeEl) {
+        wordCountRangeEl.textContent = '';
+    }
+    
+    // Color code based on range
+    if (wordCountEl && state.promptLengthRange) {
+        const { min, max } = state.promptLengthRange;
+        
+        if (wordCount >= min && wordCount <= max) {
+            // In range - green
+            wordCountEl.style.background = 'var(--success-bg)';
+            wordCountEl.style.color = 'var(--success)';
+            wordCountEl.style.border = '1px solid var(--success)';
+        } else {
+            // Out of range - red
+            wordCountEl.style.background = 'var(--danger-bg)';
+            wordCountEl.style.color = 'var(--danger)';
+            wordCountEl.style.border = '1px solid var(--danger)';
+        }
+    } else if (wordCountEl) {
+        // No range set - neutral
+        wordCountEl.style.background = 'var(--bg-tertiary)';
+        wordCountEl.style.color = 'var(--text-primary)';
+        wordCountEl.style.border = '1px solid var(--border)';
+    }
+    
+    // Show warning if outside range
+    if (elements.promptLengthWarning && state.promptLengthRange) {
+        const { min, max } = state.promptLengthRange;
+        
+        if (wordCount < min || wordCount > max) {
+            elements.promptLengthWarning.classList.remove('hidden');
+            elements.promptLengthWarning.className = 'prompt-length-warning error';
+            elements.promptLengthWarning.innerHTML = `
+                ⚠️ <strong>Prompt length out of range!</strong><br>
+                Current: ${wordCount} words | Required: ${min} - ${max} words
+            `;
+            return false;
+        } else {
+            elements.promptLengthWarning.classList.add('hidden');
+            return true;
+        }
+    }
+    
+    return true;
+}
+
+// ============== Model Matching Validation ==============
+
+function validateModelMatch() {
+    if (!state.metadataModel || !elements.modelSelect) {
+        return true; // No validation if metadata model not set
+    }
+    
+    const selectedModel = elements.modelSelect.value || '';
+    if (!selectedModel) {
+        return true; // No model selected yet
+    }
+    
+    const selectedModelLower = selectedModel.toLowerCase();
+    
+    // Extract model name from selected model ID
+    let selectedModelName = '';
+    if (selectedModelLower.includes('nemotron')) {
+        selectedModelName = 'nemotron';
+    } else if (selectedModelLower.includes('qwen')) {
+        selectedModelName = 'qwen';
+    } else {
+        // Unknown model - allow it (might be a new model)
+        return true;
+    }
+    
+    // Check if selected model matches metadata model
+    const metadataModelLower = state.metadataModel.toLowerCase();
+    const matches = (
+        (metadataModelLower.includes('qwen') && selectedModelName === 'qwen') ||
+        (metadataModelLower.includes('nemotron') && selectedModelName === 'nemotron')
+    );
+    
+    // Remove any existing warning
+    const existingWarning = document.getElementById('modelMismatchWarning');
+    if (existingWarning) {
+        existingWarning.remove();
+    }
+    
+    if (!matches && selectedModelName) {
+        // Model mismatch - show warning and disable save/start buttons
+        state.modelMismatchWarning = true;
+        
+        // Create warning element
+        const warning = document.createElement('div');
+        warning.id = 'modelMismatchWarning';
+        warning.className = 'model-mismatch-warning';
+        warning.innerHTML = `
+            ⚠️ <strong>Model Mismatch!</strong><br>
+            Metadata shows: <strong>${state.metadataModel}</strong> | Selected: <strong>${selectedModelName}</strong><br>
+            Please double-check the model in metadata before proceeding.
+        `;
+        
+        // Insert warning before model select
+        const modelGroup = elements.modelSelect.closest('.form-group');
+        if (modelGroup) {
+            modelGroup.appendChild(warning);
+        }
+        
+        // Disable start hunt button
+        if (elements.startHuntBtn) {
+            elements.startHuntBtn.disabled = true;
+            elements.startHuntBtn.title = 'Model mismatch detected. Please select the correct model from metadata.';
+        }
+        
+        // Disable save buttons
+        disableSaveButtons(true);
+        
+        showToast('⚠️ Model mismatch detected! Please select the correct model from metadata.', 'error');
+        return false;
+    } else {
+        // Model matches or no model selected yet
+        state.modelMismatchWarning = false;
+        
+        // Enable start hunt button
+        if (elements.startHuntBtn) {
+            elements.startHuntBtn.disabled = false;
+            elements.startHuntBtn.title = '';
+        }
+        
+        // Enable save buttons
+        disableSaveButtons(false);
+        
+        return true;
+    }
+}
+
+function disableSaveButtons(disable) {
+    const saveButtons = [
+        elements.saveAllBtn,
+        elements.savePromptBtn,
+        elements.saveResponseBtn,
+        elements.saveModelRefBtn,
+        elements.saveJudgeBtn,
+        elements.judgeBeforeHuntBtn // Also disable judge button on model mismatch
+    ];
+    
+    saveButtons.forEach(btn => {
+        if (btn) {
+            if (disable) {
+                btn.disabled = true;
+                btn.title = 'Model mismatch detected. Please select the correct model from metadata.';
+                btn.style.opacity = '0.6';
+                btn.style.cursor = 'not-allowed';
+            } else {
+                btn.disabled = false;
+                btn.title = '';
+                btn.style.opacity = '1';
+                btn.style.cursor = 'pointer';
+            }
+        }
+    });
+}
+
+// ============== Save Handlers ==============
+
+function setupSaveHandlers() {
+    // Individual save buttons
+    if (elements.savePromptBtn) {
+        elements.savePromptBtn.addEventListener('click', () => saveCell('prompt'));
+    }
+    
+    if (elements.saveResponseBtn) {
+        // Keep existing handler, but update to use new format
+        // The existing saveAndRejudge function will be updated
+    }
+    
+    if (elements.saveModelRefBtn) {
+        elements.saveModelRefBtn.addEventListener('click', () => saveCell('response_reference'));
+    }
+    
+    if (elements.saveJudgeBtn) {
+        elements.saveJudgeBtn.addEventListener('click', () => saveCell('judge_system_prompt'));
+    }
+    
+    // Save All button
+    if (elements.saveAllBtn) {
+        elements.saveAllBtn.addEventListener('click', saveAllCells);
+    }
+}
+
+async function saveCell(cellType) {
+    if (!state.sessionId) {
+        showToast('Please load a notebook first', 'error');
+        return;
+    }
+    
+    // Validate prompt length if saving prompt
+    if (cellType === 'prompt' && !validatePromptLength()) {
+        showToast('⚠️ Cannot save: Prompt length is outside the required range', 'error');
+        return;
+    }
+    
+    let content = '';
+    let cellHeading = '';
+    
+    switch (cellType) {
+        case 'prompt':
+            // Get text content from contentEditable div (strips HTML formatting for now)
+            content = elements.promptPreview?.textContent || elements.promptPreview?.innerText || '';
+            cellHeading = 'prompt';
+            break;
+        case 'response':
+            content = elements.referencePreview?.textContent || elements.referencePreview?.innerText || '';
+            cellHeading = 'response';
+            break;
+        case 'response_reference':
+            // Use converted JSON if available, otherwise try to convert now
+            if (!state.convertedModelRefJSON) {
+                convertStructuredToJSON();
+            }
+            content = state.convertedModelRefJSON || '';
+            if (!content) {
+                showToast('⚠️ Please ensure Model Reference is in valid format', 'error');
+                return;
+            }
+            cellHeading = 'response_reference';
+            break;
+        case 'judge_system_prompt':
+            content = elements.judgePreview?.textContent || elements.judgePreview?.innerText || '';
+            cellHeading = 'judge_system_prompt';
+            break;
+        default:
+            showToast('Unknown cell type', 'error');
+            return;
+    }
+    
+    if (!content.trim()) {
+        showToast(`${cellType} cannot be empty`, 'error');
+        return;
+    }
+    
+    try {
+        let btn = null;
+        if (cellType === 'prompt') {
+            btn = elements.savePromptBtn;
+        } else if (cellType === 'response') {
+            btn = elements.saveResponseBtn;
+        } else if (cellType === 'response_reference') {
+            btn = elements.saveModelRefBtn;
+        } else if (cellType === 'judge_system_prompt') {
+            btn = elements.saveJudgeBtn;
+        }
+        
+        const originalText = btn ? btn.textContent : '';
+        
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = '💾 Saving...';
+        }
+        
+        const response = await fetch(`/api/update-notebook-cell/${state.sessionId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                cell_type: cellHeading,
+                content: content
+            })
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to save');
+        }
+        
+        const data = await response.json();
+        showToast(`✅ ${cellType} saved to Colab!`, 'success');
+        
+        // Mark as saved
+        state.unsavedChanges[cellType === 'response_reference' ? 'modelRef' : cellType] = false;
+        
+        // If saving response, also re-judge
+        if (cellType === 'response') {
+            await judgeReferenceResponse();
+        }
+        
+    } catch (error) {
+        showToast(`❌ Error saving ${cellType}: ${error.message}`, 'error');
+    } finally {
+        let btn = null;
+        let originalText = '';
+        if (cellType === 'prompt') {
+            btn = elements.savePromptBtn;
+            originalText = '💾 Save Prompt';
+        } else if (cellType === 'response') {
+            btn = elements.saveResponseBtn;
+            originalText = '💾 Save Response';
+        } else if (cellType === 'response_reference') {
+            btn = elements.saveModelRefBtn;
+            originalText = '💾 Save Model Reference';
+        } else if (cellType === 'judge_system_prompt') {
+            btn = elements.saveJudgeBtn;
+            originalText = '💾 Save Judge Prompt';
+        }
+        
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = originalText;
+        }
+    }
+}
+
+async function saveAllCells() {
+    if (!state.sessionId) {
+        showToast('Please load a notebook first', 'error');
+        return;
+    }
+    
+    // Validate prompt length
+    if (!validatePromptLength()) {
+        showToast('⚠️ Cannot save: Prompt length is outside the required range', 'error');
+        return;
+    }
+    
+    // Check if Model Reference is valid
+    if (!state.convertedModelRefJSON) {
+        convertStructuredToJSON();
+        if (!state.convertedModelRefJSON) {
+            showToast('⚠️ Please ensure Model Reference is in valid format', 'error');
+            return;
+        }
+    }
+    
+    const cellsToSave = [];
+    
+    // Collect all edited content
+    const promptContent = elements.promptPreview?.textContent || elements.promptPreview?.innerText || '';
+    if (promptContent.trim()) {
+        cellsToSave.push({
+            cell_type: 'prompt',
+            content: promptContent
+        });
+    }
+    
+    const responseContent = elements.referencePreview?.textContent || elements.referencePreview?.innerText || '';
+    if (responseContent.trim()) {
+        cellsToSave.push({
+            cell_type: 'response',
+            content: responseContent
+        });
+    }
+    
+    // Ensure Model Reference is converted
+    if (!state.convertedModelRefJSON) {
+        convertStructuredToJSON();
+    }
+    if (state.convertedModelRefJSON) {
+        cellsToSave.push({
+            cell_type: 'response_reference',
+            content: state.convertedModelRefJSON
+        });
+    }
+    
+    const judgeContent = elements.judgePreview?.textContent || elements.judgePreview?.innerText || '';
+    if (judgeContent.trim()) {
+        cellsToSave.push({
+            cell_type: 'judge_system_prompt',
+            content: judgeContent
+        });
+    }
+    
+    if (cellsToSave.length === 0) {
+        showToast('No changes to save', 'info');
+        return;
+    }
+    
+    try {
+        if (elements.saveAllBtn) {
+            elements.saveAllBtn.disabled = true;
+            elements.saveAllBtn.textContent = '💾 Saving All...';
+        }
+        
+        const response = await fetch(`/api/update-notebook-cells/${state.sessionId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cells: cellsToSave })
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to save');
+        }
+        
+        const data = await response.json();
+        showToast(`✅ All changes saved to Colab! (${cellsToSave.length} cells)`, 'success');
+        
+        // Mark all as saved
+        Object.keys(state.unsavedChanges).forEach(key => {
+            state.unsavedChanges[key] = false;
+        });
+        
+        // Re-judge if response was saved
+        if (cellsToSave.some(c => c.cell_type === 'response')) {
+            await judgeReferenceResponse();
+        }
+        
+    } catch (error) {
+        showToast(`❌ Error saving: ${error.message}`, 'error');
+    } finally {
+        if (elements.saveAllBtn) {
+            elements.saveAllBtn.disabled = false;
+            elements.saveAllBtn.textContent = '💾 Save All Changes to Colab';
+        }
+    }
 }
 
 // Validate Model Reference: JSON format AND criteria completeness
@@ -1036,14 +2024,21 @@ function validateModelReferenceAndCriteria(responseReference) {
     }
     
     // Step 3: JSON is valid AND all criteria are present
-    // But hunt is still disabled until judge passes
+    // Check if reference was already validated (judged and passed)
+    // If already validated, enable the button; otherwise keep it disabled until judging
     if (elements.modelrefPreview) {
         elements.modelrefPreview.textContent = responseReference || 'No model reference criteria found';
     }
     if (elements.startHuntBtn) {
-        // Don't enable yet - still need to judge first
-        elements.startHuntBtn.disabled = true;
-        elements.startHuntBtn.title = 'Model Reference is valid. Click "Judge Reference Response" to validate.';
+        // Only enable if reference was already validated (judged and all criteria passed)
+        if (state.referenceValidated && state.modelRefValid) {
+            elements.startHuntBtn.disabled = false;
+            elements.startHuntBtn.title = '';
+        } else {
+            // Don't enable yet - still need to judge first
+            elements.startHuntBtn.disabled = true;
+            elements.startHuntBtn.title = 'Model Reference is valid. Click "Judge Reference Response" to validate.';
+        }
     }
     console.log('✅ Model Reference validation passed: JSON valid and all criteria present');
 }
@@ -1107,18 +2102,79 @@ function parseCriteria(responseReference) {
         throw new Error(error);
     }
     
+    // Clean the input - remove any leading/trailing whitespace
+    const cleaned = responseReference.trim();
+    
     try {
-        // Extract only the JSON array between [ and ]
-        const arrayMatch = responseReference.match(/\[[\s\S]*?\]/);
+        // First, try to parse the entire string as JSON (most common case)
+        let criteriaArray = null;
+        let jsonArrayStr = null;
         
-        if (!arrayMatch) {
-            const error = 'No JSON array found between [ and ] brackets in response_reference';
-            console.error(error);
-            throw new Error(error);
+        try {
+            const parsed = JSON.parse(cleaned);
+            if (Array.isArray(parsed)) {
+                criteriaArray = parsed;
+                jsonArrayStr = cleaned;
+                console.log('✅ Parsed as direct JSON array');
+            } else {
+                // It's JSON but not an array
+                throw new Error('Parsed JSON is not an array');
+            }
+        } catch (jsonParseError) {
+            // Not pure JSON, try to extract JSON array from text
+            console.log('Not pure JSON, attempting extraction. Error:', jsonParseError.message);
+            
+            // Try to find JSON array with balanced brackets (most robust method)
+            let bracketCount = 0;
+            let startIndex = -1;
+            let arrayMatch = null;
+            
+            for (let i = 0; i < cleaned.length; i++) {
+                if (cleaned[i] === '[') {
+                    if (bracketCount === 0) startIndex = i;
+                    bracketCount++;
+                } else if (cleaned[i] === ']') {
+                    bracketCount--;
+                    if (bracketCount === 0 && startIndex >= 0) {
+                        arrayMatch = cleaned.substring(startIndex, i + 1);
+                        break;
+                    }
+                }
+            }
+            
+            // If balanced bracket matching failed, try regex as fallback
+            if (!arrayMatch) {
+                // Try greedy match (captures full array including nested arrays)
+                const greedyMatch = cleaned.match(/\[[\s\S]*\]/);
+                if (greedyMatch) {
+                    arrayMatch = greedyMatch[0];
+                } else {
+                    // Try non-greedy
+                    const nonGreedyMatch = cleaned.match(/\[[\s\S]*?\]/);
+                    if (nonGreedyMatch) {
+                        arrayMatch = nonGreedyMatch[0];
+                    }
+                }
+            }
+            
+            if (arrayMatch) {
+                try {
+                    jsonArrayStr = arrayMatch;
+                    criteriaArray = JSON.parse(jsonArrayStr);
+                    console.log('✅ Extracted and parsed JSON array from text');
+                } catch (parseError) {
+                    console.error('Failed to parse extracted array:', parseError);
+                    console.error('Extracted string:', arrayMatch.substring(0, 200));
+                    throw new Error(`JSON parse error in response_reference: ${parseError.message}`);
+                }
+            } else {
+                // No array found at all
+                const error = 'No JSON array found between [ and ] brackets in response_reference';
+                console.error(error);
+                console.error('Response reference content (first 500 chars):', cleaned.substring(0, 500));
+                throw new Error(error);
+            }
         }
-        
-        const jsonArrayStr = arrayMatch[0];
-        const criteriaArray = JSON.parse(jsonArrayStr);
         
         if (!Array.isArray(criteriaArray) || criteriaArray.length === 0) {
             const error = 'JSON array is empty or invalid - must contain at least one criterion';
@@ -1261,6 +2317,28 @@ async function startHunt() {
         return;
     }
     
+    // MANDATORY: Check if reference was judged and all criteria passed (100%)
+    if (!state.referenceValidated) {
+        showToast('❌ You must judge the reference response first! Click "Judge Only" or "Save & Re-judge" before starting hunt.', 'error');
+        return;
+    }
+    
+    // MANDATORY: Check if reference was judged and all criteria passed (100%)
+    if (!state.referenceValidated) {
+        showToast('❌ You must judge the reference response first! All criteria must pass (100%) before starting hunt. Click "Judge Only" or "Save & Re-judge".', 'error');
+        // Ensure button is disabled
+        if (elements.startHuntBtn) {
+            elements.startHuntBtn.disabled = true;
+        }
+        return;
+    }
+    
+    // Validate model match before starting
+    if (!validateModelMatch()) {
+        showToast('⚠️ Model mismatch detected! Please select the correct model from metadata.', 'error');
+        return;
+    }
+    
     state.isHunting = true;
     state.config = getConfig();
     state.results = [];
@@ -1268,6 +2346,16 @@ async function startHunt() {
     // Add loading state to button
     elements.startHuntBtn.classList.add('loading');
     elements.startHuntBtn.disabled = true;
+    
+    // FIX 4: Lock model and provider selection once hunt starts
+    if (elements.modelSelect) {
+        elements.modelSelect.disabled = true;
+        elements.modelSelect.title = 'Model selection locked during hunt. Refresh page to change.';
+    }
+    if (elements.providerSelect) {
+        elements.providerSelect.disabled = true;
+        elements.providerSelect.title = 'Provider selection locked during hunt. Refresh page to change.';
+    }
     
     // Hide upload and config sections during hunt
     document.querySelector('.section')?.classList.add('hidden'); // Hide upload section
@@ -1291,60 +2379,87 @@ async function startHunt() {
     // Scroll to progress section
     elements.progressSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
     
-    // Start SSE stream
-    const eventSource = new EventSource(`/api/hunt-stream/${state.sessionId}`);
+    // Start SSE stream with reconnection support
+    let eventSource = null;
+    let reconnectAttempts = 0;
+    const maxReconnectAttempts = 3;
+    const reconnectDelay = 2000; // 2 seconds
     
-    eventSource.onmessage = (event) => {
-        console.log('SSE message:', event.data);
-    };
-    
-    eventSource.addEventListener('start', (event) => {
-        const data = JSON.parse(event.data);
-        console.log('Hunt started:', data);
-    });
-    
-    eventSource.addEventListener('hunt_start', (event) => {
-        const data = JSON.parse(event.data);
-        updateTableRow(data.hunt_id, { status: 'running', model: data.model });
-    });
-    
-    eventSource.addEventListener('hunt_result', (event) => {
-        const data = JSON.parse(event.data);
-        handleHuntResult(data);
-    });
-    
-    eventSource.addEventListener('early_stop', (event) => {
-        const data = JSON.parse(event.data);
-        showToast(data.reason, 'info');
-    });
-    
-    eventSource.addEventListener('complete', (event) => {
-        const data = JSON.parse(event.data);
-        handleHuntComplete(data);
-        eventSource.close();
-    });
-    
-    eventSource.addEventListener('error', (event) => {
-        console.error('SSE error:', event);
-        eventSource.close();
-        state.isHunting = false;
+    function connectSSE() {
+        eventSource = new EventSource(`/api/hunt-stream/${state.sessionId}`);
         
-        // Remove loading state from button
-        elements.startHuntBtn.classList.remove('loading');
-        elements.startHuntBtn.disabled = false;
+        eventSource.onmessage = (event) => {
+            console.log('SSE message:', event.data);
+        };
         
-        // Update status to show error
-        if (elements.huntStatus) {
-            elements.huntStatus.querySelector('.status-dot').className = 'status-dot failed';
-            elements.statusText.textContent = 'Error - Connection lost';
-        }
+        eventSource.addEventListener('start', (event) => {
+            const data = JSON.parse(event.data);
+            console.log('Hunt started:', data);
+            reconnectAttempts = 0; // Reset on successful connection
+        });
         
-        showToast('Hunt connection error. Please try again.', 'error');
-    });
+        eventSource.addEventListener('hunt_start', (event) => {
+            const data = JSON.parse(event.data);
+            updateTableRow(data.hunt_id, { status: 'running', model: data.model });
+        });
+        
+        eventSource.addEventListener('hunt_result', (event) => {
+            const data = JSON.parse(event.data);
+            handleHuntResult(data);
+        });
+        
+        eventSource.addEventListener('early_stop', (event) => {
+            const data = JSON.parse(event.data);
+            showToast(data.reason, 'info');
+        });
+        
+        eventSource.addEventListener('complete', (event) => {
+            const data = JSON.parse(event.data);
+            handleHuntComplete(data);
+            eventSource.close();
+        });
+        
+        eventSource.addEventListener('error', (event) => {
+            console.error('SSE error:', event);
+            eventSource.close();
+            
+            // Try to reconnect if hunt is still in progress
+            if (state.isHunting && reconnectAttempts < maxReconnectAttempts) {
+                reconnectAttempts++;
+                console.log(`SSE reconnect attempt ${reconnectAttempts}/${maxReconnectAttempts}...`);
+                showToast(`Connection lost. Reconnecting... (${reconnectAttempts}/${maxReconnectAttempts})`, 'warning');
+                
+                setTimeout(() => {
+                    if (state.isHunting) {
+                        connectSSE();
+                    }
+                }, reconnectDelay * reconnectAttempts);
+                return;
+            }
+            
+            // Max reconnect attempts reached or hunt finished
+            state.isHunting = false;
+            
+            // Remove loading state from button
+            elements.startHuntBtn.classList.remove('loading');
+            elements.startHuntBtn.disabled = false;
+            
+            // Update status to show error
+            if (elements.huntStatus) {
+                elements.huntStatus.querySelector('.status-dot').className = 'status-dot failed';
+                elements.statusText.textContent = 'Error - Connection lost';
+            }
+            
+            showToast('Hunt connection error. Please try again.', 'error');
+        });
+        
+        eventSource.addEventListener('ping', () => {
+            // Keepalive, ignore
+        });
+    }
     
-    eventSource.addEventListener('ping', () => {
-        // Keepalive, ignore
-    });
+    // Start the connection
+    connectSSE();
 }
 
 function initProgressUI() {
@@ -1384,6 +2499,9 @@ function initProgressUI() {
             <td class="status-cell"><span class="score-badge pending">⏳ Pending</span></td>
             <td class="score-cell">-</td>
             <td class="issues-cell">-</td>
+            <td class="response-cell" style="max-width: 400px;">
+                <span class="response-placeholder" style="color: var(--text-muted);">-</span>
+            </td>
         `;
         elements.resultsTableBody.appendChild(row);
     }
@@ -1432,6 +2550,21 @@ function handleHuntResult(data) {
     // Store result with response data
     state.results.push(data);
     
+    // Store in allResponses for selection phase (with row number for reference)
+    if (response && status === 'completed' && !error) {
+        const responseData = {
+            ...data,
+            rowNumber: globalRowNum - 1  // 0-based index for allResponses
+        };
+        // Only add if not already present (avoid duplicates on re-judging)
+        const existingIndex = state.allResponses.findIndex(r => r.hunt_id === data.hunt_id);
+        if (existingIndex >= 0) {
+            state.allResponses[existingIndex] = responseData;
+        } else {
+            state.allResponses.push(responseData);
+        }
+    }
+    
     // Add to blind judging queue if completed successfully (for criteria review later)
     if (status === 'completed' && !error) {
         state.blindJudging.queue.push(data);
@@ -1474,6 +2607,70 @@ function handleHuntResult(data) {
         } else {
             row.querySelector('.issues-cell').textContent = '-';
         }
+        
+        // Response - SHOW IMMEDIATELY (expandable)
+        const responseCell = row.querySelector('.response-cell');
+        if (responseCell && response) {
+            const responseText = response.trim();
+            const responseId = `response-${globalRowNum}`;
+            
+            // Check if already initialized
+            const isInitialized = responseCell.dataset.initialized === 'true';
+            const isExpanded = responseCell.dataset.expanded === 'true';
+            
+            if (!isInitialized) {
+                // Initialize expandable response
+                responseCell.innerHTML = `
+                    <div class="response-container" style="position: relative;">
+                        <div class="response-preview" id="${responseId}" style="
+                            max-height: 60px;
+                            overflow: hidden;
+                            white-space: pre-wrap;
+                            word-break: break-word;
+                            font-size: 0.85rem;
+                            line-height: 1.4;
+                            color: var(--text-primary);
+                            cursor: pointer;
+                            padding: 0.5rem;
+                            background: var(--bg-tertiary);
+                            border-radius: 4px;
+                            transition: max-height 0.3s ease;
+                        " onclick="toggleResponse(${globalRowNum})">
+                            <span class="response-text">${escapeHtml(responseText)}</span>
+                        </div>
+                        <button class="response-toggle-btn" onclick="toggleResponse(${globalRowNum})" style="
+                            position: absolute;
+                            top: 0.25rem;
+                            right: 0.25rem;
+                            background: var(--bg-primary);
+                            border: 1px solid var(--border);
+                            border-radius: 4px;
+                            padding: 0.25rem 0.5rem;
+                            font-size: 0.75rem;
+                            cursor: pointer;
+                            color: var(--text-primary);
+                            z-index: 10;
+                        ">▼ Expand</button>
+                    </div>
+                `;
+                responseCell.dataset.initialized = 'true';
+                responseCell.dataset.expanded = 'false';
+            } else {
+                // Update existing response text
+                const preview = responseCell.querySelector('.response-preview');
+                const toggleBtn = responseCell.querySelector('.response-toggle-btn');
+                if (preview) {
+                    const textSpan = preview.querySelector('.response-text');
+                    if (textSpan) {
+                        textSpan.textContent = responseText;
+                    }
+                }
+            }
+        } else if (responseCell && error) {
+            responseCell.innerHTML = `
+                <span style="color: var(--danger); font-size: 0.85rem;">Error: ${escapeHtml(error.substring(0, 100))}</span>
+            `;
+        }
     }
     
     // Update progress
@@ -1489,16 +2686,80 @@ function handleHuntResult(data) {
     }
 }
 
+// Toggle response expansion in progress table
+function toggleResponse(rowNum) {
+    const row = document.getElementById(`hunt-row-${rowNum}`);
+    if (!row) return;
+    
+    const responseCell = row.querySelector('.response-cell');
+    if (!responseCell) return;
+    
+    const isExpanded = responseCell.dataset.expanded === 'true';
+    const preview = responseCell.querySelector('.response-preview');
+    const toggleBtn = responseCell.querySelector('.response-toggle-btn');
+    
+    if (preview && toggleBtn) {
+        if (isExpanded) {
+            preview.style.maxHeight = '60px';
+            toggleBtn.textContent = '▼ Expand';
+            responseCell.dataset.expanded = 'false';
+        } else {
+            preview.style.maxHeight = 'none';
+            toggleBtn.textContent = '▲ Collapse';
+            responseCell.dataset.expanded = 'true';
+        }
+    }
+}
+
+// Make toggleResponse available globally
+window.toggleResponse = toggleResponse;
+
+// Toggle response expansion in selection table
+function toggleSelectionResponse(rowNumber) {
+    const cell = document.querySelector(`.selection-response-cell[data-row-number="${rowNumber}"]`);
+    if (!cell) return;
+    
+    const preview = cell.querySelector('.selection-response-preview');
+    const toggleBtn = cell.querySelector('.selection-response-toggle-btn');
+    
+    if (preview && toggleBtn) {
+        const isExpanded = preview.style.maxHeight === 'none' || preview.style.maxHeight === '';
+        
+        if (isExpanded) {
+            preview.style.maxHeight = '60px';
+            toggleBtn.textContent = '▼ Expand';
+        } else {
+            preview.style.maxHeight = 'none';
+            toggleBtn.textContent = '▲ Collapse';
+        }
+    }
+}
+
+// Make toggleSelectionResponse available globally
+window.toggleSelectionResponse = toggleSelectionResponse;
+
 function handleHuntComplete(data) {
     state.isHunting = false;
     
     // Remove loading state from button
     elements.startHuntBtn.classList.remove('loading');
-    elements.startHuntBtn.disabled = false;
+    
+    // FIX 1: Don't enable Start Hunt button if reviews section is visible
+    const isInReviewMode = !elements.resultsSection.classList.contains('hidden') && state.selectionConfirmed;
+    if (isInReviewMode) {
+        elements.startHuntBtn.disabled = true;
+        elements.startHuntBtn.title = 'Cannot start new hunt while reviews are in progress. Complete reviews or refresh page.';
+    } else {
+        elements.startHuntBtn.disabled = false;
+        elements.startHuntBtn.title = '';
+    }
     
     // Show upload and config sections again
     document.querySelector('.section')?.classList.remove('hidden');
     elements.configSection?.classList.remove('hidden');
+    
+    // FIX 4: Keep model/provider locked even after hunt completes (only unlock on refresh)
+    // Don't re-enable model/provider selects here - they stay locked until page refresh
     
     const { completed_hunts, breaks_found } = data;
     
@@ -1523,9 +2784,27 @@ async function fetchAllResponsesAndShowSelection(completedHunts, breaksFound) {
         const response = await fetch(`/api/results/${state.sessionId}`);
         const data = await response.json();
         
-        // Store all responses (accumulate across runs)
+        // Store all responses (accumulate across runs, avoiding duplicates)
         const newResponses = data.results || [];
-        state.allResponses = [...state.allResponses, ...newResponses];
+        
+        // Add new responses, avoiding duplicates by hunt_id
+        newResponses.forEach(newResponse => {
+            const existingIndex = state.allResponses.findIndex(r => r.hunt_id === newResponse.hunt_id);
+            if (existingIndex >= 0) {
+                // Update existing response, preserve row number
+                state.allResponses[existingIndex] = {
+                    ...newResponse,
+                    rowNumber: state.allResponses[existingIndex].rowNumber
+                };
+            } else {
+                // Add new response with correct row number (index in array)
+                const newRowNumber = state.allResponses.length;
+                state.allResponses.push({
+                    ...newResponse,
+                    rowNumber: newRowNumber
+                });
+            }
+        });
         
         // Count total breaks across all accumulated responses (check both judge_score and score fields)
         const totalBreaks = state.allResponses.filter(r => {
@@ -1604,8 +2883,8 @@ function displaySelectionCards() {
     const grid = elements.selectionGrid;
     grid.innerHTML = '';
     
-    // Reset selection - use row numbers (0-based indices) instead of hunt_ids
-    state.selectedRowNumbers = [];
+    // Don't reset selection - keep existing selection if any
+    // state.selectedRowNumbers is preserved
     
     if (state.allResponses.length === 0) {
         grid.innerHTML = '<div style="text-align: center; padding: 2rem; color: var(--text-muted);">No hunts found. Run hunts first.</div>';
@@ -1619,10 +2898,10 @@ function displaySelectionCards() {
         <thead>
             <tr style="background: var(--bg-secondary); border-bottom: 2px solid var(--border);">
                 <th style="padding: 0.75rem; text-align: left; font-weight: 600;">Select</th>
+                <th style="padding: 0.75rem; text-align: left; font-weight: 600;">Slot</th>
                 <th style="padding: 0.75rem; text-align: left; font-weight: 600;">Hunt #</th>
                 <th style="padding: 0.75rem; text-align: left; font-weight: 600;">Status</th>
                 <th style="padding: 0.75rem; text-align: left; font-weight: 600;">Model</th>
-                <th style="padding: 0.75rem; text-align: left; font-weight: 600;">Response Preview</th>
                 <th style="padding: 0.75rem; text-align: center; font-weight: 600; width: 100px;">Details</th>
             </tr>
         </thead>
@@ -1648,13 +2927,20 @@ function displaySelectionCards() {
         const rowNumber = state.allResponses.indexOf(result); // Get original index in allResponses
         const isSelected = state.selectedRowNumbers.includes(rowNumber);
         
+        // Get slot number if selected (1-based index in selectedRowNumbers array)
+        const slotIndex = isSelected ? state.selectedRowNumbers.indexOf(rowNumber) : -1;
+        const slotNumber = slotIndex >= 0 ? slotIndex + 1 : null;
+        const slotDisplay = slotNumber ? `Slot ${slotNumber}` : '-';
+        const slotStyle = slotNumber ? 
+            'background: var(--accent-primary); color: white; padding: 0.25rem 0.5rem; border-radius: 4px; font-weight: 600; font-size: 0.85rem;' :
+            'color: var(--text-muted);';
+        
         // Determine if breaking or passing
         const judgeScore = result.judge_score !== undefined && result.judge_score !== null ? Number(result.judge_score) : null;
         const score = result.score !== undefined && result.score !== null ? Number(result.score) : null;
         const isBreaking = (judgeScore !== null && judgeScore === 0) || (score !== null && score === 0);
         
         const shortModel = (result.model || 'unknown').split('/').pop().substring(0, 20);
-        const responsePreview = (result.response || '').substring(0, 100).replace(/\n/g, ' ');
         
         const row = document.createElement('tr');
         row.className = `hunt-selection-row ${isSelected ? 'selected' : ''}`;
@@ -1672,11 +2958,21 @@ function displaySelectionCards() {
             if (!isSelected) row.style.background = 'transparent';
         };
         
+        // FIX 2: Disable checkbox if selection is confirmed
+        const checkboxDisabled = state.selectionConfirmed ? 'disabled' : '';
+        const checkboxStyle = state.selectionConfirmed 
+            ? 'transform: scale(1.3); cursor: not-allowed; opacity: 0.6;' 
+            : 'transform: scale(1.3); cursor: pointer;';
+        
         row.innerHTML = `
             <td style="padding: 0.75rem; text-align: center;">
                 <input type="checkbox" class="hunt-selection-checkbox" ${isSelected ? 'checked' : ''} 
+                       ${checkboxDisabled}
                        data-row-number="${rowNumber}" 
-                       style="transform: scale(1.3); cursor: pointer;">
+                       style="${checkboxStyle}">
+            </td>
+            <td style="padding: 0.75rem; text-align: center;">
+                <span style="${slotStyle}">${slotDisplay}</span>
             </td>
             <td style="padding: 0.75rem; font-weight: 600;">Hunt #${rowNumber + 1}</td>
             <td style="padding: 0.75rem;">
@@ -1685,9 +2981,6 @@ function displaySelectionCards() {
                 </span>
             </td>
             <td style="padding: 0.75rem; font-size: 0.9rem; color: var(--text-secondary);">${shortModel}</td>
-            <td style="padding: 0.75rem; font-size: 0.85rem; color: var(--text-muted); max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                ${escapeHtml(responsePreview)}...
-            </td>
             <td style="padding: 0.75rem; text-align: center;">
                 <button class="details-toggle-btn" data-row-number="${rowNumber}" 
                         style="background: var(--bg-tertiary); border: 1px solid var(--border); 
@@ -1742,7 +3035,73 @@ function displaySelectionCards() {
     updateSelectionCount();
 }
 
+// Refresh selection table to update slot indicators without resetting selection
+function refreshSelectionTable() {
+    const tbody = document.getElementById('huntSelectionTableBody');
+    if (!tbody) {
+        // Table doesn't exist yet, nothing to refresh
+        return;
+    }
+    
+    // Update slot indicators for all rows
+    tbody.querySelectorAll('tr').forEach(row => {
+        const rowNumber = parseInt(row.dataset.rowNumber);
+        if (isNaN(rowNumber)) return;
+        
+        const isSelected = state.selectedRowNumbers.includes(rowNumber);
+        const slotIndex = isSelected ? state.selectedRowNumbers.indexOf(rowNumber) : -1;
+        const slotNumber = slotIndex >= 0 ? slotIndex + 1 : null;
+        const slotDisplay = slotNumber ? `Slot ${slotNumber}` : '-';
+        const slotStyle = slotNumber ? 
+            'background: var(--accent-primary); color: white; padding: 0.25rem 0.5rem; border-radius: 4px; font-weight: 600; font-size: 0.85rem;' :
+            'color: var(--text-muted);';
+        
+        // Update slot cell (second column)
+        const slotCell = row.querySelector('td:nth-child(2)');
+        if (slotCell) {
+            slotCell.innerHTML = `<span style="${slotStyle}">${slotDisplay}</span>`;
+        }
+        
+        // Update row selection styling
+        if (isSelected) {
+            row.classList.add('selected');
+            row.style.background = 'rgba(var(--accent-primary-rgb), 0.1)';
+            row.style.borderLeft = '4px solid var(--accent-primary)';
+        } else {
+            row.classList.remove('selected');
+            row.style.background = 'transparent';
+            row.style.borderLeft = 'none';
+        }
+        
+        // Update checkbox state
+        const checkbox = row.querySelector('.hunt-selection-checkbox');
+        if (checkbox) {
+            checkbox.checked = isSelected;
+            // FIX 2: Disable checkbox if selection is confirmed
+            if (state.selectionConfirmed) {
+                checkbox.disabled = true;
+                checkbox.style.cursor = 'not-allowed';
+                checkbox.style.opacity = '0.6';
+            } else {
+                checkbox.disabled = false;
+                checkbox.style.cursor = 'pointer';
+                checkbox.style.opacity = '1';
+            }
+        }
+    });
+}
+
 function toggleHuntSelection(rowNumber, row) {
+    // FIX 2: Prevent selection changes after confirmation
+    if (state.selectionConfirmed) {
+        showToast('Selection is locked. You cannot change selection after confirming. Please complete reviews or refresh the page.', 'warning');
+        const checkbox = row.querySelector('.hunt-selection-checkbox');
+        if (checkbox) {
+            checkbox.checked = state.selectedRowNumbers.includes(rowNumber);
+        }
+        return;
+    }
+    
     const checkbox = row.querySelector('.hunt-selection-checkbox');
     
     // Get the result directly by row number (no lookup needed!)
@@ -1765,46 +3124,39 @@ function toggleHuntSelection(rowNumber, row) {
             return;
         }
         
-        // Get current selection breakdown
-        const selectedResults = state.selectedRowNumbers.map(rn => state.allResponses[rn]).filter(r => r);
-        const currentBreakingCount = selectedResults.filter(r => {
-            const js = r.judge_score !== undefined && r.judge_score !== null ? Number(r.judge_score) : null;
-            const s = r.score !== undefined && r.score !== null ? Number(r.score) : null;
-            return (js !== null && js === 0) || (s !== null && s === 0);
-        }).length;
-        const currentPassingCount = selectedResults.filter(r => {
-            const js = r.judge_score !== undefined && r.judge_score !== null ? Number(r.judge_score) : null;
-            const s = r.score !== undefined && r.score !== null ? Number(r.score) : null;
-            return (js !== null && js > 0) || (s !== null && s > 0);
-        }).length;
+        // Add to selection temporarily to validate
+        const tempSelection = [...state.selectedRowNumbers];
+        if (!tempSelection.includes(rowNumber)) {
+            tempSelection.push(rowNumber);
+        }
         
-        // Calculate what counts would be AFTER adding this one
-        const newBreakingCount = currentBreakingCount + (isBreaking ? 1 : 0);
-        const newPassingCount = currentPassingCount + (isBreaking ? 0 : 1);
-        
-        const currentCount = state.selectedRowNumbers.length;
-        
-        // SIMPLIFIED VALIDATION: Only validate when selecting 4th item
-        if (currentCount === 3) {
-            // Selecting the 4th item - must be exactly valid
-            const isValidFinalCombination = 
-                (newBreakingCount === 4 && newPassingCount === 0) ||  // All 4 breaking
-                (newBreakingCount === 3 && newPassingCount === 1);    // 3 breaking + 1 passing
+        // Validate selection combination: Must be exactly 4 hunts with either:
+        // - 4 breaking, OR
+        // - 3 breaking + 1 passing
+        if (tempSelection.length === 4) {
+            const tempResults = tempSelection.map(rn => state.allResponses[rn]).filter(r => r);
+            const breakingCount = tempResults.filter(r => {
+                const judgeScore = r.judge_score !== undefined && r.judge_score !== null ? Number(r.judge_score) : null;
+                const score = r.score !== undefined && r.score !== null ? Number(r.score) : null;
+                return (judgeScore !== null && judgeScore === 0) || (score !== null && score === 0);
+            }).length;
+            const passingCount = tempResults.filter(r => {
+                const judgeScore = r.judge_score !== undefined && r.judge_score !== null ? Number(r.judge_score) : null;
+                const score = r.score !== undefined && r.score !== null ? Number(r.score) : null;
+                return (judgeScore !== null && judgeScore > 0) || (score !== null && score > 0);
+            }).length;
             
-            if (!isValidFinalCombination) {
+            // Check if combination is valid
+            const isValid = (breakingCount === 4) || (breakingCount === 3 && passingCount === 1);
+            
+            if (!isValid) {
                 checkbox.checked = false;
-                if (newBreakingCount < 3) {
-                    showToast(`Invalid combination: ${newBreakingCount} breaking, ${newPassingCount} passing. Need either 4 breaking OR 3 breaking + 1 passing.`, 'warning');
-                } else if (newBreakingCount === 3 && newPassingCount > 1) {
-                    showToast('Invalid combination. Can only have 1 passing hunt. Select a breaking hunt instead.', 'warning');
-                } else {
-                    showToast(`Invalid combination: ${newBreakingCount} breaking, ${newPassingCount} passing. Need either 4 breaking OR 3 breaking + 1 passing.`, 'warning');
-                }
+                showToast(`❌ Invalid combination! Must select either 4 breaking OR 3 breaking + 1 passing. Current: ${breakingCount} breaking, ${passingCount} passing.`, 'error');
                 return;
             }
         }
         
-        // Add to selection
+        // Add to selection - combination is valid
         if (!state.selectedRowNumbers.includes(rowNumber)) {
             state.selectedRowNumbers.push(rowNumber);
         }
@@ -1813,6 +3165,9 @@ function toggleHuntSelection(rowNumber, row) {
         row.style.borderLeft = '4px solid var(--accent-primary)';
         // Reset diversity check flag when selection changes
         state.diversityCheckPassed = false;
+        
+        // Refresh the selection table to show updated slot assignments
+        refreshSelectionTable();
     } else {
         // Remove from selection
         state.selectedRowNumbers = state.selectedRowNumbers.filter(rn => rn !== rowNumber);
@@ -1821,9 +3176,17 @@ function toggleHuntSelection(rowNumber, row) {
         row.style.borderLeft = 'none';
         // Reset diversity check flag when selection changes
         state.diversityCheckPassed = false;
+        
+        // Refresh the selection table to show updated slot assignments
+        refreshSelectionTable();
     }
     
     updateSelectionCount();
+    
+    // If we're in review mode, update the review display
+    if (state.selectedRowNumbers.length > 0 && !elements.resultsSection.classList.contains('hidden')) {
+        displaySelectedForReview();
+    }
 }
 
 function toggleDetailsRow(rowNumber, row, result) {
@@ -1859,7 +3222,7 @@ function toggleDetailsRow(rowNumber, row, result) {
             const fullResponse = result.response || 'No response available';
             
             detailRow.innerHTML = `
-                <td colspan="6" style="padding: 0;">
+                <td colspan="7" style="padding: 0;">
                     <div style="padding: 1.5rem; background: var(--bg-secondary);">
                         <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;">
                             <span style="font-size: 1.1rem;">📄</span>
@@ -1902,82 +3265,116 @@ function updateSelectionCount() {
     // Get results directly by row numbers - NO LOOKUP NEEDED!
     const selectedResults = state.selectedRowNumbers.map(rn => state.allResponses[rn]).filter(r => r !== undefined);
     
+    // Count breaking vs passing
+    const breakingCount = selectedResults.filter(r => {
+        const judgeScore = r.judge_score !== undefined && r.judge_score !== null ? Number(r.judge_score) : null;
+        const score = r.score !== undefined && r.score !== null ? Number(r.score) : null;
+        return (judgeScore !== null && judgeScore === 0) || (score !== null && score === 0);
+    }).length;
+    const passingCount = selectedResults.filter(r => {
+        const judgeScore = r.judge_score !== undefined && r.judge_score !== null ? Number(r.judge_score) : null;
+        const score = r.score !== undefined && r.score !== null ? Number(r.score) : null;
+        return (judgeScore !== null && judgeScore > 0) || (score !== null && score > 0);
+    }).length;
+    
+    // Validate combination when exactly 4 are selected
+    let isValid = true;
+    let validationMessage = '';
+    if (count === 4) {
+        isValid = (breakingCount === 4) || (breakingCount === 3 && passingCount === 1);
+        if (!isValid) {
+            validationMessage = `⚠️ Invalid combination! Must be either 4 breaking OR 3 breaking + 1 passing. Current: ${breakingCount} breaking, ${passingCount} passing.`;
+        } else {
+            validationMessage = `✅ Valid combination: ${breakingCount} breaking, ${passingCount} passing`;
+        }
+    } else if (count > 0 && count < 4) {
+        validationMessage = `Select ${4 - count} more hunt(s). Must be exactly 4 total.`;
+    }
+    
     if (selectedResults.length !== count) {
         console.error(`❌ CRITICAL: Expected ${count} results but found ${selectedResults.length}`);
         console.error('   Selected row numbers:', state.selectedRowNumbers);
         console.error('   allResponses length:', state.allResponses.length);
     }
     
-    // Count breaking vs passing
-    const breakingCount = selectedResults.filter(r => {
-        const judgeScore = r.judge_score !== undefined && r.judge_score !== null ? Number(r.judge_score) : null;
-        const score = r.score !== undefined && r.score !== null ? Number(r.score) : null;
-        return (judgeScore !== null && judgeScore === 0) || (score !== null && score === 0);
-    }).length;
-    
-    const passingCount = selectedResults.filter(r => {
-        const judgeScore = r.judge_score !== undefined && r.judge_score !== null ? Number(r.judge_score) : null;
-        const score = r.score !== undefined && r.score !== null ? Number(r.score) : null;
-        return (judgeScore !== null && judgeScore > 0) || (score !== null && score > 0);
-    }).length;
+    // Update UI with validation message
+    if (elements.selectionCount) {
+        let statusText = '';
+        let statusColor = 'var(--text-muted)';
+        
+        if (count === 0) {
+            statusText = 'No hunts selected';
+            statusColor = 'var(--text-muted)';
+        } else if (count < 4) {
+            statusText = `Selected: ${count}/4 hunts (${breakingCount} breaking, ${passingCount} passing) - Select ${4 - count} more`;
+            statusColor = 'var(--text-primary)';
+        } else if (count === 4) {
+            if (isValid) {
+                statusText = `✅ Valid: ${breakingCount} breaking, ${passingCount} passing`;
+                statusColor = 'var(--success)';
+            } else {
+                statusText = `❌ Invalid: ${breakingCount} breaking, ${passingCount} passing - Must be 4 breaking OR 3 breaking + 1 passing`;
+                statusColor = 'var(--danger)';
+            }
+        } else {
+            statusText = `Too many selected: ${count}/4`;
+            statusColor = 'var(--danger)';
+        }
+        
+        elements.selectionCount.textContent = statusText;
+        elements.selectionCount.style.color = statusColor;
+    }
     
     console.log('🔍 updateSelectionCount:', {
         selectedRowNumbers: state.selectedRowNumbers,
         selectedResultsCount: selectedResults.length,
         breakingCount,
         passingCount,
+        isValid,
+        validationMessage,
         count
     });
     
-    // Check if current combination is valid
-    const isValidCombination = 
-        (breakingCount === 4 && passingCount === 0) ||  // All 4 breaking
-        (breakingCount === 3 && passingCount === 1);    // 3 breaking + 1 passing
-    
-    // Build status text
-    let statusText = `Selected: ${count} / 4`;
-    if (count > 0) {
-        statusText += ` (${breakingCount} breaking, ${passingCount} passing)`;
+    // Build status text - no validation restrictions, allow any combination
+    // Enable confirm button only if exactly 4 hunts are selected AND combination is valid
+    const shouldEnable = (count === 4) && isValid;
+    if (elements.confirmSelectionBtn) {
+        elements.confirmSelectionBtn.disabled = !shouldEnable;
+        if (!shouldEnable && count === 4) {
+            elements.confirmSelectionBtn.title = 'Invalid combination! Must be 4 breaking OR 3 breaking + 1 passing.';
+        } else if (!shouldEnable && count < 4) {
+            elements.confirmSelectionBtn.title = `Select ${4 - count} more hunt(s). Must be exactly 4 total.`;
+        } else {
+            elements.confirmSelectionBtn.title = '';
+        }
     }
-    
-    // Add validation message
-    if (count === 4 && !isValidCombination) {
-        statusText += ' ⚠️ Invalid combination';
-        elements.selectionCount.style.color = 'var(--danger)';
-    } else if (count === 4 && isValidCombination) {
-        statusText += ' ✅ Valid';
-        elements.selectionCount.style.color = 'var(--success)';
-    } else {
-        elements.selectionCount.style.color = 'var(--text-primary)';
-    }
-    
-    elements.selectionCount.textContent = statusText;
-    
-    // Enable confirm button only if exactly 4 selected AND valid combination
-    const shouldEnable = count === 4 && isValidCombination;
-    elements.confirmSelectionBtn.disabled = !shouldEnable;
     
     console.log('🔍 Button state:', {
         count,
         breakingCount,
         passingCount,
-        isValidCombination,
         shouldEnable,
         buttonDisabled: elements.confirmSelectionBtn.disabled
     });
 }
 
 function confirmSelection() {
-    if (state.selectedRowNumbers.length !== 4) {
-        showToast('Please select exactly 4 hunts', 'error');
+    if (state.selectedRowNumbers.length === 0) {
+        showToast('Please select at least 1 hunt to review', 'error');
         return;
     }
     
     // Get selected results directly by row numbers
     const selectedResults = state.selectedRowNumbers.map(rn => state.allResponses[rn]).filter(r => r);
     
+    if (selectedResults.length === 0) {
+        showToast(`Error: Could not find selected hunts.`, 'error');
+        return;
+    }
+    
+    // MANDATORY: Must select exactly 4 hunts
     if (selectedResults.length !== 4) {
-        showToast(`Error: Could not find all selected hunts. Found ${selectedResults.length}/4.`, 'error');
+        showToast(`❌ Must select exactly 4 hunts. Currently selected: ${selectedResults.length}`, 'error');
         return;
     }
     
@@ -1993,12 +3390,11 @@ function confirmSelection() {
         return (judgeScore !== null && judgeScore > 0) || (score !== null && score > 0);
     }).length;
     
-    const isValidCombination = 
-        (breakingCount === 4 && passingCount === 0) ||  // All 4 breaking
-        (breakingCount === 3 && passingCount === 1);    // 3 breaking + 1 passing
+    // MANDATORY: Validate combination - must be either 4 breaking OR 3 breaking + 1 passing
+    const isValid = (breakingCount === 4) || (breakingCount === 3 && passingCount === 1);
     
-    if (!isValidCombination) {
-        showToast('Invalid combination. Need either 4 breaking OR 3 breaking + 1 passing.', 'error');
+    if (!isValid) {
+        showToast(`❌ Invalid combination! Must select either 4 breaking OR 3 breaking + 1 passing. Current: ${breakingCount} breaking, ${passingCount} passing.`, 'error');
         return;
     }
     
@@ -2058,34 +3454,42 @@ function confirmSelection() {
     
     console.log('✅ LLM Judge diversity check passed');
     
-    // ===== SARCASTIC CONFIRMATION DIALOG =====
+    // ===== CONFIRMATION DIALOG =====
     const confirmed = confirm(
-        `🎯 LOCKING IN YOUR SELECTION 🎯\n\n` +
-        `You've selected ${breakingCount} breaking and ${passingCount} passing hunt(s).\n\n` +
-        `Once you confirm, you're stuck with these 4.\n` +
-        `No swapping. No "wait, I want a different one".\n` +
-        `This is your final team. Make sure it's the right one.\n\n` +
-        `Are you REALLY sure these are the 4 you want to review?\n\n` +
-        `Click "Cancel" if you want to change your mind.\n` +
-        `Click "OK" if you're ready to commit.`
+        `🎯 Moving to Human Review Stage 🎯\n\n` +
+        `You've selected ${selectedResults.length} hunt(s) (${breakingCount} breaking, ${passingCount} passing).\n\n` +
+        `These hunts will be moved to the human review stage.\n` +
+        `You can still change your selection later if needed.\n\n` +
+        `Click "Cancel" to go back and adjust your selection.\n` +
+        `Click "OK" to proceed to human review.`
     );
     
     if (!confirmed) {
-        showToast('Good call. Make sure you have the right selection!', 'info');
+        showToast('You can adjust your selection and try again.', 'info');
         return;
     }
     
     // Mark diversity check as passed
     state.diversityCheckPassed = true;
+    // FIX 2: Lock selection after confirmation
+    state.selectionConfirmed = true;
     
-    // Hide selection, show results with blind review
-    elements.selectionSection.classList.add('hidden');
+    // Keep selection section visible, but selection is now locked
     elements.resultsSection.classList.remove('hidden');
     
     // Display the selected responses for review (blind mode)
     displaySelectedForReview();
     
-    showToast('Selection confirmed! Complete your human reviews.', 'success');
+    // FIX 1: Disable Start Hunt button when in reviews section
+    if (elements.startHuntBtn) {
+        elements.startHuntBtn.disabled = true;
+        elements.startHuntBtn.title = 'Cannot start new hunt while reviews are in progress. Complete reviews or refresh page.';
+    }
+    
+    // FIX 2: Disable all checkboxes in selection table
+    disableSelectionCheckboxes();
+    
+    showToast(`Selection confirmed and locked! ${selectedResults.length} hunt(s) moved to human review. Complete all 4 reviews to proceed.`, 'success');
 }
 
 function displaySelectedForReview() {
@@ -2099,9 +3503,9 @@ function displaySelectedForReview() {
     console.log('selectedRowNumbers:', state.selectedRowNumbers);
     console.log('selectedResponses count:', selectedResponses.length);
     
-    if (selectedResponses.length === 0 || selectedResponses.length !== 4) {
+    if (selectedResponses.length === 0) {
         elements.noBreaksMessage.classList.remove('hidden');
-        console.error(`❌ CRITICAL: Expected 4 responses but got ${selectedResponses.length}`);
+        elements.noBreaksMessage.textContent = 'No hunts selected. Select hunts from the table above to review them.';
         return;
     }
     
@@ -2122,8 +3526,33 @@ function displaySelectedForReview() {
     
     // Show save container but keep button disabled until reveal
     elements.saveDriveContainer.classList.remove('hidden');
+    // FIX 3: Ensure buttons are disabled until all 4 reviews complete
     elements.saveDriveBtn.disabled = true;
     elements.saveDriveBtn.style.opacity = '0.5';
+    if (elements.revealLLMBtn) {
+        elements.revealLLMBtn.disabled = true;
+        elements.revealLLMBtn.style.opacity = '0.5';
+    }
+}
+
+// FIX 2: Helper function to disable all selection checkboxes
+function disableSelectionCheckboxes() {
+    const checkboxes = document.querySelectorAll('.hunt-selection-checkbox');
+    checkboxes.forEach(checkbox => {
+        checkbox.disabled = true;
+        checkbox.style.cursor = 'not-allowed';
+        checkbox.style.opacity = '0.6';
+    });
+}
+
+// FIX 2: Helper function to enable all selection checkboxes (for future use)
+function enableSelectionCheckboxes() {
+    const checkboxes = document.querySelectorAll('.hunt-selection-checkbox');
+    checkboxes.forEach(checkbox => {
+        checkbox.disabled = false;
+        checkbox.style.cursor = 'pointer';
+        checkbox.style.opacity = '1';
+    });
 }
 
 function updateReviewProgress() {
@@ -2138,9 +3567,9 @@ function updateReviewProgress() {
         elements.reviewProgressText.style.color = reviewCount === selectedCount ? 'var(--success)' : 'var(--text-primary)';
     }
     
-    // Enable reveal button only when all 4 reviews are complete
+    // Enable reveal button only when all selected reviews are complete
     if (elements.revealLLMBtn) {
-        const allComplete = reviewCount >= 4;
+        const allComplete = reviewCount >= selectedCount && selectedCount > 0;
         elements.revealLLMBtn.disabled = !allComplete || state.llmRevealed;
         
         if (state.llmRevealed) {
@@ -2180,18 +3609,23 @@ function updateReviewProgress() {
 }
 
 function revealLLMJudgments() {
-    // Check reviews for the SELECTED row numbers
+    // FIX 3: Ensure exactly 4 reviews are complete before allowing reveal
     const selectedRowNumbers = state.selectedRowNumbers || [];
+    if (selectedRowNumbers.length === 0) {
+        showToast('Please select hunts first', 'error');
+        return;
+    }
+    
     if (selectedRowNumbers.length !== 4) {
-        showToast('Please select exactly 4 hunts first', 'error');
+        showToast(`Must have exactly 4 hunts selected. Currently: ${selectedRowNumbers.length}`, 'error');
         return;
     }
     
     const reviewKeys = selectedRowNumbers.map(rn => `row_${rn}`);
     const completedReviews = reviewKeys.filter(key => state.humanReviews && state.humanReviews[key]);
     
-    if (completedReviews.length < 4) {
-        showToast(`Please complete all 4 human reviews first. Completed: ${completedReviews.length}/4`, 'error');
+    if (completedReviews.length !== 4) {
+        showToast(`Only ${completedReviews.length}/4 review(s) complete. Please complete all 4 reviews before revealing LLM judgments.`, 'error');
         return;
     }
     
@@ -2741,26 +4175,28 @@ function revealLLMJudge(huntId, card) {
 function checkAllReviewsComplete() {
     // Check reviews for the SELECTED row numbers, not just any reviews
     const selectedRowNumbers = state.selectedRowNumbers || [];
-    if (selectedRowNumbers.length !== 4) {
-        return; // Not enough selected yet
+    if (selectedRowNumbers.length === 0) {
+        return; // No hunts selected yet
     }
     
-    // Check if all 4 selected hunts have reviews (using row number keys)
+    // Check if all selected hunts have reviews (using row number keys)
     const reviewKeys = selectedRowNumbers.map(rn => `row_${rn}`);
     const completedReviews = reviewKeys.filter(key => state.humanReviews && state.humanReviews[key]);
     const reviewCount = completedReviews.length;
-    const totalSlots = 4;
+    const totalSlots = selectedRowNumbers.length;
     
     console.log('🔍 checkAllReviewsComplete:', {
         selectedRowNumbers,
         reviewKeys,
         completedReviews,
         reviewCount,
+        totalSlots,
         allReviews: Object.keys(state.humanReviews || {})
     });
     
-    if (reviewCount >= totalSlots) {
-        showToast('All 4 reviews complete! Ready to export.', 'success');
+    // FIX 3: Only enable buttons when exactly 4 reviews are complete
+    if (reviewCount >= totalSlots && totalSlots === 4) {
+        showToast(`All ${totalSlots} review(s) complete! Ready to export.`, 'success');
         // Enable reveal button
         if (elements.revealLLMBtn) {
             elements.revealLLMBtn.disabled = false;
@@ -2768,10 +4204,22 @@ function checkAllReviewsComplete() {
         }
         // Enable save button prominently
         if (elements.saveDriveBtn) {
+            elements.saveDriveBtn.disabled = false;
+            elements.saveDriveBtn.style.opacity = '1';
             elements.saveDriveBtn.classList.add('pulse');
         }
         // Update progress display
         updateReviewProgress();
+    } else if (totalSlots === 4 && reviewCount < 4) {
+        // FIX 3: Ensure buttons remain disabled if not all 4 reviews complete
+        if (elements.revealLLMBtn) {
+            elements.revealLLMBtn.disabled = true;
+            elements.revealLLMBtn.style.opacity = '0.5';
+        }
+        if (elements.saveDriveBtn) {
+            elements.saveDriveBtn.disabled = true;
+            elements.saveDriveBtn.style.opacity = '0.5';
+        }
     }
 }
 
@@ -2790,11 +4238,20 @@ async function exportNotebook() {
         return;
     }
     
-    // Check if all 4 reviews are complete (warn if not)
-    const reviewCount = Object.keys(state.humanReviews || {}).length;
+    // FIX 3: Require all 4 reviews before allowing export
+    const selectedRowNumbers = state.selectedRowNumbers || [];
+    const reviewKeys = selectedRowNumbers.map(rn => `row_${rn}`);
+    const reviews = reviewKeys.map(key => state.humanReviews[key]).filter(r => r);
+    const reviewCount = reviews.length;
+    
+    if (selectedRowNumbers.length !== 4) {
+        showToast(`Must have exactly 4 hunts selected. Currently: ${selectedRowNumbers.length}`, 'error');
+        return;
+    }
+    
     if (reviewCount < 4) {
-        const proceed = confirm(`Only ${reviewCount}/4 human reviews completed. Export anyway?`);
-        if (!proceed) return;
+        showToast(`Cannot export: Only ${reviewCount}/4 reviews completed. Please complete all 4 reviews before exporting.`, 'error');
+        return;
     }
     
     try {
@@ -2845,6 +4302,7 @@ function clearPreviousResults() {
     state.humanReviews = {};  // Reset human reviews
     state.allResponses = [];  // Reset accumulated responses
     state.selectedRowNumbers = [];  // Reset selection
+    state.selectionConfirmed = false;  // FIX 2: Reset selection lock
     state.llmRevealed = false;  // Reset reveal state
     state.accumulatedHuntOffset = 0;  // Reset hunt offset
     state.currentRunStartOffset = 0;  // Reset run offset
@@ -2854,6 +4312,30 @@ function clearPreviousResults() {
         currentResult: null,
         humanJudgments: {}
     };
+    
+    // Reset validation states (prevents carrying over from previous task)
+    state.referenceValidated = false;  // Must re-validate new notebook
+    state.criteria = null;  // Will be set from new notebook
+    state.initialCriteria = null;  // Will be set from new notebook
+    state.metadata = null;  // Will be set from new notebook
+    state.metadataModel = null;  // Will be set from new notebook
+    state.unsavedChanges = {
+        prompt: false,
+        response: false,
+        modelRef: false,
+        judge: false
+    };
+    state.modelMismatchWarning = false;  // Reset warning flag
+    
+    // FIX 4: Re-enable model/provider selects when clearing (e.g., on model change before hunt)
+    if (elements.modelSelect) {
+        elements.modelSelect.disabled = false;
+        elements.modelSelect.title = '';
+    }
+    if (elements.providerSelect) {
+        elements.providerSelect.disabled = false;
+        elements.providerSelect.title = '';
+    }
     
     // Hide progress, results, selection, and summary sections
     elements.progressSection?.classList.add('hidden');
@@ -3301,12 +4783,43 @@ function initEventListeners() {
     elements.startHuntBtn.addEventListener('click', startHunt);
     if (elements.saveDriveBtn) elements.saveDriveBtn.addEventListener('click', saveToDrive);
     
+    // Metadata sidebar toggle
+    if (elements.metadataToggleBtn) {
+        elements.metadataToggleBtn.addEventListener('click', toggleMetadataSidebar);
+    }
+    
     // Clear results and reset when model changes
+    // FIX 4: Only allow model change if not locked (not during/after hunt)
     if (elements.modelSelect) {
         elements.modelSelect.addEventListener('change', () => {
+            // Check if model selection is locked
+            if (elements.modelSelect.disabled) {
+                showToast('Model selection is locked. Please refresh the page to change model.', 'warning');
+                // Revert to previous value
+                const previousModel = state.config.models?.[0] || 'qwen/qwen3-235b-a22b-thinking-2507';
+                elements.modelSelect.value = previousModel;
+                return;
+            }
             // Full clear when model changes
             clearPreviousResults();
             showToast('Model changed. Previous results cleared.', 'info');
+            // Validate model match with metadata
+            validateModelMatch();
+        });
+    }
+    
+    // FIX 4: Prevent provider change if locked
+    if (elements.providerSelect) {
+        elements.providerSelect.addEventListener('change', () => {
+            if (elements.providerSelect.disabled) {
+                showToast('Provider selection is locked. Please refresh the page to change provider.', 'warning');
+                // Revert to previous value
+                const previousProvider = state.config.provider || 'openrouter';
+                elements.providerSelect.value = previousProvider;
+                return;
+            }
+            // Update model options when provider changes
+            updateModelOptions();
         });
     }
     
@@ -3319,15 +4832,38 @@ function initEventListeners() {
     });
     elements.nextHuntBtn?.addEventListener('click', showNextBlindJudge);
     
-    // Judge reference response button
+    // Judge reference response button (for other tabs)
     elements.judgeReferenceBtn?.addEventListener('click', judgeReferenceResponse);
     
-    // Save response to Colab & Re-judge button
-    elements.saveResponseBtn?.addEventListener('click', saveAndRejudge);
+    // Judge button next to Start Hunt button
+    elements.judgeBeforeHuntBtn?.addEventListener('click', judgeReferenceResponse);
+    
+    // Save response button (Response tab)
+    elements.saveResponseBtn?.addEventListener('click', saveResponseOnly);
     
     // NEW: Selection and Reveal buttons
     elements.confirmSelectionBtn?.addEventListener('click', confirmSelection);
     elements.revealLLMBtn?.addEventListener('click', revealLLMJudgments);
+}
+
+// ============== Metadata Sidebar Toggle ==============
+
+function toggleMetadataSidebar() {
+    if (!elements.metadataSidebar || !elements.metadataToggleBtn) return;
+    
+    const isCollapsed = elements.metadataSidebar.classList.contains('collapsed');
+    
+    if (isCollapsed) {
+        // Expand
+        elements.metadataSidebar.classList.remove('collapsed');
+        elements.metadataToggleBtn.querySelector('.metadata-toggle-icon').textContent = '▼';
+        document.body.classList.add('sidebar-visible');
+    } else {
+        // Collapse
+        elements.metadataSidebar.classList.add('collapsed');
+        elements.metadataToggleBtn.querySelector('.metadata-toggle-icon').textContent = '▶';
+        document.body.classList.remove('sidebar-visible');
+    }
 }
 
 async function judgeReferenceResponse() {
@@ -3338,12 +4874,44 @@ async function judgeReferenceResponse() {
     
     // Check for missing criteria before judging
     // Compare initial criteria with current criteria from preview
-    const currentRefText = elements.modelrefPreview?.textContent || '';
+    // Get the JSON version from the converted JSON, not the structured text input
+    let currentRefText = '';
+    if (state.convertedModelRefJSON) {
+        // Use the converted JSON if available
+        currentRefText = state.convertedModelRefJSON;
+    } else if (elements.jsonPreviewContent && elements.jsonPreviewContent.textContent && 
+               !elements.jsonPreviewContent.textContent.includes('Enter criteria') &&
+               !elements.jsonPreviewContent.textContent.includes('Error:')) {
+        // Use the JSON preview if available
+        currentRefText = elements.jsonPreviewContent.textContent.trim();
+    } else if (elements.modelrefPreview) {
+        // Fallback: get value from input and try to convert
+        const inputValue = elements.modelrefPreview.value.trim();
+        if (inputValue) {
+            // Try to parse as JSON first
+            try {
+                const parsed = JSON.parse(inputValue);
+                if (Array.isArray(parsed)) {
+                    currentRefText = inputValue;
+                } else {
+                    // Not JSON, trigger conversion
+                    convertStructuredToJSON();
+                    currentRefText = state.convertedModelRefJSON || inputValue;
+                }
+            } catch (e) {
+                // Not JSON, trigger conversion
+                convertStructuredToJSON();
+                currentRefText = state.convertedModelRefJSON || inputValue;
+            }
+        }
+    }
+    
     let currentCriteria;
     try {
         currentCriteria = parseCriteria(currentRefText);
     } catch (error) {
         console.error('Failed to parse criteria:', error);
+        console.error('Input text was:', currentRefText.substring(0, 200));
         showToast(`❌ Failed to parse criteria: ${error.message}`, 'error');
         return;
     }
@@ -3377,6 +4945,11 @@ async function judgeReferenceResponse() {
             </div>
         `;
         resultDiv.classList.remove('hidden');
+        // Keep response editor in view
+        const responseEditor = document.getElementById('responseEditor');
+        if (responseEditor) {
+            responseEditor.scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'nearest' });
+        }
         showToast(`❌ Minimum 3 criteria required. Currently have ${currentCriteria.length}.`, 'error');
         return;
     }
@@ -3402,21 +4975,33 @@ async function judgeReferenceResponse() {
                     }).join('')}
                 </ul>
                 <p style="color: var(--text-secondary); font-size: 0.9rem;">
-                    <strong>Action Required:</strong> Please add these criteria back to the response_reference section in your Colab notebook, then click "Save to Colab & Re-judge" or "Judge Only" again.
+                    <strong>Action Required:</strong> Please add these criteria back to the response_reference section in your Colab notebook, then click "Judge Reference" again.
                 </p>
             </div>
         `;
         resultDiv.classList.remove('hidden');
+        // Keep response editor in view
+        const responseEditor = document.getElementById('responseEditor');
+        if (responseEditor) {
+            responseEditor.scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'nearest' });
+        }
         return;
     }
     
-    const btn = elements.judgeReferenceBtn;
+    // Use the button that was clicked (could be judgeReferenceBtn or judgeBeforeHuntBtn)
+    const btn = event?.target?.id === 'judgeBeforeHuntBtn' ? elements.judgeBeforeHuntBtn : elements.judgeReferenceBtn;
     const resultDiv = elements.referenceJudgeResult;
     
     try {
-        btn.disabled = true;
-        btn.textContent = '⏳ Judging...';
-        resultDiv.classList.add('hidden');
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = '⏳ Judging...';
+        }
+        // Don't hide the result div - just clear it, so response editor stays visible
+        if (resultDiv) {
+            resultDiv.innerHTML = '';
+            resultDiv.classList.add('hidden');
+        }
         
         const response = await fetch(`/api/judge-reference/${state.sessionId}`, {
             method: 'POST'
@@ -3681,7 +5266,14 @@ async function judgeReferenceResponse() {
                 ` : ''}
             </div>
         `;
+        // Show result div below response editor (not covering it)
         resultDiv.classList.remove('hidden');
+        // Scroll response editor into view first, then show result
+        const responseEditor = document.getElementById('responseEditor');
+        if (responseEditor) {
+            // Keep response editor in view - don't scroll away
+            responseEditor.scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'nearest' });
+        }
         
         const passCount = criteriaEntries.filter(([k, v]) => String(v).toUpperCase() === 'PASS').length;
         const totalCount = criteriaEntries.length;
@@ -3702,6 +5294,11 @@ async function judgeReferenceResponse() {
             </div>
         `;
         resultDiv.classList.remove('hidden');
+        // Keep response editor in view
+        const responseEditor = document.getElementById('responseEditor');
+        if (responseEditor) {
+            responseEditor.scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'nearest' });
+        }
         
         // Also show toast
         showToast(`Error: ${error.message}`, 'error');
@@ -3713,12 +5310,272 @@ async function judgeReferenceResponse() {
         }
         state.referenceValidated = false;
     } finally {
-        btn.disabled = false;
-        btn.textContent = '⚖️ Judge Only';
+        if (btn) {
+            btn.disabled = false;
+            // Update button text based on which button it is
+            if (btn.id === 'judgeBeforeHuntBtn') {
+                btn.textContent = '⚖️ Judge Reference';
+            } else if (btn.id === 'judgeReferenceBtn') {
+                btn.textContent = '⚖️ Judge Only';
+            }
+        }
     }
 }
 
-// Save edited response to Colab and re-judge
+// Save Response Only (without judging)
+async function saveResponseOnly() {
+    if (!state.sessionId) {
+        showToast('Please load a notebook first', 'error');
+        return;
+    }
+    
+    const btn = elements.saveResponseBtn;
+    if (!btn) {
+        showToast('Save button not found', 'error');
+        return;
+    }
+    
+    // Get response from rich text editor (contenteditable div)
+    const responseEditor = elements.referencePreview;
+    const newResponse = responseEditor?.textContent || responseEditor?.innerText || '';
+    
+    if (!newResponse.trim()) {
+        showToast('Response cannot be empty', 'error');
+        return;
+    }
+    
+    try {
+        btn.disabled = true;
+        btn.textContent = '💾 Saving...';
+        
+        // Save to Colab
+        const saveResponse = await fetch(`/api/update-response/${state.sessionId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ response: newResponse })
+        });
+        
+        if (!saveResponse.ok) {
+            const error = await saveResponse.json();
+            throw new Error(error.detail || 'Failed to save to Colab');
+        }
+        
+        showToast('✅ Saved to Colab!', 'success');
+        
+    } catch (error) {
+        showToast(`Error: ${error.message}`, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '💾 Save Response';
+    }
+}
+
+// Combined Save & Judge function for Response tab (legacy - not used anymore)
+async function saveAndJudgeResponse() {
+    if (!state.sessionId) {
+        showToast('Please load a notebook first', 'error');
+        return;
+    }
+    
+    // Check minimum 3 criteria requirement
+    const currentRefText = elements.modelrefPreview?.textContent || '';
+    let currentCriteria;
+    try {
+        currentCriteria = parseCriteria(currentRefText);
+    } catch (error) {
+        console.error('Failed to parse criteria:', error);
+        showToast(`❌ Failed to parse criteria: ${error.message}`, 'error');
+        return;
+    }
+    if (currentCriteria.length < 3) {
+        showToast(`❌ Minimum 3 criteria required. Currently have ${currentCriteria.length}. Please add more criteria before saving.`, 'error');
+        return;
+    }
+    
+    const btn = elements.saveAndJudgeResponseBtn;
+    if (!btn) {
+        showToast('Save & Judge button not found', 'error');
+        return;
+    }
+    const resultDiv = elements.referenceJudgeResult;
+    // Get response from rich text editor (contenteditable div)
+    const responseEditor = elements.referencePreview;
+    const newResponse = responseEditor?.textContent || responseEditor?.innerText || '';
+    
+    if (!newResponse.trim()) {
+        showToast('Response cannot be empty', 'error');
+        return;
+    }
+    
+    try {
+        btn.disabled = true;
+        btn.textContent = '💾 Saving...';
+        // Don't hide result div - keep response editor visible
+        if (resultDiv) {
+            resultDiv.innerHTML = '';
+            resultDiv.classList.add('hidden');
+        }
+        
+        // Step 1: Save to Colab
+        const saveResponse = await fetch(`/api/update-response/${state.sessionId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ response: newResponse })
+        });
+        
+        if (!saveResponse.ok) {
+            const error = await saveResponse.json();
+            throw new Error(error.detail || 'Failed to save to Colab');
+        }
+        
+        showToast('✅ Saved to Colab!', 'success');
+        btn.textContent = '⚖️ Judging...';
+        
+        // Step 2: Judge
+        const judgeResponse = await fetch(`/api/judge-reference/${state.sessionId}`, {
+            method: 'POST'
+        });
+        
+        if (!judgeResponse.ok) {
+            if (judgeResponse.status === 404) {
+                showToast('⚠️ Session expired. Please reload the notebook.', 'error');
+                throw new Error('Session not found. Please reload the notebook from Colab.');
+            }
+            const error = await judgeResponse.json();
+            throw new Error(error.detail || 'Judge failed');
+        }
+        
+        const data = await judgeResponse.json();
+        
+        // Update state.criteria from judge result
+        let criteria = data.criteria || {};
+        let criteriaEntries = Object.entries(criteria);
+        
+        // Check for missing criteria
+        const evaluatedCriteria = criteriaEntries.map(([id]) => id);
+        const missingCriteria = (state.initialCriteria || [])
+            .filter(c => !evaluatedCriteria.includes(c.id))
+            .map(c => [c.id, c.criteria]);
+        const hasMissingCriteria = missingCriteria.length > 0;
+        
+        // Determine if all criteria pass
+        const allCriteriaPass = criteriaEntries.length > 0 && 
+            criteriaEntries.every(([k, v]) => String(v).toUpperCase() === 'PASS');
+        const isPassing = allCriteriaPass && !hasMissingCriteria;
+        
+        const scoreClass = isPassing ? 'score-1' : 'score-0';
+        const scoreEmoji = isPassing ? '✅' : '❌';
+        
+        // Update reference validated state
+        state.referenceValidated = isPassing;
+        
+        // Enable/disable Start Hunt based on result
+        if (elements.startHuntBtn) {
+            if (!state.modelRefValid) {
+                elements.startHuntBtn.disabled = true;
+                elements.startHuntBtn.title = 'Model Reference must be valid JSON before hunting';
+            } else if (hasMissingCriteria) {
+                const missingIds = missingCriteria.map(([id]) => id).join(', ');
+                elements.startHuntBtn.disabled = true;
+                elements.startHuntBtn.title = `Missing criteria: ${missingIds}. Please add them back to response_reference and re-judge.`;
+            } else if (isPassing && !hasMissingCriteria) {
+                elements.startHuntBtn.disabled = false;
+                elements.startHuntBtn.title = '';
+            } else {
+                elements.startHuntBtn.disabled = true;
+                elements.startHuntBtn.title = 'All criteria must pass before starting hunt';
+            }
+        }
+        
+        // Build criteria breakdown HTML
+        const criteriaHtml = formatJudgeCriteriaDisplay(criteria);
+        
+        // Build status message
+        let statusMessage = '';
+        if (hasMissingCriteria) {
+            const missingIds = missingCriteria.map(([id]) => id).join(', ');
+            statusMessage = `⚠️ Saved but MISSING CRITERIA: ${missingIds} - Please add them back to response_reference and re-judge`;
+        } else if (isPassing) {
+            statusMessage = '✅ Saved & ALL CRITERIA PASS - Hunt Enabled!';
+        } else {
+            statusMessage = '❌ Saved but CRITERIA FAILED - Edit & try again';
+        }
+        
+        resultDiv.innerHTML = `
+            <div style="padding: 1rem; background: var(--bg-primary); border-radius: 8px; border: 1px solid ${hasMissingCriteria ? 'var(--warning)' : (isPassing ? 'var(--success)' : 'var(--danger)')};">
+                <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
+                    <span class="score-badge ${scoreClass}">${scoreEmoji} Score: ${data.score}</span>
+                    <span style="font-weight: 600;">${statusMessage}</span>
+                </div>
+                
+                <!-- Criteria Breakdown -->
+                <div style="margin-top: 0.75rem;">
+                    <label style="font-weight: 600; font-size: 0.9rem;">📋 Criteria Breakdown:</label>
+                    ${criteriaHtml}
+                </div>
+                
+                <div style="margin-top: 0.75rem;">
+                    <label style="font-weight: 600; font-size: 0.9rem;">📝 Judge Explanation:</label>
+                    <p style="margin-top: 0.25rem; font-size: 0.9rem; color: var(--text-secondary); white-space: pre-wrap;">${escapeHtml(data.explanation || 'No explanation provided')}</p>
+                    ${missingCriteria && missingCriteria.length > 0 ? `
+                    <div style="margin-top: 0.5rem; padding: 0.5rem; background: var(--warning-bg); border-left: 3px solid var(--warning); border-radius: 4px; font-size: 0.85rem;">
+                        <strong>⚠️ Note:</strong> The judge's explanation above refers only to the criteria present in <code>response_reference</code> (${evaluatedCriteria.length} criteria evaluated). 
+                        ${missingCriteria.length} criterion/criteria (${missingCriteria.map(([id]) => id).join(', ')}) ${missingCriteria.length === 1 ? 'is' : 'are'} missing from <code>response_reference</code> and ${missingCriteria.length === 1 ? 'was' : 'were'} not evaluated.
+                    </div>
+                    ` : ''}
+                </div>
+            </div>
+        `;
+        // Show result div below response editor (expands downward)
+        resultDiv.classList.remove('hidden');
+        // Keep response editor in view - don't scroll away
+        const responseEditor = document.getElementById('responseEditor');
+        if (responseEditor) {
+            // Just ensure editor is visible, don't scroll to result
+            responseEditor.scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'nearest' });
+        }
+        
+        const passCount = criteriaEntries.filter(([k, v]) => String(v).toUpperCase() === 'PASS').length;
+        const totalCount = criteriaEntries.length;
+        showToast(`Saved & Judged: ${passCount}/${totalCount} criteria pass (${isPassing ? 'HUNT ENABLED' : 'Fix required'})`, isPassing ? 'success' : 'warning');
+        
+    } catch (error) {
+        showToast(`Error: ${error.message}`, 'error');
+        // Display error in result div
+        if (resultDiv) {
+            resultDiv.innerHTML = `
+                <div style="padding: 1rem; background: var(--danger-bg); border-radius: 8px; border: 2px solid var(--danger);">
+                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
+                        <span style="font-size: 1.2rem;">❌</span>
+                        <span style="font-weight: 600; color: var(--danger); font-size: 1rem;">Error</span>
+                    </div>
+                    <div style="margin-top: 0.75rem;">
+                        <label style="font-weight: 600; font-size: 0.9rem; color: var(--danger);">Error Message:</label>
+                        <p style="margin-top: 0.25rem; font-size: 0.9rem; color: var(--text-primary); white-space: pre-wrap; word-break: break-word;">${escapeHtml(error.message || 'Unknown error occurred')}</p>
+                    </div>
+                </div>
+            `;
+            resultDiv.classList.remove('hidden');
+            // Keep response editor in view
+            const responseEditor = document.getElementById('responseEditor');
+            if (responseEditor) {
+                responseEditor.scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'nearest' });
+            }
+        }
+        
+        // Disable hunt button on error
+        if (elements.startHuntBtn) {
+            elements.startHuntBtn.disabled = true;
+            elements.startHuntBtn.title = 'Fix error before starting hunt';
+        }
+        state.referenceValidated = false;
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '💾⚖️ Save & Judge Response';
+    }
+}
+
+// Save edited response to Colab and re-judge (legacy function)
 async function saveAndRejudge() {
     if (!state.sessionId) {
         showToast('Please load a notebook first', 'error');
@@ -3983,7 +5840,14 @@ async function saveAndRejudge() {
                 </div>
             </div>
         `;
+        // Show result div below response editor (expands downward)
         resultDiv.classList.remove('hidden');
+        // Keep response editor in view - don't scroll away from it
+        const responseEditor = document.getElementById('responseEditor');
+        if (responseEditor) {
+            // Just ensure editor is visible, don't scroll to result
+            responseEditor.scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'nearest' });
+        }
         
         const passCount = criteriaEntries.filter(([k, v]) => String(v).toUpperCase() === 'PASS').length;
         const totalCount = criteriaEntries.length;
@@ -3993,7 +5857,7 @@ async function saveAndRejudge() {
         showToast(`Error: ${error.message}`, 'error');
     } finally {
         btn.disabled = false;
-        btn.textContent = '💾 Save to Colab & Re-judge';
+        btn.textContent = '💾 Save Response';
     }
 }
 
@@ -4079,5 +5943,69 @@ function updateModelOptions(skipDefaultSelection = false) {
     console.log(`Updated models for provider: ${provider}, selected: ${elements.modelSelect.value} (skipDefault: ${skipDefaultSelection})`);
 }
 
+// Restore session on page load
+async function restoreSession() {
+    const savedSessionId = localStorage.getItem('modelHunter_sessionId');
+    if (!savedSessionId) {
+        console.log('No saved session found');
+        return;
+    }
+    
+    console.log('🔄 Attempting to restore session:', savedSessionId);
+    
+    try {
+        // Try to get session from backend
+        const response = await fetch(`/api/session/${savedSessionId}`);
+        if (response.ok) {
+            const sessionData = await response.json();
+            console.log('✅ Session restored:', sessionData);
+            
+            // Try to get full notebook data
+            // We need to reconstruct the notebook from session storage
+            // For now, show a message that they need to reload the notebook
+            showToast('🔄 Session found! Please reload the notebook to continue.', 'info');
+            
+            // Store sessionId in state
+            state.sessionId = savedSessionId;
+            
+            // Optionally, try to fetch notebook data if available
+            // This would require an endpoint to get notebook from session
+        } else if (response.status === 404) {
+            // Session expired or not found
+            console.log('⚠️ Session expired or not found');
+            localStorage.removeItem('modelHunter_sessionId');
+            showToast('⚠️ Previous session expired. Please load a new notebook.', 'warning');
+        } else {
+            throw new Error(`HTTP ${response.status}`);
+        }
+    } catch (error) {
+        console.error('Error restoring session:', error);
+        localStorage.removeItem('modelHunter_sessionId');
+    }
+}
+
 // Start app
-document.addEventListener('DOMContentLoaded', init);
+document.addEventListener('DOMContentLoaded', async () => {
+    await init();
+    // Restore session after initialization
+    await restoreSession();
+    
+    // Ensure fetch button is set up (backup in case init didn't catch it)
+    const fetchBtn = document.getElementById('fetchUrlBtn');
+    if (fetchBtn && !fetchBtn.onclick) {
+        console.log('Setting up fetch button as backup...');
+        fetchBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('Fetch button clicked (backup handler)');
+            fetchFromUrl();
+        });
+        fetchBtn.onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            fetchFromUrl();
+        };
+        fetchBtn.type = 'button';
+        fetchBtn.disabled = false;
+    }
+});

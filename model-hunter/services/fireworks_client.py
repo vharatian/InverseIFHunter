@@ -9,13 +9,18 @@ Handles API calls to Fireworks AI for models:
 Features:
 - Streaming support
 - Standard OpenAI-compatible format
+- Connection pooling for better performance
 """
 import os
 import json
+import asyncio
 import httpx
 import time
+import logging
 from typing import Tuple, Optional, Dict, Any
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 # Telemetry import - wrapped to never fail
 try:
@@ -26,9 +31,19 @@ except ImportError:
 
 load_dotenv()
 
+# Connection pool settings for better performance
+POOL_LIMITS = httpx.Limits(
+    max_connections=20,
+    max_keepalive_connections=10,
+    keepalive_expiry=30.0
+)
+
+# Timeout settings
+DEFAULT_TIMEOUT = httpx.Timeout(120.0, connect=10.0)
+
 
 class FireworksClient:
-    """Async client for Fireworks AI API."""
+    """Async client for Fireworks AI API with connection pooling."""
     
     BASE_URL = "https://api.fireworks.ai/inference/v1/chat/completions"
     
@@ -43,6 +58,29 @@ class FireworksClient:
         if not self.api_key:
             # Don't raise error on init to allow app startup even if key missing
             pass
+        
+        # Pooled HTTP client for better performance
+        self._client: Optional[httpx.AsyncClient] = None
+        self._client_lock = asyncio.Lock()
+    
+    async def _get_client(self) -> httpx.AsyncClient:
+        """Get or create the pooled HTTP client."""
+        if self._client is None or self._client.is_closed:
+            async with self._client_lock:
+                if self._client is None or self._client.is_closed:
+                    self._client = httpx.AsyncClient(
+                        limits=POOL_LIMITS,
+                        timeout=DEFAULT_TIMEOUT,
+                        http2=True
+                    )
+                    logger.info("Created pooled HTTP client for Fireworks")
+        return self._client
+    
+    async def close(self):
+        """Close the HTTP client."""
+        if self._client and not self._client.is_closed:
+            await self._client.aclose()
+            self._client = None
             
     def _get_headers(self) -> Dict[str, str]:
         if not self.api_key:
@@ -184,15 +222,17 @@ Remember: Put ALL your thinking inside <think>...</think> tags, then give your f
         }
         
         # Debug: Log the payload being sent
-        print(f"DEBUG Fireworks: Using system message + prompt engineering for reasoning separation")
-        print(f"DEBUG Fireworks: Model: {model}")
+        logger.debug(f"Fireworks: Using system message + prompt engineering for reasoning separation")
+        logger.debug(f"Fireworks: Model: {model}")
         
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.post(
-                self.BASE_URL,
-                headers=self._get_headers(),
-                json=payload
-            )
+        # Use pooled client for better performance
+        client = await self._get_client()
+        response = await client.post(
+            self.BASE_URL,
+            headers=self._get_headers(),
+            json=payload,
+            timeout=timeout
+        )
             
             if response.status_code != 200:
                 raise ValueError(f"Fireworks API Error {response.status_code}: {response.text}")
@@ -200,9 +240,9 @@ Remember: Put ALL your thinking inside <think>...</think> tags, then give your f
             data = response.json()
             
             # Debug: Log the raw response structure
-            print(f"DEBUG Fireworks: Raw response keys: {list(data.keys())}")
+            logger.debug(f"Fireworks: Raw response keys: {list(data.keys())}")
             if "choices" in data and data["choices"]:
-                print(f"DEBUG Fireworks: First choice keys: {list(data['choices'][0].keys())}")
+                logger.debug(f"Fireworks: First choice keys: {list(data['choices'][0].keys())}")
             
             # Check for API errors
             if "error" in data:
@@ -223,29 +263,29 @@ Remember: Put ALL your thinking inside <think>...</think> tags, then give your f
             # Priority 1: Check reasoning_content field (Fireworks-specific)
             if "reasoning_content" in message and message["reasoning_content"]:
                 reasoning_trace = message["reasoning_content"]
-                print(f"DEBUG Fireworks: Found reasoning in 'reasoning_content' field")
+                logger.debug(f"Fireworks: Found reasoning in 'reasoning_content' field")
             
             # Priority 2: Check reasoning_details array (similar to OpenRouter format)
             if not reasoning_trace and "reasoning_details" in message and message["reasoning_details"]:
-                print(f"DEBUG Fireworks: Found reasoning_details array with {len(message['reasoning_details'])} items")
+                logger.debug(f"Fireworks: Found reasoning_details array with {len(message['reasoning_details'])} items")
                 for detail in message["reasoning_details"]:
                     if isinstance(detail, dict) and "text" in detail:
                         reasoning_trace += detail["text"]
                 if reasoning_trace:
-                    print(f"DEBUG Fireworks: Extracted reasoning from 'reasoning_details' array")
+                    logger.debug(f"Fireworks: Extracted reasoning from 'reasoning_details' array")
             
             # Priority 3: Check direct reasoning/thinking fields (fallback, like OpenRouter)
             if not reasoning_trace:
                 reasoning_trace = message.get("reasoning", "") or message.get("thinking", "") or ""
                 if reasoning_trace:
-                    print(f"DEBUG Fireworks: Found reasoning in 'reasoning' or 'thinking' field")
+                    logger.debug(f"Fireworks: Found reasoning in 'reasoning' or 'thinking' field")
             
             # Priority 4: Check for <think>...</think> pattern (both tags) - PREFERRED
             # We now explicitly prompt the model to use this format
             import re
-            print(f"DEBUG Fireworks: Checking for <think>...</think> tags in response...")
-            print(f"DEBUG Fireworks: '<think>' in response_text: {'<think>' in response_text}")
-            print(f"DEBUG Fireworks: '</think>' in response_text: {'</think>' in response_text}")
+            logger.debug(f"Fireworks: Checking for <think>...</think> tags in response...")
+            logger.debug(f"Fireworks: '<think>' in response_text: {'<think>' in response_text}")
+            logger.debug(f"Fireworks: '</think>' in response_text: {'</think>' in response_text}")
             
             if not reasoning_trace and '<think>' in response_text and '</think>' in response_text:
                 # Use regex with DOTALL to match across newlines
@@ -255,8 +295,8 @@ Remember: Put ALL your thinking inside <think>...</think> tags, then give your f
                     reasoning_trace = think_match.group(1).strip()
                     # Remove the entire <think>...</think> block from response
                     response_text = re.sub(think_pattern, '', response_text, flags=re.DOTALL).strip()
-                    print(f"DEBUG Fireworks: Extracted reasoning from <think>...</think> tags")
-                    print(f"DEBUG Fireworks: Reasoning: {len(reasoning_trace)} chars, Answer: {len(response_text)} chars")
+                    logger.debug(f"Fireworks: Extracted reasoning from <think>...</think> tags")
+                    logger.debug(f"Fireworks: Reasoning: {len(reasoning_trace)} chars, Answer: {len(response_text)} chars")
             
             # Priority 5: Fallback - Split on </think> only (no opening tag)
             # Some Qwen responses have: "Reasoning here...</think>\n\nAnswer here"
@@ -271,8 +311,8 @@ Remember: Put ALL your thinking inside <think>...</think> tags, then give your f
                 if extracted_reasoning:
                     reasoning_trace = extracted_reasoning
                     response_text = extracted_answer
-                    print(f"DEBUG Fireworks: Extracted reasoning by splitting on </think>")
-                    print(f"DEBUG Fireworks: Reasoning: {len(reasoning_trace)} chars, Answer: {len(response_text)} chars")
+                    logger.debug(f"Fireworks: Extracted reasoning by splitting on </think>")
+                    logger.debug(f"Fireworks: Reasoning: {len(reasoning_trace)} chars, Answer: {len(response_text)} chars")
             
             # Priority 6: Legacy fallback - Check for additional <think>...</think> patterns
             if not reasoning_trace:
@@ -282,7 +322,7 @@ Remember: Put ALL your thinking inside <think>...</think> tags, then give your f
                     # Extract reasoning from <think> tags
                     extracted_reasoning = "\n".join(think_matches)
                     reasoning_trace = extracted_reasoning
-                    print(f"DEBUG Fireworks: Extracted reasoning from <think>...</think> tags")
+                    logger.debug(f"Fireworks: Extracted reasoning from <think>...</think> tags")
                     # Remove <think> tags from response_text to get clean final answer
                     response_text = re.sub(think_pattern, '', response_text, flags=re.DOTALL).strip()
             
@@ -292,20 +332,20 @@ Remember: Put ALL your thinking inside <think>...</think> tags, then give your f
             # we use reasoning as the response.
             
             # Debug: Log what we're extracting
-            print(f"DEBUG Fireworks: message keys: {list(message.keys())}")
-            print(f"DEBUG Fireworks: response_text length: {len(response_text)}")
-            print(f"DEBUG Fireworks: reasoning_trace length: {len(reasoning_trace)}")
-            print(f"DEBUG Fireworks: has 'reasoning_content' key: {'reasoning_content' in message}")
-            print(f"DEBUG Fireworks: has 'reasoning' key: {'reasoning' in message}")
-            print(f"DEBUG Fireworks: has 'thinking' key: {'thinking' in message}")
-            print(f"DEBUG Fireworks: has 'reasoning_details' key: {'reasoning_details' in message}")
+            logger.debug(f"Fireworks: message keys: {list(message.keys())}")
+            logger.debug(f"Fireworks: response_text length: {len(response_text)}")
+            logger.debug(f"Fireworks: reasoning_trace length: {len(reasoning_trace)}")
+            logger.debug(f"Fireworks: has 'reasoning_content' key: {'reasoning_content' in message}")
+            logger.debug(f"Fireworks: has 'reasoning' key: {'reasoning' in message}")
+            logger.debug(f"Fireworks: has 'thinking' key: {'thinking' in message}")
+            logger.debug(f"Fireworks: has 'reasoning_details' key: {'reasoning_details' in message}")
             if response_text:
-                print(f"DEBUG Fireworks: response_text preview (first 200 chars): {response_text[:200]}")
-                print(f"DEBUG Fireworks: response_text END (last 300 chars): {response_text[-300:]}")
+                logger.debug(f"Fireworks: response_text preview (first 200 chars): {response_text[:200]}")
+                logger.debug(f"Fireworks: response_text END (last 300 chars): {response_text[-300:]}")
             if reasoning_trace:
-                print(f"DEBUG Fireworks: reasoning_trace preview (first 200 chars): {reasoning_trace[:200]}")
+                logger.debug(f"Fireworks: reasoning_trace preview (first 200 chars): {reasoning_trace[:200]}")
             else:
-                print(f"DEBUG Fireworks: ⚠️ No reasoning trace extracted from any field!")
+                logger.debug(f"Fireworks: ⚠️ No reasoning trace extracted from any field!")
             
             return response_text.strip(), reasoning_trace.strip()
 

@@ -1,6 +1,22 @@
 version: '3.8'
 
 services:
+  # Redis - Session storage (survives restarts)
+  redis:
+    image: redis:7-alpine
+    container_name: model-hunter-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - model-hunter-network
+
   model-hunter:
     build: .
     container_name: model-hunter
@@ -12,16 +28,27 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - FIREWORKS_API_KEY=${FIREWORKS_API_KEY}
+      # Redis configuration
+      - REDIS_URL=redis://redis:6379/0
+      # Rate limiting (tune based on your API tier)
+      - OPENROUTER_CONCURRENCY=6
+      - FIREWORKS_CONCURRENCY=4
+      - OPENAI_CONCURRENCY=8
     volumes:
       - ./service_account.json:/app/service_account.json:ro
       - ./.storage:/app/.storage
       - telemetry-data:/app/.telemetry
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8000/" ]
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/api/health" ]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 10s
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - model-hunter-network
 
   dashboard:
     build:
@@ -34,10 +61,13 @@ services:
     environment:
       - DASHBOARD_PORT=8001
       - TELEMETRY_LOG_PATH=/app/.telemetry/events.jsonl
+      - REDIS_URL=redis://redis:6379/0
     volumes:
       - telemetry-data:/app/.telemetry:ro
     depends_on:
       - model-hunter
+    networks:
+      - model-hunter-network
 
   nginx:
     image: nginx:alpine
@@ -50,6 +80,13 @@ services:
     depends_on:
       - model-hunter
       - dashboard
+    networks:
+      - model-hunter-network
 
 volumes:
   telemetry-data:
+  redis-data:
+
+networks:
+  model-hunter-network:
+    driver: bridge

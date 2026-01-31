@@ -1,12 +1,15 @@
 fastapi>=0.109.0
 uvicorn[standard]>=0.27.0
-httpx>=0.26.0
+httpx[http2]>=0.26.0
 openai>=1.10.0
 python-multipart>=0.0.6
 pydantic>=2.5.0
 python-dotenv>=1.0.0
 aiofiles>=23.2.1
 sse-starlette>=2.0.0
+
+# Redis for session storage
+redis>=5.0.0
 
 # Google Drive API
 google-api-python-client>=2.100.0

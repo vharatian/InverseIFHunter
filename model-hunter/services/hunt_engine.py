@@ -6,11 +6,16 @@ Orchestrates parallel hunts with:
 - Progress tracking and SSE broadcasting
 - Early termination when target breaks found
 - Result aggregation with reasoning traces
+- Redis-backed session persistence (survives restarts)
+- Rate-limited API calls (prevents overload)
 """
 import asyncio
 import uuid
+import logging
 from typing import List, Dict, Any, Optional, AsyncGenerator, Callable
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 # Telemetry import - wrapped to never fail
 try:
@@ -18,6 +23,22 @@ try:
     _telemetry_enabled = True
 except ImportError:
     _telemetry_enabled = False
+
+# Session store import - wrapped to never fail
+try:
+    from services.session_store import get_session_store
+    _session_store_enabled = True
+except ImportError:
+    _session_store_enabled = False
+    logger.warning("Session store not available - sessions will not persist")
+
+# Rate limiter import - wrapped to never fail
+try:
+    from services.rate_limiter import get_rate_limiter
+    _rate_limiter_enabled = True
+except ImportError:
+    _rate_limiter_enabled = False
+    logger.warning("Rate limiter not available - API calls will not be throttled")
 
 from models.schemas import (
     HuntConfig, 
@@ -32,7 +53,7 @@ from services.openai_client import get_openai_judge_client
 
 
 class HuntEngine:
-    """Orchestrates parallel model hunts with progress tracking."""
+    """Orchestrates parallel model hunts with progress tracking and persistence."""
     
     def __init__(self):
         self.sessions: Dict[str, HuntSession] = {}
@@ -40,7 +61,7 @@ class HuntEngine:
         self._session_locks: Dict[str, asyncio.Lock] = {}  # Lock per session for atomic updates
     
     def create_session(self, notebook: ParsedNotebook, config: HuntConfig) -> HuntSession:
-        """Create a new hunt session."""
+        """Create a new hunt session and persist to Redis."""
         session_id = str(uuid.uuid4())[:8]
         
         session = HuntSession(
@@ -56,11 +77,53 @@ class HuntEngine:
         
         self.sessions[session_id] = session
         self._session_locks[session_id] = asyncio.Lock()  # Create lock for this session
+        
+        # Persist to Redis (fire-and-forget, don't block)
+        if _session_store_enabled:
+            asyncio.create_task(self._persist_session(session))
+        
         return session
     
+    async def _persist_session(self, session: HuntSession):
+        """Persist session to Redis. Fire-and-forget."""
+        try:
+            store = get_session_store()
+            await store.save_session(session.session_id, session.model_dump())
+            logger.debug(f"Session {session.session_id} persisted to Redis")
+        except Exception as e:
+            logger.error(f"Failed to persist session {session.session_id}: {e}")
+    
     def get_session(self, session_id: str) -> Optional[HuntSession]:
-        """Get session by ID."""
+        """Get session by ID (from memory only - use get_session_async for Redis)."""
         return self.sessions.get(session_id)
+    
+    async def get_session_async(self, session_id: str) -> Optional[HuntSession]:
+        """
+        Get session by ID with Redis fallback.
+        
+        Checks memory first, then Redis if not found.
+        Restores session to memory if found in Redis.
+        """
+        # Check memory first
+        if session_id in self.sessions:
+            return self.sessions[session_id]
+        
+        # Try Redis
+        if _session_store_enabled:
+            try:
+                store = get_session_store()
+                data = await store.get_session(session_id)
+                if data:
+                    # Restore session from Redis
+                    session = HuntSession(**data)
+                    self.sessions[session_id] = session
+                    self._session_locks[session_id] = asyncio.Lock()
+                    logger.info(f"Session {session_id} restored from Redis")
+                    return session
+            except Exception as e:
+                logger.error(f"Failed to restore session {session_id} from Redis: {e}")
+        
+        return None
     
     async def run_hunt(
         self,
@@ -177,6 +240,10 @@ class HuntEngine:
                 }
             ))
         
+        # Persist final session state to Redis
+        if _session_store_enabled:
+            await self._persist_session(session)
+        
         return session
     
     async def _run_with_early_stop(
@@ -230,24 +297,46 @@ class HuntEngine:
             # Wrap prompt with explanation request
             enhanced_prompt = f"{session.notebook.prompt}"
             
+            # Use rate limiter if available
+            rate_limiter = get_rate_limiter() if _rate_limiter_enabled else None
+            
             if provider == 'fireworks':
                 from services.fireworks_client import get_fireworks_client
                 fireworks = get_fireworks_client()
-                response, reasoning, error = await fireworks.call_with_retry(
-                    prompt=enhanced_prompt,
-                    model=result.model,
-                    max_retries=session.config.max_retries
-                    # No reasoning budget for Fireworks currently
-                )
+                
+                # Fireworks uses reasoning_effort API parameter to separate reasoning
+                # No prompt modification needed - API returns reasoning in reasoning_content field
+                if rate_limiter:
+                    async with rate_limiter.acquire("fireworks"):
+                        response, reasoning, error = await fireworks.call_with_retry(
+                            prompt=enhanced_prompt,
+                            model=result.model,
+                            max_retries=session.config.max_retries
+                        )
+                else:
+                    response, reasoning, error = await fireworks.call_with_retry(
+                        prompt=enhanced_prompt,
+                        model=result.model,
+                        max_retries=session.config.max_retries
+                    )
             else:
                 # Default to OpenRouter
                 openrouter = get_openrouter_client()
-                response, reasoning, error = await openrouter.call_with_retry(
-                    prompt=enhanced_prompt,
-                    model=result.model,
-                    max_retries=session.config.max_retries,
-                    reasoning_budget_percent=session.config.reasoning_budget_percent
-                )
+                if rate_limiter:
+                    async with rate_limiter.acquire("openrouter"):
+                        response, reasoning, error = await openrouter.call_with_retry(
+                            prompt=enhanced_prompt,
+                            model=result.model,
+                            max_retries=session.config.max_retries,
+                            reasoning_budget_percent=session.config.reasoning_budget_percent
+                        )
+                else:
+                    response, reasoning, error = await openrouter.call_with_retry(
+                        prompt=enhanced_prompt,
+                        model=result.model,
+                        max_retries=session.config.max_retries,
+                        reasoning_budget_percent=session.config.reasoning_budget_percent
+                    )
             
             if error:
                 # Model failed to respond after retries = FAILED (not breaking)
@@ -319,6 +408,10 @@ class HuntEngine:
             except Exception:
                 pass
         
+        # Persist session state after each result (for resilience)
+        if _session_store_enabled:
+            asyncio.create_task(self._persist_session(session))
+        
         # Emit result (outside lock to avoid deadlock)
         if progress_callback:
             await progress_callback(HuntEvent(
@@ -338,23 +431,33 @@ class HuntEngine:
             ))
     
     async def _judge_response(self, session: HuntSession, result: HuntResult):
-        """Judge a model response using GPT-5."""
+        """Judge a model response using GPT-5 with rate limiting."""
         try:
             judge = get_openai_judge_client()
             
             # Use custom judge prompt if provided
             judge_system = session.config.custom_judge_system_prompt or session.notebook.judge_system_prompt
             
-            judge_result = await judge.judge_response(
-                prompt=session.notebook.prompt,
-                student_response=result.response,
-                response_reference=session.notebook.response_reference,
-                judge_system_prompt=judge_system,
-                judge_prompt_template=session.notebook.judge_prompt_template,
-                model=session.config.judge_model,
-                independent_judging=True,  # Always use independent judging
-                standard_response=session.notebook.response  # Standard response from [response] cell
-            )
+            # Use rate limiter for OpenAI judge calls
+            rate_limiter = get_rate_limiter() if _rate_limiter_enabled else None
+            
+            async def make_judge_call():
+                return await judge.judge_response(
+                    prompt=session.notebook.prompt,
+                    student_response=result.response,
+                    response_reference=session.notebook.response_reference,
+                    judge_system_prompt=judge_system,
+                    judge_prompt_template=session.notebook.judge_prompt_template,
+                    model=session.config.judge_model,
+                    independent_judging=True,  # Always use independent judging
+                    standard_response=session.notebook.response  # Standard response from [response] cell
+                )
+            
+            if rate_limiter:
+                async with rate_limiter.acquire("openai"):
+                    judge_result = await make_judge_call()
+            else:
+                judge_result = await make_judge_call()
             
             result.judge_score = judge_result.get("score")
             
@@ -362,21 +465,30 @@ class HuntEngine:
             retry_count = 0
             while result.judge_score is None and retry_count < 3:
                 retry_count += 1
-                print(f"WARNING: Judge returned None score for Hunt {result.hunt_id}, retrying ({retry_count}/3)...")
-                judge_result = await judge.judge_response(
-                    prompt=session.notebook.prompt,
-                    student_response=result.response,
-                    response_reference=session.notebook.response_reference,
-                    judge_system_prompt=judge_system,
-                    judge_prompt_template=session.notebook.judge_prompt_template,
-                    model=session.config.judge_model,
-                    standard_response=session.notebook.response  # Standard response from [response] cell
-                )
+                logger.warning(f"Judge returned None score for Hunt {result.hunt_id}, retrying ({retry_count}/3)...")
+                
+                async def retry_judge_call():
+                    return await judge.judge_response(
+                        prompt=session.notebook.prompt,
+                        student_response=result.response,
+                        response_reference=session.notebook.response_reference,
+                        judge_system_prompt=judge_system,
+                        judge_prompt_template=session.notebook.judge_prompt_template,
+                        model=session.config.judge_model,
+                        standard_response=session.notebook.response  # Standard response from [response] cell
+                    )
+                
+                if rate_limiter:
+                    async with rate_limiter.acquire("openai"):
+                        judge_result = await retry_judge_call()
+                else:
+                    judge_result = await retry_judge_call()
+                    
                 result.judge_score = judge_result.get("score")
             
             if result.judge_score is None:
-                print(f"WARNING: Judge failed after retries for Hunt {result.hunt_id}")
-                print(f"Raw Judge Output: {judge_result.get('raw_output', '')[:500]}...")
+                logger.warning(f"Judge failed after retries for Hunt {result.hunt_id}")
+                logger.warning(f"Raw Judge Output: {judge_result.get('raw_output', '')[:500]}...")
             
             result.judge_output = judge_result.get("raw_output", "")
             result.judge_criteria = judge_result.get("criteria", {})

@@ -11,7 +11,7 @@ import os
 import json
 import asyncio
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from contextlib import asynccontextmanager
 from datetime import datetime
 
@@ -46,6 +46,20 @@ try:
 except ImportError:
     _telemetry_enabled = False
 
+# Session store import - wrapped to never fail
+try:
+    from services.session_store import get_session_store
+    _session_store_enabled = True
+except ImportError:
+    _session_store_enabled = False
+
+# Rate limiter import - wrapped to never fail
+try:
+    from services.rate_limiter import get_rate_limiter
+    _rate_limiter_enabled = True
+except ImportError:
+    _rate_limiter_enabled = False
+
 # Load environment variables
 load_dotenv()
 
@@ -54,10 +68,46 @@ load_dotenv()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    print("🔥 Model Hunter starting up...")
+    logger.info("🔥 Model Hunter starting up...")
+    
+    # Initialize Redis session store
+    if _session_store_enabled:
+        try:
+            store = get_session_store()
+            stats = await store.get_stats()
+            logger.info(f"📦 Session store: {stats['backend']} ({stats['active_sessions']} active sessions)")
+        except Exception as e:
+            logger.warning(f"⚠️ Session store initialization: {e}")
+    
+    # Initialize rate limiter
+    if _rate_limiter_enabled:
+        try:
+            limiter = get_rate_limiter()
+            stats = limiter.get_stats()
+            logger.info(f"🚦 Rate limiter initialized with limits: {stats['limits']}")
+        except Exception as e:
+            logger.warning(f"⚠️ Rate limiter initialization: {e}")
+    
     yield
-    # Shutdown
-    print("🛑 Model Hunter shutting down...")
+    
+    # Shutdown - cleanup
+    logger.info("🛑 Model Hunter shutting down...")
+    
+    # Close session store
+    if _session_store_enabled:
+        try:
+            store = get_session_store()
+            await store.close()
+        except Exception:
+            pass
+    
+    # Close rate limiter
+    if _rate_limiter_enabled:
+        try:
+            limiter = get_rate_limiter()
+            await limiter.close()
+        except Exception:
+            pass
 
 
 # Create FastAPI app
@@ -92,21 +142,106 @@ class ExportRequest(BaseModel):
 STORAGE_DIR = os.path.join(os.getcwd(), ".storage")
 os.makedirs(STORAGE_DIR, exist_ok=True)
 
+# Helper function to reorder notebook cells to ensure correct order
+def _reorder_notebook_cells(notebook_data: dict, heading_map: dict, cell_order: list):
+    """Reorder cells to ensure they're in the correct order: prompt, response, response_reference, judge_system_prompt"""
+    if "cells" not in notebook_data:
+        return
+    
+    # Find metadata cell index
+    metadata_index = -1
+    for i, cell in enumerate(notebook_data["cells"]):
+        if cell.get("cell_type") == "markdown":
+            source = "".join(cell.get("source", []))
+            if "# Metadata" in source or "Metadata" in source:
+                metadata_index = i
+                break
+    
+    # Separate cells into ordered cells and other cells
+    ordered_cells = []  # List of (index_in_order, cell, original_index)
+    other_cells = []  # List of (original_index, cell)
+    
+    for i, cell in enumerate(notebook_data["cells"]):
+        if cell.get("cell_type") == "markdown":
+            source = "".join(cell.get("source", []))
+            # Check if this is one of our ordered cells
+            found_ordered = False
+            for j, cell_type in enumerate(cell_order):
+                heading = heading_map.get(cell_type, "")
+                if heading and heading.lower() in source.lower():
+                    ordered_cells.append((j, cell, i))
+                    found_ordered = True
+                    break
+            if not found_ordered and i != metadata_index:
+                # Not an ordered cell, but also not metadata
+                other_cells.append((i, cell))
+        else:
+            # Not a markdown cell
+            if i != metadata_index:
+                other_cells.append((i, cell))
+    
+    # Sort ordered cells by their order
+    ordered_cells.sort(key=lambda x: x[0])
+    
+    # Rebuild cells list: metadata first, then ordered cells, then others
+    new_cells = []
+    
+    # Add metadata cell if it exists
+    if metadata_index >= 0:
+        new_cells.append(notebook_data["cells"][metadata_index])
+    
+    # Add ordered cells in correct order
+    for _, cell, _ in ordered_cells:
+        new_cells.append(cell)
+    
+    # Add other cells (preserving their relative order, but after ordered cells)
+    for _, cell in sorted(other_cells, key=lambda x: x[0]):
+        new_cells.append(cell)
+    
+    notebook_data["cells"] = new_cells
+
+# Session expiration: 2 hours (7200 seconds)
+SESSION_EXPIRATION_SECONDS = 2 * 60 * 60  # 2 hours
+
 def save_session_storage(session_id: str, data: dict):
-    """Save session data to disk."""
+    """Save session data to disk with timestamp."""
     path = os.path.join(STORAGE_DIR, f"{session_id}.json")
+    # Add/update timestamp
+    data["last_accessed"] = datetime.now().isoformat()
+    if "created_at" not in data:
+        data["created_at"] = datetime.now().isoformat()
     with open(path, 'w') as f:
         json.dump(data, f)
 
 def get_session_storage(session_id: str) -> Optional[dict]:
-    """Get session data from disk."""
+    """Get session data from disk, checking expiration."""
     path = os.path.join(STORAGE_DIR, f"{session_id}.json")
     if os.path.exists(path):
         try:
             with open(path, 'r') as f:
-                return json.load(f)
+                data = json.load(f)
+            
+            # Check expiration
+            if "last_accessed" in data:
+                last_accessed = datetime.fromisoformat(data["last_accessed"])
+                elapsed = (datetime.now() - last_accessed).total_seconds()
+                if elapsed > SESSION_EXPIRATION_SECONDS:
+                    # Session expired, delete it
+                    logger.info(f"Session {session_id} expired (elapsed: {elapsed:.0f}s, limit: {SESSION_EXPIRATION_SECONDS}s)")
+                    try:
+                        os.remove(path)
+                    except Exception as e:
+                        logger.error(f"Error deleting expired session file: {e}")
+                    return None
+            
+            # Update last accessed time
+            data["last_accessed"] = datetime.now().isoformat()
+            with open(path, 'w') as f:
+                json.dump(data, f)
+            
+            return data
         except Exception as e:
-            print(f"Error loading session storage {session_id}: {e}")
+            logger.error(f"Error loading session storage {session_id}: {e}")
     return None
 
 
@@ -140,10 +275,12 @@ async def upload_notebook(file: UploadFile = File(...)):
             except Exception:
                 pass
         
-        # Store original content for export
+        # Store original content and session data for export
         save_session_storage(session.session_id, {
             "original_content": content_str,
-            "filename": file.filename
+            "filename": file.filename,
+            "url": None,  # No URL for uploaded files
+            "session_data": session.model_dump()  # Store full session for restoration
         })
         
         # Extract model prefix from model slots (nemotron, qwen, etc.)
@@ -217,7 +354,8 @@ async def fetch_notebook(request: NotebookURLRequest):
         save_session_storage(session.session_id, {
             "original_content": content_str,
             "filename": parsed.filename,
-            "url": request.url
+            "url": request.url,
+            "session_data": session.model_dump()  # Store full session for restoration
         })
         
         # Extract model prefix from model slots (nemotron, qwen, etc.)
@@ -286,19 +424,48 @@ async def get_session(session_id: str):
 
 @app.post("/api/update-config/{session_id}")
 async def update_config(session_id: str, config: HuntConfig):
-    """Update hunt configuration for a session."""
+    """Update hunt configuration for a session. Restores from storage if needed."""
     session = hunt_engine.get_session(session_id)
+    
+    # If not in memory, try to restore from storage
     if not session:
-        raise HTTPException(404, "Session not found")
+        storage = get_session_storage(session_id)
+        if storage and "session_data" in storage:
+            try:
+                from models.schemas import HuntSession
+                session_data = storage["session_data"]
+                session = HuntSession(**session_data)
+                hunt_engine.sessions[session_id] = session
+                logger.info(f"Restored session {session_id} from storage")
+            except Exception as e:
+                logger.error(f"Error restoring session {session_id}: {e}")
+                raise HTTPException(404, "Session not found or expired")
+    
+    if not session:
+        raise HTTPException(404, "Session not found or expired")
     
     session.config = config
     session.total_hunts = config.parallel_workers
+    
+    # Update storage
+    storage = get_session_storage(session_id) or {}
+    storage["session_data"] = session.model_dump()
+    save_session_storage(session_id, storage)
     
     return {"success": True, "config": config.model_dump()}
 
 
 class UpdateResponseRequest(BaseModel):
     response: str
+
+
+class UpdateNotebookCellRequest(BaseModel):
+    cell_type: str  # prompt, response, response_reference, judge_system_prompt
+    content: str
+
+
+class UpdateNotebookCellsRequest(BaseModel):
+    cells: List[UpdateNotebookCellRequest]
 
 
 @app.post("/api/update-response/{session_id}")
@@ -331,8 +498,93 @@ async def update_response(session_id: str, request: UpdateResponseRequest):
                     updated = True
                     break
         
+        # If cell not found, create it
         if not updated:
-            raise HTTPException(400, "Could not find [response] cell in notebook")
+            # Define cell order: prompt, response, response_reference, judge_system_prompt
+            cell_order = ["prompt", "response", "response_reference", "judge_system_prompt"]
+            current_cell_index = cell_order.index("response")
+            
+            # Find the position to insert the new cell
+            insert_index = len(notebook_data.get("cells", []))
+            
+            # First, try to find metadata cell
+            metadata_index = -1
+            for i, cell in enumerate(notebook_data.get("cells", [])):
+                if cell.get("cell_type") == "markdown":
+                    source = "".join(cell.get("source", []))
+                    if "# Metadata" in source or "Metadata" in source:
+                        metadata_index = i
+                        break
+            
+            # Start insertion after metadata if found, otherwise at start
+            if metadata_index >= 0:
+                insert_index = metadata_index + 1
+            else:
+                insert_index = 0
+            
+            # Find where to insert based on cell order
+            heading_map = {
+                "prompt": "**[prompt]**",
+                "response": "**[response]**",
+                "response_reference": "**[response_reference]**",
+                "judge_system_prompt": "**[judge_system_prompt]**"
+            }
+            
+            # We need to ensure cells are always in correct order: prompt, response, response_reference, judge_system_prompt
+            # Find the last cell that should come BEFORE the cell we're creating
+            last_before_index = insert_index - 1
+            found_after = False
+            
+            for i, cell in enumerate(notebook_data.get("cells", []), start=insert_index):
+                if cell.get("cell_type") == "markdown":
+                    source = "".join(cell.get("source", []))
+                    # Check if this cell is one of our ordered cells
+                    for j, cell_type in enumerate(cell_order):
+                        if cell_type == "response":
+                            # This is the cell we're creating, skip
+                            continue
+                        heading = heading_map.get(cell_type, "")
+                        if heading and heading.lower() in source.lower():
+                            # Found a cell in our order
+                            if j < current_cell_index:
+                                # This cell comes before ours - update insertion point to after it
+                                last_before_index = i
+                                insert_index = i + 1
+                            elif j > current_cell_index:
+                                # Found a cell that comes after - insert before it and stop
+                                insert_index = i
+                                found_after = True
+                                break
+                    # If we found a cell that comes after, stop searching
+                    if found_after:
+                        break
+            
+            # Ensure we don't insert before metadata
+            if metadata_index >= 0 and insert_index <= metadata_index:
+                insert_index = metadata_index + 1
+            
+            # Create new markdown cell
+            new_cell = {
+                "cell_type": "markdown",
+                "metadata": {},
+                "source": [f"**[response]**\n\n{request.response}"]
+            }
+            
+            # Insert the new cell
+            if "cells" not in notebook_data:
+                notebook_data["cells"] = []
+            notebook_data["cells"].insert(insert_index, new_cell)
+            updated = True
+            
+            # After inserting, reorder cells to ensure correct order
+            heading_map = {
+                "prompt": "**[prompt]**",
+                "response": "**[response]**",
+                "response_reference": "**[response_reference]**",
+                "judge_system_prompt": "**[judge_system_prompt]**"
+            }
+            cell_order = ["prompt", "response", "response_reference", "judge_system_prompt"]
+            _reorder_notebook_cells(notebook_data, heading_map, cell_order)
         
         # Save to Google Drive
         from services.google_drive_client import drive_client
@@ -353,9 +605,358 @@ async def update_response(session_id: str, request: UpdateResponseRequest):
         
         # Update storage with new content
         storage["original_content"] = updated_content
+        # Update session data in storage
+        storage["session_data"] = session.model_dump()
         save_session_storage(session_id, storage)
         
         return {"success": True, "message": "Response saved to Colab notebook"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Error saving to Colab: {str(e)}")
+
+
+@app.post("/api/update-notebook-cell/{session_id}")
+async def update_notebook_cell(session_id: str, request: UpdateNotebookCellRequest):
+    """Update a specific cell in the notebook and save to Colab."""
+    session = hunt_engine.get_session(session_id)
+    if not session:
+        raise HTTPException(404, "Session not found")
+    
+    # Get session storage for URL and original content
+    storage = get_session_storage(session_id)
+    if not storage or "url" not in storage:
+        raise HTTPException(400, "No source URL found - cannot save back to Colab")
+    
+    # Map cell_type to heading pattern
+    heading_map = {
+        "prompt": "**[prompt]**",
+        "response": "**[response]**",
+        "response_reference": "**[response_reference]**",
+        "judge_system_prompt": "**[judge_system_prompt]**"
+    }
+    
+    if request.cell_type not in heading_map:
+        raise HTTPException(400, f"Invalid cell_type: {request.cell_type}")
+    
+    heading_pattern = heading_map[request.cell_type]
+    
+    try:
+        # Parse original notebook content
+        original_content = storage.get("original_content", "{}")
+        notebook_data = json.loads(original_content)
+        
+        # Find and update the cell
+        updated = False
+        for cell in notebook_data.get("cells", []):
+            if cell.get("cell_type") == "markdown":
+                source = "".join(cell.get("source", []))
+                if heading_pattern.lower() in source.lower():
+                    # Update the cell content, preserving the heading
+                    lines = source.split("\n")
+                    new_source = lines[0] + "\n\n" + request.content
+                    cell["source"] = [new_source]
+                    updated = True
+                    break
+        
+        # If cell not found, create it
+        if not updated:
+            # Define cell order: prompt, response, response_reference, judge_system_prompt
+            cell_order = ["prompt", "response", "response_reference", "judge_system_prompt"]
+            current_cell_index = cell_order.index(request.cell_type) if request.cell_type in cell_order else -1
+            
+            # Find the position to insert the new cell
+            insert_index = len(notebook_data.get("cells", []))
+            
+            # First, try to find metadata cell
+            metadata_index = -1
+            for i, cell in enumerate(notebook_data.get("cells", [])):
+                if cell.get("cell_type") == "markdown":
+                    source = "".join(cell.get("source", []))
+                    if "# Metadata" in source or "Metadata" in source:
+                        metadata_index = i
+                        break
+            
+            # Start insertion after metadata if found, otherwise at start
+            if metadata_index >= 0:
+                insert_index = metadata_index + 1
+            else:
+                insert_index = 0
+            
+            # Find where to insert based on cell order
+            # We need to ensure cells are always in correct order: prompt, response, response_reference, judge_system_prompt
+            # Find the last cell that should come BEFORE the cell we're creating
+            last_before_index = insert_index - 1
+            
+            for i, cell in enumerate(notebook_data.get("cells", []), start=insert_index):
+                if cell.get("cell_type") == "markdown":
+                    source = "".join(cell.get("source", []))
+                    # Check if this cell is one of our ordered cells
+                    found_after = False
+                    for j, cell_type in enumerate(cell_order):
+                        if cell_type == request.cell_type:
+                            # This is the cell we're creating, skip
+                            continue
+                        heading = heading_map.get(cell_type, "")
+                        if heading and heading.lower() in source.lower():
+                            # Found a cell in our order
+                            if j < current_cell_index:
+                                # This cell comes before ours - update insertion point to after it
+                                last_before_index = i
+                                insert_index = i + 1
+                            elif j > current_cell_index:
+                                # Found a cell that comes after - insert before it and stop
+                                insert_index = i
+                                found_after = True
+                                break
+                    # If we found a cell that comes after, stop searching
+                    if found_after:
+                        break
+            
+            # Ensure we don't insert before metadata
+            if metadata_index >= 0 and insert_index <= metadata_index:
+                insert_index = metadata_index + 1
+            
+            # Create new markdown cell
+            new_cell = {
+                "cell_type": "markdown",
+                "metadata": {},
+                "source": [f"{heading_pattern}\n\n{request.content}"]
+            }
+            
+            # Insert the new cell
+            if "cells" not in notebook_data:
+                notebook_data["cells"] = []
+            notebook_data["cells"].insert(insert_index, new_cell)
+            updated = True
+            
+            # After inserting, reorder cells to ensure correct order
+            _reorder_notebook_cells(notebook_data, heading_map, cell_order)
+        
+        # Save to Google Drive
+        from services.google_drive_client import drive_client
+        file_id = drive_client.get_file_id_from_url(storage["url"])
+        if not file_id:
+            raise HTTPException(400, "Could not extract file ID from URL")
+        
+        # Convert notebook back to JSON
+        updated_content = json.dumps(notebook_data, indent=2)
+        
+        # Update file on Drive
+        success = drive_client.update_file_content(file_id, updated_content)
+        if not success:
+            raise HTTPException(500, "Failed to update file on Google Drive")
+        
+        # Update session's notebook
+        if request.cell_type == "prompt":
+            session.notebook.prompt = request.content
+        elif request.cell_type == "response":
+            session.notebook.response = request.content
+        elif request.cell_type == "response_reference":
+            session.notebook.response_reference = request.content
+        elif request.cell_type == "judge_system_prompt":
+            session.notebook.judge_system_prompt = request.content
+        
+        # Update storage with new content
+        storage["original_content"] = updated_content
+        # Update session data in storage
+        storage["session_data"] = session.model_dump()
+        save_session_storage(session_id, storage)
+        
+        return {"success": True, "message": f"{request.cell_type} saved to Colab notebook"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Error saving to Colab: {str(e)}")
+
+
+@app.post("/api/update-notebook-cells/{session_id}")
+async def update_notebook_cells(session_id: str, request: UpdateNotebookCellsRequest):
+    """Update multiple cells in the notebook and save to Colab."""
+    session = hunt_engine.get_session(session_id)
+    if not session:
+        raise HTTPException(404, "Session not found")
+    
+    # Get session storage for URL and original content
+    storage = get_session_storage(session_id)
+    if not storage or "url" not in storage:
+        raise HTTPException(400, "No source URL found - cannot save back to Colab")
+    
+    # Map cell_type to heading pattern
+    heading_map = {
+        "prompt": "**[prompt]**",
+        "response": "**[response]**",
+        "response_reference": "**[response_reference]**",
+        "judge_system_prompt": "**[judge_system_prompt]**"
+    }
+    
+    try:
+        # Parse original notebook content
+        original_content = storage.get("original_content", "{}")
+        notebook_data = json.loads(original_content)
+        
+        updated_cells = []
+        
+        # Track which cells need to be created
+        cells_to_create = []
+        
+        # Update each cell
+        for cell_request in request.cells:
+            if cell_request.cell_type not in heading_map:
+                continue
+            
+            heading_pattern = heading_map[cell_request.cell_type]
+            updated = False
+            
+            for cell in notebook_data.get("cells", []):
+                if cell.get("cell_type") == "markdown":
+                    source = "".join(cell.get("source", []))
+                    if heading_pattern.lower() in source.lower():
+                        # Update the cell content, preserving the heading
+                        lines = source.split("\n")
+                        new_source = lines[0] + "\n\n" + cell_request.content
+                        cell["source"] = [new_source]
+                        updated = True
+                        updated_cells.append(cell_request.cell_type)
+                        
+                        # Update session's notebook
+                        if cell_request.cell_type == "prompt":
+                            session.notebook.prompt = cell_request.content
+                        elif cell_request.cell_type == "response":
+                            session.notebook.response = cell_request.content
+                        elif cell_request.cell_type == "response_reference":
+                            session.notebook.response_reference = cell_request.content
+                        elif cell_request.cell_type == "judge_system_prompt":
+                            session.notebook.judge_system_prompt = cell_request.content
+                        break
+            
+            # If cell not found, mark it for creation
+            if not updated:
+                cells_to_create.append((cell_request, heading_pattern))
+        
+        # Create cells that don't exist
+        if cells_to_create:
+            # Define cell order: prompt, response, response_reference, judge_system_prompt
+            cell_order = ["prompt", "response", "response_reference", "judge_system_prompt"]
+            
+            # Find the position to insert new cells
+            insert_index = len(notebook_data.get("cells", []))
+            
+            # First, try to find metadata cell
+            metadata_index = -1
+            for i, cell in enumerate(notebook_data.get("cells", [])):
+                if cell.get("cell_type") == "markdown":
+                    source = "".join(cell.get("source", []))
+                    if "# Metadata" in source or "Metadata" in source:
+                        metadata_index = i
+                        break
+            
+            # Start insertion after metadata if found, otherwise at start
+            if metadata_index >= 0:
+                insert_index = metadata_index + 1
+            else:
+                insert_index = 0
+            
+            # Sort cells to create by their order in cell_order
+            cells_to_create_sorted = sorted(cells_to_create, key=lambda x: (
+                cell_order.index(x[0].cell_type) if x[0].cell_type in cell_order else 999
+            ))
+            
+            # Create and insert new cells in correct order
+            for cell_request, heading_pattern in cells_to_create_sorted:
+                current_cell_index = cell_order.index(cell_request.cell_type) if cell_request.cell_type in cell_order else 999
+                
+                # Find the correct insertion position for this cell
+                cell_insert_index = insert_index
+                last_before_index = insert_index - 1
+                
+                # Look for existing cells to determine insertion position
+                found_after = False
+                for i, cell in enumerate(notebook_data.get("cells", []), start=insert_index):
+                    if cell.get("cell_type") == "markdown":
+                        source = "".join(cell.get("source", []))
+                        # Check if this cell is one of our ordered cells
+                        for j, cell_type in enumerate(cell_order):
+                            if cell_type == cell_request.cell_type:
+                                # This is the cell we're creating, skip
+                                continue
+                            heading = heading_map.get(cell_type, "")
+                            if heading and heading.lower() in source.lower():
+                                # Found a cell in our order
+                                if j < current_cell_index:
+                                    # This cell comes before ours - update insertion point to after it
+                                    last_before_index = i
+                                    cell_insert_index = i + 1
+                                elif j > current_cell_index:
+                                    # Found a cell that comes after - insert before it and stop
+                                    cell_insert_index = i
+                                    found_after = True
+                                    break
+                        # If we found a cell that comes after, stop searching
+                        if found_after:
+                            break
+                
+                # Ensure we don't insert before metadata
+                if metadata_index >= 0 and cell_insert_index <= metadata_index:
+                    cell_insert_index = metadata_index + 1
+                
+                new_cell = {
+                    "cell_type": "markdown",
+                    "metadata": {},
+                    "source": [f"{heading_pattern}\n\n{cell_request.content}"]
+                }
+                
+                if "cells" not in notebook_data:
+                    notebook_data["cells"] = []
+                notebook_data["cells"].insert(cell_insert_index, new_cell)
+                updated_cells.append(cell_request.cell_type)
+                
+                # Update session's notebook
+                if cell_request.cell_type == "prompt":
+                    session.notebook.prompt = cell_request.content
+                elif cell_request.cell_type == "response":
+                    session.notebook.response = cell_request.content
+                elif cell_request.cell_type == "response_reference":
+                    session.notebook.response_reference = cell_request.content
+                elif cell_request.cell_type == "judge_system_prompt":
+                    session.notebook.judge_system_prompt = cell_request.content
+                
+                # Update insert_index for next cell (after the one we just inserted)
+                insert_index = cell_insert_index + 1
+            
+            # After creating all cells, reorder to ensure correct order
+            _reorder_notebook_cells(notebook_data, heading_map, cell_order)
+        
+        if not updated_cells:
+            raise HTTPException(400, "Could not find any matching cells in notebook")
+        
+        # Save to Google Drive
+        from services.google_drive_client import drive_client
+        file_id = drive_client.get_file_id_from_url(storage["url"])
+        if not file_id:
+            raise HTTPException(400, "Could not extract file ID from URL")
+        
+        # Convert notebook back to JSON
+        updated_content = json.dumps(notebook_data, indent=2)
+        
+        # Update file on Drive
+        success = drive_client.update_file_content(file_id, updated_content)
+        if not success:
+            raise HTTPException(500, "Failed to update file on Google Drive")
+        
+        # Update storage with new content
+        storage["original_content"] = updated_content
+        # Update session data in storage
+        storage["session_data"] = session.model_dump()
+        save_session_storage(session_id, storage)
+        
+        return {
+            "success": True,
+            "message": f"Saved {len(updated_cells)} cell(s) to Colab notebook",
+            "updated_cells": updated_cells
+        }
         
     except HTTPException:
         raise
@@ -928,8 +1529,71 @@ async def get_available_models():
 
 @app.get("/api/health")
 async def health_check():
-    """Health check endpoint."""
-    return {"status": "healthy", "service": "model-hunter"}
+    """Health check endpoint with system status."""
+    health = {
+        "status": "healthy",
+        "service": "model-hunter",
+        "timestamp": datetime.utcnow().isoformat() + "Z"
+    }
+    
+    # Check Redis
+    if _session_store_enabled:
+        try:
+            store = get_session_store()
+            stats = await store.get_stats()
+            health["redis"] = {
+                "status": "connected" if stats["backend"] == "redis" else "fallback",
+                "backend": stats["backend"],
+                "active_sessions": stats["active_sessions"]
+            }
+        except Exception as e:
+            health["redis"] = {"status": "error", "error": str(e)}
+    
+    # Check rate limiter
+    if _rate_limiter_enabled:
+        try:
+            limiter = get_rate_limiter()
+            health["rate_limiter"] = limiter.get_stats()
+        except Exception as e:
+            health["rate_limiter"] = {"status": "error", "error": str(e)}
+    
+    return health
+
+
+@app.get("/api/admin/status")
+async def admin_status():
+    """Detailed admin status endpoint with all system metrics."""
+    status = {
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "sessions": {
+            "in_memory": len(hunt_engine.sessions),
+            "session_ids": list(hunt_engine.sessions.keys())[:10]  # First 10 only
+        }
+    }
+    
+    # Redis status
+    if _session_store_enabled:
+        try:
+            store = get_session_store()
+            stats = await store.get_stats()
+            redis_sessions = await store.list_sessions()
+            status["redis"] = {
+                **stats,
+                "session_count": len(redis_sessions),
+                "session_ids": redis_sessions[:10]  # First 10 only
+            }
+        except Exception as e:
+            status["redis"] = {"error": str(e)}
+    
+    # Rate limiter status
+    if _rate_limiter_enabled:
+        try:
+            limiter = get_rate_limiter()
+            status["rate_limiter"] = limiter.get_stats()
+        except Exception as e:
+            status["rate_limiter"] = {"error": str(e)}
+    
+    return status
 
 
 # ============== Static Files & Frontend ==============
