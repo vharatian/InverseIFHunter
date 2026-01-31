@@ -38,6 +38,7 @@ services:
       - ./service_account.json:/app/service_account.json:ro
       - ./.storage:/app/.storage
       - telemetry-data:/app/.telemetry
+      - ./static:/app/static:ro  # Mount static files for hot-reload
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8000/api/health" ]
       interval: 30s
