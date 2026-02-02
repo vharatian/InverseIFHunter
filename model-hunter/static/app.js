@@ -319,6 +319,81 @@ const elements = {
 const MAX_HUNTS_PER_NOTEBOOK = 16;
 const HUNT_COUNT_STORAGE_PREFIX = 'modelHunter_huntCount_';
 
+// ============== Original Notebook JSON Update Helper ==============
+/**
+ * Update originalNotebookJson with a saved cell.
+ * This ensures that when we later save the snapshot, all previously saved cells are included.
+ * 
+ * @param {string} cellHeading - The heading/marker for the cell (e.g., 'prompt', 'response', 'response_reference')
+ * @param {string} content - The new content for the cell
+ */
+function updateOriginalNotebookWithCell(cellHeading, content) {
+    if (!state.originalNotebookJson) {
+        console.warn('Cannot update originalNotebookJson: not set');
+        return;
+    }
+    
+    try {
+        const notebook = JSON.parse(state.originalNotebookJson);
+        const cells = notebook.cells || [];
+        
+        // Format the cell heading to match notebook format (e.g., **[prompt]**)
+        const headingPattern = new RegExp(`\\*\\*\\[${cellHeading}\\]\\*\\*`, 'i');
+        
+        // Find existing cell with this heading
+        let cellIndex = cells.findIndex(cell => {
+            const source = Array.isArray(cell.source) ? cell.source.join('') : (cell.source || '');
+            return headingPattern.test(source);
+        });
+        
+        // Format the new cell content
+        const formattedContent = `**[${cellHeading}]**\n\n${content}`;
+        
+        if (cellIndex >= 0) {
+            // Update existing cell
+            cells[cellIndex].source = [formattedContent];
+            console.log(`✅ Updated existing cell [${cellHeading}] in originalNotebookJson`);
+        } else {
+            // Find insertion point - after metadata, before any model slots
+            // Look for judge_system_prompt or judge_prompt_template as anchor
+            let insertIndex = cells.length;
+            
+            // Try to insert before model slots or at the end of setup cells
+            for (let i = 0; i < cells.length; i++) {
+                const source = Array.isArray(cells[i].source) ? cells[i].source.join('') : (cells[i].source || '');
+                // Insert before any model slot cells
+                if (/\*\*\[(qwen|nemotron|model)_\d\]\*\*/i.test(source)) {
+                    insertIndex = i;
+                    break;
+                }
+                // Insert before number_of_attempts_made
+                if (/\*\*\[number_of_attempts_made\]\*\*/i.test(source)) {
+                    insertIndex = i;
+                    break;
+                }
+            }
+            
+            // Create new cell
+            const newCell = {
+                cell_type: 'markdown',
+                id: `auto_${cellHeading}_${Date.now()}`,
+                metadata: {},
+                source: [formattedContent]
+            };
+            
+            cells.splice(insertIndex, 0, newCell);
+            console.log(`✅ Added new cell [${cellHeading}] to originalNotebookJson at index ${insertIndex}`);
+        }
+        
+        notebook.cells = cells;
+        state.originalNotebookJson = JSON.stringify(notebook, null, 2);
+        console.log(`📝 originalNotebookJson updated, now has ${cells.length} cells`);
+        
+    } catch (e) {
+        console.error('Failed to update originalNotebookJson:', e);
+    }
+}
+
 // ============== Hunt Limit Functions ==============
 
 function getHuntCountKey(notebookId) {
@@ -2423,6 +2498,9 @@ async function saveCell(cellType) {
         // Mark as saved
         state.unsavedChanges[cellType === 'response_reference' ? 'modelRef' : cellType] = false;
         
+        // CRITICAL: Update originalNotebookJson so snapshot saves include this cell
+        updateOriginalNotebookWithCell(cellHeading, content);
+        
         // If saving response, also re-judge
         if (cellType === 'response') {
             await judgeReferenceResponse();
@@ -2544,6 +2622,11 @@ async function saveAllCells() {
         // Mark all as saved
         Object.keys(state.unsavedChanges).forEach(key => {
             state.unsavedChanges[key] = false;
+        });
+        
+        // CRITICAL: Update originalNotebookJson for each saved cell so snapshot saves include them
+        cellsToSave.forEach(cell => {
+            updateOriginalNotebookWithCell(cell.cell_type, cell.content);
         });
         
         // Re-judge if response was saved
@@ -3352,7 +3435,7 @@ function handleHuntResult(data) {
             const previewText = responseText.length > 50 ? responseText.substring(0, 50) + '...' : responseText;
             responseCell.innerHTML = `
                 <button class="response-view-btn" onclick="window.openResponseSlideout(${globalRowNum})">
-                    👁️ View
+                    View
                 </button>
                 <span style="color: var(--text-muted); font-size: 0.75rem; margin-left: 0.5rem;">
                     ${escapeHtml(previewText)}
@@ -4087,7 +4170,7 @@ function displaySelectionCards() {
             <td class="col-response">
                 <div class="response-preview-text">${escapeHtml(responsePreview)}</div>
                 <button class="view-details-btn" data-row-number="${rowNumber}">
-                    👁️ View Full
+                    View Full
                 </button>
             </td>
             <td class="col-model">
@@ -4766,7 +4849,7 @@ function revealLLMJudgments() {
         card.classList.add('revealed');
         const btn = card.querySelector('.slot-open-btn');
         if (btn) {
-            btn.textContent = '👁️ View';
+            btn.textContent = 'View';
         }
     });
     
@@ -6767,6 +6850,9 @@ async function saveResponseOnly() {
             throw new Error(error.detail || 'Failed to save to Colab');
         }
         
+        // CRITICAL: Update originalNotebookJson so snapshot saves include this cell
+        updateOriginalNotebookWithCell('response', newResponse);
+        
         showToast('✅ Saved to Colab!', 'success');
         
     } catch (error) {
@@ -6834,6 +6920,9 @@ async function saveAndJudgeResponse() {
             const error = await saveResponse.json();
             throw new Error(error.detail || 'Failed to save to Colab');
         }
+        
+        // CRITICAL: Update originalNotebookJson so snapshot saves include this cell
+        updateOriginalNotebookWithCell('response', newResponse);
         
         showToast('✅ Saved to Colab!', 'success');
         btn.textContent = '⚖️ Judging...';
@@ -7029,6 +7118,9 @@ async function saveAndRejudge() {
             const error = await saveResponse.json();
             throw new Error(error.detail || 'Failed to save to Colab');
         }
+        
+        // CRITICAL: Update originalNotebookJson so snapshot saves include this cell
+        updateOriginalNotebookWithCell('response', newResponse);
         
         showToast('✅ Saved to Colab!', 'success');
         btn.textContent = '⚖️ Re-judging...';

@@ -14,7 +14,7 @@ import logging
 from typing import Optional, Dict, Any, List
 
 # App version - increment this on each deployment for update prompt
-APP_VERSION = "1.0.3"
+APP_VERSION = "1.0.4"
 from contextlib import asynccontextmanager
 from datetime import datetime
 
@@ -48,6 +48,13 @@ try:
     _telemetry_enabled = True
 except ImportError:
     _telemetry_enabled = False
+
+# Trainer identity for fun character names
+try:
+    from services.trainer_identity import get_trainer_info
+    _trainer_identity_enabled = True
+except ImportError:
+    _trainer_identity_enabled = False
 
 # Session store import - wrapped to never fail
 try:
@@ -380,7 +387,7 @@ def get_session_storage(session_id: str) -> Optional[dict]:
 
 
 @app.post("/api/upload-notebook")
-async def upload_notebook(file: UploadFile = File(...)):
+async def upload_notebook(request: Request, file: UploadFile = File(...)):
     """Upload a .ipynb notebook file."""
     if not file.filename.endswith('.ipynb'):
         raise HTTPException(400, "File must be a .ipynb notebook")
@@ -395,6 +402,14 @@ async def upload_notebook(file: UploadFile = File(...)):
         config = HuntConfig()
         session = hunt_engine.create_session(parsed, config)
         
+        # Get trainer identity from fingerprint
+        trainer_info = {}
+        if _trainer_identity_enabled:
+            try:
+                trainer_info = get_trainer_info(request)
+            except Exception:
+                pass
+        
         # Telemetry: Log session creation
         if _telemetry_enabled:
             try:
@@ -406,12 +421,15 @@ async def upload_notebook(file: UploadFile = File(...)):
             except Exception:
                 pass
         
-        # Store original content and session data for export
+        # Store original content and session data for export (with trainer info)
         save_session_storage(session.session_id, {
             "original_content": content_str,
             "filename": file.filename,
             "url": None,  # No URL for uploaded files
-            "session_data": session.model_dump()  # Store full session for restoration
+            "session_data": session.model_dump(),  # Store full session for restoration
+            "trainer_id": trainer_info.get("trainer_id", "unknown"),
+            "fingerprint": trainer_info.get("fingerprint", ""),
+            "ip_hint": trainer_info.get("ip_hint", "")
         })
         
         # Extract model prefix from metadata or model slots
@@ -442,7 +460,7 @@ async def upload_notebook(file: UploadFile = File(...)):
 
 
 @app.post("/api/fetch-notebook")
-async def fetch_notebook(request: NotebookURLRequest):
+async def fetch_notebook(http_request: Request, request: NotebookURLRequest):
     """Fetch a notebook from a URL."""
     try:
         parsed, content_str = await notebook_parser.load_from_url(request.url)
@@ -450,6 +468,14 @@ async def fetch_notebook(request: NotebookURLRequest):
         # Create session
         config = HuntConfig()
         session = hunt_engine.create_session(parsed, config)
+        
+        # Get trainer identity from fingerprint
+        trainer_info = {}
+        if _trainer_identity_enabled:
+            try:
+                trainer_info = get_trainer_info(http_request)
+            except Exception:
+                pass
         
         # Telemetry: Log session creation (from URL fetch)
         if _telemetry_enabled:
@@ -462,12 +488,15 @@ async def fetch_notebook(request: NotebookURLRequest):
             except Exception:
                 pass
         
-        # We don't have original content for URL fetches, recreate from parsed
+        # We don't have original content for URL fetches, recreate from parsed (with trainer info)
         save_session_storage(session.session_id, {
             "original_content": content_str,
             "filename": parsed.filename,
             "url": request.url,
-            "session_data": session.model_dump()  # Store full session for restoration
+            "session_data": session.model_dump(),  # Store full session for restoration
+            "trainer_id": trainer_info.get("trainer_id", "unknown"),
+            "fingerprint": trainer_info.get("fingerprint", ""),
+            "ip_hint": trainer_info.get("ip_hint", "")
         })
         
         # Extract model prefix from metadata or model slots
@@ -1208,10 +1237,12 @@ async def save_snapshot(request: Request):
             # Use selected_results in exact order sent from frontend (no reordering)
             results = snapshot.selected_results
             
-            # Calculate valid response count on backend (excludes empty/error responses)
-            # This ensures correct count even if frontend sends old value
-            valid_response_count = count_valid_responses(results)
-            logger.info(f"📊 Valid response count: {valid_response_count} (frontend sent: {snapshot.total_hunts_ran})")
+            # Use total_hunts_ran from frontend - it correctly counts ALL successful responses
+            # (not just the 4 selected ones). The frontend calculates this from state.allResponses.
+            # We only validate that selected results have valid responses.
+            selected_valid_count = count_valid_responses(results)
+            total_hunts_ran = snapshot.total_hunts_ran
+            logger.info(f"📊 Total hunts ran: {total_hunts_ran} (selected: {selected_valid_count} valid of {len(results)} sent)")
             
             # Construct notebook using existing export_notebook logic
             modified_content = notebook_parser.export_notebook(
@@ -1220,7 +1251,7 @@ async def save_snapshot(request: Request):
                 results=results,
                 include_reasoning=snapshot.include_reasoning,
                 human_reviews=snapshot.human_reviews,
-                total_hunts_ran=valid_response_count  # Use backend-calculated count
+                total_hunts_ran=total_hunts_ran  # Use frontend's count (all successful responses)
             )
             
             # Write to Drive (export_notebook returns JSON string)
