@@ -31,7 +31,7 @@ services:
       # Redis configuration
       - REDIS_URL=redis://redis:6379/0
       # Rate limiting (tune based on your API tier)
-      - OPENROUTER_CONCURRENCY=6
+      - OPENROUTER_CONCURRENCY=50
       - FIREWORKS_CONCURRENCY=4
       - OPENAI_CONCURRENCY=8
     volumes:

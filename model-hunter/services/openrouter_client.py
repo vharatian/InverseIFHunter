@@ -105,8 +105,12 @@ class OpenRouterClient(BaseAPIClient):
             "temperature": 0.8 if not is_nemotron else 0.6
         }
         
-        # Add reasoning parameter
-        if reasoning_budget_percent > 0:
+        # Add reasoning parameter only for reasoning-capable models
+        # Nemotron is NOT a reasoning model - sending reasoning params causes empty responses
+        if is_nemotron:
+            # No reasoning parameter for Nemotron - it doesn't support it
+            pass
+        elif reasoning_budget_percent > 0:
             payload["reasoning"] = {
                 "exclude": False,
                 "effort": "high"

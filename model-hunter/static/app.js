@@ -3511,7 +3511,7 @@ function openResponseSlideout(rowNum) {
     
     if (scoreEl) {
         if (data.score !== null && data.score !== undefined) {
-            scoreEl.textContent = `${data.score}/4`;
+            scoreEl.textContent = data.score === 0 ? 'BREAKING' : 'PASSING';
             scoreEl.className = 'response-slideout-meta-value';
             // Score 0 = breaking = GOOD for hunt = 'pass' styling
             // Score 1-4 = passing = BAD for hunt = 'fail' styling
