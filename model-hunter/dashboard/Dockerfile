@@ -16,4 +16,4 @@ RUN mkdir -p /app/.telemetry
 EXPOSE 8001
 
 # Run the dashboard
-CMD ["python", "main.py"]
+CMD ["python", "main_enhanced.py"]
