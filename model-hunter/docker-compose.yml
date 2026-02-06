@@ -17,9 +17,14 @@ services:
     networks:
       - model-hunter-network
 
-  model-hunter:
+  # Blue-Green Deployment: Two identical app instances
+  # Blue runs on port 8000, Green runs on port 8002
+  # System nginx switches between them for zero-downtime deploys
+
+  model-hunter-blue:
     build: .
-    container_name: model-hunter
+    image: model-hunter_model-hunter-blue
+    container_name: model-hunter-blue
     restart: unless-stopped
     ports:
       - "8000:8000"
@@ -28,9 +33,7 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - FIREWORKS_API_KEY=${FIREWORKS_API_KEY}
-      # Redis configuration
       - REDIS_URL=redis://redis:6379/0
-      # Rate limiting (tune based on your API tier)
       - OPENROUTER_CONCURRENCY=50
       - FIREWORKS_CONCURRENCY=4
       - OPENAI_CONCURRENCY=8
@@ -38,9 +41,42 @@ services:
       - ./service_account.json:/app/service_account.json:ro
       - ./.storage:/app/.storage
       - telemetry-data:/app/.telemetry
-      - ./static:/app/static:ro  # Mount static files for hot-reload
+      - ./static:/app/static:ro
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8000/api/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - model-hunter-network
+
+  model-hunter-green:
+    build: .
+    image: model-hunter_model-hunter-green
+    container_name: model-hunter-green
+    restart: unless-stopped
+    ports:
+      - "8002:8002"
+    environment:
+      - PORT=8002
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - FIREWORKS_API_KEY=${FIREWORKS_API_KEY}
+      - REDIS_URL=redis://redis:6379/0
+      - OPENROUTER_CONCURRENCY=50
+      - FIREWORKS_CONCURRENCY=4
+      - OPENAI_CONCURRENCY=8
+    volumes:
+      - ./service_account.json:/app/service_account.json:ro
+      - ./.storage:/app/.storage
+      - telemetry-data:/app/.telemetry
+      - ./static:/app/static:ro
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8002/api/health" ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -66,7 +102,7 @@ services:
     volumes:
       - telemetry-data:/app/.telemetry:ro
     depends_on:
-      - model-hunter
+      - model-hunter-blue
     networks:
       - model-hunter-network
 
@@ -79,7 +115,8 @@ services:
     volumes:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
-      - model-hunter
+      - model-hunter-blue
+      - model-hunter-green
       - dashboard
     networks:
       - model-hunter-network
