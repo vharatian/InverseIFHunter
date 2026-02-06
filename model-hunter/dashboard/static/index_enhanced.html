@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Model Hunter Dashboard v2</title>
+    <script>window.BASE_PATH = window.location.pathname.includes('/dashboard') ? '/dashboard' : '';</script>
+    <link rel="stylesheet" href="static/style_enhanced.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+</head>
+<body>
+    <header>
+        <div class="header-left">
+            <h1>🎯 Model Hunter Dashboard</h1>
+            <span class="version">v2.0</span>
+        </div>
+        <div class="header-controls">
+            <div class="realtime-indicator" id="realtimeIndicator">
+                <span class="pulse"></span>
+                <span id="activeTrainers">0</span> active trainers
+            </div>
+            <div class="search-box">
+                <input type="text" id="searchInput" placeholder="Search..." 
+                       onkeypress="if(event.key==='Enter') performSearch()">
+                <button onclick="performSearch()">🔍</button>
+            </div>
+            <select id="timeRange" onchange="refreshAll()">
+                <option value="1">Last 1 hour</option>
+                <option value="6">Last 6 hours</option>
+                <option value="24" selected>Last 24 hours</option>
+                <option value="72">Last 3 days</option>
+                <option value="168">Last 7 days</option>
+            </select>
+            <button id="refreshBtn" onclick="refreshAll()">⟳ Refresh</button>
+        </div>
+    </header>
+
+    <nav class="tab-nav">
+        <button class="tab-btn active" onclick="showSection('overview')">📊 Overview</button>
+        <button class="tab-btn" onclick="showSection('trainers')">🏆 Trainers</button>
+        <button class="tab-btn" onclick="showSection('criteria')">📋 Criteria</button>
+        <button class="tab-btn" onclick="showSection('models')">🤖 Models</button>
+        <button class="tab-btn" onclick="showSection('costs')">💰 Costs</button>
+        <button class="tab-btn" onclick="showSection('details')">📝 Details</button>
+    </nav>
+
+    <main>
+        <!-- Overview Section -->
+        <section id="section-overview" class="section active">
+            <!-- Real-time Stats -->
+            <div class="realtime-banner">
+                <div class="rt-stat">
+                    <span class="rt-value" id="rtActiveSessions">-</span>
+                    <span class="rt-label">Active Sessions</span>
+                </div>
+                <div class="rt-stat">
+                    <span class="rt-value" id="rtHuntsInProgress">-</span>
+                    <span class="rt-label">Hunts Running</span>
+                </div>
+                <div class="rt-stat">
+                    <span class="rt-value" id="rtRecentBreaks">-</span>
+                    <span class="rt-label">Breaks (5min)</span>
+                </div>
+            </div>
+
+            <!-- Overview Cards -->
+            <div class="overview-cards">
+                <div class="card">
+                    <div class="card-icon">👥</div>
+                    <div class="card-content">
+                        <div class="card-value" id="uniqueTrainers">--</div>
+                        <div class="card-label">Unique Trainers</div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-icon">📁</div>
+                    <div class="card-content">
+                        <div class="card-value" id="totalSessions">--</div>
+                        <div class="card-label">Total Sessions</div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-icon">🎯</div>
+                    <div class="card-content">
+                        <div class="card-value" id="totalHunts">--</div>
+                        <div class="card-label">Total Hunts</div>
+                    </div>
+                </div>
+                <div class="card highlight">
+                    <div class="card-icon">💔</div>
+                    <div class="card-content">
+                        <div class="card-value" id="breaksFound">--</div>
+                        <div class="card-label">Breaks Found</div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-icon">📡</div>
+                    <div class="card-content">
+                        <div class="card-value" id="apiCalls">--</div>
+                        <div class="card-label">API Calls</div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-icon">⏱️</div>
+                    <div class="card-content">
+                        <div class="card-value" id="avgLatency">--</div>
+                        <div class="card-label">Avg Latency</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Charts -->
+            <div class="charts-row">
+                <div class="chart-container">
+                    <h3>📊 Activity Breakdown</h3>
+                    <div class="chart-wrapper">
+                        <canvas id="timelineChart"></canvas>
+                    </div>
+                </div>
+                <div class="chart-container">
+                    <h3>🔥 Activity Heatmap</h3>
+                    <div class="chart-wrapper" id="heatmapChart"></div>
+                </div>
+            </div>
+
+            <!-- Live Feed -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h3>📡 Live Event Feed</h3>
+                    <select id="eventFilter" onchange="loadEvents()">
+                        <option value="">All Events</option>
+                        <option value="hunt_result">Hunt Results</option>
+                        <option value="session_created">Sessions</option>
+                        <option value="api_call_end">API Calls</option>
+                    </select>
+                </div>
+                <div class="event-list" id="eventList">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Trainers Section -->
+        <section id="section-trainers" class="section">
+            <div class="section-header">
+                <h2>🏆 Trainer Leaderboard</h2>
+                <p>Ranked by total breaks found</p>
+            </div>
+            
+            <div class="leaderboard-cards">
+                <div class="podium">
+                    <div class="podium-item second" id="podium2">
+                        <div class="podium-rank">🥈</div>
+                        <div class="podium-name">--</div>
+                        <div class="podium-stat">-- breaks</div>
+                    </div>
+                    <div class="podium-item first" id="podium1">
+                        <div class="podium-rank">🥇</div>
+                        <div class="podium-name">--</div>
+                        <div class="podium-stat">-- breaks</div>
+                    </div>
+                    <div class="podium-item third" id="podium3">
+                        <div class="podium-rank">🥉</div>
+                        <div class="podium-name">--</div>
+                        <div class="podium-stat">-- breaks</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <table class="data-table" id="trainerTable">
+                    <thead>
+                        <tr>
+                            <th>Rank</th>
+                            <th>Trainer ID</th>
+                            <th>Sessions</th>
+                            <th>Hunts</th>
+                            <th>Breaks</th>
+                            <th>Break Rate</th>
+                            <th>Efficiency</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td colspan="7" class="loading">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Criteria Section -->
+        <section id="section-criteria" class="section">
+            <div class="section-header">
+                <h2>📋 Criteria Difficulty Analysis</h2>
+                <p>Which criteria are hardest for models?</p>
+            </div>
+
+            <div class="charts-row">
+                <div class="chart-container full">
+                    <h3>🔴 Criteria Fail Rate (Higher = Harder)</h3>
+                    <div id="criteriaChart"></div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <table class="data-table" id="criteriaTable">
+                    <thead>
+                        <tr>
+                            <th>Criteria ID</th>
+                            <th>Evaluations</th>
+                            <th>Pass</th>
+                            <th>Fail</th>
+                            <th>Fail Rate</th>
+                            <th>Difficulty</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td colspan="6" class="loading">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Models Section -->
+        <section id="section-models" class="section">
+            <div class="section-header">
+                <h2>🤖 Model Performance</h2>
+                <p>Which models find the most breaks?</p>
+            </div>
+
+            <div class="charts-row">
+                <div class="chart-container">
+                    <h3>Break Rate by Model</h3>
+                    <canvas id="modelBreakChart"></canvas>
+                </div>
+                <div class="chart-container">
+                    <h3>Usage Distribution</h3>
+                    <canvas id="modelUsageChart"></canvas>
+                </div>
+            </div>
+
+            <div class="panel">
+                <table class="data-table" id="modelTable">
+                    <thead>
+                        <tr>
+                            <th>Model</th>
+                            <th>Hunts</th>
+                            <th>Breaks</th>
+                            <th>Break Rate</th>
+                            <th>Avg Latency</th>
+                            <th>Success Rate</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td colspan="6" class="loading">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Costs Section -->
+        <section id="section-costs" class="section">
+            <div class="section-header">
+                <h2>💰 Cost Tracking</h2>
+                <p>Estimated API costs</p>
+            </div>
+
+            <div class="cost-summary">
+                <div class="cost-card total">
+                    <div class="cost-value" id="totalCost">$0.00</div>
+                    <div class="cost-label">Total Cost</div>
+                </div>
+                <div class="cost-card">
+                    <div class="cost-value" id="tokensIn">0</div>
+                    <div class="cost-label">Tokens In</div>
+                </div>
+                <div class="cost-card">
+                    <div class="cost-value" id="tokensOut">0</div>
+                    <div class="cost-label">Tokens Out</div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h3>Cost by Provider/Model</h3>
+                <table class="data-table" id="costTable">
+                    <thead>
+                        <tr>
+                            <th>Provider/Model</th>
+                            <th>Calls</th>
+                            <th>Tokens In</th>
+                            <th>Tokens Out</th>
+                            <th>Cost</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td colspan="5" class="loading">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Details Section -->
+        <section id="section-details" class="section">
+            <div class="section-header">
+                <h2>📝 Detailed Views</h2>
+            </div>
+
+            <div class="sub-tabs">
+                <button class="sub-tab active" onclick="showSubTab('hunts')">Hunts</button>
+                <button class="sub-tab" onclick="showSubTab('breaks')">Breaks</button>
+                <button class="sub-tab" onclick="showSubTab('calls')">API Calls</button>
+                <button class="sub-tab" onclick="showSubTab('failures')">Failures</button>
+            </div>
+
+            <div class="sub-content active" id="subtab-hunts">
+                <div class="detail-list" id="huntsList"></div>
+            </div>
+            <div class="sub-content" id="subtab-breaks">
+                <div class="detail-list" id="breaksList"></div>
+            </div>
+            <div class="sub-content" id="subtab-calls">
+                <div class="detail-list" id="callsList"></div>
+            </div>
+            <div class="sub-content" id="subtab-failures">
+                <div class="detail-list" id="failuresList"></div>
+            </div>
+        </section>
+
+        <!-- Search Results -->
+        <section id="section-search" class="section">
+            <div class="section-header">
+                <h2>🔍 Search Results</h2>
+                <button onclick="clearSearch()" class="clear-btn">Clear</button>
+            </div>
+            <div id="searchResults"></div>
+        </section>
+    </main>
+
+    <footer>
+        <p>Model Hunter Dashboard v2.0 | Auto-refresh: 30s | 
+           <span id="lastUpdate">--</span></p>
+    </footer>
+
+    <script src="static/dashboard_enhanced.js"></script>
+</body>
+</html>

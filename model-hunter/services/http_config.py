@@ -47,12 +47,17 @@ _HTTP2_AVAILABLE = None
 
 
 def is_http2_available() -> bool:
-    """Check if HTTP/2 is available (cached)."""
+    """
+    HTTP/2 is disabled to avoid ConnectionTerminated errors.
+    
+    OpenRouter closes HTTP/2 connections after ~500 requests (GOAWAY frame),
+    which kills all in-flight requests on that connection. HTTP/1.1 uses
+    separate connections per request, avoiding this issue entirely.
+    """
     global _HTTP2_AVAILABLE
     if _HTTP2_AVAILABLE is None:
-        _HTTP2_AVAILABLE = check_http2_support()
-        if not _HTTP2_AVAILABLE:
-            logger.warning("h2 package not installed, HTTP/2 disabled for all clients")
+        _HTTP2_AVAILABLE = False  # Force HTTP/1.1 to avoid ConnectionTerminated errors
+        logger.info("HTTP/2 disabled - using HTTP/1.1 to avoid connection termination errors")
     return _HTTP2_AVAILABLE
 
 
