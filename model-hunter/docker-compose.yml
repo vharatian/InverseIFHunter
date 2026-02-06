@@ -101,6 +101,7 @@ services:
       - REDIS_URL=redis://redis:6379/0
     volumes:
       - telemetry-data:/app/.telemetry:ro
+      - ./.storage:/app/.storage:ro
     depends_on:
       - model-hunter-blue
     networks:
