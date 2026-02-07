@@ -488,12 +488,12 @@ main {
     background: var(--bg-card);
     padding: 0.75rem;
     border-radius: 6px;
-    margin: 0.5rem 0;
+    margin: 0.25rem 0;
     max-height: none;
 }
 
 .detail-content.collapsed {
-    max-height: 120px;
+    max-height: 100px;
     overflow: hidden;
     position: relative;
 }
@@ -508,6 +508,18 @@ main {
     background: linear-gradient(transparent, var(--bg-card));
 }
 
+/* Collapsible blocks */
+.collapsible-wrapper {
+    margin: 0.5rem 0;
+}
+
+.collapsible-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 0.25rem;
+}
+
 .expand-btn {
     background: transparent;
     border: none;
@@ -515,11 +527,66 @@ main {
     font-size: 0.75rem;
     cursor: pointer;
     padding: 0.25rem 0;
-    margin-top: 0.25rem;
 }
 
 .expand-btn:hover {
     text-decoration: underline;
+}
+
+/* Judge section */
+.judge-section {
+    margin: 0.75rem 0 0.5rem;
+    padding: 0.75rem;
+    background: rgba(99, 102, 241, 0.05);
+    border: 1px solid rgba(99, 102, 241, 0.15);
+    border-radius: 8px;
+}
+
+.judge-header {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--primary);
+    margin-bottom: 0.5rem;
+}
+
+/* Criteria badges */
+.criteria-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-bottom: 0.5rem;
+}
+
+.criteria-badge {
+    padding: 0.2rem 0.6rem;
+    border-radius: 12px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+}
+
+.criteria-pass {
+    background: rgba(16, 185, 129, 0.15);
+    color: var(--success);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.criteria-fail {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--danger);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.criteria-missing {
+    background: rgba(245, 158, 11, 0.15);
+    color: var(--warning);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.criteria-empty {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    font-style: italic;
 }
 
 .detail-meta {

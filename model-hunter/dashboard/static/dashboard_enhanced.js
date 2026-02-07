@@ -592,21 +592,14 @@ async function loadDetailTab(tab) {
     container.innerHTML = items.map(item => formatDetailItem(item, tab)).join('');
 }
 
-// Content display - shows full content, collapsible if long
-function formatContent(text) {
-    if (!text) return { html: '<em>No response</em>', isLong: false };
-    // Show full content always; mark as collapsible if very long
-    const isLong = text.length > 500;
-    return { html: text, full: text, isLong };
-}
-
-function escapeHtmlAttr(str) {
+function escapeHtml(str) {
     if (!str) return '';
     return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 function toggleCollapse(btn) {
-    const content = btn.parentElement.querySelector('.detail-content');
+    const wrapper = btn.closest('.collapsible-wrapper');
+    const content = wrapper.querySelector('.collapsible-content');
     const isCollapsed = content.classList.contains('collapsed');
     
     if (isCollapsed) {
@@ -618,12 +611,33 @@ function toggleCollapse(btn) {
     }
 }
 
+function collapsibleBlock(label, text, defaultCollapsed = true) {
+    if (!text) return '';
+    const isLong = text.length > 300;
+    const collapsed = isLong && defaultCollapsed ? 'collapsed' : '';
+    const btnText = collapsed ? '▼ Show full' : '▲ Collapse';
+    return `
+        <div class="collapsible-wrapper">
+            <div class="collapsible-label">${label}</div>
+            <div class="collapsible-content detail-content ${collapsed}">${escapeHtml(text)}</div>
+            ${isLong ? `<button class="expand-btn" onclick="toggleCollapse(this)">${btnText}</button>` : ''}
+        </div>
+    `;
+}
+
+function formatCriteriaBadges(criteria) {
+    if (!criteria || Object.keys(criteria).length === 0) return '<span class="criteria-empty">No criteria data</span>';
+    return Object.entries(criteria).map(([k, v]) => {
+        const cls = v === 'PASS' ? 'criteria-pass' : v === 'FAIL' ? 'criteria-fail' : 'criteria-missing';
+        return `<span class="criteria-badge ${cls}">${k}: ${v}</span>`;
+    }).join(' ');
+}
+
 function formatDetailItem(item, type) {
     const time = new Date(item.timestamp).toLocaleString();
     
     switch(type) {
         case 'hunts':
-            const huntsContent = formatContent(item.response_preview);
             return `
                 <div class="detail-item ${item.is_breaking ? 'breaking' : ''}">
                     <div class="detail-header">
@@ -632,29 +646,34 @@ function formatDetailItem(item, type) {
                             Score: ${item.score ?? 'N/A'} ${item.is_breaking ? '💔' : '✓'}
                         </span>
                     </div>
-                    <div class="detail-content">${escapeHtmlAttr(huntsContent.html)}</div>
-                    ${huntsContent.isLong ? '<button class="expand-btn" onclick="toggleCollapse(this)">▲ Collapse</button>' : ''}
+                    ${collapsibleBlock('📝 Model Response', item.response_preview, true)}
+                    <div class="judge-section">
+                        <div class="judge-header">⚖️ Judge Verdict</div>
+                        <div class="criteria-list">${formatCriteriaBadges(item.criteria)}</div>
+                        ${item.judge_explanation ? collapsibleBlock('💬 Judge Reasoning', item.judge_explanation, true) : ''}
+                    </div>
                     <div class="detail-meta">
                         <span>🏷️ ${item.trainer_id || item.session_id}</span>
-                        <span>📊 Criteria: ${Object.entries(item.criteria || {}).map(([k,v]) => `${k}:${v}`).join(', ') || 'N/A'}</span>
                         <span class="detail-time">${time}</span>
                     </div>
                 </div>
             `;
         
         case 'breaks':
-            const breaksContent = formatContent(item.response_preview);
             return `
                 <div class="detail-item breaking">
                     <div class="detail-header">
                         <span>💔 ${item.model?.split('/').pop()}</span>
                         <span class="detail-badge fail">BREAK</span>
                     </div>
-                    <div class="detail-content">${escapeHtmlAttr(breaksContent.html)}</div>
-                    ${breaksContent.isLong ? '<button class="expand-btn" onclick="toggleCollapse(this)">▲ Collapse</button>' : ''}
+                    ${collapsibleBlock('📝 Model Response', item.response_preview, true)}
+                    <div class="judge-section">
+                        <div class="judge-header">⚖️ Judge Verdict</div>
+                        <div class="criteria-list">${formatCriteriaBadges(item.criteria)}</div>
+                        ${item.judge_explanation ? collapsibleBlock('💬 Judge Reasoning', item.judge_explanation, true) : ''}
+                    </div>
                     <div class="detail-meta">
                         <span>🏷️ ${item.trainer_id || item.session_id}</span>
-                        <span>❌ Failed: ${Object.entries(item.criteria || {}).filter(([k,v]) => v === 'FAIL').map(([k]) => k).join(', ') || 'N/A'}</span>
                         <span class="detail-time">${time}</span>
                     </div>
                 </div>
@@ -684,7 +703,7 @@ function formatDetailItem(item, type) {
                         <span>⚠️ ${item.type} error</span>
                         <span>${item.model?.split('/').pop() || ''}</span>
                     </div>
-                    <div class="detail-content">${item.error || 'Unknown error'}</div>
+                    <div class="detail-content">${escapeHtml(item.error) || 'Unknown error'}</div>
                     <div class="detail-meta">
                         <span>🏷️ ${item.session_id || 'N/A'}</span>
                         <span class="detail-time">${time}</span>

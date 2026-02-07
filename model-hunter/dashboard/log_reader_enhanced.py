@@ -484,7 +484,8 @@ class EnhancedLogReader:
                     "error": data.get("error"),
                     "response_preview": data.get("response_preview"),
                     "reasoning_preview": data.get("reasoning_preview"),
-                    "criteria": data.get("criteria")
+                    "criteria": data.get("criteria"),
+                    "judge_explanation": data.get("judge_explanation")
                 })
         
         return hunts[:limit]
@@ -510,7 +511,8 @@ class EnhancedLogReader:
                         "score": data.get("score"),
                         "response_preview": data.get("response_preview"),
                         "reasoning_preview": data.get("reasoning_preview"),
-                        "criteria": data.get("criteria")
+                        "criteria": data.get("criteria"),
+                        "judge_explanation": data.get("judge_explanation")
                     })
         
         return breaks[:limit]

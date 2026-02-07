@@ -206,7 +206,8 @@ class TelemetryLogger:
         error: Optional[str] = None,
         response_preview: Optional[str] = None,
         reasoning_preview: Optional[str] = None,
-        criteria: Optional[Dict[str, str]] = None
+        criteria: Optional[Dict[str, str]] = None,
+        judge_explanation: Optional[str] = None
     ) -> None:
         """Log individual hunt result with searchable content."""
         self.log_event("hunt_result", {
@@ -218,7 +219,8 @@ class TelemetryLogger:
             "error": error,
             "response_preview": response_preview,
             "reasoning_preview": reasoning_preview,
-            "criteria": criteria
+            "criteria": criteria,
+            "judge_explanation": judge_explanation
         })
     
     def log_judge_call(

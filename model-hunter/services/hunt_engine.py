@@ -449,7 +449,8 @@ class HuntEngine:
                     error=result.error,
                     response_preview=result.response,
                     reasoning_preview=result.reasoning_trace,
-                    criteria=result.judge_criteria
+                    criteria=result.judge_criteria,
+                    judge_explanation=result.judge_explanation
                 )
             except Exception:
                 pass
