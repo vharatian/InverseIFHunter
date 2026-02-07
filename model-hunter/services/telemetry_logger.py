@@ -216,8 +216,8 @@ class TelemetryLogger:
             "score": score,
             "is_breaking": is_breaking,
             "error": error,
-            "response_preview": (response_preview[:500] if response_preview else None),
-            "reasoning_preview": (reasoning_preview[:500] if reasoning_preview else None),
+            "response_preview": response_preview,
+            "reasoning_preview": reasoning_preview,
             "criteria": criteria
         })
     

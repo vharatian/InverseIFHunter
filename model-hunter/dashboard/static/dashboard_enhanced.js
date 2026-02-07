@@ -346,7 +346,7 @@ function formatEventDetails(event) {
         case 'api_call_end':
             return `${data.provider} | ${data.latency_ms}ms | ${data.success ? '✓' : '✗'}`;
         default:
-            return JSON.stringify(data).substring(0, 100);
+            return JSON.stringify(data);
     }
 }
 
@@ -388,7 +388,7 @@ async function loadTrainers() {
             <td>${t.total_hunts}</td>
             <td><strong>${t.total_breaks}</strong></td>
             <td>${(t.break_rate * 100).toFixed(1)}%</td>
-            <td>${(t.efficiency * 100).toFixed(2)}%</td>
+            <td>${t.efficiency.toFixed(2)}</td>
         </tr>
     `).join('');
 }
@@ -592,20 +592,12 @@ async function loadDetailTab(tab) {
     container.innerHTML = items.map(item => formatDetailItem(item, tab)).join('');
 }
 
-// Smart truncate - cuts at word boundary and adds expand functionality
-function smartTruncate(text, maxLen = 300) {
-    if (!text) return { preview: 'No response', full: '', truncated: false };
-    if (text.length <= maxLen) return { preview: text, full: text, truncated: false };
-    
-    // Find last space before maxLen to avoid cutting mid-word
-    let cutoff = text.lastIndexOf(' ', maxLen);
-    if (cutoff < maxLen * 0.5) cutoff = maxLen; // If no good space found, just cut
-    
-    return { 
-        preview: text.substring(0, cutoff).trim(), 
-        full: text,
-        truncated: true 
-    };
+// Content display - shows full content, collapsible if long
+function formatContent(text) {
+    if (!text) return { html: '<em>No response</em>', isLong: false };
+    // Show full content always; mark as collapsible if very long
+    const isLong = text.length > 500;
+    return { html: text, full: text, isLong };
 }
 
 function escapeHtmlAttr(str) {
@@ -613,20 +605,16 @@ function escapeHtmlAttr(str) {
     return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function toggleExpand(el) {
-    const content = el.querySelector('.detail-content');
-    const fullText = content.getAttribute('data-full');
-    const previewText = content.getAttribute('data-preview');
-    const isExpanded = content.classList.contains('expanded');
+function toggleCollapse(btn) {
+    const content = btn.parentElement.querySelector('.detail-content');
+    const isCollapsed = content.classList.contains('collapsed');
     
-    if (isExpanded) {
-        content.textContent = previewText + '...';
-        content.classList.remove('expanded');
-        el.querySelector('.expand-btn').textContent = '▼ Show more';
+    if (isCollapsed) {
+        content.classList.remove('collapsed');
+        btn.textContent = '▲ Collapse';
     } else {
-        content.textContent = fullText;
-        content.classList.add('expanded');
-        el.querySelector('.expand-btn').textContent = '▲ Show less';
+        content.classList.add('collapsed');
+        btn.textContent = '▼ Show full';
     }
 }
 
@@ -635,7 +623,7 @@ function formatDetailItem(item, type) {
     
     switch(type) {
         case 'hunts':
-            const huntsText = smartTruncate(item.response_preview, 250);
+            const huntsContent = formatContent(item.response_preview);
             return `
                 <div class="detail-item ${item.is_breaking ? 'breaking' : ''}">
                     <div class="detail-header">
@@ -644,8 +632,8 @@ function formatDetailItem(item, type) {
                             Score: ${item.score ?? 'N/A'} ${item.is_breaking ? '💔' : '✓'}
                         </span>
                     </div>
-                    <div class="detail-content" data-preview="${escapeHtmlAttr(huntsText.preview)}" data-full="${escapeHtmlAttr(huntsText.full)}">${huntsText.preview}${huntsText.truncated ? '...' : ''}</div>
-                    ${huntsText.truncated ? '<button class="expand-btn" onclick="toggleExpand(this.parentElement)">▼ Show more</button>' : ''}
+                    <div class="detail-content">${escapeHtmlAttr(huntsContent.html)}</div>
+                    ${huntsContent.isLong ? '<button class="expand-btn" onclick="toggleCollapse(this)">▲ Collapse</button>' : ''}
                     <div class="detail-meta">
                         <span>🏷️ ${item.trainer_id || item.session_id}</span>
                         <span>📊 Criteria: ${Object.entries(item.criteria || {}).map(([k,v]) => `${k}:${v}`).join(', ') || 'N/A'}</span>
@@ -655,15 +643,15 @@ function formatDetailItem(item, type) {
             `;
         
         case 'breaks':
-            const breaksText = smartTruncate(item.response_preview, 300);
+            const breaksContent = formatContent(item.response_preview);
             return `
                 <div class="detail-item breaking">
                     <div class="detail-header">
                         <span>💔 ${item.model?.split('/').pop()}</span>
                         <span class="detail-badge fail">BREAK</span>
                     </div>
-                    <div class="detail-content" data-preview="${escapeHtmlAttr(breaksText.preview)}" data-full="${escapeHtmlAttr(breaksText.full)}">${breaksText.preview}${breaksText.truncated ? '...' : ''}</div>
-                    ${breaksText.truncated ? '<button class="expand-btn" onclick="toggleExpand(this.parentElement)">▼ Show more</button>' : ''}
+                    <div class="detail-content">${escapeHtmlAttr(breaksContent.html)}</div>
+                    ${breaksContent.isLong ? '<button class="expand-btn" onclick="toggleCollapse(this)">▲ Collapse</button>' : ''}
                     <div class="detail-meta">
                         <span>🏷️ ${item.trainer_id || item.session_id}</span>
                         <span>❌ Failed: ${Object.entries(item.criteria || {}).filter(([k,v]) => v === 'FAIL').map(([k]) => k).join(', ') || 'N/A'}</span>
@@ -733,7 +721,7 @@ async function performSearch() {
                     <span>${r.type}</span>
                     <span class="detail-time">${new Date(r.ts).toLocaleString()}</span>
                 </div>
-                <div class="detail-content"><pre>${JSON.stringify(r.data, null, 2).substring(0, 500)}</pre></div>
+                <div class="detail-content"><pre>${JSON.stringify(r.data, null, 2)}</pre></div>
             </div>
         `).join('')}
     `;

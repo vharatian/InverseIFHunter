@@ -433,7 +433,7 @@ main {
 
 /* Detail List */
 .detail-list {
-    max-height: 500px;
+    max-height: 800px;
     overflow-y: auto;
 }
 
@@ -485,13 +485,27 @@ main {
     color: var(--text-secondary);
     white-space: pre-wrap;
     word-break: break-word;
-}
-
-.detail-content.expanded {
     background: var(--bg-card);
     padding: 0.75rem;
     border-radius: 6px;
     margin: 0.5rem 0;
+    max-height: none;
+}
+
+.detail-content.collapsed {
+    max-height: 120px;
+    overflow: hidden;
+    position: relative;
+}
+
+.detail-content.collapsed::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 40px;
+    background: linear-gradient(transparent, var(--bg-card));
 }
 
 .expand-btn {
