@@ -41,10 +41,10 @@ credentials.json
 Thumbs.db
 .DS_Store
 
-# Local-only docs (not shared in repo)
-SOURCE_OF_TRUTH.md
-WORKLOG.md
+# Markdown docs (except README)
+*.md
+!README.md
 
-# Notebooks (optional - uncomment if you don't want to track notebooks)
-# *.ipynb
+# Notebooks
+*.ipynb
 
