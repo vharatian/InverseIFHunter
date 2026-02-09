@@ -52,6 +52,7 @@ class FireworksClient(BaseAPIClient):
         prompt: str,
         model: str,
         timeout: float = 120.0,
+        messages: Optional[list] = None,
         **kwargs
     ) -> Tuple[str, str]:
         """
@@ -59,6 +60,14 @@ class FireworksClient(BaseAPIClient):
         
         Uses prompt engineering with system message to get structured reasoning
         in <think>...</think> tags.
+        
+        Args:
+            prompt: The input prompt
+            model: Model identifier
+            timeout: Request timeout in seconds
+            messages: Optional conversation history for multi-turn
+                      (list of {role, content} dicts). The current prompt
+                      is appended as the final user message.
         """
         # System message prompts model to use <think> tags for reasoning
         system_message = """You MUST format your response in exactly this structure:
@@ -75,12 +84,16 @@ CRITICAL: Always use <think> and </think> tags to wrap your reasoning. Your fina
 
 Remember: Put ALL your thinking inside <think>...</think> tags, then give your final answer after.</s>"""
         
+        # Build messages list: system + optional conversation history + current user message
+        api_messages = [{"role": "system", "content": system_message}]
+        if messages:
+            # Multi-turn: insert conversation history between system and current prompt
+            api_messages.extend(messages)
+        api_messages.append({"role": "user", "content": user_message})
+        
         payload = {
             "model": model,
-            "messages": [
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": user_message}
-            ],
+            "messages": api_messages,
             "max_tokens": 8192,
             "temperature": 0.6,
             "stream": False

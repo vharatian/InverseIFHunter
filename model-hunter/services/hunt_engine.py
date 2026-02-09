@@ -46,7 +46,8 @@ from models.schemas import (
     HuntSession, 
     HuntStatus,
     HuntEvent,
-    ParsedNotebook
+    ParsedNotebook,
+    TurnData
 )
 from services.openrouter_client import get_openrouter_client
 from services.openai_client import get_openai_judge_client
@@ -319,6 +320,10 @@ class HuntEngine:
             # Wrap prompt with explanation request
             enhanced_prompt = f"{session.notebook.prompt}"
             
+            # Multi-turn: pass conversation history to model (empty list for single-turn)
+            conversation_history = session.config.conversation_history or []
+            messages_kwarg = {"messages": conversation_history} if conversation_history else {}
+            
             # Use rate limiter if available
             rate_limiter = get_rate_limiter() if _rate_limiter_enabled else None
             
@@ -341,13 +346,15 @@ class HuntEngine:
                         response, reasoning, error = await fireworks.call_with_retry(
                             prompt=enhanced_prompt,
                             model=result.model,
-                            max_retries=session.config.max_retries
+                            max_retries=session.config.max_retries,
+                            **messages_kwarg
                         )
                 else:
                     response, reasoning, error = await fireworks.call_with_retry(
                         prompt=enhanced_prompt,
                         model=result.model,
-                        max_retries=session.config.max_retries
+                        max_retries=session.config.max_retries,
+                        **messages_kwarg
                     )
             else:
                 # Default to OpenRouter
@@ -358,14 +365,16 @@ class HuntEngine:
                             prompt=enhanced_prompt,
                             model=result.model,
                             max_retries=session.config.max_retries,
-                            reasoning_budget_percent=session.config.reasoning_budget_percent
+                            reasoning_budget_percent=session.config.reasoning_budget_percent,
+                            **messages_kwarg
                         )
                 else:
                     response, reasoning, error = await openrouter.call_with_retry(
                         prompt=enhanced_prompt,
                         model=result.model,
                         max_retries=session.config.max_retries,
-                        reasoning_budget_percent=session.config.reasoning_budget_percent
+                        reasoning_budget_percent=session.config.reasoning_budget_percent,
+                        **messages_kwarg
                     )
             
             # Emit progress: received response

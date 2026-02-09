@@ -214,8 +214,35 @@ deploy() {
     fi
     echo ""
     
-    # Step 5: Switch nginx
-    echo -e "${YELLOW}[5/5] Switching traffic to $target...${NC}"
+    # Step 5: Wait for active hunts to complete (safety gate)
+    echo -e "${YELLOW}[5/6] Waiting for active hunts to complete...${NC}"
+    local active_port
+    active_port=$(get_port "$active")
+    local wait_count=0
+    local max_wait=60  # Max 60 checks * 15s = 15 minutes
+    
+    while true; do
+        local active_hunts
+        active_hunts=$(curl -s "http://localhost:${active_port}/api/admin/active-hunts" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('count',0))" 2>/dev/null || echo "0")
+        
+        if [ "$active_hunts" = "0" ] || [ -z "$active_hunts" ]; then
+            echo -e "  ${GREEN}✓ No active hunts — safe to switch${NC}"
+            break
+        fi
+        
+        wait_count=$((wait_count + 1))
+        if [ "$wait_count" -ge "$max_wait" ]; then
+            echo -e "  ${YELLOW}⚠ Waited 15 minutes. Proceeding with switch (${active_hunts} hunts may be interrupted)${NC}"
+            break
+        fi
+        
+        echo -ne "  Waiting for ${active_hunts} active hunt(s) to complete... (${wait_count}/${max_wait})\r"
+        sleep 15
+    done
+    echo ""
+    
+    # Step 6: Switch nginx
+    echo -e "${YELLOW}[6/6] Switching traffic to $target...${NC}"
     if switch_nginx "$target"; then
         echo ""
         echo -e "${GREEN}╔══════════════════════════════════════╗${NC}"

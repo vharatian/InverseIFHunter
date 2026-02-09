@@ -17,6 +17,7 @@ build/
 # IDE
 .idea/
 .vscode/
+.cursor/
 *.swp
 *.swo
 .DS_Store
@@ -47,4 +48,13 @@ Thumbs.db
 
 # Notebooks
 *.ipynb
+
+# Data files (too large for repo)
+Model_Hunter_ML_Analysis.xlsx
+model-hunter/.telemetry/
+model-hunter/ml_data/
+
+# VM utility scripts
+check_active_users.sh
+view_system_logs.sh
 

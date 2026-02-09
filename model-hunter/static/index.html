@@ -7,8 +7,8 @@
     <title>Model Hunter - Red Team LLM Models</title>
     <meta name="description" content="Red-team LLM models with parallel hunts and automated judging">
     <!-- Modern Hunter Fonts -->
-    <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Source+Sans+3:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=16">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css?v=21">
     <!-- Marked.js for Markdown parsing -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
@@ -25,31 +25,46 @@
         </div>
     </header>
 
+    <!-- Turn Journey Bar (sticky, hidden until multi-turn) -->
+    <nav class="turn-journey-bar" id="turnJourneyBar">
+        <!-- Journey steps rendered dynamically by JS -->
+    </nav>
+
     <!-- Main Content -->
-    <main class="container">
-        <!-- Notebook Upload Section -->
+    <main class="container" id="mainContainer">
+        <!-- Conversation Thread (left rail, hidden until multi-turn) -->
+        <aside class="conversation-thread" id="conversationThread">
+            <div class="thread-title">Conversation</div>
+            <!-- Thread nodes rendered dynamically by JS -->
+        </aside>
+        <!-- Main content area wrapper (shifts right when thread is visible) -->
+        <div class="main-content-area" id="mainContentArea">
+        <!-- Notebook Upload Section (collapsible after load) -->
         <section class="section" id="uploadSection">
             <div class="card">
-                <div class="card-header">
+                <div class="card-header upload-toggle-header" id="uploadToggleHeader" style="cursor: pointer; user-select: none;">
                     <h2 class="card-title">
                         <span class="card-title-icon">📓</span>
-                        Load Notebook
+                        <span id="uploadHeaderText">Load Notebook</span>
                     </h2>
+                    <span class="upload-toggle-chevron" id="uploadChevron" style="font-size: 0.75rem; color: var(--text-muted); transition: transform 0.2s ease;">▼</span>
                 </div>
 
-                <div id="uploadTab" class="tab-content">
-                    <div class="url-input-section">
-                        <label for="colabUrlInput">Paste Colab Notebook URL</label>
-                        <div class="url-input-group">
-                            <input type="url" id="colabUrlInput"
-                                placeholder="https://colab.research.google.com/drive/..." class="url-input">
-                            <button type="button" id="fetchUrlBtn" class="btn btn-secondary fetch-btn-cute">
-                                📥 Fetch
-                            </button>
+                <div id="uploadBody" class="upload-collapsible-body">
+                    <div id="uploadTab" class="tab-content">
+                        <div class="url-input-section">
+                            <label for="colabUrlInput">Paste Colab Notebook URL</label>
+                            <div class="url-input-group">
+                                <input type="url" id="colabUrlInput"
+                                    placeholder="https://colab.research.google.com/drive/..." class="url-input">
+                                <button type="button" id="fetchUrlBtn" class="btn btn-secondary fetch-btn-cute">
+                                    📥 Fetch
+                                </button>
+                            </div>
+                            <small style="color: var(--text-muted); margin-top: 0.5rem; display: block;">
+                                Supports: Colab share links, Google Drive links, raw .ipynb URLs
+                            </small>
                         </div>
-                        <small style="color: var(--text-muted); margin-top: 0.5rem; display: block;">
-                            Supports: Colab share links, Google Drive links, raw .ipynb URLs
-                        </small>
                     </div>
                 </div>
 
@@ -79,7 +94,8 @@
                 <div class="card-header">
                     <h2 class="card-title">
                         <span class="card-title-icon">📋</span>
-                        Notebook Preview
+                        <span id="previewTitleText">Notebook Preview</span>
+                        <span class="turn-badge section-turn-badge" id="previewTurnBadge"></span>
                     </h2>
                 </div>
 
@@ -372,8 +388,9 @@
                         </button>
                     </div>
                     <p style="text-align: center; color: var(--text-muted); font-size: 0.8rem; margin-top: 0.75rem;">
-                        Note: Each task allows up to 16 hunts. If you reach the limit, please revise your prompt or criteria and reload the notebook to start fresh.
+                        Note: Each turn allows up to 16 hunts. Starting a new turn resets the hunt counter.
                     </p>
+                    <div id="configTipContainer"></div>
                 </div>
             </div>
         </section>
@@ -384,7 +401,8 @@
                 <div class="card-header">
                     <h2 class="card-title">
                         <span class="card-title-icon">📊</span>
-                        Hunt Progress
+                        <span id="progressTitleText">Hunt Progress</span>
+                        <span class="turn-badge section-turn-badge" id="progressTurnBadge"></span>
                     </h2>
                     <div class="status" id="huntStatus">
                         <span class="status-dot running"></span>
@@ -393,6 +411,10 @@
                 </div>
 
                 <div class="progress-container">
+                    <div class="progress-turn-info" id="progressTurnInfo" style="display:none;">
+                        <span class="turn-scope" id="progressTurnScope"></span>
+                        <span class="cumulative" id="progressCumulative"></span>
+                    </div>
                     <div class="progress-bar">
                         <div class="progress-fill" id="progressFill" style="width: 0%"></div>
                     </div>
@@ -427,6 +449,114 @@
                         </tbody>
                     </table>
                 </div>
+                <div id="huntingTipContainer"></div>
+            </div>
+        </section>
+
+        <!-- Multi-Turn Section -->
+        <section class="section hidden" id="multiTurnSection">
+            <!-- Turn History Card (always visible once multi-turn starts) -->
+            <div class="card" id="turnHistoryCard" style="margin-bottom: 1rem;">
+                <div class="card-header" style="padding-bottom: 0;">
+                    <h2 class="card-title">
+                        <span class="card-title-icon">🔄</span>
+                        Turn History
+                    </h2>
+                </div>
+                <!-- Turn Tabs -->
+                <div id="turnHistoryTabs" style="display: flex; gap: 0; border-bottom: 2px solid var(--border); overflow-x: auto; padding: 0 1rem;">
+                    <!-- Turn tab buttons rendered dynamically -->
+                </div>
+                <!-- Turn Tab Content -->
+                <div id="turnHistoryContent" style="padding: 1rem;">
+                    <!-- Content for selected turn rendered dynamically -->
+                </div>
+            </div>
+
+            <!-- Decision Card (current turn actions) -->
+            <div class="card" id="multiTurnDecisionCard">
+                <div class="card-header">
+                    <h2 class="card-title">
+                        <span class="card-title-icon">⚡</span>
+                        <span id="multiTurnTitle">Turn 1 Complete — What Next?</span>
+                    </h2>
+                </div>
+
+                <!-- Decision Panel: Asymmetric Fork -->
+                <div id="multiTurnDecisionPanel">
+                    <!-- Summary stats bar -->
+                    <div class="decision-summary" id="decisionSummary">
+                        <span class="decision-summary-stat" id="decisionTurnStat"></span>
+                        <span class="decision-summary-stat" id="decisionHuntStat"></span>
+                        <span class="decision-summary-stat" id="decisionBreakStat"></span>
+                    </div>
+
+                    <!-- Two-card asymmetric fork -->
+                    <div class="decision-fork">
+                        <!-- Destructive: End & Review (left, smaller, outline) -->
+                        <div class="decision-card destructive">
+                            <div class="decision-card-heading">Found a Breaking Response?</div>
+                            <div class="decision-card-desc">
+                                End the session. Select 4 responses for human review and save to notebook.
+                            </div>
+                            <button class="btn-destructive-outline" id="markBreakingBtn">
+                                End &amp; Review
+                            </button>
+                        </div>
+
+                        <!-- Primary: Continue (right, larger, solid) -->
+                        <div class="decision-card primary">
+                            <div class="decision-card-heading">No Breaking Yet?</div>
+                            <div class="decision-card-desc">
+                                Pick a passing response and write the next turn's prompt and criteria.
+                            </div>
+                            <button class="btn-continue-primary" id="continueToNextTurnBtn">
+                                Continue to Turn <span id="decisionNextTurn">2</span> &rarr;
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Dynamic multi-turn tip -->
+                    <div id="multiTurnTipContainer"></div>
+                </div>
+
+                <!-- Good Response Picker (shown when "Continue" is clicked) -->
+                <div id="goodResponsePicker" class="hidden" style="margin-top: 1.5rem;">
+                    <h4 style="margin-bottom: 0.75rem;">Select a passing response to carry forward:</h4>
+                    <div id="goodResponseList" style="display: flex; flex-direction: column; gap: 0.5rem;">
+                        <!-- Response cards rendered dynamically -->
+                    </div>
+                </div>
+
+                <!-- Next Turn Editor (shown after good response is selected) -->
+                <div id="nextTurnEditor" class="hidden" style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid var(--border);">
+                    <h4 style="margin-bottom: 1rem;">Write Turn <span id="nextTurnNumber">2</span></h4>
+                    
+                    <div class="form-group" style="margin-bottom: 1rem;">
+                        <label for="nextTurnPrompt" style="font-weight: 600;">New Prompt</label>
+                        <textarea id="nextTurnPrompt" class="markdown-textarea" rows="6" 
+                            placeholder="Enter the prompt for the next turn..."></textarea>
+                    </div>
+                    
+                    <div class="form-group" style="margin-bottom: 1rem;">
+                        <label for="nextTurnCriteria" style="font-weight: 600;">New Criteria / Rubrics</label>
+                        <textarea id="nextTurnCriteria" class="markdown-textarea" rows="6" 
+                            placeholder="C1: First criterion for this turn&#10;C2: Second criterion&#10;C3: Third criterion"></textarea>
+                        <small style="color: var(--text-muted);">Use the same format as model reference: C1: description, C2: description, etc.</small>
+                    </div>
+                    
+                    <div class="form-group" style="margin-bottom: 1rem;">
+                        <label for="nextTurnJudgePrompt" style="font-weight: 600;">
+                            Judge System Prompt <span style="font-weight: 400; color: var(--text-muted);">(optional — defaults to previous turn's)</span>
+                        </label>
+                        <textarea id="nextTurnJudgePrompt" class="markdown-textarea" rows="4" 
+                            placeholder="Leave empty to use the same judge prompt from the previous turn..."></textarea>
+                    </div>
+                    
+                    <button class="btn btn-primary btn-lg" id="startNextTurnBtn" style="width: 100%;">
+                        🚀 Start Turn <span id="startNextTurnNumber">2</span> Hunt
+                    </button>
+                </div>
             </div>
         </section>
 
@@ -443,6 +573,7 @@
                 <div class="selection-instructions">
                     <p><strong>Instructions:</strong> Select exactly <strong>4 responses</strong> for human review.</p>
                     <p><strong>Valid:</strong> <span class="valid-combo">4 breaking</span> OR <span class="valid-combo">3 breaking + 1 passing</span></p>
+                    <div id="selectionTipContainer"></div>
                 </div>
 
                 <div id="selectionGrid" class="selection-table-container">
@@ -513,6 +644,7 @@
                     <div class="empty-state-icon">🎉</div>
                     <p>No breaking responses found. The model held strong!</p>
                 </div>
+                <div id="resultsTipContainer"></div>
             </div>
         </section>
 
@@ -544,8 +676,10 @@
                         <div class="info-value" id="summaryMet">-</div>
                     </div>
                 </div>
+                <div id="summaryTipContainer"></div>
             </div>
         </section>
+        </div><!-- /.main-content-area -->
     </main>
 
     <!-- Human Blind Judging Modal -->
@@ -659,7 +793,7 @@
     <!-- Toast Container -->
     <div id="toastContainer" style="position: fixed; bottom: 1rem; right: 1rem; z-index: 1000;"></div>
 
-    <script src="/static/app.js?v=224"></script>
+    <script src="/static/app.js?v=233"></script>
 </body>
 
 </html>

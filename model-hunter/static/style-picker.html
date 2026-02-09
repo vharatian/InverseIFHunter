@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Style Picker - Mix & Match Fonts + Colors</title>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Crimson+Pro:wght@400;500;600&family=Poiret+One&family=Raleway:wght@400;500;600&family=Special+Elite&family=Courier+Prime:wght@400;700&family=Cormorant+Garamond:wght@400;500;600;700&family=EB+Garamond:wght@400;500;600&family=Cinzel:wght@400;600;700&family=Spectral:wght@400;500;600&family=DM+Serif+Display&family=Source+Sans+3:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        body {
+            font-family: system-ui, sans-serif;
+            background: #0a0a0a;
+            color: #fff;
+            min-height: 100vh;
+        }
+
+        /* Control Panel */
+        .control-panel {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: #111;
+            border-bottom: 2px solid #333;
+            padding: 1rem 2rem;
+            z-index: 1000;
+            display: flex;
+            gap: 2rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        .control-label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: #888;
+        }
+        .control-buttons {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+        .control-btn {
+            padding: 0.5rem 1rem;
+            border: 2px solid #333;
+            background: #1a1a1a;
+            color: #ccc;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+        }
+        .control-btn:hover {
+            border-color: #555;
+            background: #222;
+        }
+        .control-btn.active {
+            border-color: #22d3ee;
+            background: rgba(34, 211, 238, 0.1);
+            color: #22d3ee;
+        }
+        .current-selection {
+            margin-left: auto;
+            background: #1a1a1a;
+            padding: 0.75rem 1.25rem;
+            border-radius: 8px;
+            border: 2px solid #22d3ee;
+        }
+        .current-selection code {
+            color: #22d3ee;
+            font-size: 1rem;
+        }
+
+        /* Preview Area */
+        .preview-area {
+            margin-top: 100px;
+            padding: 2rem;
+            transition: all 0.3s ease;
+        }
+
+        .preview-container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        /* Dynamic Theme Styles */
+        .preview-area {
+            --radius-sm: 4px;
+            --radius-md: 8px;
+        }
+
+        .preview-header {
+            text-align: center;
+            padding: 2rem 0;
+            margin-bottom: 2rem;
+            border-bottom: 2px solid var(--border);
+        }
+        .preview-header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+            color: var(--accent);
+        }
+        .preview-header p {
+            color: var(--text-muted);
+            font-size: 1.1rem;
+        }
+
+        .card {
+            background: var(--bg-card);
+            border: 2px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            position: relative;
+        }
+        .card::before {
+            content: '';
+            display: block;
+            height: 3px;
+            background: var(--accent-gradient);
+            margin: -1.5rem -1.5rem 1.25rem -1.5rem;
+            border-radius: 6px 6px 0 0;
+        }
+        .card-title {
+            font-size: 1.3rem;
+            color: var(--accent);
+            margin-bottom: 1rem;
+        }
+
+        .btn {
+            padding: 0.875rem 1.5rem;
+            border-radius: 6px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 2px solid transparent;
+        }
+        .btn-primary {
+            background: var(--accent-gradient);
+            color: var(--btn-text);
+            border-color: var(--accent);
+        }
+        .btn-secondary {
+            background: transparent;
+            color: var(--text-primary);
+            border: 2px solid var(--border);
+        }
+
+        input, select, textarea {
+            width: 100%;
+            padding: 0.875rem 1rem;
+            background: var(--bg-secondary);
+            border: 2px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-primary);
+            font-size: 1rem;
+        }
+
+        .progress-bar {
+            height: 14px;
+            background: var(--bg-secondary);
+            border-radius: 6px;
+            overflow: hidden;
+            border: 2px solid var(--border);
+        }
+        .progress-fill {
+            height: 100%;
+            background: var(--accent-gradient);
+            width: 65%;
+        }
+
+        .slot-card {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 1rem 1.25rem;
+            background: var(--bg-card);
+            border: 2px solid var(--border);
+            border-radius: var(--radius-md);
+            margin-bottom: 0.75rem;
+            position: relative;
+        }
+        .slot-card::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+            background: var(--accent-gradient);
+            border-radius: 8px 0 0 8px;
+        }
+        .slot-badge {
+            background: var(--accent-gradient);
+            color: var(--btn-text);
+            padding: 0.4rem 0.75rem;
+            border-radius: 4px;
+            font-size: 0.85rem;
+        }
+        .badge-success {
+            background: var(--success);
+            color: #fff;
+            padding: 0.35rem 0.7rem;
+            border-radius: 4px;
+            font-size: 0.85rem;
+        }
+        .badge-danger {
+            background: var(--danger);
+            color: #fff;
+            padding: 0.35rem 0.7rem;
+            border-radius: 4px;
+            font-size: 0.85rem;
+        }
+
+        .flex-row { display: flex; gap: 0.75rem; align-items: center; }
+        .mt-1 { margin-top: 1rem; }
+        .text-muted { color: var(--text-muted); }
+
+        .tabs {
+            display: flex;
+            gap: 0.25rem;
+            margin-bottom: 1.25rem;
+            border-bottom: 2px solid var(--border);
+        }
+        .tab {
+            padding: 0.875rem 1.25rem;
+            border: 2px solid transparent;
+            border-bottom: none;
+            background: transparent;
+            color: var(--text-secondary);
+            cursor: pointer;
+            border-radius: 6px 6px 0 0;
+            margin-bottom: -2px;
+            font-size: 0.95rem;
+        }
+        .tab.active {
+            color: var(--accent);
+            background: var(--bg-card);
+            border-color: var(--border);
+            border-bottom-color: var(--bg-card);
+        }
+
+        /* Font Family Classes */
+        .font-a { --font-heading: 'Playfair Display', serif; --font-body: 'Crimson Pro', serif; }
+        .font-b { --font-heading: 'Poiret One', cursive; --font-body: 'Raleway', sans-serif; }
+        .font-c { --font-heading: 'Special Elite', cursive; --font-body: 'Courier Prime', monospace; }
+        .font-d { --font-heading: 'Cormorant Garamond', serif; --font-body: 'EB Garamond', serif; }
+        .font-e { --font-heading: 'Cinzel', serif; --font-body: 'Spectral', serif; }
+        .font-f { --font-heading: 'DM Serif Display', serif; --font-body: 'Source Sans 3', sans-serif; }
+
+        .preview-area h1, .preview-area h2, .preview-area h3, 
+        .preview-area .card-title, .preview-area .btn, 
+        .preview-area .tab, .preview-area .slot-badge {
+            font-family: var(--font-heading);
+        }
+        .preview-area, .preview-area p, .preview-area input, 
+        .preview-area textarea, .preview-area select {
+            font-family: var(--font-body);
+        }
+
+        /* Palette Classes */
+        .palette-gold {
+            --bg-primary: #1a1612;
+            --bg-secondary: #231f1a;
+            --bg-card: #272220;
+            --text-primary: #f4e8d3;
+            --text-secondary: #c9b896;
+            --text-muted: #8a7a5f;
+            --accent: #c9a227;
+            --accent-gradient: linear-gradient(135deg, #c9a227, #e6c84a);
+            --btn-text: #1a1612;
+            --success: #5d8a4a;
+            --danger: #a84032;
+            --border: rgba(201, 162, 39, 0.2);
+        }
+        .palette-burgundy {
+            --bg-primary: #1c1a1f;
+            --bg-secondary: #252328;
+            --bg-card: #28252b;
+            --text-primary: #f5f0e8;
+            --text-secondary: #c9c0b5;
+            --text-muted: #8a817a;
+            --accent: #8b2942;
+            --accent-gradient: linear-gradient(135deg, #8b2942, #b33a5a);
+            --btn-text: #f5f0e8;
+            --success: #4a7c59;
+            --danger: #a84032;
+            --border: rgba(184, 134, 11, 0.2);
+        }
+        .palette-ocean {
+            --bg-primary: #0d1b2a;
+            --bg-secondary: #1b2838;
+            --bg-card: #162635;
+            --text-primary: #e8e6e1;
+            --text-secondary: #a8c0c8;
+            --text-muted: #6b8a94;
+            --accent: #1b998b;
+            --accent-gradient: linear-gradient(135deg, #1b998b, #2dd4bf);
+            --btn-text: #0d1b2a;
+            --success: #1b998b;
+            --danger: #e07a5f;
+            --border: rgba(27, 153, 139, 0.25);
+        }
+        .palette-forest {
+            --bg-primary: #1a1f1c;
+            --bg-secondary: #232a26;
+            --bg-card: #212823;
+            --text-primary: #f0ebe3;
+            --text-secondary: #b8c4b8;
+            --text-muted: #7a8a7a;
+            --accent: #b87333;
+            --accent-gradient: linear-gradient(135deg, #b87333, #d4894a);
+            --btn-text: #1a1f1c;
+            --success: #2d5a4a;
+            --danger: #a84032;
+            --border: rgba(184, 115, 51, 0.25);
+        }
+        .palette-purple {
+            --bg-primary: #1a1423;
+            --bg-secondary: #231c2e;
+            --bg-card: #211a2b;
+            --text-primary: #f5f0f7;
+            --text-secondary: #c9b8d4;
+            --text-muted: #8a7a94;
+            --accent: #7b2cbf;
+            --accent-gradient: linear-gradient(135deg, #7b2cbf, #9d4edd);
+            --btn-text: #f5f0f7;
+            --success: #4a7c59;
+            --danger: #c43b5e;
+            --border: rgba(123, 44, 191, 0.25);
+        }
+        .palette-midnight {
+            --bg-primary: #0a0f1a;
+            --bg-secondary: #111927;
+            --bg-card: #0f1729;
+            --text-primary: #e2e8f0;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --accent: #06b6d4;
+            --accent-gradient: linear-gradient(135deg, #06b6d4, #22d3ee);
+            --btn-text: #0a0f1a;
+            --success: #10b981;
+            --danger: #f43f5e;
+            --border: rgba(6, 182, 212, 0.2);
+        }
+        .palette-hunter {
+            --bg-primary: #0a0f1a;
+            --bg-secondary: #111927;
+            --bg-card: #0f1729;
+            --text-primary: #e2e8f0;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --accent: #22d3ee;
+            --accent-gradient: linear-gradient(135deg, #06b6d4, #fbbf24);
+            --btn-text: #0a0f1a;
+            --success: #10b981;
+            --danger: #f43f5e;
+            --border: rgba(6, 182, 212, 0.2);
+        }
+
+        .preview-area.palette-gold { background: #1a1612; }
+        .preview-area.palette-burgundy { background: #1c1a1f; }
+        .preview-area.palette-ocean { background: #0d1b2a; }
+        .preview-area.palette-forest { background: #1a1f1c; }
+        .preview-area.palette-purple { background: #1a1423; }
+        .preview-area.palette-midnight { background: #0a0f1a; }
+        .preview-area.palette-hunter { background: #0a0f1a; }
+
+        /* Mobile fix */
+        @media (max-width: 900px) {
+            .control-panel {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 1rem;
+            }
+            .current-selection {
+                margin-left: 0;
+            }
+            .preview-area {
+                margin-top: 200px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Control Panel -->
+    <div class="control-panel">
+        <div class="control-group">
+            <div class="control-label">Font Style</div>
+            <div class="control-buttons" id="fontButtons">
+                <button class="control-btn" data-font="font-a">A: Classic</button>
+                <button class="control-btn" data-font="font-b">B: Art Deco</button>
+                <button class="control-btn active" data-font="font-c">C: Typewriter</button>
+                <button class="control-btn" data-font="font-d">D: Victorian</button>
+                <button class="control-btn" data-font="font-e">E: Imperial</button>
+                <button class="control-btn" data-font="font-f">F: Modern</button>
+            </div>
+        </div>
+        <div class="control-group">
+            <div class="control-label">Color Palette</div>
+            <div class="control-buttons" id="paletteButtons">
+                <button class="control-btn" data-palette="palette-gold">Gold</button>
+                <button class="control-btn" data-palette="palette-burgundy">Burgundy</button>
+                <button class="control-btn" data-palette="palette-ocean">Ocean</button>
+                <button class="control-btn" data-palette="palette-forest">Forest</button>
+                <button class="control-btn" data-palette="palette-purple">Purple</button>
+                <button class="control-btn" data-palette="palette-midnight">Midnight</button>
+                <button class="control-btn active" data-palette="palette-hunter">Hunter ⭐</button>
+            </div>
+        </div>
+        <div class="current-selection">
+            Your choice: <code id="currentChoice">Font C + Hunter</code>
+        </div>
+    </div>
+
+    <!-- Preview Area -->
+    <div class="preview-area font-c palette-hunter" id="previewArea">
+        <div class="preview-container">
+            <!-- Header -->
+            <div class="preview-header">
+                <h1>🎯 Model Hunter</h1>
+                <p>Red-team LLM models with parallel hunts and automated judging</p>
+            </div>
+
+            <!-- Load Notebook -->
+            <div class="card">
+                <h2 class="card-title">📓 Load Notebook</h2>
+                <input type="text" placeholder="https://colab.research.google.com/drive/...">
+                <div class="flex-row mt-1">
+                    <button class="btn btn-secondary" style="flex: 1;">📥 Fetch Notebook</button>
+                </div>
+            </div>
+
+            <!-- Notebook Preview -->
+            <div class="card">
+                <h2 class="card-title">📋 Notebook Preview</h2>
+                <div class="tabs">
+                    <button class="tab">Prompt</button>
+                    <button class="tab active">Response</button>
+                    <button class="tab">Criteria</button>
+                    <button class="tab">Judge</button>
+                </div>
+                <textarea rows="4" placeholder="Enter expected response here..." style="margin-bottom: 1rem;">The answer is C because the historical evidence clearly shows that the event occurred in 1842, not 1845 as commonly believed.</textarea>
+                <div class="flex-row">
+                    <button class="btn btn-primary" style="flex: 1;">💾 Save Response</button>
+                    <button class="btn btn-secondary" style="flex: 1;">⚖️ Judge Reference</button>
+                </div>
+            </div>
+
+            <!-- Hunt Config -->
+            <div class="card">
+                <h2 class="card-title">⚙️ Hunt Configuration</h2>
+                <div class="flex-row" style="gap: 1rem;">
+                    <div style="flex: 1;">
+                        <label style="display: block; margin-bottom: 0.5rem; color: var(--text-secondary);">Provider</label>
+                        <select>
+                            <option>OpenRouter</option>
+                            <option>Fireworks AI</option>
+                        </select>
+                    </div>
+                    <div style="flex: 1;">
+                        <label style="display: block; margin-bottom: 0.5rem; color: var(--text-secondary);">Model</label>
+                        <select>
+                            <option>nemotron-70b-instruct</option>
+                            <option>claude-3.5-sonnet</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="mt-1" style="text-align: center;">
+                    <button class="btn btn-primary" style="padding: 1rem 2.5rem; font-size: 1.1rem;">🚀 Start Hunt</button>
+                </div>
+            </div>
+
+            <!-- Progress -->
+            <div class="card">
+                <h2 class="card-title">📊 Hunt Progress</h2>
+                <div class="progress-bar" style="margin-bottom: 0.75rem;">
+                    <div class="progress-fill"></div>
+                </div>
+                <div class="flex-row" style="justify-content: space-between;">
+                    <span style="color: var(--text-secondary);">13 / 20 hunts complete</span>
+                    <span style="color: var(--accent);">65%</span>
+                </div>
+            </div>
+
+            <!-- Results -->
+            <div class="card">
+                <h2 class="card-title">🔴 Model Breaking Responses</h2>
+                <div class="slot-card">
+                    <span class="slot-badge">Slot 1</span>
+                    <div style="flex: 1;">
+                        <div style="font-family: var(--font-heading); font-size: 1.05rem;">nemotron-3-nano-30b</div>
+                        <div class="text-muted" style="font-size: 0.9rem;">🟢 BREAK - Click to Review</div>
+                    </div>
+                    <span class="badge-success">✅ BREAK</span>
+                </div>
+                <div class="slot-card">
+                    <span class="slot-badge">Slot 2</span>
+                    <div style="flex: 1;">
+                        <div style="font-family: var(--font-heading); font-size: 1.05rem;">nemotron-3-nano-30b</div>
+                        <div style="color: var(--success); font-size: 0.9rem;">✅ Review Submitted</div>
+                    </div>
+                    <span class="badge-success">✅ BREAK</span>
+                </div>
+                <div class="slot-card">
+                    <span class="slot-badge">Slot 3</span>
+                    <div style="flex: 1;">
+                        <div style="font-family: var(--font-heading); font-size: 1.05rem;">nemotron-3-nano-30b</div>
+                        <div class="text-muted" style="font-size: 0.9rem;">🔴 PASS - Click to Review</div>
+                    </div>
+                    <span class="badge-danger">❌ PASS</span>
+                </div>
+            </div>
+
+            <div style="text-align: center; padding: 2rem; color: var(--text-muted);">
+                <p>Pick your favorite combo and tell me to implement it!</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const previewArea = document.getElementById('previewArea');
+        const currentChoice = document.getElementById('currentChoice');
+        
+        let currentFont = 'font-c';
+        let currentPalette = 'palette-hunter';
+
+        const fontNames = {
+            'font-a': 'Font A (Classic)',
+            'font-b': 'Font B (Art Deco)',
+            'font-c': 'Font C (Typewriter)',
+            'font-d': 'Font D (Victorian)',
+            'font-e': 'Font E (Imperial)',
+            'font-f': 'Font F (Modern)'
+        };
+
+        const paletteNames = {
+            'palette-gold': 'Antique Gold',
+            'palette-burgundy': 'Burgundy',
+            'palette-ocean': 'Ocean Teal',
+            'palette-forest': 'Forest Copper',
+            'palette-purple': 'Royal Purple',
+            'palette-midnight': 'Midnight Blue',
+            'palette-hunter': 'Midnight Hunter'
+        };
+
+        function updatePreview() {
+            // Remove all font classes
+            previewArea.classList.remove('font-a', 'font-b', 'font-c', 'font-d', 'font-e', 'font-f');
+            // Remove all palette classes
+            previewArea.classList.remove('palette-gold', 'palette-burgundy', 'palette-ocean', 'palette-forest', 'palette-purple', 'palette-midnight', 'palette-hunter');
+            
+            // Add current classes
+            previewArea.classList.add(currentFont);
+            previewArea.classList.add(currentPalette);
+            
+            // Update choice text
+            currentChoice.textContent = fontNames[currentFont] + ' + ' + paletteNames[currentPalette];
+        }
+
+        // Font buttons
+        document.querySelectorAll('#fontButtons .control-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('#fontButtons .control-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentFont = btn.dataset.font;
+                updatePreview();
+            });
+        });
+
+        // Palette buttons
+        document.querySelectorAll('#paletteButtons .control-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('#paletteButtons .control-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentPalette = btn.dataset.palette;
+                updatePreview();
+            });
+        });
+    </script>
+</body>
+</html>

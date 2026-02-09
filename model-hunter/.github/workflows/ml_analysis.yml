@@ -1,0 +1,240 @@
+# Model Hunter ML Analysis Pipeline
+# 
+# This workflow:
+# 1. Downloads data from VM
+# 2. Runs ML analysis
+# 3. Generates reports and artifacts
+#
+# Triggers:
+# - Daily at 5 AM UTC (after 4 AM export)
+# - Manual trigger (workflow_dispatch)
+# - On push to ml_pipeline/
+
+name: ML Analysis Pipeline
+
+on:
+  schedule:
+    # Run at 5 AM UTC daily (1 hour after VM export at 4 AM)
+    - cron: '0 5 * * *'
+  
+  workflow_dispatch:
+    inputs:
+      run_full_analysis:
+        description: 'Run full ML analysis'
+        required: false
+        default: 'true'
+        type: boolean
+
+  push:
+    paths:
+      - 'ml_pipeline/**'
+      - '.github/workflows/ml_analysis.yml'
+
+env:
+  VM_HOST: ${{ secrets.VM_HOST }}
+  VM_USER: ${{ secrets.VM_USER }}
+  SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+
+jobs:
+  export-data:
+    name: Export Data from VM
+    runs-on: ubuntu-latest
+    outputs:
+      export_success: ${{ steps.export.outputs.success }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.VM_HOST }} >> ~/.ssh/known_hosts
+      
+      - name: Run export on VM
+        id: export
+        run: |
+          # Trigger export on VM
+          ssh ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} << 'EOF'
+            docker exec model-hunter-green python /app/ml_pipeline/export_ml_data.py \
+              --storage /app/.storage \
+              --telemetry /app/.telemetry/events.jsonl \
+              --output /tmp/ml_export_gh
+            
+            docker cp model-hunter-green:/tmp/ml_export_gh /tmp/
+          EOF
+          
+          echo "success=true" >> $GITHUB_OUTPUT
+      
+      - name: Download exported data
+        run: |
+          mkdir -p ml_data
+          scp -r ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}:/tmp/ml_export_gh/* ml_data/
+          ls -la ml_data/
+      
+      - name: Upload data artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ml-data-export
+          path: ml_data/
+          retention-days: 7
+
+  analyze-data:
+    name: Run ML Analysis
+    runs-on: ubuntu-latest
+    needs: export-data
+    if: needs.export-data.outputs.export_success == 'true'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Download exported data
+        uses: actions/download-artifact@v4
+        with:
+          name: ml-data-export
+          path: ml_data/
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          pip install pandas numpy scikit-learn matplotlib seaborn
+      
+      - name: Run analysis script
+        run: |
+          python << 'PYTHON'
+          import pandas as pd
+          import numpy as np
+          import json
+          import gzip
+          from datetime import datetime
+          from collections import defaultdict
+          
+          print("="*60)
+          print("MODEL HUNTER ML ANALYSIS REPORT")
+          print(f"Generated: {datetime.now().isoformat()}")
+          print("="*60)
+          
+          # Load data
+          print("\n📊 Loading data...")
+          
+          # Load trainer leaderboard
+          trainer_df = pd.read_csv('ml_data/trainer_leaderboard.csv')
+          print(f"  Trainers: {len(trainer_df)}")
+          
+          # Load criteria difficulty
+          criteria_df = pd.read_csv('ml_data/criteria_difficulty.csv')
+          print(f"  Criteria: {len(criteria_df)}")
+          
+          # Load model performance
+          model_df = pd.read_csv('ml_data/model_performance.csv')
+          print(f"  Models: {len(model_df)}")
+          
+          # Load main dataset
+          records = []
+          with gzip.open('ml_data/ml_dataset.jsonl.gz', 'rt') as f:
+              for line in f:
+                  records.append(json.loads(line))
+          df = pd.DataFrame(records)
+          print(f"  Sessions: {len(df)}")
+          
+          # Analysis
+          print("\n" + "="*60)
+          print("🏆 TOP 10 TRAINERS (by breaks found)")
+          print("="*60)
+          top_trainers = trainer_df.nlargest(10, 'total_breaks')
+          for i, row in top_trainers.iterrows():
+              print(f"  {row['trainer_id']}: {row['total_breaks']} breaks ({row['overall_break_rate']:.1%} rate)")
+          
+          print("\n" + "="*60)
+          print("📋 HARDEST CRITERIA (highest fail rate)")
+          print("="*60)
+          hard_criteria = criteria_df.nlargest(10, 'fail_rate')
+          for i, row in hard_criteria.iterrows():
+              print(f"  {row['criteria_id']}: {row['fail_rate']:.1%} fail rate ({row['total_evaluations']} evals)")
+          
+          print("\n" + "="*60)
+          print("🤖 MODEL PERFORMANCE")
+          print("="*60)
+          for i, row in model_df.iterrows():
+              print(f"  {row['model'].split('/')[-1]}: {row['break_rate']:.1%} break rate ({row['total_hunts']} hunts)")
+          
+          print("\n" + "="*60)
+          print("📈 SUMMARY STATISTICS")
+          print("="*60)
+          total_hunts = df['total_hunts'].sum()
+          total_breaks = df['breaks_found'].sum()
+          print(f"  Total sessions analyzed: {len(df)}")
+          print(f"  Total hunts: {total_hunts:,}")
+          print(f"  Total breaks: {total_breaks:,}")
+          print(f"  Overall break rate: {total_breaks/total_hunts:.1%}")
+          print(f"  Unique trainers: {df['trainer_id'].nunique()}")
+          print(f"  Avg criteria per task: {df['num_criteria'].mean():.1f}")
+          
+          # Save summary
+          summary = {
+              "generated_at": datetime.now().isoformat(),
+              "total_sessions": len(df),
+              "total_hunts": int(total_hunts),
+              "total_breaks": int(total_breaks),
+              "overall_break_rate": float(total_breaks/total_hunts),
+              "unique_trainers": int(df['trainer_id'].nunique()),
+              "top_trainers": top_trainers[['trainer_id', 'total_breaks', 'overall_break_rate']].to_dict('records'),
+              "hardest_criteria": hard_criteria[['criteria_id', 'fail_rate']].to_dict('records')
+          }
+          
+          with open('ml_data/analysis_summary.json', 'w') as f:
+              json.dump(summary, f, indent=2)
+          
+          print("\n✅ Analysis complete! Summary saved to analysis_summary.json")
+          PYTHON
+      
+      - name: Upload analysis results
+        uses: actions/upload-artifact@v4
+        with:
+          name: ml-analysis-results
+          path: ml_data/
+          retention-days: 30
+      
+      - name: Create summary comment
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          echo "## ML Analysis Complete! 🎯" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          cat ml_data/analysis_summary.json | python -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          print(f\"**Sessions:** {d['total_sessions']:,}\")
+          print(f\"**Hunts:** {d['total_hunts']:,}\")
+          print(f\"**Breaks:** {d['total_breaks']:,}\")
+          print(f\"**Break Rate:** {d['overall_break_rate']:.1%}\")
+          print(f\"**Trainers:** {d['unique_trainers']}\")
+          print()
+          print('### Top 5 Trainers')
+          print('| Trainer | Breaks | Rate |')
+          print('|---------|--------|------|')
+          for t in d['top_trainers'][:5]:
+              print(f\"| {t['trainer_id']} | {t['total_breaks']} | {t['overall_break_rate']:.1%} |\")
+          " >> $GITHUB_STEP_SUMMARY
+
+  notify-complete:
+    name: Notify Completion
+    runs-on: ubuntu-latest
+    needs: [export-data, analyze-data]
+    if: always()
+    
+    steps:
+      - name: Summary
+        run: |
+          echo "## ML Pipeline Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Export: ${{ needs.export-data.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Analysis: ${{ needs.analyze-data.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Download artifacts from the Actions tab to get the full analysis data." >> $GITHUB_STEP_SUMMARY

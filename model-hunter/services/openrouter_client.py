@@ -70,6 +70,7 @@ class OpenRouterClient(BaseAPIClient):
         reasoning_budget_percent: float = 0.9,
         stream: bool = True,
         timeout: float = 180.0,
+        messages: Optional[list] = None,
         **kwargs
     ) -> Tuple[str, str]:
         """
@@ -82,6 +83,9 @@ class OpenRouterClient(BaseAPIClient):
             reasoning_budget_percent: Fraction of max_tokens for reasoning (0.9 = 90%)
             stream: Whether to stream the response
             timeout: Request timeout in seconds
+            messages: Optional conversation history for multi-turn
+                      (list of {role, content} dicts). The current prompt
+                      is appended as the final user message.
         
         Returns:
             Tuple of (response_text, reasoning_trace)
@@ -93,9 +97,14 @@ class OpenRouterClient(BaseAPIClient):
         if max_tokens is None:
             max_tokens = self._get_max_tokens(model)
         
-        # Build messages - just user prompt, no system prompt
+        # Build messages - prepend conversation history if provided (multi-turn)
         is_nemotron = 'nemotron' in model.lower()
-        messages = [{"role": "user", "content": prompt}]
+        if messages:
+            # Multi-turn: conversation history + current prompt
+            messages = list(messages) + [{"role": "user", "content": prompt}]
+        else:
+            # Single-turn: just user prompt
+            messages = [{"role": "user", "content": prompt}]
         
         payload = {
             "model": model,

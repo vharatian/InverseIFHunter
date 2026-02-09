@@ -39,6 +39,22 @@ class ParsedNotebook(BaseModel):
     attempts_made: int = 0
     raw_cells: List[NotebookCell] = []
     validation_warnings: List[str] = []  # JSON validation warnings
+    # Multi-turn fields
+    is_multi_turn: bool = False
+    turns: List[Any] = []  # List of TurnData dicts
+
+
+class TurnData(BaseModel):
+    """Data for a single turn in a multi-turn conversation."""
+    turn_number: int
+    prompt: str
+    response_reference: str          # Criteria/rubrics for this turn
+    judge_system_prompt: str = ""    # Judge prompt (defaults to previous turn's)
+    selected_response: Optional[str] = None  # The "good" response trainer picked
+    selected_hunt_id: Optional[int] = None
+    judge_result: Optional[Dict[str, Any]] = None  # Judge output for selected response
+    status: str = "pending"          # pending, hunting, reviewing, completed
+    results: List[Any] = []          # HuntResult dicts for this turn
 
 
 class HuntConfig(BaseModel):
@@ -53,6 +69,7 @@ class HuntConfig(BaseModel):
     provider: str = Field(default="openrouter")
     independent_judging: bool = Field(default=True)
     hunt_offset: int = Field(default=0, ge=0)  # Starting hunt_id offset (from frontend's hunt count)
+    conversation_history: List[Dict[str, str]] = []  # Multi-turn conversation history
 
 
 class HuntResult(BaseModel):
@@ -83,6 +100,10 @@ class HuntSession(BaseModel):
     accumulated_hunt_count: int = 0  # Total hunts ever run (for unique IDs)
     status: HuntStatus = HuntStatus.PENDING
     human_reviews: Dict[str, Any] = {}  # Store human review data
+    # Multi-turn fields
+    current_turn: int = 1
+    conversation_history: List[Dict[str, str]] = []  # [{role: "user", content: ...}, ...]
+    turns: List[TurnData] = []  # All turn data for this session
 
 
 class HuntEvent(BaseModel):

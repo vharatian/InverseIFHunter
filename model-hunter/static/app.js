@@ -198,7 +198,16 @@ const state = {
         modelRef: false,
         judge: false
     },
-    modelMismatchWarning: false  // Track if model mismatch warning is shown
+    modelMismatchWarning: false,  // Track if model mismatch warning is shown
+    
+    // Multi-turn state
+    currentTurn: 1,
+    conversationHistory: [],  // [{role: "user", content: ...}, {role: "assistant", content: ...}]
+    turns: [],                // [{turnNumber, prompt, criteria, selectedResponse, ...}]
+    isMultiTurn: false,       // Activates when trainer advances to turn 2
+    multiTurnTotalHunts: 0,   // Total hunts across all turns
+    huntsThisTurn: 0,         // Hunts in the CURRENT turn (resets on new turn)
+    previousTurnHuntIds: new Set()  // hunt_ids from completed turns (excluded from current turn fetch)
 };
 
 
@@ -275,6 +284,9 @@ const elements = {
     // Summary
     summarySection: document.getElementById('summarySection'),
     
+    // Multi-Turn Section
+    multiTurnSection: document.getElementById('multiTurnSection'),
+    
     // Selection Section (NEW)
     selectionSection: document.getElementById('selectionSection'),
     selectionGrid: document.getElementById('selectionGrid'),
@@ -316,8 +328,182 @@ const elements = {
 
 
 // ============== Hunt Limit Constants ==============
-const MAX_HUNTS_PER_NOTEBOOK = 16;
+const MAX_HUNTS_PER_NOTEBOOK = 16;  // Now applies PER TURN (not global)
 const HUNT_COUNT_STORAGE_PREFIX = 'modelHunter_huntCount_';
+
+// ============== Turn Color System ==============
+const TURN_COLORS = [
+    '#2383e2',  // Turn 1: Blue (Notion)
+    '#9065e0',  // Turn 2: Purple
+    '#e8a441',  // Turn 3: Amber
+    '#eb5757',  // Turn 4: Red
+    '#4dab9a',  // Turn 5: Teal
+    '#3b82f6',  // Turn 6: Blue alt
+];
+
+function getTurnColor(turnNumber) {
+    return TURN_COLORS[(turnNumber - 1) % TURN_COLORS.length];
+}
+
+/**
+ * Compute cumulative hunt statistics across ALL completed turns + current turn.
+ * Returns { totalHunts, totalBreaks } 
+ */
+function getCumulativeStats() {
+    // Previous turns
+    let prevHunts = 0;
+    let prevBreaks = 0;
+    if (state.turns && state.turns.length > 0) {
+        state.turns.forEach(t => {
+            const results = t.results || [];
+            prevHunts += results.length;
+            prevBreaks += results.filter(r => r.is_breaking).length;
+        });
+    }
+    
+    // Current turn (from allResponses with score-based break detection)
+    const currentHunts = state.allResponses.length;
+    const currentBreaks = state.allResponses.filter(r => {
+        const judgeScore = r.judge_score !== undefined && r.judge_score !== null ? Number(r.judge_score) : null;
+        const score = r.score !== undefined && r.score !== null ? Number(r.score) : null;
+        return (judgeScore !== null && judgeScore === 0) || (score !== null && score === 0) || r.is_breaking === true;
+    }).length;
+    
+    return {
+        totalHunts: prevHunts + currentHunts,
+        totalBreaks: prevBreaks + currentBreaks
+    };
+}
+
+function getTurnColorClass(turnNumber) {
+    const idx = ((turnNumber - 1) % TURN_COLORS.length) + 1;
+    return `turn-color-${idx}`;
+}
+
+// ================================================================
+// INSIGHT TIPS — Data-driven contextual tips from ML analysis
+// Source: 46,686 hunts across 741 trainers
+// ================================================================
+
+const INSIGHT_TIPS = {
+    // Config / pre-hunt tips
+    config: [
+        { text: 'Tasks with <strong>8+ criteria</strong> achieve a ~48% break rate — nearly double the average.', icon: '💡' },
+        { text: 'The average break rate across all hunts is <strong>26.3%</strong>. Don\'t worry if the first few pass — persistence pays off.', icon: '📊' },
+        { text: '<strong>Creative domains</strong> like Sports & Recreation yield ~34% break rates — try diverse topics.', icon: '🎯' },
+        { text: 'Format-constraint criteria (exact word positions, bold/italic) are especially effective at breaking models.', icon: '✨' },
+        { text: 'Policy & Legal Analysis tasks have the <strong>highest break rate at ~60%</strong> — complex reasoning trips models up.', icon: '⚖️' },
+    ],
+    // Model-specific tips
+    nemotron: [
+        { text: 'Nemotron has a <strong>24% break rate</strong>. It struggles most with format constraints and multi-step criteria.', icon: '🤖' },
+        { text: 'Nemotron is weaker on <strong>criteria C5–C6</strong> (regex/format checks) — craft criteria around structured output.', icon: '🔍' },
+    ],
+    qwen: [
+        { text: 'Qwen3 has a <strong>30% break rate</strong> — higher than Nemotron. It struggles with complex multi-step reasoning.', icon: '🤖' },
+        { text: 'Qwen3 is weaker on <strong>criteria C7–C8</strong> (character-level checks) — exploit exact-format requirements.', icon: '🔍' },
+    ],
+    // During hunting
+    hunting: [
+        { text: 'Hang tight — the judge evaluates each criterion independently. Partial breaks are common.', icon: '⏳' },
+        { text: 'Each hunt tests the model\'s consistency. Even small prompt variations can reveal new weaknesses.', icon: '🔬' },
+        { text: 'Across <strong>46K+ hunts</strong>, models fail ~1 in 4 attempts. Every hunt counts.', icon: '📈' },
+    ],
+    // Post-hunt / results
+    results: [
+        { text: 'You need at least <strong>3 breaks</strong> to proceed. If you\'re close, try adjusting criteria wording.', icon: '🎯' },
+        { text: 'Successful trainers review failing criteria to understand <strong>which specific rules</strong> trip models up.', icon: '🔎' },
+        { text: 'The top trainers average <strong>3.6 criteria per task</strong> — quality and specificity beat quantity.', icon: '🏆' },
+    ],
+    // Selection tips
+    selection: [
+        { text: 'Pick responses where the model <strong>confidently gave wrong output</strong> — these are the most valuable breaks.', icon: '✅' },
+        { text: 'A mix of <strong>3 breaking + 1 passing</strong> gives reviewers contrast to evaluate the boundary.', icon: '⚖️' },
+    ],
+    // Multi-turn decision
+    multiTurn: [
+        { text: 'Most trainers continue until they find a clear breaking pattern across 2–3 turns.', icon: '🔄' },
+        { text: 'Refining your prompt across turns often uncovers <strong>deeper model weaknesses</strong> than repeating the same one.', icon: '💡' },
+        { text: 'Adding more criteria in subsequent turns can <strong>dramatically increase</strong> break rates.', icon: '📊' },
+    ],
+    // Summary / final
+    summary: [
+        { text: 'Great work! Every hunt contributes to improving model safety across the community.', icon: '🎉', type: 'success' },
+        { text: 'The most successful trainers <strong>explore multiple domains</strong> and refine their criteria iteratively.', icon: '🧭' },
+        { text: 'Your results help identify blind spots in model behavior — this data directly improves training.', icon: '🛡️' },
+    ],
+};
+
+/**
+ * Pick a random tip from a category. 
+ * If `model` is provided, tries model-specific tips first.
+ */
+function getRandomTip(category, model) {
+    // Try model-specific tips for config/hunting categories
+    if (model && (category === 'config' || category === 'hunting')) {
+        const modelKey = model.toLowerCase().includes('nemotron') ? 'nemotron' : 
+                         model.toLowerCase().includes('qwen') ? 'qwen' : null;
+        if (modelKey && INSIGHT_TIPS[modelKey] && Math.random() < 0.4) {
+            const tips = INSIGHT_TIPS[modelKey];
+            return tips[Math.floor(Math.random() * tips.length)];
+        }
+    }
+    const tips = INSIGHT_TIPS[category] || INSIGHT_TIPS.config;
+    return tips[Math.floor(Math.random() * tips.length)];
+}
+
+/**
+ * Render a tip into a container element. Creates or updates an .insight-tip div.
+ * @param {string} containerId - ID of the container element
+ * @param {string} category - Tip category key from INSIGHT_TIPS
+ * @param {object} [options] - { model, type, append }
+ */
+function renderInsightTip(containerId, category, options = {}) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    
+    const tip = getRandomTip(category, options.model);
+    if (!tip) return;
+    
+    // Find or create the tip element
+    let tipEl = container.querySelector('.insight-tip');
+    if (!tipEl) {
+        tipEl = document.createElement('div');
+        tipEl.className = 'insight-tip tip-fade-in';
+        if (options.append === false) {
+            container.prepend(tipEl);
+        } else {
+            container.appendChild(tipEl);
+        }
+    }
+    
+    // Apply type class
+    tipEl.className = 'insight-tip tip-fade-in';
+    if (tip.type) tipEl.classList.add(`tip-${tip.type}`);
+    if (options.type) tipEl.classList.add(`tip-${options.type}`);
+    
+    tipEl.innerHTML = `<span class="tip-icon">${tip.icon || '💡'}</span> ${tip.text}`;
+}
+
+/**
+ * Rotate the tip in a container every N seconds.
+ */
+function startTipRotation(containerId, category, intervalMs = 15000, options = {}) {
+    // Render immediately
+    renderInsightTip(containerId, category, options);
+    
+    // Rotate periodically
+    const intervalId = setInterval(() => {
+        const container = document.getElementById(containerId);
+        if (!container || container.closest('.hidden')) {
+            clearInterval(intervalId);
+            return;
+        }
+        renderInsightTip(containerId, category, options);
+    }, intervalMs);
+    
+    return intervalId;
+}
 
 // ============== Original Notebook JSON Update Helper ==============
 /**
@@ -425,40 +611,40 @@ function incrementHuntCount(notebookId, addCount) {
     const newCount = current + addCount;
     saveHuntCount(notebookId, newCount);
     state.totalHuntsCount = newCount;
+    state.huntsThisTurn += addCount;  // Track per-turn hunts
     updateHuntLimitUI();
     return newCount;
 }
 
 function canStartMoreHunts(requestedHunts = 1) {
-    // Check if adding requestedHunts would exceed the limit
-    const projected = state.totalHuntsCount + requestedHunts;
+    // Per-turn limit: check huntsThisTurn against MAX_HUNTS_PER_NOTEBOOK
+    const projected = state.huntsThisTurn + requestedHunts;
     return projected <= MAX_HUNTS_PER_NOTEBOOK;
 }
 
 function getRemainingHunts() {
-    return Math.max(0, MAX_HUNTS_PER_NOTEBOOK - state.totalHuntsCount);
+    return Math.max(0, MAX_HUNTS_PER_NOTEBOOK - state.huntsThisTurn);
 }
 
 function updateHuntLimitUI() {
-    // Update any UI elements that show hunt count
+    // Per-turn limit: use huntsThisTurn for limit checks
     const remaining = getRemainingHunts();
-    const total = state.totalHuntsCount;
+    const thisTurn = state.huntsThisTurn;
+    const totalGlobal = state.totalHuntsCount;
     
-    // Update slider and input max values based on remaining hunts
+    // Update slider and input max values based on remaining hunts this turn
     const slider = document.getElementById('parallelWorkersSlider');
     const numberInput = document.getElementById('parallelWorkers');
     const maxAllowed = Math.min(6, remaining);
     
     if (slider) {
         slider.max = maxAllowed > 0 ? maxAllowed : 1;
-        // Adjust current value if it exceeds new max
         if (parseInt(slider.value) > maxAllowed) {
             slider.value = maxAllowed > 0 ? maxAllowed : 1;
         }
     }
     if (numberInput) {
         numberInput.max = maxAllowed > 0 ? maxAllowed : 1;
-        // Adjust current value if it exceeds new max
         if (parseInt(numberInput.value) > maxAllowed) {
             numberInput.value = maxAllowed > 0 ? maxAllowed : 1;
         }
@@ -471,7 +657,7 @@ function updateHuntLimitUI() {
         if (btnValue > remaining) {
             btn.disabled = true;
             btn.style.opacity = '0.4';
-            btn.title = `Only ${remaining} hunts remaining`;
+            btn.title = `Only ${remaining} hunts remaining this turn`;
         } else {
             btn.disabled = false;
             btn.style.opacity = '1';
@@ -482,9 +668,8 @@ function updateHuntLimitUI() {
     // Find or create the hunt limit indicator
     let indicator = document.getElementById('huntLimitIndicator');
     
-    if (total > 0) {
+    if (thisTurn > 0 || totalGlobal > 0) {
         if (!indicator) {
-            // Create indicator if it doesn't exist
             const huntSection = document.querySelector('.hunt-action-section');
             if (huntSection) {
                 indicator = document.createElement('div');
@@ -495,28 +680,31 @@ function updateHuntLimitUI() {
         }
         
         if (indicator) {
+            const turnLabel = state.currentTurn > 1 ? ` (Turn ${state.currentTurn})` : '';
             if (remaining === 0) {
                 indicator.innerHTML = `
                     <span style="color: var(--danger); font-weight: 600;">
-                        ⛔ Hunt limit reached (${total}/${MAX_HUNTS_PER_NOTEBOOK})
+                        ⛔ Turn limit reached (${thisTurn}/${MAX_HUNTS_PER_NOTEBOOK} this turn)
                     </span>
                     <br>
                     <span style="color: var(--text-muted); font-size: 0.8rem;">
-                        Please revise your prompt or criteria and load a new notebook.
+                        Continue to the next turn or end the session.
                     </span>
                 `;
                 state.huntLimitReached = true;
             } else if (remaining <= 4) {
                 indicator.innerHTML = `
                     <span style="color: var(--warning);">
-                        ⚠️ ${remaining} hunts remaining (${total}/${MAX_HUNTS_PER_NOTEBOOK})
+                        ⚠️ ${remaining} hunts remaining this turn${turnLabel} (${thisTurn}/${MAX_HUNTS_PER_NOTEBOOK})
                     </span>
+                    ${totalGlobal > thisTurn ? `<br><span style="color: var(--text-muted); font-size: 0.75rem;">${totalGlobal} total across all turns</span>` : ''}
                 `;
             } else {
                 indicator.innerHTML = `
                     <span style="color: var(--text-muted);">
-                        📊 ${total}/${MAX_HUNTS_PER_NOTEBOOK} hunts used
+                        📊 ${thisTurn}/${MAX_HUNTS_PER_NOTEBOOK} hunts this turn${turnLabel}
                     </span>
+                    ${totalGlobal > thisTurn ? `<br><span style="color: var(--text-muted); font-size: 0.75rem;">${totalGlobal} total across all turns</span>` : ''}
                 `;
             }
         }
@@ -524,17 +712,18 @@ function updateHuntLimitUI() {
         indicator.innerHTML = '';
     }
     
-    // Disable Start Hunt button if limit reached
+    // Disable Start Hunt button if per-turn limit reached
     if (elements.startHuntBtn && state.huntLimitReached) {
         elements.startHuntBtn.disabled = true;
-        elements.startHuntBtn.title = 'Hunt limit reached. Please revise prompt/criteria and load a new notebook.';
+        elements.startHuntBtn.title = 'Turn hunt limit reached. Continue to next turn or end session.';
     }
 }
 
 function showHuntLimitReachedError() {
+    const turnLabel = state.currentTurn > 1 ? ` for Turn ${state.currentTurn}` : '';
     showToast(
-        `⛔ Maximum ${MAX_HUNTS_PER_NOTEBOOK} hunts reached for this notebook. ` +
-        `Please revise your prompt or criteria and load a new notebook to continue.`,
+        `⛔ Maximum ${MAX_HUNTS_PER_NOTEBOOK} hunts reached${turnLabel}. ` +
+        `Continue to the next turn or end the session.`,
         'error'
     );
 }
@@ -787,8 +976,9 @@ function handleNotebookLoaded(data, isUrl = false) {
     
     // Load existing hunt count for this notebook
     state.totalHuntsCount = loadHuntCount(state.notebookId);
-    state.huntLimitReached = state.totalHuntsCount >= MAX_HUNTS_PER_NOTEBOOK;
-    console.log(`📊 Hunt count for notebook ${state.notebookId}: ${state.totalHuntsCount}/${MAX_HUNTS_PER_NOTEBOOK}`);
+    state.huntsThisTurn = 0;  // Reset per-turn counter on fresh load
+    state.huntLimitReached = state.huntsThisTurn >= MAX_HUNTS_PER_NOTEBOOK;
+    console.log(`📊 Hunt count for notebook ${state.notebookId}: total=${state.totalHuntsCount}, thisTurn=${state.huntsThisTurn}/${MAX_HUNTS_PER_NOTEBOOK}`);
     
     // Update hunt limit UI
     updateHuntLimitUI();
@@ -814,8 +1004,23 @@ function handleNotebookLoaded(data, isUrl = false) {
     
     showToast('Notebook loaded! Configure hunt settings.', 'success');
     
+    // Auto-collapse the upload section (notebook is loaded, no need to show it)
+    const uploadBody = document.getElementById('uploadBody');
+    const uploadChevron = document.getElementById('uploadChevron');
+    const uploadHeaderText = document.getElementById('uploadHeaderText');
+    if (uploadBody && uploadChevron) {
+        uploadBody.classList.add('collapsed');
+        uploadChevron.classList.add('collapsed');
+    }
+    if (uploadHeaderText) {
+        uploadHeaderText.textContent = 'Notebook Loaded ✓';
+    }
+    
     // Show config section
     elements.configSection.classList.remove('hidden');
+    
+    // Show a contextual config tip
+    renderInsightTip('configTipContainer', 'config');
     
     // Preselect model based on notebook metadata or model_slots
     let modelPrefix = null;
@@ -1267,12 +1472,16 @@ async function saveToDrive() {
         
         // Create snapshot
         // Note: selected_results order determines slots 1-4 (index 0 = slot 1, index 1 = slot 2, etc.)
+        const totalHunts = state.isMultiTurn 
+            ? state.multiTurnTotalHunts + validResponseCount 
+            : validResponseCount;
+        
         const snapshot = {
             original_notebook_json: originalNotebookJson,
             url: notebookUrl,
             selected_results: selectedResults,  // Order preserved - determines slot assignment
             human_reviews: reviewsForBackend,
-            total_hunts_ran: validResponseCount,
+            total_hunts_ran: totalHunts,
             include_reasoning: true,
             metadata: {
                 parsed_notebook: {
@@ -1284,7 +1493,17 @@ async function saveToDrive() {
                     judge_system_prompt: state.notebook?.judge_system_prompt || '',
                     judge_prompt_template: state.notebook?.judge_prompt_template || '',
                     model_slots: state.notebook?.model_slots || []
-                }
+                },
+                // Multi-turn data (included when applicable)
+                is_multi_turn: state.isMultiTurn,
+                turns: state.isMultiTurn ? [...state.turns, {
+                    turn_number: state.currentTurn,
+                    prompt: state.notebook?.prompt || '',
+                    response_reference: state.notebook?.response_reference || '',
+                    status: 'breaking',
+                    results: selectedResults
+                }] : [],
+                conversation_history: state.isMultiTurn ? state.conversationHistory : []
             }
         };
         
@@ -2214,6 +2433,8 @@ function showModelLockedIndicator(modelName) {
     const nameSpan = document.getElementById('modelLockedName');
     if (indicator && nameSpan) {
         nameSpan.textContent = modelName;
+        // Update config tip with model-specific insight
+        renderInsightTip('configTipContainer', 'config', { model: modelName });
         indicator.style.display = 'block';
         indicator.classList.remove('hidden');
         console.log(`🔒 Model locked to: ${modelName} (from notebook metadata)`);
@@ -3077,6 +3298,7 @@ async function startHunt() {
     
     if (!canStartMoreHunts(requestedHunts)) {
         const remaining = getRemainingHunts();
+        const turnCtx = (state.isMultiTurn || state.currentTurn > 1) ? ` this turn` : '';
         if (remaining === 0) {
             showHuntLimitReachedError();
             state.huntLimitReached = true;
@@ -3084,7 +3306,7 @@ async function startHunt() {
             return;
         } else {
             showToast(
-                `⚠️ Only ${remaining} hunts remaining. Reduce hunt count to ${remaining} or less.`,
+                `⚠️ Only ${remaining} hunts remaining${turnCtx}. Reduce hunt count to ${remaining} or less.`,
                 'warning'
             );
             return;
@@ -3130,6 +3352,10 @@ async function startHunt() {
     document.querySelector('.section')?.classList.add('hidden'); // Hide upload section
     elements.configSection?.classList.add('hidden'); // Hide config section
     
+    // Start rotating hunting tips (model-aware)
+    const selectedModel = elements.modelSelect?.value || '';
+    startTipRotation('huntingTipContainer', 'hunting', 12000, { model: selectedModel });
+    
     // Update config on server WITH hunt offset for unique hunt_id generation
     const configWithOffset = {
         ...state.config,
@@ -3141,13 +3367,17 @@ async function startHunt() {
         body: JSON.stringify(configWithOffset)
     });
     
-    // Show progress section and reset it
+    // Show progress section (centered) and reset it
     elements.progressSection.classList.remove('hidden');
+    elements.progressSection.classList.add('hunt-active');
     elements.resultsSection.classList.add('hidden');
     elements.summarySection.classList.add('hidden');
     
     // Initialize progress UI (resets progress to 0%)
     initProgressUI();
+    
+    // Update turn-aware UI (journey bar shows "Hunting" for current turn)
+    updateTurnAwareUI();
     
     // Scroll to progress section
     elements.progressSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -3228,7 +3458,21 @@ async function startHunt() {
                 elements.statusText.textContent = 'Error - Connection lost';
             }
             
-            showToast('Hunt connection error. Please try again.', 'error');
+            // Try to recover completed results
+            fetch(`/api/results/${state.sessionId}`)
+                .then(resp => resp.ok ? resp.json() : Promise.reject('not ok'))
+                .then(recoveryData => {
+                    const recoveredCount = (recoveryData.results || []).length;
+                    if (recoveredCount > 0) {
+                        showToast(`Connection lost. Recovered ${recoveredCount} completed results. You can review them or run more hunts.`, 'warning');
+                        fetchAllResponses().then(() => showMultiTurnDecision());
+                    } else {
+                        showToast('Hunt connection error. Please try again.', 'error');
+                    }
+                })
+                .catch(() => {
+                    showToast('Hunt connection error. Please try again.', 'error');
+                });
         });
         
         eventSource.addEventListener('ping', () => {
@@ -3250,8 +3494,15 @@ function initProgressUI() {
     
     // Reset progress for THIS run only
     elements.progressFill.style.width = '0%';
-    elements.progressText.textContent = `0 / ${parallel_workers} hunts complete`;
+    const turnLabel = (state.isMultiTurn || state.currentTurn > 1) ? ` (Turn ${state.currentTurn})` : '';
+    elements.progressText.textContent = `0 / ${parallel_workers} hunts complete${turnLabel}`;
     elements.progressPercent.textContent = '0%';
+    
+    // Update turn-aware progress bar color
+    if (state.isMultiTurn || state.currentTurn > 1) {
+        const color = getTurnColor(state.currentTurn);
+        if (elements.progressFill) elements.progressFill.style.background = color;
+    }
     
     // Initialize breaks indicator for this run
     elements.breaksIndicator.innerHTML = '';
@@ -3285,9 +3536,10 @@ function initProgressUI() {
         elements.resultsTableBody.appendChild(row);
     }
     
-    // Update status
+    // Update status (with turn context)
     elements.huntStatus.querySelector('.status-dot').className = 'status-dot running';
-    elements.statusText.textContent = 'Running...';
+    const runTurnLabel = (state.isMultiTurn || state.currentTurn > 1) ? ` — Turn ${state.currentTurn}` : '';
+    elements.statusText.textContent = `Running...${runTurnLabel}`;
 }
 
 function updateTableRow(huntId, data) {
@@ -3448,10 +3700,11 @@ function handleHuntResult(data) {
         }
     }
     
-    // Update progress
+    // Update progress (with turn context)
     const percent = Math.round((completed / total) * 100);
     elements.progressFill.style.width = `${percent}%`;
-    elements.progressText.textContent = `${completed} / ${total} hunts complete`;
+    const turnCtx = (state.isMultiTurn || state.currentTurn > 1) ? ` (Turn ${state.currentTurn})` : '';
+    elements.progressText.textContent = `${completed} / ${total} hunts complete${turnCtx}`;
     elements.progressPercent.textContent = `${percent}%`;
     
     // Update breaks indicator
@@ -3975,6 +4228,9 @@ function handleHuntComplete(data) {
     document.querySelector('.section')?.classList.remove('hidden');
     elements.configSection?.classList.remove('hidden');
     
+    // Remove centering from progress section (hunt is done)
+    elements.progressSection?.classList.remove('hunt-active');
+    
     // FIX 4: Keep model/provider locked even after hunt completes (only unlock on refresh)
     // Don't re-enable model/provider selects here - they stay locked until page refresh
     
@@ -3983,16 +4239,70 @@ function handleHuntComplete(data) {
     // NOTE: totalHuntsCount is now the single source of truth (already incremented before hunt started)
     // No need to update accumulatedHuntOffset separately
     
-    // Update status
+    // Update status (with turn context)
     elements.huntStatus.querySelector('.status-dot').className = 'status-dot completed';
-    elements.statusText.textContent = 'Completed';
+    const turnSuffix = (state.isMultiTurn || state.currentTurn > 1) ? ` — Turn ${state.currentTurn}` : '';
+    elements.statusText.textContent = `Completed${turnSuffix}`;
     
     // Reset reveal state for new hunt
     state.llmRevealed = false;
     state.humanReviews = {};
     
-    // Fetch ALL responses and show selection UI
-    fetchAllResponsesAndShowSelection(completed_hunts, breaks_found);
+    // Update turn-aware UI (journey bar label changes from "Hunting" to "Reviewing")
+    if (state.isMultiTurn || state.currentTurn > 1) {
+        updateTurnAwareUI();
+    }
+    
+    // Fetch all responses first (we need them for both flows)
+    fetchAllResponses().then(() => {
+        // Show multi-turn decision panel
+        // Trainer chooses: "breaking" (standard flow) or "continue" (multi-turn)
+        showMultiTurnDecision();
+    });
+}
+
+/**
+ * Fetch all responses from the session and accumulate them in state.
+ * Does NOT show selection UI — that's triggered separately.
+ */
+async function fetchAllResponses() {
+    try {
+        const response = await fetch(`/api/results/${state.sessionId}`);
+        const data = await response.json();
+        
+        // Filter out results from previous turns (they're already saved in state.turns)
+        const newResponses = (data.results || []).filter(r => 
+            !state.previousTurnHuntIds.has(r.hunt_id)
+        );
+        
+        newResponses.forEach(newResponse => {
+            const existingIndex = state.allResponses.findIndex(r => r.hunt_id === newResponse.hunt_id);
+            if (existingIndex >= 0) {
+                state.allResponses[existingIndex] = {
+                    ...newResponse,
+                    rowNumber: state.allResponses[existingIndex].rowNumber
+                };
+            } else {
+                const newRowNumber = state.allResponses.length;
+                state.allResponses.push({
+                    ...newResponse,
+                    rowNumber: newRowNumber
+                });
+            }
+        });
+        
+        // Update summary with CUMULATIVE stats
+        const cumul = getCumulativeStats();
+        
+        elements.summarySection?.classList.remove('hidden');
+        const summaryTotal = document.getElementById('summaryTotal');
+        const summaryBreaks = document.getElementById('summaryBreaks');
+        if (summaryTotal) summaryTotal.textContent = cumul.totalHunts;
+        if (summaryBreaks) summaryBreaks.textContent = cumul.totalBreaks;
+        
+    } catch (error) {
+        console.error('Error fetching results:', error);
+    }
 }
 
 async function fetchAllResponsesAndShowSelection(completedHunts, breaksFound) {
@@ -4001,8 +4311,10 @@ async function fetchAllResponsesAndShowSelection(completedHunts, breaksFound) {
         const response = await fetch(`/api/results/${state.sessionId}`);
         const data = await response.json();
         
-        // Store all responses (accumulate across runs, avoiding duplicates)
-        const newResponses = data.results || [];
+        // Filter out results from previous turns, then accumulate current turn
+        const newResponses = (data.results || []).filter(r => 
+            !state.previousTurnHuntIds.has(r.hunt_id)
+        );
         
         // Add new responses, avoiding duplicates by hunt_id
         newResponses.forEach(newResponse => {
@@ -4023,28 +4335,25 @@ async function fetchAllResponsesAndShowSelection(completedHunts, breaksFound) {
             }
         });
         
-        // Count total breaks across all accumulated responses (check both judge_score and score fields)
-        const totalBreaks = state.allResponses.filter(r => {
-            const judgeScore = r.judge_score !== undefined && r.judge_score !== null ? Number(r.judge_score) : null;
-            const score = r.score !== undefined && r.score !== null ? Number(r.score) : null;
-            return (judgeScore !== null && judgeScore === 0) || (score !== null && score === 0);
-        }).length;
+        // Count breaks for current turn (for selection logic)
         const totalPasses = state.allResponses.filter(r => {
             const judgeScore = r.judge_score !== undefined && r.judge_score !== null ? Number(r.judge_score) : null;
             const score = r.score !== undefined && r.score !== null ? Number(r.score) : null;
             return (judgeScore !== null && judgeScore > 0) || (score !== null && score > 0);
         }).length;
         
-        // Populate summary
+        // Populate summary with CUMULATIVE stats across all turns
+        const cumulative = getCumulativeStats();
         elements.summarySection.classList.remove('hidden');
-        document.getElementById('summaryTotal').textContent = state.allResponses.length;
-        document.getElementById('summaryBreaks').textContent = totalBreaks;
+        document.getElementById('summaryTotal').textContent = cumulative.totalHunts;
+        document.getElementById('summaryBreaks').textContent = cumulative.totalBreaks;
         
-        const successRate = state.allResponses.length > 0 ? Math.round((totalBreaks / state.allResponses.length) * 100) : 0;
-        document.getElementById('summarySuccess').textContent = `${successRate}% (${totalBreaks}/${state.allResponses.length} breaks)`;
-        document.getElementById('summaryMet').textContent = totalBreaks >= 3 ? '✅ Yes' : '❌ No';
+        const successRate = cumulative.totalHunts > 0 ? Math.round((cumulative.totalBreaks / cumulative.totalHunts) * 100) : 0;
+        document.getElementById('summarySuccess').textContent = `${successRate}% (${cumulative.totalBreaks}/${cumulative.totalHunts} breaks)`;
+        document.getElementById('summaryMet').textContent = cumulative.totalBreaks >= 3 ? '✅ Yes' : '❌ No';
         
-        // VALIDATION 1: Need at least 3 breaks
+        // VALIDATION 1: Need at least 3 breaks (use cumulative)
+        const totalBreaks = cumulative.totalBreaks;
         const criteriaMetBreaks = totalBreaks >= 3;
         
         // VALIDATION 2: Criteria-level diversity - at least 1 criterion has both PASS and FAIL
@@ -4086,6 +4395,9 @@ async function fetchAllResponsesAndShowSelection(completedHunts, breaksFound) {
         // Show selection section - criteria met!
         elements.selectionSection.classList.remove('hidden');
         
+        // Show a selection tip
+        renderInsightTip('selectionTipContainer', 'selection');
+        
         // Display selection cards (NO auto-selection)
         displaySelectionCards();
         
@@ -4095,6 +4407,849 @@ async function fetchAllResponsesAndShowSelection(completedHunts, breaksFound) {
         showToast('Error fetching results', 'error');
     }
 }
+
+
+// ============== Turn-Aware UI Functions (Journey Bar, Thread, Badges) ==============
+
+/**
+ * Activate a specific turn's tab in the turn history panel.
+ * Scrolls to the multi-turn section and clicks the correct tab.
+ */
+function activateTurnTab(turnNumber) {
+    const section = document.getElementById('multiTurnSection');
+    if (!section) return;
+    
+    // Make the section visible if hidden
+    section.classList.remove('hidden');
+    
+    // Find the correct tab button
+    const tabBar = document.getElementById('turnHistoryTabs');
+    if (tabBar) {
+        const tabs = tabBar.querySelectorAll('button');
+        tabs.forEach(tab => {
+            // Tab text is like "Turn 1 ✓" or "Turn 2 (current)"
+            const match = tab.textContent.match(/Turn\s+(\d+)/);
+            if (match && parseInt(match[1]) === turnNumber) {
+                tab.click();  // Programmatically click to trigger the render
+            }
+        });
+    }
+    
+    // Scroll to the turn history card
+    const historyCard = document.getElementById('turnHistoryCard');
+    if (historyCard) {
+        historyCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+}
+
+/**
+ * Render the Turn Journey Bar — horizontal stepper showing all turns.
+ */
+function renderJourneyBar() {
+    const bar = document.getElementById('turnJourneyBar');
+    if (!bar) return;
+    
+    bar.innerHTML = '';
+    
+    // Build list: completed turns + current turn + one future placeholder
+    const steps = [];
+    state.turns.forEach(t => {
+        steps.push({ turnNumber: t.turnNumber || t.turn_number, status: 'completed' });
+    });
+    steps.push({ turnNumber: state.currentTurn, status: 'active' });
+    steps.push({ turnNumber: state.currentTurn + 1, status: 'future' });
+    
+    steps.forEach((step, idx) => {
+        // Add connector before each step (except the first)
+        if (idx > 0) {
+            const connector = document.createElement('div');
+            connector.className = 'journey-connector';
+            if (step.status === 'completed' || step.status === 'active') {
+                connector.classList.add('completed');
+            } else {
+                connector.classList.add('dashed');
+            }
+            bar.appendChild(connector);
+        }
+        
+        const node = document.createElement('div');
+        node.className = `journey-node ${step.status}`;
+        
+        const circle = document.createElement('div');
+        circle.className = 'journey-circle';
+        const color = getTurnColor(step.turnNumber);
+        
+        if (step.status === 'completed') {
+            circle.style.background = color;
+            circle.innerHTML = '&#10003;';
+        } else if (step.status === 'active') {
+            circle.style.background = color;
+            circle.textContent = step.turnNumber;
+        } else {
+            circle.textContent = '?';
+        }
+        
+        const label = document.createElement('div');
+        label.className = 'journey-label';
+        if (step.status === 'completed') {
+            label.textContent = `Turn ${step.turnNumber}`;
+        } else if (step.status === 'active') {
+            label.textContent = state.isHunting ? 'Hunting' : 'Active';
+        } else {
+            label.textContent = 'Next';
+        }
+        
+        node.appendChild(circle);
+        node.appendChild(label);
+        
+        // Click any turn to show its content in the turn history panel
+        if (step.status === 'completed' || step.status === 'active') {
+            node.addEventListener('click', () => {
+                activateTurnTab(step.turnNumber);
+            });
+        }
+        
+        bar.appendChild(node);
+    });
+    
+    // Show the bar
+    bar.classList.add('visible');
+}
+
+/**
+ * Render the Conversation Thread — left-rail timeline.
+ */
+function renderConversationThread() {
+    const thread = document.getElementById('conversationThread');
+    if (!thread) return;
+    
+    // Keep the title, clear the rest
+    const title = thread.querySelector('.thread-title');
+    thread.innerHTML = '';
+    if (title) thread.appendChild(title);
+    else {
+        const t = document.createElement('div');
+        t.className = 'thread-title';
+        t.textContent = 'Conversation';
+        thread.appendChild(t);
+    }
+    
+    // Completed turns
+    state.turns.forEach(t => {
+        const turnNum = t.turnNumber || t.turn_number;
+        const node = document.createElement('div');
+        node.className = 'thread-node completed thread-node-enter';
+        node.dataset.turn = turnNum;
+        
+        const color = getTurnColor(turnNum);
+        node.style.setProperty('--node-color', color);
+        
+        node.innerHTML = `
+            <div class="thread-turn-label">
+                <span class="turn-badge ${getTurnColorClass(turnNum)}" style="font-size:0.6rem; padding:0.1rem 0.4rem;">T${turnNum}</span>
+            </div>
+            <div class="thread-prompt-preview">${escapeHtml((t.prompt || '').substring(0, 80))}</div>
+            ${t.selectedResponse ? `<div class="thread-response-preview" style="border-left-color:${color};">${escapeHtml(t.selectedResponse.substring(0, 80))}</div>` : ''}
+            <div class="thread-status done">&#10003; ${(t.results || []).length} hunts</div>
+        `;
+        
+        node.addEventListener('click', () => {
+            activateTurnTab(turnNum);
+        });
+        
+        thread.appendChild(node);
+    });
+    
+    // Current turn
+    const currentNode = document.createElement('div');
+    currentNode.className = 'thread-node active thread-node-enter';
+    currentNode.dataset.turn = state.currentTurn;
+    const currentColor = getTurnColor(state.currentTurn);
+    currentNode.style.setProperty('--node-color', currentColor);
+    
+    const currentPrompt = state.notebook?.prompt || '';
+    const huntCount = state.allResponses?.length || 0;
+    
+    currentNode.innerHTML = `
+        <div class="thread-turn-label">
+            <span class="turn-badge ${getTurnColorClass(state.currentTurn)}" style="font-size:0.6rem; padding:0.1rem 0.4rem;">T${state.currentTurn}</span>
+        </div>
+        <div class="thread-prompt-preview">${escapeHtml(currentPrompt.substring(0, 80))}</div>
+        <div class="thread-status hunting">${state.isHunting ? '● Hunting...' : (huntCount > 0 ? `${huntCount} hunts` : 'Ready')}</div>
+    `;
+    
+    thread.appendChild(currentNode);
+    
+    // Activate the two-column layout and show thread
+    const container = document.getElementById('mainContainer');
+    if (container) container.classList.add('multi-turn-layout');
+    thread.classList.add('visible');
+    
+    // Hide metadata sidebar to avoid overlap with conversation thread
+    if (elements.metadataSidebar) {
+        elements.metadataSidebar.style.display = 'none';
+        document.body.classList.remove('sidebar-visible');
+    }
+}
+
+/**
+ * Update all turn-aware section headers, progress info, and badges.
+ */
+function updateTurnAwareUI() {
+    const turn = state.currentTurn;
+    const color = getTurnColor(turn);
+    const colorClass = getTurnColorClass(turn);
+    
+    // Add class to body/main for CSS-based visibility
+    document.body.classList.toggle('multi-turn-active', state.isMultiTurn || turn > 1);
+    
+    // Update progress section header badge
+    const progressBadge = document.getElementById('progressTurnBadge');
+    const progressTitle = document.getElementById('progressTitleText');
+    if (progressBadge && (state.isMultiTurn || turn > 1)) {
+        progressBadge.textContent = `Turn ${turn}`;
+        progressBadge.className = `turn-badge section-turn-badge ${colorClass}`;
+        progressBadge.style.display = 'inline-flex';
+        if (progressTitle) progressTitle.textContent = 'Hunt Progress';
+    }
+    
+    // Update preview section header badge
+    const previewBadge = document.getElementById('previewTurnBadge');
+    const previewTitle = document.getElementById('previewTitleText');
+    if (previewBadge && (state.isMultiTurn || turn > 1)) {
+        previewBadge.textContent = `Turn ${turn}`;
+        previewBadge.className = `turn-badge section-turn-badge ${colorClass}`;
+        previewBadge.style.display = 'inline-flex';
+        if (previewTitle) previewTitle.textContent = 'Prompt & Criteria';
+    }
+    
+    // Update per-turn progress info
+    const turnInfo = document.getElementById('progressTurnInfo');
+    const turnScope = document.getElementById('progressTurnScope');
+    const cumulative = document.getElementById('progressCumulative');
+    if (turnInfo && (state.isMultiTurn || turn > 1)) {
+        turnInfo.style.display = 'flex';
+        if (turnScope) turnScope.textContent = `Turn ${turn}`;
+        if (cumulative) {
+            const globalTotal = state.multiTurnTotalHunts + (state.allResponses?.length || 0);
+            cumulative.textContent = globalTotal > 0 ? `${globalTotal} total across ${turn} turns` : '';
+        }
+    }
+    
+    // Update progress bar color
+    const progressFill = document.getElementById('progressFill');
+    if (progressFill && (state.isMultiTurn || turn > 1)) {
+        progressFill.style.background = color;
+    }
+    
+    // Update the decision fork "next turn" number
+    const decisionNextTurn = document.getElementById('decisionNextTurn');
+    if (decisionNextTurn) decisionNextTurn.textContent = turn + 1;
+    
+    // Render journey bar and thread if multi-turn
+    if (state.isMultiTurn || turn > 1) {
+        renderJourneyBar();
+        renderConversationThread();
+    }
+}
+
+// ============== Multi-Turn Functions ==============
+
+/**
+ * Show the multi-turn decision panel after a hunt completes.
+ * Trainer chooses: "This turn is breaking" or "Select good response & continue".
+ */
+function showMultiTurnDecision() {
+    const section = document.getElementById('multiTurnSection');
+    if (!section) return;
+    
+    // Update turn title
+    const title = document.getElementById('multiTurnTitle');
+    if (title) {
+        title.textContent = `Turn ${state.currentTurn} Complete — What Next?`;
+    }
+    
+    // Populate decision summary stats
+    const hunts = state.allResponses?.length || 0;
+    const breaks = (state.allResponses || []).filter(r => (r.judge_score === 0 || r.score === 0)).length;
+    const turnStat = document.getElementById('decisionTurnStat');
+    const huntStat = document.getElementById('decisionHuntStat');
+    const breakStat = document.getElementById('decisionBreakStat');
+    const turnColor = getTurnColor(state.currentTurn);
+    
+    if (turnStat) turnStat.innerHTML = `<span class="turn-badge ${getTurnColorClass(state.currentTurn)}">Turn ${state.currentTurn}</span> Complete`;
+    if (huntStat) huntStat.textContent = `${hunts} hunts`;
+    if (breakStat) breakStat.innerHTML = `${breaks} break${breaks !== 1 ? 's' : ''} found`;
+    
+    // Update "Continue to Turn X" button text
+    const nextTurnSpan = document.getElementById('decisionNextTurn');
+    if (nextTurnSpan) nextTurnSpan.textContent = state.currentTurn + 1;
+    
+    // Render the tabbed turn history (shows all completed turns + current)
+    renderTurnHistoryTabs();
+    
+    // Reset panels — show decision card and decision panel
+    document.getElementById('multiTurnDecisionCard')?.classList.remove('hidden');
+    document.getElementById('multiTurnDecisionPanel').classList.remove('hidden');
+    document.getElementById('goodResponsePicker').classList.add('hidden');
+    document.getElementById('nextTurnEditor').classList.add('hidden');
+    
+    // Update turn-aware UI elements
+    updateTurnAwareUI();
+    
+    // Show a multi-turn decision tip
+    renderInsightTip('multiTurnTipContainer', 'multiTurn');
+    
+    // Show the section
+    section.classList.remove('hidden');
+    section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+/**
+ * Render the tabbed turn history panel.
+ * Each completed turn gets a tab. The current (in-progress) turn also gets a tab.
+ * Clicking a tab shows that turn's prompt, criteria, selected response, and judge result.
+ */
+function renderTurnHistoryTabs() {
+    const tabBar = document.getElementById('turnHistoryTabs');
+    const contentArea = document.getElementById('turnHistoryContent');
+    if (!tabBar || !contentArea) return;
+    
+    tabBar.innerHTML = '';
+    
+    // Build list of turns to show: completed turns + current turn
+    const allTurns = [];
+    
+    // Add completed turns from state.turns
+    state.turns.forEach(t => {
+        allTurns.push({
+            turnNumber: t.turnNumber || t.turn_number,
+            prompt: t.prompt,
+            criteria: t.response_reference || t.criteria,
+            selectedResponse: t.selectedResponse || t.selected_response || null,
+            judgeResult: t.judgeResult || t.judge_result || null,
+            status: 'completed',
+            results: t.results || []
+        });
+    });
+    
+    // Add current turn (the one that just finished hunting)
+    allTurns.push({
+        turnNumber: state.currentTurn,
+        prompt: state.notebook?.prompt || '',
+        criteria: state.notebook?.response_reference || '',
+        selectedResponse: null, // Not selected yet
+        judgeResult: null,
+        status: 'current',
+        results: state.allResponses || []
+    });
+    
+    // No turns at all? Hide the history card
+    if (allTurns.length === 0) {
+        document.getElementById('turnHistoryCard').style.display = 'none';
+        return;
+    }
+    document.getElementById('turnHistoryCard').style.display = '';
+    
+    // Create tab buttons
+    allTurns.forEach((turn, idx) => {
+        const tab = document.createElement('button');
+        const isCurrent = turn.status === 'current';
+        const isActive = idx === allTurns.length - 1; // Default: show latest turn
+        const turnColor = getTurnColor(turn.turnNumber);
+        
+        tab.style.cssText = `
+            padding: 0.6rem 1.2rem;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: ${isActive ? turnColor : 'var(--text-muted)'};
+            border-bottom: 3px solid ${isActive ? turnColor : 'transparent'};
+            white-space: nowrap;
+            transition: all 0.2s;
+        `;
+        tab.textContent = isCurrent 
+            ? `Turn ${turn.turnNumber} (current)` 
+            : `Turn ${turn.turnNumber} ✓`;
+        
+        tab.addEventListener('mouseenter', () => {
+            if (!tab.classList.contains('active-turn-tab')) {
+                tab.style.color = 'var(--text-primary)';
+                tab.style.borderBottomColor = 'var(--border)';
+            }
+        });
+        tab.addEventListener('mouseleave', () => {
+            if (!tab.classList.contains('active-turn-tab')) {
+                tab.style.color = 'var(--text-muted)';
+                tab.style.borderBottomColor = 'transparent';
+            }
+        });
+        
+        tab.addEventListener('click', () => {
+            // Update active tab styling
+            tabBar.querySelectorAll('button').forEach(b => {
+                b.style.color = 'var(--text-muted)';
+                b.style.borderBottomColor = 'transparent';
+                b.classList.remove('active-turn-tab');
+            });
+            tab.style.color = turnColor;
+            tab.style.borderBottomColor = turnColor;
+            tab.classList.add('active-turn-tab');
+            
+            // Render this turn's content
+            renderTurnContent(contentArea, turn);
+        });
+        
+        if (isActive) {
+            tab.classList.add('active-turn-tab');
+        }
+        
+        tabBar.appendChild(tab);
+    });
+    
+    // Show the latest turn by default
+    renderTurnContent(contentArea, allTurns[allTurns.length - 1]);
+}
+
+/**
+ * Render the content for a single turn tab.
+ */
+function renderTurnContent(container, turn) {
+    const isCurrent = turn.status === 'current';
+    
+    // Count breaks/passes in results
+    const breaks = (turn.results || []).filter(r => 
+        (r.judge_score === 0 || r.score === 0)
+    ).length;
+    const passes = (turn.results || []).filter(r => {
+        const s = r.judge_score ?? r.score;
+        return s !== null && s !== undefined && s > 0;
+    }).length;
+    
+    let html = '';
+    
+    // Turn status badge (with per-turn color)
+    const turnColor = getTurnColor(turn.turnNumber);
+    html += `<div style="display: flex; gap: 0.5rem; align-items: center; margin-bottom: 1rem; flex-wrap: wrap;">`;
+    html += `<span class="turn-badge ${getTurnColorClass(turn.turnNumber)}">Turn ${turn.turnNumber}</span>`;
+    if (turn.results && turn.results.length > 0) {
+        html += `<span style="font-size: 0.8rem; color: var(--text-muted);">${turn.results.length} hunts &mdash; ${breaks} breaks, ${passes} passes</span>`;
+    }
+    if (turn.selectedResponse) {
+        html += `<span style="padding: 0.2rem 0.6rem; border-radius: 999px; font-size: 0.75rem; background: rgba(16, 185, 129, 0.15); color: var(--success, #10b981);">Response selected ✓</span>`;
+    }
+    html += `</div>`;
+    
+    // Prompt section (border color matches turn color)
+    html += `<div style="margin-bottom: 1rem;">`;
+    html += `<div style="font-weight: 700; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 0.4rem;">Prompt</div>`;
+    html += `<div style="padding: 0.75rem; background: var(--bg-tertiary); border-radius: 8px; border-left: 3px solid ${turnColor}; font-size: 0.9rem; white-space: pre-wrap; max-height: 200px; overflow-y: auto;">${escapeHtml(turn.prompt || '')}</div>`;
+    html += `</div>`;
+    
+    // Criteria section
+    html += `<div style="margin-bottom: 1rem;">`;
+    html += `<div style="font-weight: 700; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 0.4rem;">Criteria / Rubrics</div>`;
+    html += `<div style="padding: 0.75rem; background: var(--bg-tertiary); border-radius: 8px; border-left: 3px solid ${turnColor}; font-size: 0.9rem; white-space: pre-wrap; max-height: 200px; overflow-y: auto; opacity: 0.9;">${escapeHtml(turn.criteria || '')}</div>`;
+    html += `</div>`;
+    
+    // Selected response (for completed turns)
+    if (turn.selectedResponse) {
+        html += `<div style="margin-bottom: 1rem;">`;
+        html += `<div style="font-weight: 700; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 0.4rem;">Selected Response (carried forward)</div>`;
+        html += `<div style="padding: 0.75rem; background: var(--bg-tertiary); border-radius: 8px; border-left: 3px solid var(--success, #10b981); font-size: 0.9rem; white-space: pre-wrap; max-height: 300px; overflow-y: auto;">${escapeHtml(turn.selectedResponse)}</div>`;
+        html += `</div>`;
+    }
+    
+    // Judge result for the selected response (for completed turns)
+    if (turn.judgeResult && turn.judgeResult.score !== undefined) {
+        const score = turn.judgeResult.score;
+        const criteria = turn.judgeResult.criteria || {};
+        const explanation = turn.judgeResult.explanation || '';
+        
+        html += `<div style="margin-bottom: 1rem;">`;
+        html += `<div style="font-weight: 700; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 0.4rem;">Auto-Judge Result for Selected Response <span style="font-weight:400;text-transform:none;letter-spacing:0;">(judged by GPT-5)</span></div>`;
+        html += `<div style="padding: 0.75rem; background: var(--bg-tertiary); border-radius: 8px; border-left: 3px solid ${score > 0 ? 'var(--success, #10b981)' : 'var(--danger, #ef4444)'}; font-size: 0.9rem;">`;
+        html += `<div style="font-weight: 600; margin-bottom: 0.5rem;">Score: ${score} ${score > 0 ? '(PASS)' : '(BREAK)'}</div>`;
+        
+        if (Object.keys(criteria).length > 0) {
+            html += `<div style="margin-bottom: 0.5rem;">`;
+            for (const [k, v] of Object.entries(criteria)) {
+                const isPassing = String(v).toUpperCase() === 'PASS';
+                html += `<span style="display: inline-block; margin: 0.15rem 0.25rem; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; background: ${isPassing ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)'}; color: ${isPassing ? 'var(--success,#10b981)' : 'var(--danger,#ef4444)'};">${escapeHtml(k)}: ${escapeHtml(String(v))}</span>`;
+            }
+            html += `</div>`;
+        }
+        
+        if (explanation) {
+            html += `<div style="font-size: 0.85rem; color: var(--text-secondary); white-space: pre-wrap; max-height: 100px; overflow-y: auto;">${escapeHtml(explanation)}</div>`;
+        }
+        html += `</div></div>`;
+    }
+    
+    // For current turn: show a note only if hunts have been run (so the decision panel is visible)
+    if (isCurrent && !turn.selectedResponse && turn.results && turn.results.length > 0) {
+        html += `<div style="padding: 0.75rem; background: rgba(59, 130, 246, 0.08); border-radius: 8px; border: 1px dashed var(--primary); text-align: center; color: var(--text-muted); font-size: 0.9rem;">`;
+        html += `This is the current turn. Use the panel below to mark it as breaking or select a good response to continue.`;
+        html += `</div>`;
+    } else if (isCurrent && !turn.selectedResponse && (!turn.results || turn.results.length === 0)) {
+        html += `<div style="padding: 0.75rem; background: rgba(59, 130, 246, 0.05); border-radius: 8px; text-align: center; color: var(--text-muted); font-size: 0.85rem;">`;
+        html += `Awaiting hunts for this turn. Configure and start a hunt above.`;
+        html += `</div>`;
+    }
+    
+    container.innerHTML = html;
+}
+
+/**
+ * Helper: Escape HTML in strings.
+ */
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+/**
+ * Handle "This Turn is Breaking" button click.
+ * Marks the turn as breaking and proceeds to the standard selection/review flow.
+ */
+async function handleMarkBreaking() {
+    try {
+        // Call mark-breaking API
+        const response = await fetch(`/api/mark-breaking/${state.sessionId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        if (!response.ok) {
+            throw new Error(`Mark breaking failed: ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        state.isMultiTurn = data.is_multi_turn;
+        
+        // Hide multi-turn section
+        document.getElementById('multiTurnSection').classList.add('hidden');
+        
+        // Count total hunts across all turns
+        state.multiTurnTotalHunts = state.turns.reduce((sum, t) => sum + (t.results?.length || 0), 0) + state.allResponses.length;
+        
+        // Proceed to standard selection flow
+        const completedHunts = state.allResponses.length;
+        const breaksFound = state.allResponses.filter(r => (r.judge_score === 0 || r.score === 0)).length;
+        fetchAllResponsesAndShowSelection(completedHunts, breaksFound);
+        
+    } catch (error) {
+        console.error('Error marking breaking:', error);
+        showToast(`Turn ${state.currentTurn} — Error: ${error.message}`, 'error');
+    }
+}
+
+/**
+ * Handle "Select Good Response & Continue" button click.
+ * Shows the response picker for selecting a passing response.
+ */
+function handleContinueToNextTurn() {
+    // Hide decision panel, show response picker
+    document.getElementById('multiTurnDecisionPanel').classList.add('hidden');
+    const picker = document.getElementById('goodResponsePicker');
+    picker.classList.remove('hidden');
+    
+    // Populate response list with ALL responses from current turn
+    const list = document.getElementById('goodResponseList');
+    list.innerHTML = '';
+    
+    // Show conversation context (prior turns) if multi-turn
+    if (state.conversationHistory.length > 0) {
+        const contextDiv = document.createElement('div');
+        contextDiv.className = 'response-picker-context';
+        let contextHtml = '<div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-muted);margin-bottom:0.4rem;">Conversation so far</div>';
+        state.conversationHistory.forEach(msg => {
+            const roleClass = msg.role === 'user' ? 'user' : 'assistant';
+            contextHtml += `
+                <div class="context-message ${roleClass}">
+                    <div class="context-message-role">${msg.role}</div>
+                    <div class="context-message-text">${escapeHtml((msg.content || '').substring(0, 150))}</div>
+                </div>
+            `;
+        });
+        contextDiv.innerHTML = contextHtml;
+        list.appendChild(contextDiv);
+    }
+    
+    if (state.allResponses.length === 0) {
+        list.innerHTML += '<p style="color: var(--text-muted);">No responses available.</p>';
+        return;
+    }
+    
+    state.allResponses.forEach((r, idx) => {
+        const score = r.judge_score ?? r.score ?? '?';
+        const isPassing = score > 0;
+        const shortModel = (r.model || '').split('/').pop();
+        
+        // Build criteria badges if available
+        const judgeCriteria = r.judge_criteria || {};
+        let criteriaBadgesHtml = '';
+        if (Object.keys(judgeCriteria).length > 0) {
+            criteriaBadgesHtml = '<div style="display: flex; flex-wrap: wrap; gap: 0.25rem; margin-bottom: 0.5rem;">';
+            for (const [k, v] of Object.entries(judgeCriteria)) {
+                const isPass = String(v).toUpperCase() === 'PASS';
+                criteriaBadgesHtml += `<span style="display: inline-block; padding: 0.1rem 0.4rem; border-radius: 4px; font-size: 0.7rem; font-weight: 600; background: ${isPass ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)'}; color: ${isPass ? 'var(--success,#10b981)' : 'var(--danger,#ef4444)'};">${escapeHtml(k)}: ${escapeHtml(String(v))}</span>`;
+            }
+            criteriaBadgesHtml += '</div>';
+        }
+        
+        const card = document.createElement('div');
+        card.style.cssText = `
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            border: 1.5px solid ${isPassing ? 'var(--success, #10b981)' : 'var(--danger, #ef4444)'};
+            background: ${isPassing ? 'rgba(16, 185, 129, 0.04)' : 'rgba(239, 68, 68, 0.04)'};
+            cursor: pointer;
+            transition: all 0.2s;
+        `;
+        card.addEventListener('mouseenter', () => { card.style.transform = 'translateY(-1px)'; card.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)'; });
+        card.addEventListener('mouseleave', () => { card.style.transform = ''; card.style.boxShadow = ''; });
+        
+        // Show FULL response content (scrollable)
+        card.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                <span style="font-weight: 600;">Hunt #${r.hunt_id} — ${shortModel}</span>
+                <span style="font-weight: 700; color: ${isPassing ? 'var(--success, #10b981)' : 'var(--danger, #ef4444)'};">
+                    Score: ${score} ${isPassing ? '(PASS)' : '(BREAK)'}
+                </span>
+            </div>
+            ${criteriaBadgesHtml}
+            <div style="font-size: 0.85rem; color: var(--text-secondary); white-space: pre-wrap; max-height: 300px; overflow-y: auto; padding-right: 0.25rem;">${escapeHtml(r.response || '')}</div>
+        `;
+        
+        card.addEventListener('click', () => selectGoodResponse(r));
+        list.appendChild(card);
+    });
+}
+
+/**
+ * Select a good response to carry forward to the next turn.
+ */
+function selectGoodResponse(response) {
+    // Store the selected response
+    state._selectedGoodResponse = response;
+    
+    // Show next turn editor
+    const editor = document.getElementById('nextTurnEditor');
+    editor.classList.remove('hidden');
+    
+    // Update turn numbers
+    const nextTurn = state.currentTurn + 1;
+    document.getElementById('nextTurnNumber').textContent = nextTurn;
+    document.getElementById('startNextTurnNumber').textContent = nextTurn;
+    
+    // Pre-populate judge prompt from current turn
+    const judgePromptField = document.getElementById('nextTurnJudgePrompt');
+    if (judgePromptField && state.notebook?.judge_system_prompt) {
+        judgePromptField.placeholder = `Current: ${state.notebook.judge_system_prompt.substring(0, 100)}... (leave empty to reuse)`;
+    }
+    
+    // Clear input fields
+    document.getElementById('nextTurnPrompt').value = '';
+    document.getElementById('nextTurnCriteria').value = '';
+    document.getElementById('nextTurnJudgePrompt').value = '';
+    
+    // Highlight selected response
+    const cards = document.querySelectorAll('#goodResponseList > div');
+    cards.forEach(card => { card.style.opacity = '0.5'; });
+    const selectedIdx = state.allResponses.findIndex(r => r.hunt_id === response.hunt_id);
+    if (selectedIdx >= 0 && cards[selectedIdx]) {
+        cards[selectedIdx].style.opacity = '1';
+        cards[selectedIdx].style.border = '3px solid var(--primary)';
+    }
+    
+    editor.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    
+    showToast(`Turn ${state.currentTurn} — Selected Hunt #${response.hunt_id} as good response. Write Turn ${state.currentTurn + 1} below.`, 'success');
+}
+
+/**
+ * Start the next turn: call advance-turn API, then start a new hunt.
+ */
+async function startNextTurn() {
+    const nextPrompt = document.getElementById('nextTurnPrompt').value.trim();
+    const nextCriteria = document.getElementById('nextTurnCriteria').value.trim();
+    const nextJudgePrompt = document.getElementById('nextTurnJudgePrompt').value.trim() || null;
+    
+    if (!nextPrompt) {
+        showToast('Please enter a prompt for the next turn.', 'error');
+        return;
+    }
+    if (!nextCriteria) {
+        showToast('Please enter criteria for the next turn.', 'error');
+        return;
+    }
+    
+    if (!state._selectedGoodResponse) {
+        showToast('Please select a good response first.', 'error');
+        return;
+    }
+    
+    try {
+        // Call advance-turn API
+        const response = await fetch(`/api/advance-turn/${state.sessionId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                selected_hunt_id: state._selectedGoodResponse.hunt_id,
+                next_prompt: nextPrompt,
+                next_criteria: nextCriteria,
+                next_judge_prompt: nextJudgePrompt
+            })
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to advance turn');
+        }
+        
+        const data = await response.json();
+        
+        // Update local state
+        state.currentTurn = data.current_turn;
+        state.isMultiTurn = true;
+        
+        // Build local conversation history
+        state.conversationHistory.push(
+            { role: 'user', content: state.notebook.prompt },
+            { role: 'assistant', content: state._selectedGoodResponse.response }
+        );
+        
+        // Save current turn data locally
+        state.turns.push({
+            turnNumber: state.currentTurn - 1,
+            prompt: state.notebook.prompt,
+            response_reference: state.notebook.response_reference,
+            selectedResponse: state._selectedGoodResponse.response,
+            selectedHuntId: state._selectedGoodResponse.hunt_id,
+            judgeResult: {
+                score: state._selectedGoodResponse.judge_score,
+                criteria: state._selectedGoodResponse.judge_criteria || {},
+                explanation: state._selectedGoodResponse.judge_explanation || ''
+            },
+            results: state.allResponses.map(r => ({
+                hunt_id: r.hunt_id,
+                response: r.response,
+                judge_score: r.judge_score,
+                is_breaking: r.is_breaking
+            }))
+        });
+        
+        // Track total hunts across turns
+        state.multiTurnTotalHunts += state.allResponses.length;
+        
+        // Update notebook state with new turn data
+        state.notebook.prompt = nextPrompt;
+        state.notebook.response_reference = nextCriteria;
+        // CRITICAL: Update response to the selected good response from this turn
+        // This is what gets judged when "Judge Reference" is clicked in the new turn
+        if (state._selectedGoodResponse?.response) {
+            state.notebook.response = state._selectedGoodResponse.response;
+        }
+        if (nextJudgePrompt) {
+            state.notebook.judge_system_prompt = nextJudgePrompt;
+        }
+        
+        // Track hunt IDs from this turn so they're excluded from future fetches
+        state.allResponses.forEach(r => {
+            if (r.hunt_id) state.previousTurnHuntIds.add(r.hunt_id);
+        });
+        
+        // Reset hunt state for new turn
+        state.allResponses = [];
+        state.results = [];
+        state.selectedRowNumbers = [];
+        state.humanReviews = {};
+        state.selectionConfirmed = false;
+        state.llmRevealed = false;
+        state.referenceValidated = false;
+        state._selectedGoodResponse = null;
+        
+        // RESET per-turn hunt counter (this is the key per-turn limit change)
+        state.huntsThisTurn = 0;
+        state.huntLimitReached = false;
+        
+        // Clear the progress table rows for the new turn
+        if (elements.resultsTableBody) {
+            elements.resultsTableBody.innerHTML = '';
+        }
+        
+        // Hide decision card and other sections, but KEEP turn history visible
+        document.getElementById('multiTurnDecisionCard')?.classList.add('hidden');
+        document.getElementById('selectionSection')?.classList.add('hidden');
+        document.getElementById('resultsSection')?.classList.add('hidden');
+        document.getElementById('summarySection')?.classList.add('hidden');
+        
+        // Re-render turn history tabs (now includes the just-completed turn)
+        renderTurnHistoryTabs();
+        // Show the multi-turn section (for the history card)
+        document.getElementById('multiTurnSection').classList.remove('hidden');
+        
+        // Update the notebook preview with new prompt/criteria
+        populatePreviewTabs(state.notebook);
+        
+        // Re-enable the reference judge (trainer needs to validate new criteria)
+        state.referenceValidated = false;
+        if (elements.startHuntBtn) {
+            elements.startHuntBtn.disabled = true;
+        }
+        
+        // Clear previous judge results display so old criteria grades don't persist
+        if (elements.referenceJudgeResult) {
+            elements.referenceJudgeResult.innerHTML = '';
+        }
+        // Reset initial criteria so judge validates against new turn's criteria
+        state.initialCriteria = null;
+        
+        // Update all turn-aware UI (journey bar, thread, badges, progress info)
+        updateTurnAwareUI();
+        updateHuntLimitUI();
+        
+        // Turn transition toast with turn context
+        showToast(`Turn ${state.currentTurn} started — ${MAX_HUNTS_PER_NOTEBOOK} hunts available`, 'success');
+        
+        // Show config section and scroll to it
+        elements.configSection?.classList.remove('hidden');
+        elements.configSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        
+        // Refresh config tip for the new turn (model-aware)
+        const selectedModel = elements.modelSelect?.value || '';
+        renderInsightTip('configTipContainer', 'config', { model: selectedModel });
+        
+    } catch (error) {
+        console.error('Error advancing turn:', error);
+        showToast(`Error: ${error.message}`, 'error');
+    }
+}
+
+/**
+ * Initialize multi-turn event listeners.
+ */
+function initMultiTurnListeners() {
+    const markBreakingBtn = document.getElementById('markBreakingBtn');
+    if (markBreakingBtn) {
+        markBreakingBtn.addEventListener('click', handleMarkBreaking);
+    }
+    
+    const continueBtn = document.getElementById('continueToNextTurnBtn');
+    if (continueBtn) {
+        continueBtn.addEventListener('click', handleContinueToNextTurn);
+    }
+    
+    const startNextBtn = document.getElementById('startNextTurnBtn');
+    if (startNextBtn) {
+        startNextBtn.addEventListener('click', startNextTurn);
+    }
+}
+
 
 function displaySelectionCards() {
     const grid = elements.selectionGrid;
@@ -4653,6 +5808,9 @@ function confirmSelection() {
     
     // Keep selection section visible, but selection is now locked
     elements.resultsSection.classList.remove('hidden');
+    
+    // Show a results tip
+    renderInsightTip('resultsTipContainer', 'results');
     
     // Display the selected responses for review (blind mode)
     displaySelectedForReview();
@@ -5995,13 +7153,17 @@ function showFinalResults() {
     elements.resultsSection.classList.remove('hidden');
     elements.summarySection.classList.remove('hidden');
     
-    // Calculate actual breaks from results
-    const breaksFound = state.results.filter(r => r.is_breaking).length;
-    const totalHunts = state.results.length;
+    // Calculate CUMULATIVE breaks and hunts across ALL turns + current turn
+    const cumulative = getCumulativeStats();
+    const totalHunts = cumulative.totalHunts;
+    const breaksFound = cumulative.totalBreaks;
     
-    // Populate summary
+    // Populate summary with cumulative data
     document.getElementById('summaryTotal').textContent = totalHunts;
     document.getElementById('summaryBreaks').textContent = breaksFound;
+    
+    // Show summary tip
+    renderInsightTip('summaryTipContainer', 'summary', { type: breaksFound >= 3 ? 'success' : undefined });
     
     const successRate = totalHunts > 0 ? Math.round((breaksFound / totalHunts) * 100) : 0;
     document.getElementById('summarySuccess').textContent = `${successRate}% (${breaksFound}/${totalHunts} breaks)`;
@@ -7379,6 +8541,9 @@ function init() {
     // Initialize provider logic
     initializeProviderLogic();
     
+    // Initialize multi-turn listeners
+    initMultiTurnListeners();
+    
     console.log('🔥 Model Hunter initialized');
 }
 
@@ -7550,5 +8715,18 @@ document.addEventListener('DOMContentLoaded', async () => {
         };
         fetchBtn.type = 'button';
         fetchBtn.disabled = false;
+    }
+    
+    // Upload section toggle (collapse/expand)
+    const uploadToggle = document.getElementById('uploadToggleHeader');
+    if (uploadToggle) {
+        uploadToggle.addEventListener('click', () => {
+            const body = document.getElementById('uploadBody');
+            const chevron = document.getElementById('uploadChevron');
+            if (body && chevron) {
+                body.classList.toggle('collapsed');
+                chevron.classList.toggle('collapsed');
+            }
+        });
     }
 });

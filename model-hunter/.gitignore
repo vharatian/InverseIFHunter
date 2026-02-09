@@ -44,6 +44,8 @@ build/
 .pytest_cache/
 htmlcov/
 .coverage
+test_results/
+.test_report.json
 
 # OS
 Thumbs.db

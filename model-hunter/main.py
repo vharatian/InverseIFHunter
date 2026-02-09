@@ -36,7 +36,9 @@ from models.schemas import (
     HuntConfig,
     HuntSession,
     HuntEvent,
-    ParsedNotebook
+    ParsedNotebook,
+    TurnData,
+    HuntStatus
 )
 from services.notebook_parser import notebook_parser
 from services.hunt_engine import hunt_engine
@@ -590,7 +592,23 @@ async def update_config(session_id: str, config: HuntConfig):
     if not session:
         raise HTTPException(404, "Session not found or expired")
     
+    # CRITICAL: Preserve multi-turn fields that the frontend doesn't send
+    # but were set by advance_turn. The frontend's getConfig() doesn't include
+    # conversation_history or custom_judge_system_prompt, so a naive replacement
+    # would wipe them out and cause Turn 2+ hunts to lose conversational context.
+    existing_conversation_history = session.config.conversation_history if session.config else []
+    existing_judge_prompt = session.config.custom_judge_system_prompt if session.config else None
+    
     session.config = config
+    
+    # Restore multi-turn fields if the incoming config didn't include them
+    if not config.conversation_history and existing_conversation_history:
+        session.config.conversation_history = existing_conversation_history
+        logger.info(f"Session {session_id}: Preserved conversation_history ({len(existing_conversation_history)} messages) during config update")
+    if not config.custom_judge_system_prompt and existing_judge_prompt:
+        session.config.custom_judge_system_prompt = existing_judge_prompt
+        logger.info(f"Session {session_id}: Preserved custom_judge_system_prompt during config update")
+    
     session.total_hunts = config.parallel_workers
     
     # Update storage
@@ -888,10 +906,19 @@ async def judge_reference(session_id: str):
         raise HTTPException(404, "Session not found")
     
     # Re-fetch notebook from Colab to get latest response_reference
+    # CRITICAL: Only re-fetch for Turn 1. In multi-turn mode (turn > 1),
+    # advance_turn has already updated session.notebook with the new turn's
+    # prompt, criteria, response, and judge prompt. Re-fetching from Colab
+    # would OVERWRITE these with the original Turn 1 data.
     storage = get_session_storage(session_id)
     old_ref = session.notebook.response_reference[:100] if session.notebook.response_reference else "empty"
     
-    if storage and "url" in storage:
+    if session.current_turn > 1:
+        # Multi-turn: DO NOT re-fetch from Colab — notebook was updated by advance_turn
+        logger.info(f"Session {session_id}: Turn {session.current_turn} — skipping Colab re-fetch "
+                    f"(using advance_turn data: prompt='{session.notebook.prompt[:80]}...', "
+                    f"criteria='{session.notebook.response_reference[:80]}...')")
+    elif storage and "url" in storage:
         try:
             # Re-fetch the notebook to get latest content
             parsed, _ = await notebook_parser.load_from_url(storage["url"])
@@ -1166,6 +1193,22 @@ async def save_reviews(session_id: str, request: Request):
         session.human_reviews = {}
     session.human_reviews = reviews
     
+    # Telemetry: Log human review submission
+    try:
+        if _telemetry_enabled:
+            # Count how many reviews have actual judgment content
+            reviews_with_judgment = sum(
+                1 for r in reviews.values()
+                if isinstance(r, dict) and r.get("judgment")
+            )
+            get_telemetry().log_event("human_review_submitted", {
+                "session_id": session_id,
+                "total_reviews": len(reviews),
+                "reviews_with_judgment": reviews_with_judgment
+            })
+    except Exception:
+        pass
+    
     return {"success": True, "saved_count": len(reviews)}
 
 
@@ -1244,15 +1287,39 @@ async def save_snapshot(request: Request):
             total_hunts_ran = snapshot.total_hunts_ran
             logger.info(f"📊 Total hunts ran: {total_hunts_ran} (selected: {selected_valid_count} valid of {len(results)} sent)")
             
-            # Construct notebook using existing export_notebook logic
-            modified_content = notebook_parser.export_notebook(
-                original_content=original_content,
-                parsed=parsed,
-                results=results,
-                include_reasoning=snapshot.include_reasoning,
-                human_reviews=snapshot.human_reviews,
-                total_hunts_ran=total_hunts_ran  # Use frontend's count (all successful responses)
+            # Check if this is a multi-turn session
+            is_multi_turn = (
+                snapshot.metadata and 
+                snapshot.metadata.get('is_multi_turn', False) and
+                snapshot.metadata.get('turns')
             )
+            
+            if is_multi_turn:
+                # Multi-turn export: includes all turns' data
+                turns_data = snapshot.metadata.get('turns', [])
+                conversation_history = snapshot.metadata.get('conversation_history', [])
+                logger.info(f"📝 Multi-turn export: {len(turns_data)} turns")
+                
+                modified_content = notebook_parser.export_multi_turn_notebook(
+                    original_content=original_content,
+                    parsed=parsed,
+                    turns=turns_data,
+                    breaking_turn_results=results,
+                    include_reasoning=snapshot.include_reasoning,
+                    human_reviews=snapshot.human_reviews,
+                    total_hunts_ran=total_hunts_ran,
+                    conversation_history=conversation_history
+                )
+            else:
+                # Standard single-turn export
+                modified_content = notebook_parser.export_notebook(
+                    original_content=original_content,
+                    parsed=parsed,
+                    results=results,
+                    include_reasoning=snapshot.include_reasoning,
+                    human_reviews=snapshot.human_reviews,
+                    total_hunts_ran=total_hunts_ran  # Use frontend's count (all successful responses)
+                )
             
             # Write to Drive (export_notebook returns JSON string)
             success = drive_client.update_file_content(file_id, modified_content)
@@ -1275,6 +1342,18 @@ async def save_snapshot(request: Request):
             raise HTTPException(500, result.get("error", "Write failed"))
         
         logger.info(f"✅ Successfully saved snapshot to file_id {file_id}")
+        
+        # Telemetry: Log snapshot save (task completion via snapshot method)
+        try:
+            if _telemetry_enabled:
+                get_telemetry().log_event("task_completed", {
+                    "session_id": snapshot.session_id if hasattr(snapshot, 'session_id') else None,
+                    "file_id": file_id,
+                    "save_method": "save_snapshot"
+                })
+        except Exception:
+            pass
+        
         return {
             "success": True,
             "file_id": file_id,
@@ -1385,6 +1464,19 @@ async def save_to_drive(session_id: str, request: Request):
         
         if not success:
             raise HTTPException(500, "Failed to update file on Google Drive (Auth error?)")
+        
+        # Telemetry: Log task completion (save to drive = trainer finished the task)
+        try:
+            if _telemetry_enabled:
+                get_telemetry().log_event("task_completed", {
+                    "session_id": session_id,
+                    "selected_hunts": len(selected_hunt_ids) if selected_hunt_ids else 0,
+                    "total_results": len(all_results),
+                    "has_human_reviews": bool(human_reviews),
+                    "save_method": "save_to_drive"
+                })
+        except Exception:
+            pass
             
         return {"success": True, "message": f"Successfully updated notebook {file_id}"}
         
@@ -1414,6 +1506,19 @@ async def get_all_results(session_id: str):
     # Merge: all_accumulated + current_completed (avoiding duplicates by hunt_id)
     existing_ids = {r.hunt_id for r in all_accumulated}
     merged_results = list(all_accumulated) + [r for r in current_completed if r.hunt_id not in existing_ids]
+    
+    # Telemetry: Log results viewing (trainer reviewing results for slot selection)
+    try:
+        if _telemetry_enabled:
+            breaking = sum(1 for r in merged_results if getattr(r, 'score', None) == 0)
+            get_telemetry().log_event("results_viewed", {
+                "session_id": session_id,
+                "total_results": len(merged_results),
+                "breaking_results": breaking,
+                "accumulated_count": len(all_accumulated)
+            })
+    except Exception:
+        pass
     
     return {
         "count": len(merged_results),
@@ -1548,6 +1653,226 @@ async def admin_status():
             status["rate_limiter"] = {"error": str(e)}
     
     return status
+
+
+# ============== Multi-Turn Endpoints ==============
+
+
+class AdvanceTurnRequest(BaseModel):
+    """Request to advance to the next turn in a multi-turn session."""
+    selected_hunt_id: int                    # Hunt ID of the "good" response from current turn
+    next_prompt: str                          # New prompt for next turn
+    next_criteria: str                        # New criteria/rubrics for next turn
+    next_judge_prompt: Optional[str] = None   # Optional judge system prompt for next turn
+
+
+@app.post("/api/advance-turn/{session_id}")
+async def advance_turn(session_id: str, request: AdvanceTurnRequest):
+    """
+    Advance to the next turn in a multi-turn session.
+    
+    Takes the selected "good" response from the current turn,
+    builds conversation history, and prepares the session for
+    the next turn with new prompt and criteria.
+    """
+    session = await hunt_engine.get_session_async(session_id)
+    if not session:
+        raise HTTPException(404, "Session not found")
+    
+    # Find the selected response from current results
+    selected_result = None
+    all_results = session.all_results + session.results
+    for r in all_results:
+        if r.hunt_id == request.selected_hunt_id:
+            selected_result = r
+            break
+    
+    if not selected_result:
+        raise HTTPException(400, f"Hunt ID {request.selected_hunt_id} not found in session results")
+    
+    if not selected_result.response:
+        raise HTTPException(400, f"Hunt ID {request.selected_hunt_id} has no response")
+    
+    current_turn = session.current_turn
+    
+    # Save current turn data
+    turn_data = TurnData(
+        turn_number=current_turn,
+        prompt=session.notebook.prompt,
+        response_reference=session.notebook.response_reference,
+        judge_system_prompt=session.config.custom_judge_system_prompt or session.notebook.judge_system_prompt,
+        selected_response=selected_result.response,
+        selected_hunt_id=request.selected_hunt_id,
+        judge_result={
+            "score": selected_result.judge_score,
+            "output": selected_result.judge_output,
+            "criteria": selected_result.judge_criteria,
+            "explanation": selected_result.judge_explanation,
+        },
+        status="completed",
+        results=[r.model_dump() for r in session.results if r.status == HuntStatus.COMPLETED]
+    )
+    session.turns.append(turn_data)
+    
+    # Build conversation history: add current turn's user prompt + selected response
+    session.conversation_history.append({
+        "role": "user",
+        "content": session.notebook.prompt
+    })
+    session.conversation_history.append({
+        "role": "assistant",
+        "content": selected_result.response
+    })
+    
+    # Advance to next turn
+    session.current_turn = current_turn + 1
+    
+    # Update notebook with new turn's prompt and criteria
+    session.notebook.prompt = request.next_prompt
+    session.notebook.response_reference = request.next_criteria
+    # CRITICAL: Update response to the selected good response from this turn
+    # This is the response that should be judged against the new turn's criteria
+    session.notebook.response = selected_result.response
+    if request.next_judge_prompt is not None:
+        session.notebook.judge_system_prompt = request.next_judge_prompt
+        session.config.custom_judge_system_prompt = request.next_judge_prompt
+    
+    # Update config conversation history (used by hunt engine for model calls)
+    session.config.conversation_history = list(session.conversation_history)
+    
+    # Mark notebook as multi-turn
+    session.notebook.is_multi_turn = True
+    
+    # Reset current run results for the new turn
+    session.results = []
+    session.all_results = []
+    session.completed_hunts = 0
+    session.breaks_found = 0
+    session.status = HuntStatus.PENDING
+    
+    # Persist to Redis
+    if _session_store_enabled:
+        try:
+            store = get_session_store()
+            await store.save_session(session_id, session.model_dump())
+        except Exception as e:
+            logger.error(f"Failed to persist session after turn advance: {e}")
+    
+    # Also persist to disk storage
+    try:
+        storage = get_session_storage(session_id)
+        if storage:
+            storage["session_data"] = session.model_dump()
+            save_session_storage(session_id, storage)
+    except Exception as e:
+        logger.error(f"Failed to persist to disk after turn advance: {e}")
+    
+    logger.info(f"Session {session_id}: Advanced to turn {session.current_turn} "
+                f"(history: {len(session.conversation_history)} messages)")
+    
+    return {
+        "success": True,
+        "session_id": session_id,
+        "current_turn": session.current_turn,
+        "conversation_history_length": len(session.conversation_history),
+        "turns_completed": len(session.turns),
+        "prompt": session.notebook.prompt,
+        "response_reference": session.notebook.response_reference,
+    }
+
+
+@app.post("/api/mark-breaking/{session_id}")
+async def mark_breaking(session_id: str):
+    """
+    Mark the current turn as the breaking turn.
+    
+    This enters the standard review/selection flow.
+    The trainer will then do blind human review of the 
+    worst responses from this turn.
+    """
+    session = await hunt_engine.get_session_async(session_id)
+    if not session:
+        raise HTTPException(404, "Session not found")
+    
+    current_turn = session.current_turn
+    
+    # Save current turn data with "breaking" status
+    turn_data = TurnData(
+        turn_number=current_turn,
+        prompt=session.notebook.prompt,
+        response_reference=session.notebook.response_reference,
+        judge_system_prompt=session.config.custom_judge_system_prompt or session.notebook.judge_system_prompt,
+        status="breaking",
+        results=[r.model_dump() for r in session.results if r.status == HuntStatus.COMPLETED]
+    )
+    session.turns.append(turn_data)
+    session.notebook.is_multi_turn = len(session.turns) > 1
+    
+    # Persist
+    if _session_store_enabled:
+        try:
+            store = get_session_store()
+            await store.save_session(session_id, session.model_dump())
+        except Exception as e:
+            logger.error(f"Failed to persist session after mark-breaking: {e}")
+    
+    logger.info(f"Session {session_id}: Turn {current_turn} marked as breaking "
+                f"(total turns: {len(session.turns)})")
+    
+    return {
+        "success": True,
+        "session_id": session_id,
+        "breaking_turn": current_turn,
+        "total_turns": len(session.turns),
+        "is_multi_turn": session.notebook.is_multi_turn,
+    }
+
+
+@app.get("/api/turn-status/{session_id}")
+async def get_turn_status(session_id: str):
+    """
+    Get current turn status, conversation history, and all past turns.
+    """
+    session = await hunt_engine.get_session_async(session_id)
+    if not session:
+        raise HTTPException(404, "Session not found")
+    
+    return {
+        "session_id": session_id,
+        "current_turn": session.current_turn,
+        "is_multi_turn": session.notebook.is_multi_turn if session.notebook else False,
+        "conversation_history": session.conversation_history,
+        "turns": [t.model_dump() for t in session.turns],
+        "current_prompt": session.notebook.prompt if session.notebook else "",
+        "current_criteria": session.notebook.response_reference if session.notebook else "",
+        "current_judge_prompt": session.notebook.judge_system_prompt if session.notebook else "",
+        "status": session.status.value,
+    }
+
+
+@app.get("/api/admin/active-hunts")
+async def get_active_hunts():
+    """
+    Return count of sessions with status RUNNING.
+    Used by deploy script to wait for active hunts to finish.
+    """
+    active_count = 0
+    active_sessions = []
+    
+    for sid, session in hunt_engine.sessions.items():
+        if session.status == HuntStatus.RUNNING:
+            active_count += 1
+            active_sessions.append({
+                "session_id": sid,
+                "current_turn": session.current_turn,
+                "completed_hunts": session.completed_hunts,
+                "total_hunts": session.total_hunts,
+            })
+    
+    return {
+        "count": active_count,
+        "sessions": active_sessions,
+    }
 
 
 # ============== Static Files & Frontend ==============
