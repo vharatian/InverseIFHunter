@@ -44,6 +44,8 @@ class OpenRouterClient(BaseAPIClient):
     MAX_TOKENS = {
         "nvidia/nemotron-3-nano-30b-a3b": 32768,
         "qwen/qwen3-235b-a22b-thinking-2507": 131072,
+        "anthropic/claude-opus-4.5": 16384,
+        "anthropic/claude-sonnet-4.5": 8192,
     }
     
     def __init__(self, api_key: Optional[str] = None):
@@ -101,7 +103,9 @@ class OpenRouterClient(BaseAPIClient):
         model_lower = model.lower()
         is_nemotron = 'nemotron' in model_lower
         is_claude = 'claude' in model_lower or 'anthropic' in model_lower
-        is_reasoning_model = not is_nemotron and not is_claude  # Only Qwen-type models support reasoning param
+        is_opus = 'opus' in model_lower
+        # Opus needs reasoning to handle complex prompts. Sonnet and Nemotron don't.
+        is_reasoning_model = not is_nemotron and (not is_claude or is_opus)
         
         if messages:
             # Multi-turn: conversation history + current prompt
