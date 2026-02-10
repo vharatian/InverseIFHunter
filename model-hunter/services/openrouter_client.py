@@ -105,8 +105,11 @@ class OpenRouterClient(BaseAPIClient):
         is_nemotron = 'nemotron' in model_lower
         is_claude = 'claude' in model_lower or 'anthropic' in model_lower
         is_opus = 'opus' in model_lower
-        # Opus needs reasoning to handle complex prompts. Sonnet and Nemotron don't.
-        is_reasoning_model = not is_nemotron and (not is_claude or is_opus)
+        is_opus_46 = is_opus and '4.6' in model_lower
+        # Reasoning param: Qwen and Opus 4.5 need it. Nemotron and Sonnet don't.
+        # Opus 4.6: reasoning param causes empty responses on OpenRouter (both streaming
+        #   and non-streaming); exclude it — Claude handles extended thinking natively.
+        is_reasoning_model = not is_nemotron and (not is_claude or (is_opus and not is_opus_46))
         
         if messages:
             # Multi-turn: conversation history + current prompt
@@ -131,9 +134,10 @@ class OpenRouterClient(BaseAPIClient):
                 "allow_fallbacks": False
             }
         
-        # Add reasoning parameter ONLY for models that support it (Qwen-type)
+        # Add reasoning parameter for Qwen and Opus 4.5
         # Nemotron: not a reasoning model, causes empty responses
-        # Claude: doesn't use OpenRouter's reasoning param, has its own extended thinking
+        # Sonnet: doesn't need reasoning
+        # Opus 4.6: reasoning param causes empty responses on OpenRouter
         if is_reasoning_model and reasoning_budget_percent > 0:
             payload["reasoning"] = {
                 "exclude": False,
@@ -141,11 +145,6 @@ class OpenRouterClient(BaseAPIClient):
             }
         elif is_reasoning_model:
             payload["reasoning"] = {"exclude": True}
-        
-        # Opus 4.6 streaming + reasoning returns empty on OpenRouter — use non-streaming
-        if is_opus and '4.6' in model_lower and stream:
-            stream = False
-            payload["stream"] = False
         
         client = await self._get_client()
         if stream:
