@@ -142,6 +142,11 @@ class OpenRouterClient(BaseAPIClient):
         elif is_reasoning_model:
             payload["reasoning"] = {"exclude": True}
         
+        # Opus 4.6 streaming + reasoning returns empty on OpenRouter — use non-streaming
+        if is_opus and '4.6' in model_lower and stream:
+            stream = False
+            payload["stream"] = False
+        
         client = await self._get_client()
         if stream:
             return await self._stream_response(client, payload, timeout)

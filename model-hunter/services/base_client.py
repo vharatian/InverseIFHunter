@@ -160,7 +160,7 @@ class BaseAPIClient(ABC):
         prompt: str,
         model: str,
         max_retries: int = 3,
-        timeout: float = 120.0,
+        timeout: float = 180.0,
         **kwargs
     ) -> Tuple[str, str, Optional[str]]:
         """
