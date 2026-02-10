@@ -98,7 +98,11 @@ class OpenRouterClient(BaseAPIClient):
             max_tokens = self._get_max_tokens(model)
         
         # Build messages - prepend conversation history if provided (multi-turn)
-        is_nemotron = 'nemotron' in model.lower()
+        model_lower = model.lower()
+        is_nemotron = 'nemotron' in model_lower
+        is_claude = 'claude' in model_lower or 'anthropic' in model_lower
+        is_reasoning_model = not is_nemotron and not is_claude  # Only Qwen-type models support reasoning param
+        
         if messages:
             # Multi-turn: conversation history + current prompt
             messages = list(messages) + [{"role": "user", "content": prompt}]
@@ -111,20 +115,18 @@ class OpenRouterClient(BaseAPIClient):
             "messages": messages,
             "max_tokens": max_tokens,
             "stream": stream,
-            "temperature": 0.8 if not is_nemotron else 0.6
+            "temperature": 0.7 if is_claude else (0.6 if is_nemotron else 0.8)
         }
         
-        # Add reasoning parameter only for reasoning-capable models
-        # Nemotron is NOT a reasoning model - sending reasoning params causes empty responses
-        if is_nemotron:
-            # No reasoning parameter for Nemotron - it doesn't support it
-            pass
-        elif reasoning_budget_percent > 0:
+        # Add reasoning parameter ONLY for models that support it (Qwen-type)
+        # Nemotron: not a reasoning model, causes empty responses
+        # Claude: doesn't use OpenRouter's reasoning param, has its own extended thinking
+        if is_reasoning_model and reasoning_budget_percent > 0:
             payload["reasoning"] = {
                 "exclude": False,
                 "effort": "high"
             }
-        else:
+        elif is_reasoning_model:
             payload["reasoning"] = {"exclude": True}
         
         client = await self._get_client()
