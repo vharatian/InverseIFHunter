@@ -123,15 +123,20 @@ class OpenRouterClient(BaseAPIClient):
             "temperature": 0.7 if is_claude else (0.6 if is_nemotron else 0.8)
         }
         
-        # Force Claude Opus 4.5 through Anthropic directly (not Bedrock)
-        # Bedrock has stricter content filtering that causes empty responses for 4.5
-        # Opus 4.6: do NOT force Anthropic — reasoning+Anthropic returns empty,
-        #   but reasoning+Bedrock works. Let OpenRouter pick the best provider.
-        if is_opus and '4.6' not in model_lower:
-            payload["provider"] = {
-                "order": ["Anthropic"],
-                "allow_fallbacks": False
-            }
+        # Provider routing per Opus version:
+        # Opus 4.5: Force Anthropic (Bedrock content filtering causes empty responses)
+        # Opus 4.6: Force Bedrock (Anthropic + reasoning returns empty, Bedrock works)
+        if is_opus:
+            if '4.6' in model_lower:
+                payload["provider"] = {
+                    "order": ["Amazon Bedrock"],
+                    "allow_fallbacks": False
+                }
+            else:
+                payload["provider"] = {
+                    "order": ["Anthropic"],
+                    "allow_fallbacks": False
+                }
         
         # Add reasoning parameter for Qwen and Opus models
         # Nemotron: not a reasoning model, causes empty responses
