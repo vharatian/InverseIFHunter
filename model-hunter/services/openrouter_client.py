@@ -118,6 +118,14 @@ class OpenRouterClient(BaseAPIClient):
             "temperature": 0.7 if is_claude else (0.6 if is_nemotron else 0.8)
         }
         
+        # Force Claude Opus through Anthropic directly (not Bedrock)
+        # Bedrock has stricter content filtering that causes empty responses
+        if 'opus' in model_lower:
+            payload["provider"] = {
+                "order": ["Anthropic"],
+                "allow_fallbacks": False
+            }
+        
         # Add reasoning parameter ONLY for models that support it (Qwen-type)
         # Nemotron: not a reasoning model, causes empty responses
         # Claude: doesn't use OpenRouter's reasoning param, has its own extended thinking
