@@ -137,7 +137,8 @@ const PROVIDER_MODELS = {
         { id: 'nvidia/nemotron-3-nano-30b-a3b', name: 'Nemotron-3-Nano (Fast)' },
         { id: 'qwen/qwen3-235b-a22b-thinking-2507', name: 'Qwen3-235B (Thinking)' },
         { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5' },
-        { id: 'anthropic/claude-opus-4.5', name: 'Claude Opus 4.5' }
+        { id: 'anthropic/claude-opus-4.5', name: 'Claude Opus 4.5' },
+        { id: 'anthropic/claude-opus-4.6', name: 'Claude Opus 4.6' }
     ],
     'fireworks': [
         // Only Qwen3 for Fireworks (Nemotron not available on serverless)

@@ -45,6 +45,7 @@ class OpenRouterClient(BaseAPIClient):
         "nvidia/nemotron-3-nano-30b-a3b": 32768,
         "qwen/qwen3-235b-a22b-thinking-2507": 131072,
         "anthropic/claude-opus-4.5": 16384,
+        "anthropic/claude-opus-4.6": 16384,
         "anthropic/claude-sonnet-4.5": 8192,
     }
     
