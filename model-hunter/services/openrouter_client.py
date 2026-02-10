@@ -105,11 +105,8 @@ class OpenRouterClient(BaseAPIClient):
         is_nemotron = 'nemotron' in model_lower
         is_claude = 'claude' in model_lower or 'anthropic' in model_lower
         is_opus = 'opus' in model_lower
-        is_opus_46 = is_opus and '4.6' in model_lower
-        # Reasoning param: Qwen and Opus 4.5 need it. Nemotron and Sonnet don't.
-        # Opus 4.6: reasoning param causes empty responses on OpenRouter (both streaming
-        #   and non-streaming); exclude it — Claude handles extended thinking natively.
-        is_reasoning_model = not is_nemotron and (not is_claude or (is_opus and not is_opus_46))
+        # Reasoning param: Qwen and Opus models need it. Nemotron and Sonnet don't.
+        is_reasoning_model = not is_nemotron and (not is_claude or is_opus)
         
         if messages:
             # Multi-turn: conversation history + current prompt
@@ -126,18 +123,19 @@ class OpenRouterClient(BaseAPIClient):
             "temperature": 0.7 if is_claude else (0.6 if is_nemotron else 0.8)
         }
         
-        # Force Claude Opus through Anthropic directly (not Bedrock)
-        # Bedrock has stricter content filtering that causes empty responses
-        if 'opus' in model_lower:
+        # Force Claude Opus 4.5 through Anthropic directly (not Bedrock)
+        # Bedrock has stricter content filtering that causes empty responses for 4.5
+        # Opus 4.6: do NOT force Anthropic — reasoning+Anthropic returns empty,
+        #   but reasoning+Bedrock works. Let OpenRouter pick the best provider.
+        if is_opus and '4.6' not in model_lower:
             payload["provider"] = {
                 "order": ["Anthropic"],
                 "allow_fallbacks": False
             }
         
-        # Add reasoning parameter for Qwen and Opus 4.5
+        # Add reasoning parameter for Qwen and Opus models
         # Nemotron: not a reasoning model, causes empty responses
         # Sonnet: doesn't need reasoning
-        # Opus 4.6: reasoning param causes empty responses on OpenRouter
         if is_reasoning_model and reasoning_budget_percent > 0:
             payload["reasoning"] = {
                 "exclude": False,
