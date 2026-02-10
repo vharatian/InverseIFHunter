@@ -6,17 +6,54 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Model Hunter - Red Team LLM Models</title>
     <meta name="description" content="Red-team LLM models with parallel hunts and automated judging">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <!-- Modern Hunter Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=21">
+    <link rel="stylesheet" href="/static/style.css?v=23">
     <!-- Marked.js for Markdown parsing -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 
 <body>
+    <!-- Trainer Registration Modal (mandatory, non-dismissible) -->
+    <!-- Hidden by default. Inline script below shows it only if not registered. -->
+    <div id="trainerRegistrationModal" class="trainer-reg-overlay hidden">
+        <div class="trainer-reg-card">
+            <h2 class="trainer-reg-title">Welcome to Model Hunter</h2>
+            <p class="trainer-reg-subtitle">Please enter your details to get started. You only need to do this once.</p>
+            <form id="trainerRegForm" class="trainer-reg-form" autocomplete="on" onsubmit="return false;">
+                <div class="trainer-reg-field">
+                    <label for="trainerNameInput">Name</label>
+                    <input type="text" id="trainerNameInput" name="name" placeholder="e.g. Tyler" required autocomplete="name" class="trainer-reg-input">
+                </div>
+                <div class="trainer-reg-field">
+                    <label for="trainerEmailInput">Turing Email</label>
+                    <input type="email" id="trainerEmailInput" name="email" placeholder="e.g. tyler@turing.com" required autocomplete="email" class="trainer-reg-input">
+                </div>
+                <button type="submit" class="btn btn-primary btn-lg trainer-reg-btn" id="trainerRegSubmitBtn">
+                    Get Started
+                </button>
+            </form>
+        </div>
+    </div>
+    <script>
+        // Show registration modal immediately if not registered (runs before app.js)
+        if (!localStorage.getItem('trainer_email') || !localStorage.getItem('trainer_name')) {
+            document.getElementById('trainerRegistrationModal').classList.remove('hidden');
+        }
+        // Clean up URL if registration form leaked query params
+        if (window.location.search.includes('name=') || window.location.search.includes('email=')) {
+            window.history.replaceState({}, '', window.location.pathname);
+        }
+    </script>
+
     <!-- Header -->
     <header class="header">
         <div class="container header-content">
+            <div class="trainer-identity" id="trainerIdentity" style="display: none;">
+                <span class="trainer-identity-label" id="trainerIdentityLabel"></span>
+                <button class="trainer-identity-change" id="trainerChangeBtn" title="Change identity">Change</button>
+            </div>
             <div class="header-actions" style="margin-left: auto;">
                 <button class="theme-toggle" id="themeToggle" title="Toggle theme">
                     🌙
@@ -57,7 +94,7 @@
                             <div class="url-input-group">
                                 <input type="url" id="colabUrlInput"
                                     placeholder="https://colab.research.google.com/drive/..." class="url-input">
-                                <button type="button" id="fetchUrlBtn" class="btn btn-secondary fetch-btn-cute">
+                                <button type="button" id="fetchUrlBtn" class="btn btn-secondary fetch-btn-cute" onclick="if(typeof fetchFromUrl==='function')fetchFromUrl();">
                                     📥 Fetch
                                 </button>
                             </div>
@@ -313,6 +350,61 @@
                 </div>
             </div>
 
+            <!-- Calibration Panel (Turn 2+ only, hidden by default) -->
+            <div class="card hidden" id="calibrationPanel">
+                <div class="card-header">
+                    <h2 class="card-title">
+                        <span class="card-title-icon">🔬</span>
+                        <span>Calibration</span>
+                        <span class="turn-badge section-turn-badge" id="calibrationTurnBadge"></span>
+                    </h2>
+                </div>
+
+                <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1rem;">
+                    Generate a single response, review it, then judge it against your criteria. 
+                    Tweak your criteria or judge prompt and re-judge until calibrated. 
+                    You must judge at least once before starting a hunt.
+                </p>
+
+                <div style="display: flex; gap: 0.75rem; margin-bottom: 1rem;">
+                    <button class="btn btn-secondary" id="generateOneBtn" type="button">
+                        Generate 1 Response
+                    </button>
+                    <button class="btn btn-secondary hidden" id="regenerateBtn" type="button">
+                        Regenerate
+                    </button>
+                    <button class="btn btn-primary hidden" id="judgeCalibrationBtn" type="button">
+                        Judge This Response
+                    </button>
+                </div>
+
+                <!-- Loading indicator -->
+                <div id="calibrationLoading" class="hidden" style="padding: 1rem; text-align: center; color: var(--text-muted);">
+                    <span id="calibrationLoadingText">Generating response...</span>
+                </div>
+
+                <!-- Generated response display -->
+                <div id="calibrationResponseArea" class="hidden">
+                    <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Generated Response:</label>
+                    <div id="calibrationResponseText" style="
+                        background: var(--bg-primary);
+                        border: 1px solid var(--border);
+                        border-radius: 8px;
+                        padding: 1rem;
+                        font-size: 0.9rem;
+                        color: var(--text-secondary);
+                        white-space: pre-wrap;
+                        max-height: 400px;
+                        overflow-y: auto;
+                        line-height: 1.5;
+                    "></div>
+                    <div id="calibrationModelInfo" style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.5rem;"></div>
+                </div>
+
+                <!-- Judge result display -->
+                <div id="calibrationJudgeResult" class="hidden" style="margin-top: 1rem;"></div>
+            </div>
+
             <!-- Hunt Configuration Card (NOW SECOND) -->
             <div class="card">
                 <div class="card-header">
@@ -365,6 +457,8 @@
                         <select id="modelSelect">
                             <option value="nvidia/nemotron-3-nano-30b-a3b">Nemotron-3-Nano (Fast)</option>
                             <option value="qwen/qwen3-235b-a22b-thinking-2507">Qwen3-235B (Thinking)</option>
+                            <option value="anthropic/claude-sonnet-4.5">Claude Sonnet 4.5</option>
+                            <option value="anthropic/claude-opus-4.5">Claude Opus 4.5</option>
                         </select>
                         <small id="modelLockedIndicator" class="model-locked-hint hidden" style="display: none; color: var(--warning); font-size: 0.8rem; margin-top: 0.25rem;">
                             🔒 Locked to <strong id="modelLockedName">-</strong> (from notebook metadata)
@@ -793,7 +887,7 @@
     <!-- Toast Container -->
     <div id="toastContainer" style="position: fixed; bottom: 1rem; right: 1rem; z-index: 1000;"></div>
 
-    <script src="/static/app.js?v=233"></script>
+    <script src="/static/app.js?v=252"></script>
 </body>
 
 </html>

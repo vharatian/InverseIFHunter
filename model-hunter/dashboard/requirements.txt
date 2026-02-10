@@ -1,5 +1,9 @@
-# Model Hunter Dashboard Dependencies
-# Run: pip install -r requirements.txt
-
+# Model Hunter Admin Dashboard Dependencies
 fastapi>=0.100.0
 uvicorn>=0.23.0
+sse-starlette>=1.6.0
+itsdangerous>=2.1.0
+scikit-learn>=1.3.0
+joblib>=1.3.0
+pandas>=2.0.0
+pyarrow>=13.0.0

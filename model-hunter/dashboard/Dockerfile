@@ -9,11 +9,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Create telemetry directory
-RUN mkdir -p /app/.telemetry
+# Create directories
+RUN mkdir -p /app/.telemetry /app/.storage
 
 # Expose port
 EXPOSE 8001
 
-# Run the dashboard
-CMD ["python", "main_enhanced.py"]
+# Run the admin dashboard
+CMD ["python", "main.py"]

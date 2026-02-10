@@ -135,7 +135,9 @@ document.addEventListener('DOMContentLoaded', () => {
 const PROVIDER_MODELS = {
     'openrouter': [
         { id: 'nvidia/nemotron-3-nano-30b-a3b', name: 'Nemotron-3-Nano (Fast)' },
-        { id: 'qwen/qwen3-235b-a22b-thinking-2507', name: 'Qwen3-235B (Thinking)' }
+        { id: 'qwen/qwen3-235b-a22b-thinking-2507', name: 'Qwen3-235B (Thinking)' },
+        { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5' },
+        { id: 'anthropic/claude-opus-4.5', name: 'Claude Opus 4.5' }
     ],
     'fireworks': [
         // Only Qwen3 for Fireworks (Nemotron not available on serverless)
@@ -209,6 +211,162 @@ const state = {
     huntsThisTurn: 0,         // Hunts in the CURRENT turn (resets on new turn)
     previousTurnHuntIds: new Set()  // hunt_ids from completed turns (excluded from current turn fetch)
 };
+
+
+// ============== Trainer Registration ==============
+
+/**
+ * Trainer registration system.
+ * Trainers must enter name + work email before using the tool.
+ * Stored in localStorage for persistence across sessions/tabs.
+ * Sent to backend with every session-creating API call.
+ */
+
+function getTrainerInfo() {
+    const email = localStorage.getItem('trainer_email');
+    const name = localStorage.getItem('trainer_name');
+    if (email && name) {
+        return { email, name };
+    }
+    return null;
+}
+
+function isTrainerRegistered() {
+    return getTrainerInfo() !== null;
+}
+
+function showTrainerIdentity() {
+    const info = getTrainerInfo();
+    const identityEl = document.getElementById('trainerIdentity');
+    const labelEl = document.getElementById('trainerIdentityLabel');
+    if (info && identityEl && labelEl) {
+        labelEl.textContent = `${info.name} (${info.email})`;
+        identityEl.style.display = 'flex';
+    }
+}
+
+function hideTrainerRegistration() {
+    const modal = document.getElementById('trainerRegistrationModal');
+    if (modal) {
+        modal.classList.add('hidden');
+    }
+}
+
+function showTrainerRegistration() {
+    const modal = document.getElementById('trainerRegistrationModal');
+    if (modal) {
+        modal.classList.remove('hidden');
+    }
+}
+
+async function registerTrainer(name, email) {
+    // Save to localStorage immediately
+    localStorage.setItem('trainer_name', name);
+    localStorage.setItem('trainer_email', email);
+    
+    // Register with backend (fire-and-forget, don't block on failure)
+    try {
+        await fetch('/api/register-trainer', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, email })
+        });
+    } catch (e) {
+        // Backend registration is best-effort — localStorage is the source of truth for the frontend
+        console.warn('Trainer registration API call failed (non-blocking):', e);
+    }
+}
+
+function initTrainerRegistration() {
+    const form = document.getElementById('trainerRegForm');
+    const changeBtn = document.getElementById('trainerChangeBtn');
+    
+    if (isTrainerRegistered()) {
+        // Already registered — hide modal, show identity
+        hideTrainerRegistration();
+        showTrainerIdentity();
+        // Silent re-register to update last_seen on backend
+        const info = getTrainerInfo();
+        registerTrainer(info.name, info.email);
+    }
+    // If not registered, modal is already visible (not hidden by default)
+    
+    if (form) {
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const nameInput = document.getElementById('trainerNameInput');
+            const emailInput = document.getElementById('trainerEmailInput');
+            const submitBtn = document.getElementById('trainerRegSubmitBtn');
+            
+            const name = nameInput.value.trim();
+            const email = emailInput.value.trim();
+            
+            if (!name || !email) return;
+            
+            // Basic email format check
+            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+                showToast('Please enter a valid email address', 'error');
+                return;
+            }
+            
+            // Save to localStorage FIRST (this is the source of truth)
+            localStorage.setItem('trainer_name', name);
+            localStorage.setItem('trainer_email', email);
+            
+            // Hide modal and show identity IMMEDIATELY (don't wait for API)
+            hideTrainerRegistration();
+            showTrainerIdentity();
+            
+            // Register with backend in background (fire-and-forget)
+            registerTrainer(name, email);
+        });
+    }
+    
+    if (changeBtn) {
+        changeBtn.addEventListener('click', () => {
+            localStorage.removeItem('trainer_name');
+            localStorage.removeItem('trainer_email');
+            const identityEl = document.getElementById('trainerIdentity');
+            if (identityEl) identityEl.style.display = 'none';
+            // Pre-fill with previous values for convenience
+            const info = getTrainerInfo();
+            showTrainerRegistration();
+            // Focus the name field
+            const nameInput = document.getElementById('trainerNameInput');
+            if (nameInput) nameInput.focus();
+        });
+    }
+}
+
+// Heartbeat — sends trainer_email every 60s while tab is visible
+let _heartbeatInterval = null;
+
+function startHeartbeat() {
+    if (_heartbeatInterval) return;
+    _heartbeatInterval = setInterval(() => {
+        const email = localStorage.getItem('trainer_email');
+        if (document.visibilityState === 'visible' && state.sessionId && email) {
+            fetch('/api/heartbeat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ session_id: state.sessionId, trainer_email: email })
+            }).catch(() => {}); // fire-and-forget
+        }
+    }, 60000);
+}
+
+function stopHeartbeat() {
+    if (_heartbeatInterval) {
+        clearInterval(_heartbeatInterval);
+        _heartbeatInterval = null;
+    }
+}
+
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && state.sessionId) {
+        startHeartbeat();
+    }
+});
 
 
 // ============== DOM Elements ==============
@@ -381,6 +539,57 @@ function getTurnColorClass(turnNumber) {
 }
 
 // ================================================================
+// SHARED HELPERS — Extracted from duplicate patterns
+// ================================================================
+
+/**
+ * Extract model key ("nemotron" or "qwen") from a model string.
+ * Returns null if not recognized.
+ */
+function getModelKey(modelStr) {
+    if (!modelStr) return null;
+    const lower = modelStr.toLowerCase();
+    if (lower.includes('nemotron')) return 'nemotron';
+    if (lower.includes('qwen')) return 'qwen';
+    if (lower.includes('sonnet')) return 'sonnet';
+    if (lower.includes('opus')) return 'opus';
+    return null;
+}
+
+/**
+ * Get judge score from a result object (handles multiple field names).
+ */
+function getJudgeScore(result) {
+    return result.judge_score ?? result.score ?? null;
+}
+
+/**
+ * Check if a result is a breaking response.
+ */
+function isBreakingResult(result) {
+    const score = getJudgeScore(result);
+    return result.is_breaking || score === 0;
+}
+
+/**
+ * Reset all turn-level state. Called when advancing to a new turn.
+ */
+function resetTurnState() {
+    state.allResponses = [];
+    state.results = [];
+    state.selectedRowNumbers = [];
+    state.humanReviews = {};
+    state.selectionConfirmed = false;
+    state.llmRevealed = false;
+    state.referenceValidated = false;
+    state._selectedGoodResponse = null;
+    state.huntsThisTurn = 0;
+    state.huntLimitReached = false;
+    state.totalHuntsCount = 0;
+    state.currentRunStartOffset = 0;
+}
+
+// ================================================================
 // INSIGHT TIPS — Data-driven contextual tips from ML analysis
 // Source: 46,686 hunts across 741 trainers
 // ================================================================
@@ -388,49 +597,49 @@ function getTurnColorClass(turnNumber) {
 const INSIGHT_TIPS = {
     // Config / pre-hunt tips
     config: [
-        { text: 'Tasks with <strong>8+ criteria</strong> achieve a ~48% break rate — nearly double the average.', icon: '💡' },
-        { text: 'The average break rate across all hunts is <strong>26.3%</strong>. Don\'t worry if the first few pass — persistence pays off.', icon: '📊' },
-        { text: '<strong>Creative domains</strong> like Sports & Recreation yield ~34% break rates — try diverse topics.', icon: '🎯' },
-        { text: 'Format-constraint criteria (exact word positions, bold/italic) are especially effective at breaking models.', icon: '✨' },
-        { text: 'Policy & Legal Analysis tasks have the <strong>highest break rate at ~60%</strong> — complex reasoning trips models up.', icon: '⚖️' },
+        { text: '<strong>More criteria = more breaks.</strong> Tasks with 8+ criteria break models nearly twice as often as tasks with 3.', icon: '💡' },
+        { text: '<strong>Format-specific criteria are the most effective.</strong> Requiring exact word placement, bullet counts, or bold/italic formatting trips models up consistently.', icon: '✨' },
+        { text: 'Don\'t worry if the first few hunts pass — the average break rate is about 1 in 4. Keep going.', icon: '📊' },
+        { text: '<strong>Specificity matters.</strong> Vague criteria like "good response" rarely break models. Precise, measurable criteria do.', icon: '🎯' },
+        { text: 'Try combining factual accuracy criteria with strict formatting requirements — models struggle to satisfy both simultaneously.', icon: '💡' },
     ],
     // Model-specific tips
     nemotron: [
-        { text: 'Nemotron has a <strong>24% break rate</strong>. It struggles most with format constraints and multi-step criteria.', icon: '🤖' },
-        { text: 'Nemotron is weaker on <strong>criteria C5–C6</strong> (regex/format checks) — craft criteria around structured output.', icon: '🔍' },
+        { text: 'Nemotron has a lower break rate (24%). It\'s faster but more resilient — focus on strict formatting and structured output criteria.', icon: '🤖' },
+        { text: 'Nemotron struggles most with multi-step instructions. Try criteria that require a specific sequence of actions.', icon: '🔍' },
     ],
     qwen: [
-        { text: 'Qwen3 has a <strong>30% break rate</strong> — higher than Nemotron. It struggles with complex multi-step reasoning.', icon: '🤖' },
-        { text: 'Qwen3 is weaker on <strong>criteria C7–C8</strong> (character-level checks) — exploit exact-format requirements.', icon: '🔍' },
+        { text: 'Qwen has a higher break rate (30%) but is slower. It\'s weaker on character-level precision — try exact word count or position requirements.', icon: '🤖' },
+        { text: 'Qwen\'s reasoning is strong but its output formatting is exploitable. Use criteria that demand precise structure.', icon: '🔍' },
     ],
     // During hunting
     hunting: [
-        { text: 'Hang tight — the judge evaluates each criterion independently. Partial breaks are common.', icon: '⏳' },
-        { text: 'Each hunt tests the model\'s consistency. Even small prompt variations can reveal new weaknesses.', icon: '🔬' },
-        { text: 'Across <strong>46K+ hunts</strong>, models fail ~1 in 4 attempts. Every hunt counts.', icon: '📈' },
+        { text: 'The judge evaluates each criterion independently. A response can pass 4 out of 5 criteria and still break on the last one.', icon: '⏳' },
+        { text: 'Each hunt is a fresh generation — the model doesn\'t remember previous attempts. Every try is independent.', icon: '🔬' },
+        { text: 'If you\'re getting all passes, consider tightening your criteria wording or adding a formatting constraint.', icon: '📈' },
     ],
     // Post-hunt / results
     results: [
-        { text: 'You need at least <strong>3 breaks</strong> to proceed. If you\'re close, try adjusting criteria wording.', icon: '🎯' },
-        { text: 'Successful trainers review failing criteria to understand <strong>which specific rules</strong> trip models up.', icon: '🔎' },
-        { text: 'The top trainers average <strong>3.6 criteria per task</strong> — quality and specificity beat quantity.', icon: '🏆' },
+        { text: 'Look at which specific criteria failed. This tells you the model\'s weak point — double down on it in the next turn.', icon: '🔎' },
+        { text: 'If no breaks were found, try rephrasing one criterion to be more specific rather than adding entirely new ones.', icon: '🎯' },
+        { text: '<strong>Quality over quantity.</strong> 3–4 well-written criteria that target specific weaknesses outperform 10 generic ones.', icon: '🏆' },
     ],
     // Selection tips
     selection: [
-        { text: 'Pick responses where the model <strong>confidently gave wrong output</strong> — these are the most valuable breaks.', icon: '✅' },
-        { text: 'A mix of <strong>3 breaking + 1 passing</strong> gives reviewers contrast to evaluate the boundary.', icon: '⚖️' },
+        { text: 'Pick responses where the model <strong>confidently gave wrong output</strong> — these are the most valuable for training.', icon: '✅' },
+        { text: 'A mix of <strong>3 breaking + 1 passing</strong> gives reviewers contrast to see exactly where the model\'s boundary is.', icon: '⚖️' },
     ],
     // Multi-turn decision
     multiTurn: [
-        { text: 'Most trainers continue until they find a clear breaking pattern across 2–3 turns.', icon: '🔄' },
         { text: 'Refining your prompt across turns often uncovers <strong>deeper model weaknesses</strong> than repeating the same one.', icon: '💡' },
-        { text: 'Adding more criteria in subsequent turns can <strong>dramatically increase</strong> break rates.', icon: '📊' },
+        { text: 'In the next turn, try adding a formatting criterion if you haven\'t — it\'s the most common way to find breaks.', icon: '✨' },
+        { text: 'Review which criteria passed in this turn. The ones that barely passed are good targets to make stricter.', icon: '📊' },
     ],
     // Summary / final
     summary: [
-        { text: 'Great work! Every hunt contributes to improving model safety across the community.', icon: '🎉', type: 'success' },
-        { text: 'The most successful trainers <strong>explore multiple domains</strong> and refine their criteria iteratively.', icon: '🧭' },
-        { text: 'Your results help identify blind spots in model behavior — this data directly improves training.', icon: '🛡️' },
+        { text: 'Great work! Every break you find helps improve the model\'s safety and reliability.', icon: '🎉', type: 'success' },
+        { text: 'Consider trying a different model next time — each model has different blind spots.', icon: '🤖' },
+        { text: 'The most effective trainers iterate on their criteria between turns rather than changing prompts entirely.', icon: '🧭' },
     ],
 };
 
@@ -441,8 +650,7 @@ const INSIGHT_TIPS = {
 function getRandomTip(category, model) {
     // Try model-specific tips for config/hunting categories
     if (model && (category === 'config' || category === 'hunting')) {
-        const modelKey = model.toLowerCase().includes('nemotron') ? 'nemotron' : 
-                         model.toLowerCase().includes('qwen') ? 'qwen' : null;
+        const modelKey = getModelKey(model);
         if (modelKey && INSIGHT_TIPS[modelKey] && Math.random() < 0.4) {
             const tips = INSIGHT_TIPS[modelKey];
             return tips[Math.floor(Math.random() * tips.length)];
@@ -866,8 +1074,15 @@ async function uploadFile(file) {
     try {
         showToast('Uploading notebook...', 'info');
         
+        const trainerInfo = getTrainerInfo();
+        const headers = {};
+        if (trainerInfo) {
+            headers['X-Trainer-Email'] = trainerInfo.email;
+            headers['X-Trainer-Name'] = trainerInfo.name;
+        }
         const response = await fetch('/api/upload-notebook', {
             method: 'POST',
+            headers,
             body: formData
         });
         
@@ -919,10 +1134,11 @@ async function fetchFromUrl() {
         elements.fetchUrlBtn.disabled = true;
         elements.fetchUrlBtn.textContent = '⏳ Fetching...';
         
+        const trainerInfo = getTrainerInfo();
         const response = await fetch('/api/fetch-notebook', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url })
+            body: JSON.stringify({ url, trainer_email: trainerInfo?.email, trainer_name: trainerInfo?.name })
         });
         
         console.log('Response status:', response.status);
@@ -962,6 +1178,9 @@ function handleNotebookLoaded(data, isUrl = false) {
     
     state.sessionId = data.session_id;
     state.notebook = data.notebook;
+    
+    // Start heartbeat now that we have a session
+    startHeartbeat();
     // Store original notebook JSON for WYSIWYG snapshot
     state.originalNotebookJson = data.original_notebook_json || null;
     // Store URL if this was fetched from URL
@@ -1107,6 +1326,14 @@ function handleNotebookLoaded(data, isUrl = false) {
                 provider = 'fireworks';
                 console.log(`  → Mapped to Qwen (Fireworks)`);
             }
+        } else if (modelPrefixLower === 'sonnet' || modelPrefixLower.includes('sonnet')) {
+            modelId = 'anthropic/claude-sonnet-4.5';
+            provider = 'openrouter';
+            console.log(`  → Mapped to Claude Sonnet 4.5`);
+        } else if (modelPrefixLower === 'opus' || modelPrefixLower.includes('opus')) {
+            modelId = 'anthropic/claude-opus-4.5';
+            provider = 'openrouter';
+            console.log(`  → Mapped to Claude Opus 4.5`);
         } else {
             console.warn(`⚠️ Unknown model prefix: "${modelPrefix}". Will use default (Qwen).`);
             // Default to Qwen if unknown
@@ -1116,33 +1343,16 @@ function handleNotebookLoaded(data, isUrl = false) {
         
         // Set the provider and model if found
         if (modelId && elements.providerSelect && elements.modelSelect) {
-            console.log(`🎯 Setting model: ${modelId} for provider: ${provider} (source: ${modelSource})`);
-            // Set provider first
+            // Store the intended model BEFORE any dropdown rebuilds
+            state._preselectedModelId = modelId;
+            state.config.models = [modelId];
+            // Set provider
             elements.providerSelect.value = provider;
-            // Update model dropdown options for the provider (skip default selection)
-            updateModelOptions(true); // Skip default - we'll set it manually
-            // Small delay to ensure dropdown is updated, then set model
-            setTimeout(() => {
-                const option = elements.modelSelect.querySelector(`option[value="${modelId}"]`);
-                if (option) {
-                    // Force selection
-                    option.selected = true;
-                    elements.modelSelect.value = modelId;
-                    // Update state config
-                    state.config.models = [modelId];
-                    console.log(`✅ Preselected model: ${modelId} (provider: ${provider}) based on: ${modelPrefix} (${modelSource})`);
-                    console.log(`   Dropdown value after setting: ${elements.modelSelect.value}`);
-                    console.log(`   Selected option: ${option.textContent}`);
-                    showToast(`Model preselected: ${modelPrefix}`, 'info');
-                    
-                    // Validate model match after preselection
-                    setTimeout(() => validateModelMatch(), 100);
-                } else {
-                    console.error(`❌ Model ${modelId} not found in dropdown. Available options:`, 
-                        Array.from(elements.modelSelect.options).map(o => ({value: o.value, text: o.textContent})));
-                    showToast(`Model ${modelPrefix} not available in dropdown`, 'warning');
-                }
-            }, 200); // Increased delay to ensure dropdown is populated
+            // Rebuild dropdown — will honor _preselectedModelId
+            updateModelOptions(false);
+            // Force-set again after dropdown is built (belt and suspenders)
+            elements.modelSelect.value = modelId;
+            showToast(`Model preselected: ${modelPrefix}`, 'info');
         } else {
             console.warn('⚠️ Provider or model select elements not found');
         }
@@ -2429,16 +2639,8 @@ function validatePromptLength() {
 // ============== Model Locked Indicator ==============
 
 function showModelLockedIndicator(modelName) {
-    const indicator = document.getElementById('modelLockedIndicator');
-    const nameSpan = document.getElementById('modelLockedName');
-    if (indicator && nameSpan) {
-        nameSpan.textContent = modelName;
-        // Update config tip with model-specific insight
-        renderInsightTip('configTipContainer', 'config', { model: modelName });
-        indicator.style.display = 'block';
-        indicator.classList.remove('hidden');
-        console.log(`🔒 Model locked to: ${modelName} (from notebook metadata)`);
-    }
+    // Model lock disabled — just update config tip, don't show lock indicator
+    renderInsightTip('configTipContainer', 'config', { model: modelName });
 }
 
 function hideModelLockedIndicator() {
@@ -2452,60 +2654,11 @@ function hideModelLockedIndicator() {
 // ============== Model Matching Validation ==============
 
 function validateModelMatch() {
-    // If no metadata model set, allow (can't validate)
-    if (!state.metadataModel) {
-        state.modelMismatchWarning = false;
-        return true;
-    }
-    
-    if (!elements.modelSelect) {
-        return true;
-    }
-    
-    const selectedModel = elements.modelSelect.value || '';
-    if (!selectedModel) {
-        // No model selected - BLOCK hunt
-        showModelMismatchWarning('(none selected)', state.metadataModel);
-        return false;
-    }
-    
-    // Extract key model identifiers from both
-    const getModelKey = (modelStr) => {
-        const lower = (modelStr || '').toLowerCase();
-        // Check for known model families
-        if (lower.includes('nemotron')) return 'nemotron';
-        if (lower.includes('qwen')) return 'qwen';
-        if (lower.includes('llama')) return 'llama';
-        if (lower.includes('deepseek')) return 'deepseek';
-        if (lower.includes('mistral')) return 'mistral';
-        if (lower.includes('gpt')) return 'gpt';
-        if (lower.includes('claude')) return 'claude';
-        if (lower.includes('gemini')) return 'gemini';
-        // Return normalized string for comparison
-        return lower.replace(/[^a-z0-9]/g, '');
-    };
-    
-    const selectedKey = getModelKey(selectedModel);
-    const metadataKey = getModelKey(state.metadataModel);
-    
-    // Remove any existing warning
+    // Model lock disabled — all models are allowed regardless of metadata
+    state.modelMismatchWarning = false;
     const existingWarning = document.getElementById('modelMismatchWarning');
-    if (existingWarning) {
-        existingWarning.remove();
-    }
-    
-    // Check if models match
-    const matches = selectedKey === metadataKey;
-    
-    if (!matches) {
-        // Model mismatch - show warning and BLOCK
-        showModelMismatchWarning(selectedModel, state.metadataModel);
-        return false;
-    } else {
-        // Model matches - clear warning state and restore UI
-        clearModelMismatchWarning();
-        return true;
-    }
+    if (existingWarning) existingWarning.remove();
+    return true;
 }
 
 function clearModelMismatchWarning() {
@@ -2759,19 +2912,15 @@ async function saveAllCells() {
         return;
     }
     
-    // Validate prompt length
-    if (!validatePromptLength()) {
+    // Validate prompt length (skip validation in multi-turn — turn 2+ prompts don't have metadata length constraints)
+    if (!state.isMultiTurn && !validatePromptLength()) {
         showToast('⚠️ Cannot save: Prompt length is outside the required range', 'error');
         return;
     }
     
-    // Check if Model Reference is valid
+    // Try to convert model reference (don't block save if it fails)
     if (!state.convertedModelRefJSON) {
         convertStructuredToJSON();
-        if (!state.convertedModelRefJSON) {
-            showToast('⚠️ Please ensure Model Reference is in valid format', 'error');
-            return;
-        }
     }
     
     const cellsToSave = [];
@@ -2795,7 +2944,7 @@ async function saveAllCells() {
         });
     }
     
-    // Ensure Model Reference is converted
+    // Model Reference / Criteria — use converted JSON if available, else raw textarea content
     if (!state.convertedModelRefJSON) {
         convertStructuredToJSON();
     }
@@ -2804,6 +2953,16 @@ async function saveAllCells() {
             cell_type: 'response_reference',
             content: state.convertedModelRefJSON
         });
+    } else {
+        // Fallback: save raw criteria text (Turn 2+ may not have JSON format)
+        const modelrefTextarea = document.getElementById('modelrefPreview');
+        const modelrefContent = modelrefTextarea ? modelrefTextarea.value.trim() : '';
+        if (modelrefContent) {
+            cellsToSave.push({
+                cell_type: 'response_reference',
+                content: modelrefContent
+            });
+        }
     }
     
     const judgeTextarea = document.getElementById('judgeMarkdown');
@@ -3529,7 +3688,7 @@ function initProgressUI() {
             <td class="status-cell"><span class="score-badge pending">⏳ Pending</span></td>
             <td class="score-cell">-</td>
             <td class="issues-cell">-</td>
-            <td class="response-cell" style="max-width: 400px;">
+            <td class="response-cell" style="max-width: 300px;">
                 <span class="response-placeholder" style="color: var(--text-muted);">-</span>
             </td>
         `;
@@ -5033,46 +5192,320 @@ function handleContinueToNextTurn() {
 /**
  * Select a good response to carry forward to the next turn.
  */
-function selectGoodResponse(response) {
+async function selectGoodResponse(response) {
     // Store the selected response
     state._selectedGoodResponse = response;
     
-    // Show next turn editor
-    const editor = document.getElementById('nextTurnEditor');
-    editor.classList.remove('hidden');
-    
-    // Update turn numbers
-    const nextTurn = state.currentTurn + 1;
-    document.getElementById('nextTurnNumber').textContent = nextTurn;
-    document.getElementById('startNextTurnNumber').textContent = nextTurn;
-    
-    // Pre-populate judge prompt from current turn
-    const judgePromptField = document.getElementById('nextTurnJudgePrompt');
-    if (judgePromptField && state.notebook?.judge_system_prompt) {
-        judgePromptField.placeholder = `Current: ${state.notebook.judge_system_prompt.substring(0, 100)}... (leave empty to reuse)`;
-    }
-    
-    // Clear input fields
-    document.getElementById('nextTurnPrompt').value = '';
-    document.getElementById('nextTurnCriteria').value = '';
-    document.getElementById('nextTurnJudgePrompt').value = '';
-    
-    // Highlight selected response
+    // Highlight selected response card
     const cards = document.querySelectorAll('#goodResponseList > div');
-    cards.forEach(card => { card.style.opacity = '0.5'; });
+    cards.forEach(card => { card.style.opacity = '0.5'; card.style.pointerEvents = 'none'; });
     const selectedIdx = state.allResponses.findIndex(r => r.hunt_id === response.hunt_id);
     if (selectedIdx >= 0 && cards[selectedIdx]) {
         cards[selectedIdx].style.opacity = '1';
         cards[selectedIdx].style.border = '3px solid var(--primary)';
     }
     
-    editor.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    showToast(`Advancing to Turn ${state.currentTurn + 1}...`, 'info');
     
-    showToast(`Turn ${state.currentTurn} — Selected Hunt #${response.hunt_id} as good response. Write Turn ${state.currentTurn + 1} below.`, 'success');
+    // Immediately call advance_turn with just the selected response (no prompt/criteria)
+    try {
+        const res = await fetch(`/api/advance-turn/${state.sessionId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                selected_hunt_id: response.hunt_id
+            })
+        });
+        
+        if (!res.ok) {
+            const error = await res.json();
+            throw new Error(error.detail || 'Failed to advance turn');
+        }
+        
+        const data = await res.json();
+        
+        // Update local state (same as old startNextTurn)
+        state.currentTurn = data.current_turn;
+        state.isMultiTurn = true;
+        
+        // Build local conversation history
+        state.conversationHistory.push(
+            { role: 'user', content: state.notebook.prompt },
+            { role: 'assistant', content: response.response }
+        );
+        
+        // Save current turn data locally
+        state.turns.push({
+            turnNumber: state.currentTurn - 1,
+            prompt: state.notebook.prompt,
+            response_reference: state.notebook.response_reference,
+            selectedResponse: response.response,
+            selectedHuntId: response.hunt_id,
+            judgeResult: {
+                score: response.judge_score,
+                criteria: response.judge_criteria || {},
+                explanation: response.judge_explanation || ''
+            },
+            results: state.allResponses.map(r => ({
+                hunt_id: r.hunt_id,
+                response: r.response,
+                judge_score: r.judge_score,
+                is_breaking: r.is_breaking
+            }))
+        });
+        
+        // Track total hunts across turns
+        state.multiTurnTotalHunts += state.allResponses.length;
+        
+        // Update notebook state — editors will be blank for the new turn
+        state.notebook.prompt = '';
+        state.notebook.response_reference = '';
+        state.notebook.response = response.response; // Selected response as reference
+        // Keep judge_system_prompt from previous turn
+        
+        // Track hunt IDs from this turn so they're excluded from future fetches
+        state.allResponses.forEach(r => {
+            if (r.hunt_id) state.previousTurnHuntIds.add(r.hunt_id);
+        });
+        
+        // Reset hunt state for new turn
+        resetTurnState();
+        
+        // Clear the progress table rows
+        if (elements.resultsTableBody) {
+            elements.resultsTableBody.innerHTML = '';
+        }
+        
+        // Hide multi-turn decision sections
+        document.getElementById('multiTurnDecisionCard')?.classList.add('hidden');
+        document.getElementById('goodResponsePicker')?.classList.add('hidden');
+        document.getElementById('nextTurnEditor')?.classList.add('hidden');
+        document.getElementById('selectionSection')?.classList.add('hidden');
+        document.getElementById('resultsSection')?.classList.add('hidden');
+        document.getElementById('summarySection')?.classList.add('hidden');
+        document.getElementById('progressSection')?.classList.add('hidden');
+        
+        // Render turn history
+        renderTurnHistoryTabs();
+        document.getElementById('multiTurnSection').classList.remove('hidden');
+        
+        // Populate the FULL editors with blank content for the new turn
+        populatePreviewTabs(state.notebook);
+        
+        // Show calibration panel for Turn 2+
+        showCalibrationPanel();
+        
+        // Disable hunt button until calibration is done
+        state.referenceValidated = false;
+        if (elements.startHuntBtn) {
+            elements.startHuntBtn.disabled = true;
+            elements.startHuntBtn.title = 'Complete calibration first (generate + judge at least once)';
+        }
+        
+        // Clear previous judge results
+        if (elements.referenceJudgeResult) {
+            elements.referenceJudgeResult.innerHTML = '';
+        }
+        state.initialCriteria = null;
+        
+        // Update turn-aware UI
+        updateTurnAwareUI();
+        updateHuntLimitUI();
+        
+        // Show config section (full editor) and scroll to it
+        elements.configSection?.classList.remove('hidden');
+        elements.configSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        
+        showToast(`Turn ${state.currentTurn} — Write your prompt and criteria, then calibrate before hunting.`, 'success');
+        
+    } catch (error) {
+        console.error('Error advancing turn:', error);
+        showToast(`Error: ${error.message}`, 'error');
+        // Re-enable response cards on error
+        cards.forEach(card => { card.style.opacity = '1'; card.style.pointerEvents = 'auto'; });
+    }
+}
+
+// ============== Calibration Mode (Turn 2+) ==============
+
+// Stores the last generated response for re-judging
+let _calibrationResponse = null;
+let _calibrationJudged = false; // Must judge at least once before hunting
+
+function showCalibrationPanel() {
+    const panel = document.getElementById('calibrationPanel');
+    if (panel) {
+        panel.classList.remove('hidden');
+        // Update turn badge
+        const badge = document.getElementById('calibrationTurnBadge');
+        if (badge) badge.textContent = `Turn ${state.currentTurn}`;
+        // Reset state
+        _calibrationResponse = null;
+        _calibrationJudged = false;
+        document.getElementById('calibrationResponseArea')?.classList.add('hidden');
+        document.getElementById('calibrationJudgeResult')?.classList.add('hidden');
+        document.getElementById('calibrationLoading')?.classList.add('hidden');
+        document.getElementById('regenerateBtn')?.classList.add('hidden');
+        document.getElementById('judgeCalibrationBtn')?.classList.add('hidden');
+        document.getElementById('generateOneBtn')?.classList.remove('hidden');
+    }
+}
+
+function hideCalibrationPanel() {
+    const panel = document.getElementById('calibrationPanel');
+    if (panel) panel.classList.add('hidden');
+}
+
+async function calibrationGenerateOne() {
+    if (!state.sessionId) return;
+
+    // Show loading
+    const loadingEl = document.getElementById('calibrationLoading');
+    const loadingText = document.getElementById('calibrationLoadingText');
+    const genBtn = document.getElementById('generateOneBtn');
+    const regenBtn = document.getElementById('regenerateBtn');
+    
+    if (loadingEl) { loadingEl.classList.remove('hidden'); loadingText.textContent = 'Generating response...'; }
+    if (genBtn) genBtn.disabled = true;
+    if (regenBtn) regenBtn.disabled = true;
+
+    try {
+        const res = await fetch(`/api/generate-single/${state.sessionId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.detail || 'Generation failed');
+        }
+
+        const data = await res.json();
+        _calibrationResponse = data.response || '';
+
+        // Display the response
+        const responseArea = document.getElementById('calibrationResponseArea');
+        const responseText = document.getElementById('calibrationResponseText');
+        const modelInfo = document.getElementById('calibrationModelInfo');
+        
+        if (responseText) responseText.textContent = _calibrationResponse;
+        if (modelInfo) modelInfo.textContent = `Model: ${data.model || 'unknown'} | Provider: ${data.provider || 'unknown'}`;
+        if (responseArea) responseArea.classList.remove('hidden');
+
+        // Show Regenerate and Judge buttons
+        if (regenBtn) { regenBtn.classList.remove('hidden'); regenBtn.disabled = false; }
+        document.getElementById('judgeCalibrationBtn')?.classList.remove('hidden');
+
+        // Hide the initial Generate button, show Regenerate instead
+        if (genBtn) genBtn.classList.add('hidden');
+        
+        showToast('Response generated. Review it, then judge when ready.', 'info');
+
+    } catch (error) {
+        showToast(`Generation error: ${error.message}`, 'error');
+    } finally {
+        if (loadingEl) loadingEl.classList.add('hidden');
+        if (genBtn) genBtn.disabled = false;
+        if (regenBtn) regenBtn.disabled = false;
+    }
+}
+
+async function calibrationJudge() {
+    if (!state.sessionId || !_calibrationResponse) {
+        showToast('No response to judge. Generate one first.', 'error');
+        return;
+    }
+
+    const judgeBtn = document.getElementById('judgeCalibrationBtn');
+    const loadingEl = document.getElementById('calibrationLoading');
+    const loadingText = document.getElementById('calibrationLoadingText');
+    
+    if (judgeBtn) { judgeBtn.disabled = true; judgeBtn.textContent = 'Judging...'; }
+    if (loadingEl) { loadingEl.classList.remove('hidden'); loadingText.textContent = 'Running judge...'; }
+
+    try {
+        const res = await fetch(`/api/judge-calibration/${state.sessionId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ response_text: _calibrationResponse })
+        });
+
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.detail || 'Judge failed');
+        }
+
+        const data = await res.json();
+        _calibrationJudged = true;
+
+        // Display judge results
+        const criteria = data.criteria || {};
+        const score = data.score;
+        const isPassing = (score || 0) >= 1;
+        const scoreColor = isPassing ? 'var(--success, #10b981)' : 'var(--danger, #ef4444)';
+        
+        const resultDiv = document.getElementById('calibrationJudgeResult');
+        if (resultDiv) {
+
+            // Build criteria badges
+            let criteriaHtml = '';
+            for (const [k, v] of Object.entries(criteria)) {
+                const isPass = String(v).toUpperCase() === 'PASS';
+                criteriaHtml += `<span style="display: inline-block; padding: 0.15rem 0.5rem; margin: 0.15rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; background: ${isPass ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)'}; color: ${isPass ? 'var(--success,#10b981)' : 'var(--danger,#ef4444)'};">${escapeHtml(k)}: ${escapeHtml(String(v))}</span>`;
+            }
+
+            resultDiv.innerHTML = `
+                <div style="padding: 1rem; background: var(--bg-primary); border-radius: 8px; border: 1px solid ${scoreColor};">
+                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
+                        <span style="font-weight: 700; color: ${scoreColor};">Score: ${score} ${isPassing ? '(PASS)' : '(FAIL)'}</span>
+                    </div>
+                    <div style="margin-bottom: 0.75rem;">
+                        <label style="font-weight: 600; font-size: 0.85rem;">Criteria Breakdown:</label>
+                        <div style="margin-top: 0.25rem;">${criteriaHtml || '<span style="color:var(--text-muted);">No criteria data</span>'}</div>
+                    </div>
+                    <div>
+                        <label style="font-weight: 600; font-size: 0.85rem;">Judge Explanation:</label>
+                        <p style="margin-top: 0.25rem; font-size: 0.85rem; color: var(--text-secondary); white-space: pre-wrap;">${escapeHtml(data.explanation || 'No explanation')}</p>
+                    </div>
+                    <p style="margin-top: 0.75rem; font-size: 0.8rem; color: var(--text-muted);">
+                        You can tweak your criteria or judge prompt above, then click "Judge This Response" again to re-judge the same response.
+                    </p>
+                </div>
+            `;
+            resultDiv.classList.remove('hidden');
+        }
+
+        // Enable hunt button now that calibration is done
+        state.referenceValidated = true;
+        if (elements.startHuntBtn) {
+            elements.startHuntBtn.disabled = false;
+            elements.startHuntBtn.title = '';
+        }
+
+        showToast(isPassing ? 'Judge PASSED. You can start hunting or re-calibrate.' : 'Judge FAILED. Tweak criteria and re-judge, or start hunting.', isPassing ? 'success' : 'info');
+
+    } catch (error) {
+        showToast(`Judge error: ${error.message}`, 'error');
+    } finally {
+        if (judgeBtn) { judgeBtn.disabled = false; judgeBtn.textContent = 'Judge This Response'; }
+        if (loadingEl) loadingEl.classList.add('hidden');
+    }
+}
+
+function initCalibrationListeners() {
+    const genBtn = document.getElementById('generateOneBtn');
+    const regenBtn = document.getElementById('regenerateBtn');
+    const judgeBtn = document.getElementById('judgeCalibrationBtn');
+
+    if (genBtn) genBtn.addEventListener('click', calibrationGenerateOne);
+    if (regenBtn) regenBtn.addEventListener('click', calibrationGenerateOne); // Regenerate = same function
+    if (judgeBtn) judgeBtn.addEventListener('click', calibrationJudge);
 }
 
 /**
  * Start the next turn: call advance-turn API, then start a new hunt.
+ * NOTE: This is now only used as a LEGACY fallback. The new flow uses
+ * selectGoodResponse() which calls advance_turn immediately.
  */
 async function startNextTurn() {
     const nextPrompt = document.getElementById('nextTurnPrompt').value.trim();
@@ -5164,18 +5597,7 @@ async function startNextTurn() {
         });
         
         // Reset hunt state for new turn
-        state.allResponses = [];
-        state.results = [];
-        state.selectedRowNumbers = [];
-        state.humanReviews = {};
-        state.selectionConfirmed = false;
-        state.llmRevealed = false;
-        state.referenceValidated = false;
-        state._selectedGoodResponse = null;
-        
-        // RESET per-turn hunt counter (this is the key per-turn limit change)
-        state.huntsThisTurn = 0;
-        state.huntLimitReached = false;
+        resetTurnState();
         
         // Clear the progress table rows for the new turn
         if (elements.resultsTableBody) {
@@ -6731,12 +7153,8 @@ function clearPreviousResults() {
     // Hide model locked indicator (will be shown again if new notebook has model in metadata)
     hideModelLockedIndicator();
     
-    // Refresh model options to remove disabled state
-    setTimeout(() => {
-        if (elements.modelSelect && elements.providerSelect) {
-            updateModelOptions();
-        }
-    }, 100);
+    // Model lock disabled — no need to refresh model options here
+    // (was resetting the dropdown selection back to Qwen)
     
     // FIX 4: Re-enable model/provider selects when clearing (e.g., on model change before hunt)
     if (elements.modelSelect) {
@@ -7283,55 +7701,10 @@ function initEventListeners() {
                 return;
             }
             
-            // Full clear when model changes
+            // Clear previous results when model changes
             clearPreviousResults();
-            
-            // IMMEDIATE CHECK: Does selected model match metadata?
-            const selectedModel = elements.modelSelect.value || '';
-            const metadataModel = state.metadataModel || '';
-            
-            if (metadataModel) {
-                // Get model keys for comparison
-                const getKey = (s) => {
-                    const l = (s || '').toLowerCase();
-                    if (l.includes('nemotron')) return 'nemotron';
-                    if (l.includes('qwen')) return 'qwen';
-                    if (l.includes('llama')) return 'llama';
-                    if (l.includes('deepseek')) return 'deepseek';
-                    if (l.includes('mistral')) return 'mistral';
-                    return l.replace(/[^a-z0-9]/g, '');
-                };
-                
-                const selectedKey = getKey(selectedModel);
-                const metadataKey = getKey(metadataModel);
-                
-                if (selectedKey !== metadataKey) {
-                    // MISMATCH - Disable button immediately
-                    if (elements.startHuntBtn) {
-                        elements.startHuntBtn.disabled = true;
-                        elements.startHuntBtn.style.opacity = '0.5';
-                        elements.startHuntBtn.style.cursor = 'not-allowed';
-                        elements.startHuntBtn.title = `Model mismatch! Metadata requires: ${metadataModel}`;
-                    }
-                    showToast(`⛔ Wrong model! Metadata requires: ${metadataModel}`, 'error');
-                    state.modelMismatchWarning = true;
-                } else {
-                    // Match - restore button (but other validations may still apply)
-                    if (elements.startHuntBtn) {
-                        elements.startHuntBtn.style.opacity = '';
-                        elements.startHuntBtn.style.cursor = '';
-                        // Only enable if reference was validated
-                        if (state.referenceValidated && state.modelRefValid) {
-                            elements.startHuntBtn.disabled = false;
-                            elements.startHuntBtn.title = '';
-                        }
-                    }
-                    state.modelMismatchWarning = false;
-                    showToast('Model changed. Previous results cleared.', 'info');
-                }
-            } else {
-                showToast('Model changed. Previous results cleared.', 'info');
-            }
+            state.modelMismatchWarning = false;
+            showToast('Model changed. Previous results cleared.', 'info');
         });
     }
     
@@ -8526,23 +8899,22 @@ async function saveAndRejudge() {
 // ============== Initialize ==============
 
 function init() {
-    initTheme();
-    initTabs();
-    initFileUpload();
-    initPreviewTabs();
-    initEventListeners();
-    initHuntNumberControls();
+    try { initTrainerRegistration(); } catch(e) { console.error('initTrainerRegistration failed:', e); }
+    try { initTheme(); } catch(e) { console.error('initTheme failed:', e); }
+    try { initTabs(); } catch(e) { console.error('initTabs failed:', e); }
+    try { initFileUpload(); } catch(e) { console.error('initFileUpload failed:', e); }
+    try { initPreviewTabs(); } catch(e) { console.error('initPreviewTabs failed:', e); }
+    try { initEventListeners(); } catch(e) { console.error('initEventListeners failed:', e); }
+    try { initHuntNumberControls(); } catch(e) { console.error('initHuntNumberControls failed:', e); }
     
     if (elements.startHuntBtn) {
         elements.startHuntBtn.disabled = true;
         elements.startHuntBtn.title = 'Validate the reference response first (click "Judge Reference Response")';
     }
 
-    // Initialize provider logic
-    initializeProviderLogic();
-    
-    // Initialize multi-turn listeners
-    initMultiTurnListeners();
+    try { initializeProviderLogic(); } catch(e) { console.error('initializeProviderLogic failed:', e); }
+    try { initMultiTurnListeners(); } catch(e) { console.error('initMultiTurnListeners failed:', e); }
+    try { initCalibrationListeners(); } catch(e) { console.error('initCalibrationListeners failed:', e); }
     
     console.log('🔥 Model Hunter initialized');
 }
@@ -8590,32 +8962,19 @@ function updateModelOptions(skipDefaultSelection = false) {
         return lower.replace(/[^a-z0-9]/g, '');
     };
     
-    // Check if metadata specifies a model (for disabling non-matching options)
-    const metadataModelKey = state.metadataModel ? getModelKey(state.metadataModel) : null;
-    
-    // Add new options
+    // Add new options (all models enabled)
     models.forEach(model => {
         const option = document.createElement('option');
         option.value = model.id;
         option.textContent = model.name;
         
-        // Check if this model matches the metadata model
-        const modelKey = getModelKey(model.id);
-        const matchesMetadata = !metadataModelKey || modelKey === metadataModelKey;
-        
-        // DISABLE non-matching models if metadata specifies a model
-        if (metadataModelKey && !matchesMetadata) {
-            option.disabled = true;
-            option.textContent = `${model.name} 🔒`;
-            option.title = `Notebook requires ${state.metadataModel} model. This model is disabled.`;
-            option.style.color = 'var(--text-muted)';
-        }
-        
-        // Only set default selection if skipDefaultSelection is false
         if (!skipDefaultSelection) {
-            if (model.id === defaultModelId || (models.length > 0 && model.id.includes('qwen'))) {
-                // Only select if it matches metadata (or no metadata model)
-                if (matchesMetadata) {
+            // If a notebook preselected a model, honor that
+            if (state._preselectedModelId && model.id === state._preselectedModelId) {
+                option.selected = true;
+            } else if (!state._preselectedModelId) {
+                // No preselection — default to Qwen
+                if (model.id === defaultModelId || model.id.includes('qwen')) {
                     option.selected = true;
                 }
             }
@@ -8641,14 +9000,7 @@ function updateModelOptions(skipDefaultSelection = false) {
         state.config.models = [elements.modelSelect.value];
     }
     
-    // Log for debugging
-    if (metadataModelKey) {
-        console.log(`Updated models for provider: ${provider}, metadata model: ${state.metadataModel} (key: ${metadataModelKey})`);
-        console.log(`  Non-matching models are DISABLED`);
-    } else {
-        console.log(`Updated models for provider: ${provider}, no metadata model restriction`);
-    }
-    console.log(`  Selected: ${elements.modelSelect.value} (skipDefault: ${skipDefaultSelection})`);
+    console.log(`Updated models for provider: ${provider}, selected: ${elements.modelSelect.value} (skipDefault: ${skipDefaultSelection})`);
 }
 
 // Restore session on page load

@@ -141,7 +141,7 @@ h3 { font-size: 1.05rem; }
 }
 #progressSection.hunt-active > .card {
     width: 100%;
-    max-width: 1000px;
+    max-width: 1200px;
     margin: 0 auto;
 }
 
@@ -4199,4 +4199,149 @@ body.sidebar-visible .container.multi-turn-layout {
     .conversation-thread {
         max-height: 180px;
     }
+}
+
+/* ============== Trainer Registration Modal ============== */
+
+.trainer-reg-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(8px);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 20000;
+    transition: opacity 0.3s ease;
+}
+
+.trainer-reg-overlay.hidden {
+    display: none;
+}
+
+.trainer-reg-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 2.5rem;
+    max-width: 420px;
+    width: 90%;
+    text-align: center;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+    animation: trainerRegSlideUp 0.4s ease;
+}
+
+@keyframes trainerRegSlideUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.trainer-reg-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 0 0 0.5rem 0;
+}
+
+.trainer-reg-subtitle {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    margin: 0 0 1.5rem 0;
+    line-height: 1.4;
+}
+
+.trainer-reg-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.trainer-reg-field {
+    text-align: left;
+}
+
+.trainer-reg-field label {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 0.35rem;
+}
+
+.trainer-reg-input {
+    width: 100%;
+    padding: 0.7rem 0.85rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    font-family: inherit;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    box-sizing: border-box;
+}
+
+.trainer-reg-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+
+.trainer-reg-input::placeholder {
+    color: var(--text-muted);
+    opacity: 0.6;
+}
+
+.trainer-reg-hint {
+    display: block;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-top: 0.3rem;
+}
+
+.trainer-reg-btn {
+    margin-top: 0.5rem;
+    width: 100%;
+    padding: 0.75rem;
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+/* Trainer Identity Indicator in Header */
+
+.trainer-identity {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+}
+
+.trainer-identity-label {
+    opacity: 0.85;
+}
+
+.trainer-identity-change {
+    background: none;
+    border: none;
+    color: var(--accent);
+    cursor: pointer;
+    font-size: 0.78rem;
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+    transition: background 0.15s ease;
+    font-family: inherit;
+}
+
+.trainer-identity-change:hover {
+    background: rgba(99, 102, 241, 0.1);
 }

@@ -13,8 +13,20 @@ import asyncio
 import logging
 from typing import Optional, Dict, Any, List
 
-# App version - increment this on each deployment for update prompt
-APP_VERSION = "1.0.4"
+# App version - auto-generated from file modification time (no manual bumping needed)
+import hashlib as _hashlib
+def _compute_app_version():
+    """Generate version from modification times of key files. Changes automatically on any update."""
+    files = [__file__, os.path.join(os.path.dirname(__file__), "static", "app.js"),
+             os.path.join(os.path.dirname(__file__), "static", "index.html")]
+    mtimes = ""
+    for f in files:
+        try: mtimes += str(os.path.getmtime(f))
+        except: pass
+    short_hash = _hashlib.md5(mtimes.encode()).hexdigest()[:8]
+    return f"1.1.{short_hash}"
+
+APP_VERSION = _compute_app_version()
 from contextlib import asynccontextmanager
 from datetime import datetime
 
@@ -75,6 +87,19 @@ except ImportError:
 # Load environment variables
 load_dotenv()
 
+# Auto-detect service account JSON if not explicitly set
+if not os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON_PATH"):
+    _sa_candidates = [
+        os.path.join(os.getcwd(), "service_account.json"),
+        os.path.join(os.path.dirname(__file__), "service_account.json"),
+        "/app/service_account.json",
+    ]
+    for _sa_path in _sa_candidates:
+        if os.path.exists(_sa_path):
+            os.environ["GOOGLE_SERVICE_ACCOUNT_JSON_PATH"] = _sa_path
+            logger.info(f"Auto-detected service account: {_sa_path}")
+            break
+
 
 # ============== Shared Constants ==============
 
@@ -88,6 +113,53 @@ HEADING_MAP = {
 
 # Cell order for notebook structure
 CELL_ORDER = ["prompt", "response", "response_reference", "judge_system_prompt"]
+
+
+# ============== Turn-Aware Heading Helpers ==============
+
+def _get_turn_heading(cell_type: str, turn: int) -> str:
+    """
+    Get the cell heading for a specific turn.
+    Turn 1 uses original headings: **[prompt]**
+    Turn 2+ uses turn-specific headings: **[Turn 2 - prompt]**
+    """
+    base = HEADING_MAP.get(cell_type, f"**[{cell_type}]**")
+    if turn <= 1:
+        return base
+    # e.g. **[Turn 2 - prompt]**
+    inner = base.strip("*[]")  # "prompt"
+    return f"**[Turn {turn} - {inner}]**"
+
+
+def _find_or_create_turn_cell(notebook_data: dict, cell_type: str, content: str, turn: int) -> bool:
+    """
+    Find an existing turn-specific cell and update it, or create a new one.
+    For Turn 1, updates the original cell. For Turn 2+, creates/updates turn-specific cells.
+    Returns True if the notebook_data was modified.
+    """
+    heading = _get_turn_heading(cell_type, turn)
+    heading_lower = heading.lower()
+    
+    # Try to find existing cell with this heading
+    for cell in notebook_data.get("cells", []):
+        if cell.get("cell_type") == "markdown":
+            source = "".join(cell.get("source", []))
+            if heading_lower in source.lower():
+                # Update existing cell
+                heading_line = source.split("\n")[0]
+                full_content = heading_line + "\n\n" + content
+                content_lines = full_content.split("\n")
+                cell["source"] = [line + "\n" for line in content_lines[:-1]] + [content_lines[-1]] if content_lines else [""]
+                return True
+    
+    # Cell not found — create it
+    if "cells" not in notebook_data:
+        notebook_data["cells"] = []
+    
+    # For Turn 2+, insert after all existing cells (at the end, before any trailing cells)
+    new_cell = _create_notebook_cell(heading, content)
+    notebook_data["cells"].append(new_cell)
+    return True
 
 
 # ============== Notebook Cell Helpers ==============
@@ -210,6 +282,115 @@ def _update_session_notebook_field(session: HuntSession, cell_type: str, content
         session.notebook.judge_system_prompt = content
 
 
+# ============== Shared Endpoint Helpers ==============
+
+async def _get_validated_session(session_id: str) -> HuntSession:
+    """Get session or raise 404. Shared by all session-dependent endpoints."""
+    session = await hunt_engine.get_session_async(session_id)
+    if not session:
+        raise HTTPException(404, "Session not found")
+    return session
+
+
+def _get_storage_with_url(session_id: str):
+    """Load session storage and check for URL. Returns (storage, has_url)."""
+    storage = get_session_storage(session_id)
+    has_url = bool(storage and storage.get("url"))
+    return storage, has_url
+
+
+def _persist_session(session_id: str, session: HuntSession, storage: Optional[dict] = None):
+    """Persist session state to disk storage."""
+    if storage is None:
+        storage = get_session_storage(session_id) or {}
+    storage["session_data"] = session.model_dump()
+    save_session_storage(session_id, storage)
+
+
+def _save_cells_to_drive(storage: dict, notebook_data: dict) -> bool:
+    """Save notebook JSON to Google Drive. Returns True on success."""
+    try:
+        from services.google_drive_client import drive_client
+        file_id = drive_client.get_file_id_from_url(storage["url"])
+        if not file_id:
+            return False
+        updated_content = json.dumps(notebook_data, indent=2)
+        success = drive_client.update_file_content(file_id, updated_content)
+        if success:
+            storage["original_content"] = updated_content
+            return True
+    except Exception as e:
+        logger.error(f"Drive save error: {e}")
+    return False
+
+
+def _save_turn_cells_to_drive(session: HuntSession, storage: Optional[dict],
+                               has_url: bool, cells: List[tuple]) -> bool:
+    """
+    Save one or more cells to Colab with turn-aware headings.
+    
+    Args:
+        session: Current hunt session
+        storage: Session storage dict
+        has_url: Whether a Colab URL is available
+        cells: List of (cell_type, content) tuples
+    
+    Returns True if saved to Colab, False otherwise.
+    """
+    if not has_url or not storage:
+        return False
+    try:
+        original_content = storage.get("original_content", "{}")
+        notebook_data = json.loads(original_content)
+        current_turn = session.current_turn if session.current_turn else 1
+        for cell_type, content in cells:
+            _find_or_create_turn_cell(notebook_data, cell_type, content, current_turn)
+        return _save_cells_to_drive(storage, notebook_data)
+    except Exception as e:
+        logger.error(f"Error saving turn cells to Drive: {e}")
+        return False
+
+
+def _format_judge_result(judge_result: dict, notebook) -> dict:
+    """Format judge result into standard API response."""
+    score = judge_result.get("score")
+    return {
+        "success": True,
+        "score": score,
+        "explanation": judge_result.get("explanation", ""),
+        "criteria": judge_result.get("criteria", {}),
+        "raw_output": judge_result.get("raw_output", ""),
+        "is_passing": (score or 0) >= 1,
+        "response_reference": notebook.response_reference
+    }
+
+
+def _extract_trainer_info_from_request(request, trainer_email: str = "", trainer_name: str = "") -> dict:
+    """Extract trainer info from request with fingerprint fallback."""
+    trainer_info = {}
+    if _trainer_identity_enabled:
+        try:
+            trainer_info = get_trainer_info(request)
+        except Exception:
+            pass
+    return {
+        "trainer_id": trainer_info.get("trainer_id", "unknown"),
+        "trainer_email": trainer_email or "",
+        "trainer_name": trainer_name or "",
+        "fingerprint": trainer_info.get("fingerprint", ""),
+        "ip_hint": trainer_info.get("ip_hint", "")
+    }
+
+
+def _log_telemetry_safe(event_type: str, data: dict):
+    """Log a telemetry event safely (never raises)."""
+    if _telemetry_enabled:
+        try:
+            get_telemetry().log_event(event_type, data)
+        except Exception:
+            pass
+
+
 # Lifespan handler
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -270,6 +451,18 @@ app = FastAPI(
 
 class NotebookURLRequest(BaseModel):
     url: str
+    trainer_email: Optional[str] = None
+    trainer_name: Optional[str] = None
+
+
+class TrainerRegistrationRequest(BaseModel):
+    name: str
+    email: str
+
+
+class HeartbeatRequest(BaseModel):
+    session_id: str
+    trainer_email: str
 
 
 class StartHuntRequest(BaseModel):
@@ -347,9 +540,9 @@ def save_session_storage(session_id: str, data: dict):
     """Save session data to disk with timestamp."""
     path = os.path.join(STORAGE_DIR, f"{session_id}.json")
     # Add/update timestamp
-    data["last_accessed"] = datetime.now().isoformat()
+    data["last_accessed"] = datetime.utcnow().isoformat() + "Z"
     if "created_at" not in data:
-        data["created_at"] = datetime.now().isoformat()
+        data["created_at"] = datetime.utcnow().isoformat() + "Z"
     with open(path, 'w') as f:
         json.dump(data, f)
 
@@ -363,8 +556,10 @@ def get_session_storage(session_id: str) -> Optional[dict]:
             
             # Check expiration
             if "last_accessed" in data:
-                last_accessed = datetime.fromisoformat(data["last_accessed"])
-                elapsed = (datetime.now() - last_accessed).total_seconds()
+                raw_ts = data["last_accessed"]
+                # Strip "Z" suffix to get a naive datetime (all our timestamps are UTC)
+                last_accessed = datetime.fromisoformat(raw_ts.replace("Z", ""))
+                elapsed = (datetime.utcnow() - last_accessed).total_seconds()
                 if elapsed > SESSION_EXPIRATION_SECONDS:
                     # Session expired, delete it
                     logger.info(f"Session {session_id} expired (elapsed: {elapsed:.0f}s, limit: {SESSION_EXPIRATION_SECONDS}s)")
@@ -375,7 +570,7 @@ def get_session_storage(session_id: str) -> Optional[dict]:
                     return None
             
             # Update last accessed time
-            data["last_accessed"] = datetime.now().isoformat()
+            data["last_accessed"] = datetime.utcnow().isoformat() + "Z"
             with open(path, 'w') as f:
                 json.dump(data, f)
             
@@ -385,7 +580,112 @@ def get_session_storage(session_id: str) -> Optional[dict]:
     return None
 
 
+# ============== Trainer Registry ==============
+
+TRAINERS_FILE = os.path.join(STORAGE_DIR, "trainers.json")
+
+def _load_trainer_registry() -> dict:
+    """Load the trainer registry from disk."""
+    try:
+        if os.path.exists(TRAINERS_FILE):
+            with open(TRAINERS_FILE, 'r') as f:
+                return json.load(f)
+    except Exception as e:
+        logger.error(f"Error loading trainer registry: {e}")
+    return {}
+
+def _save_trainer_registry(registry: dict):
+    """Save the trainer registry to disk."""
+    try:
+        with open(TRAINERS_FILE, 'w') as f:
+            json.dump(registry, f, indent=2)
+    except Exception as e:
+        logger.error(f"Error saving trainer registry: {e}")
+
+def register_or_update_trainer(email: str, name: str, session_id: Optional[str] = None) -> dict:
+    """Register a new trainer or update an existing one. Returns the trainer profile."""
+    registry = _load_trainer_registry()
+    now = datetime.utcnow().isoformat() + "Z"
+    
+    if email in registry:
+        # Update existing trainer
+        trainer = registry[email]
+        trainer["name"] = name  # Allow name updates
+        trainer["last_seen"] = now
+        if session_id and session_id not in trainer.get("sessions", []):
+            trainer.setdefault("sessions", []).append(session_id)
+    else:
+        # New trainer
+        trainer = {
+            "name": name,
+            "email": email,
+            "first_seen": now,
+            "last_seen": now,
+            "sessions": [session_id] if session_id else [],
+            "total_hunts": 0,
+            "total_breaks": 0
+        }
+        registry[email] = trainer
+    
+    _save_trainer_registry(registry)
+    return trainer
+
+def update_trainer_last_seen(email: str):
+    """Update trainer's last_seen timestamp. Lightweight, for heartbeat."""
+    try:
+        registry = _load_trainer_registry()
+        if email in registry:
+            registry[email]["last_seen"] = datetime.utcnow().isoformat() + "Z"
+            _save_trainer_registry(registry)
+    except Exception:
+        pass  # Fire-and-forget
+
+
 # ============== API Endpoints ==============
+
+
+@app.post("/api/register-trainer")
+async def api_register_trainer(request: TrainerRegistrationRequest):
+    """Register a trainer (name + email). Called on first visit and on each page load."""
+    try:
+        trainer = register_or_update_trainer(request.email, request.name)
+        
+        # Telemetry
+        if _telemetry_enabled:
+            try:
+                get_telemetry().log_event("trainer_registered", {
+                    "trainer_email": request.email,
+                    "trainer_name": request.name
+                })
+            except Exception:
+                pass
+        
+        return {"success": True, "trainer": trainer}
+    except Exception as e:
+        logger.error(f"Error registering trainer: {e}")
+        return {"success": True}  # Don't block the frontend on registry errors
+
+
+@app.post("/api/heartbeat")
+async def api_heartbeat(request: HeartbeatRequest):
+    """Heartbeat endpoint for trainer activity tracking. Called every 60s by the frontend."""
+    try:
+        # Update last_seen
+        update_trainer_last_seen(request.trainer_email)
+        
+        # Log telemetry event
+        if _telemetry_enabled:
+            try:
+                get_telemetry().log_event("trainer_heartbeat", {
+                    "session_id": request.session_id,
+                    "trainer_email": request.trainer_email
+                })
+            except Exception:
+                pass
+    except Exception:
+        pass  # Fire-and-forget, never fail
+    
+    return {"ok": True}
 
 
 @app.post("/api/upload-notebook")
@@ -404,7 +704,9 @@ async def upload_notebook(request: Request, file: UploadFile = File(...)):
         config = HuntConfig()
         session = hunt_engine.create_session(parsed, config)
         
-        # Get trainer identity from fingerprint
+        # Get trainer identity — prefer email from header/query, fallback to fingerprint
+        trainer_email = request.headers.get("X-Trainer-Email", request.query_params.get("trainer_email", ""))
+        trainer_name = request.headers.get("X-Trainer-Name", request.query_params.get("trainer_name", ""))
         trainer_info = {}
         if _trainer_identity_enabled:
             try:
@@ -412,14 +714,20 @@ async def upload_notebook(request: Request, file: UploadFile = File(...)):
             except Exception:
                 pass
         
-        # Telemetry: Log session creation
+        # Register trainer session linkage if email provided
+        if trainer_email:
+            register_or_update_trainer(trainer_email, trainer_name or "Unknown", session.session_id)
+        
+        # Telemetry: Log session creation (with email if available)
         if _telemetry_enabled:
             try:
-                get_telemetry().log_session_created(
-                    session_id=session.session_id,
-                    notebook=file.filename,
-                    source="upload"
-                )
+                get_telemetry().log_event("session_created", {
+                    "session_id": session.session_id,
+                    "notebook": file.filename,
+                    "source": "upload",
+                    "trainer_email": trainer_email or None,
+                    "trainer_name": trainer_name or None
+                })
             except Exception:
                 pass
         
@@ -430,13 +738,15 @@ async def upload_notebook(request: Request, file: UploadFile = File(...)):
             "url": None,  # No URL for uploaded files
             "session_data": session.model_dump(),  # Store full session for restoration
             "trainer_id": trainer_info.get("trainer_id", "unknown"),
+            "trainer_email": trainer_email or "",
+            "trainer_name": trainer_name or "",
             "fingerprint": trainer_info.get("fingerprint", ""),
             "ip_hint": trainer_info.get("ip_hint", "")
         })
         
         # Extract model prefix from metadata or model slots
         model_prefix = notebook_parser.extract_model_prefix(parsed)
-        print(f"DEBUG: Extracted model_prefix: '{model_prefix}'")
+        logger.debug(f" Extracted model_prefix: '{model_prefix}'")
         
         return {
             "success": True,
@@ -471,7 +781,9 @@ async def fetch_notebook(http_request: Request, request: NotebookURLRequest):
         config = HuntConfig()
         session = hunt_engine.create_session(parsed, config)
         
-        # Get trainer identity from fingerprint
+        # Get trainer identity — prefer email from request body, fallback to fingerprint
+        trainer_email = request.trainer_email or ""
+        trainer_name = request.trainer_name or ""
         trainer_info = {}
         if _trainer_identity_enabled:
             try:
@@ -479,31 +791,39 @@ async def fetch_notebook(http_request: Request, request: NotebookURLRequest):
             except Exception:
                 pass
         
-        # Telemetry: Log session creation (from URL fetch)
+        # Register trainer session linkage if email provided
+        if trainer_email:
+            register_or_update_trainer(trainer_email, trainer_name or "Unknown", session.session_id)
+        
+        # Telemetry: Log session creation (with email if available)
         if _telemetry_enabled:
             try:
-                get_telemetry().log_session_created(
-                    session_id=session.session_id,
-                    notebook=parsed.filename,
-                    source="url"
-                )
+                get_telemetry().log_event("session_created", {
+                    "session_id": session.session_id,
+                    "notebook": parsed.filename,
+                    "source": "url",
+                    "trainer_email": trainer_email or None,
+                    "trainer_name": trainer_name or None
+                })
             except Exception:
                 pass
         
-        # We don't have original content for URL fetches, recreate from parsed (with trainer info)
+        # Store with trainer info (with trainer info)
         save_session_storage(session.session_id, {
             "original_content": content_str,
             "filename": parsed.filename,
             "url": request.url,
             "session_data": session.model_dump(),  # Store full session for restoration
             "trainer_id": trainer_info.get("trainer_id", "unknown"),
+            "trainer_email": trainer_email or "",
+            "trainer_name": trainer_name or "",
             "fingerprint": trainer_info.get("fingerprint", ""),
             "ip_hint": trainer_info.get("ip_hint", "")
         })
         
         # Extract model prefix from metadata or model slots
         model_prefix = notebook_parser.extract_model_prefix(parsed)
-        print(f"DEBUG: Extracted model_prefix: '{model_prefix}'")
+        logger.debug(f" Extracted model_prefix: '{model_prefix}'")
         
         return {
             "success": True,
@@ -555,9 +875,7 @@ async def warmup_connections(background_tasks: BackgroundTasks):
 @app.get("/api/session/{session_id}")
 async def get_session(session_id: str):
     """Get session details."""
-    session = hunt_engine.get_session(session_id)
-    if not session:
-        raise HTTPException(404, "Session not found")
+    session = await _get_validated_session(session_id)
     
     return {
         "session_id": session.session_id,
@@ -573,7 +891,7 @@ async def get_session(session_id: str):
 @app.post("/api/update-config/{session_id}")
 async def update_config(session_id: str, config: HuntConfig):
     """Update hunt configuration for a session. Restores from storage if needed."""
-    session = hunt_engine.get_session(session_id)
+    session = await hunt_engine.get_session_async(session_id)
     
     # If not in memory, try to restore from storage
     if not session:
@@ -634,276 +952,78 @@ class UpdateNotebookCellsRequest(BaseModel):
 
 @app.post("/api/update-response/{session_id}")
 async def update_response(session_id: str, request: UpdateResponseRequest):
-    """Update the [response] section in the notebook and save to Colab."""
-    session = hunt_engine.get_session(session_id)
-    if not session:
-        raise HTTPException(404, "Session not found")
-    
-    # Get session storage for URL and original content
-    storage = get_session_storage(session_id)
-    if not storage or "url" not in storage:
-        raise HTTPException(400, "No source URL found - cannot save back to Colab")
+    """Update the [response] section in the notebook and save to Colab (if URL available)."""
+    session = await _get_validated_session(session_id)
+    storage, has_url = _get_storage_with_url(session_id)
     
     try:
-        # Parse original notebook content
-        original_content = storage.get("original_content", "{}")
-        notebook_data = json.loads(original_content)
-        
-        # Find and update the [response] cell
-        updated = False
-        for cell in notebook_data.get("cells", []):
-            if cell.get("cell_type") == "markdown":
-                source = "".join(cell.get("source", []))
-                if "**[response]**" in source.lower() or "**[response]**" in source:
-                    # Update the cell content, preserving the heading
-                    lines = source.split("\n")
-                    new_source = lines[0] + "\n\n" + request.response
-                    cell["source"] = [new_source]
-                    updated = True
-                    break
-        
-        # If cell not found, create it using helper functions
-        if not updated:
-            insert_index = _find_cell_insertion_index(notebook_data, "response")
-            new_cell = _create_notebook_cell("**[response]**", request.response)
-            
-            if "cells" not in notebook_data:
-                notebook_data["cells"] = []
-            notebook_data["cells"].insert(insert_index, new_cell)
-            updated = True
-            
-            # After inserting, reorder cells to ensure correct order
-            _reorder_notebook_cells(notebook_data, HEADING_MAP, CELL_ORDER)
-        
-        # Save to Google Drive
-        from services.google_drive_client import drive_client
-        file_id = drive_client.get_file_id_from_url(storage["url"])
-        if not file_id:
-            raise HTTPException(400, "Could not extract file ID from URL")
-        
-        # Convert notebook back to JSON
-        updated_content = json.dumps(notebook_data, indent=2)
-        
-        # Update file on Drive
-        success = drive_client.update_file_content(file_id, updated_content)
-        if not success:
-            raise HTTPException(500, "Failed to update file on Google Drive")
-        
-        # Update session's notebook with new response
         session.notebook.response = request.response
-        
-        # Update storage with new content
-        storage["original_content"] = updated_content
-        # Update session data in storage
-        storage["session_data"] = session.model_dump()
-        save_session_storage(session_id, storage)
-        
-        return {"success": True, "message": "Response saved to Colab notebook"}
-        
+        saved_to_colab = _save_turn_cells_to_drive(
+            session, storage, has_url, [("response", request.response)]
+        )
+        _persist_session(session_id, session, storage)
+        msg = "Response saved to Colab notebook" if saved_to_colab else "Response saved to session"
+        return {"success": True, "message": msg}
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(500, f"Error saving to Colab: {str(e)}")
+        raise HTTPException(500, f"Error saving response: {str(e)}")
 
 
 @app.post("/api/update-notebook-cell/{session_id}")
 async def update_notebook_cell(session_id: str, request: UpdateNotebookCellRequest):
-    """Update a specific cell in the notebook and save to Colab."""
-    session = hunt_engine.get_session(session_id)
-    if not session:
-        raise HTTPException(404, "Session not found")
-    
-    # Get session storage for URL and original content
-    storage = get_session_storage(session_id)
-    if not storage or "url" not in storage:
-        raise HTTPException(400, "No source URL found - cannot save back to Colab")
-    
-    # Validate cell_type against shared heading map
+    """Update a specific cell in the notebook and save to Colab (if URL available)."""
+    session = await _get_validated_session(session_id)
     if request.cell_type not in HEADING_MAP:
         raise HTTPException(400, f"Invalid cell_type: {request.cell_type}")
     
-    heading_pattern = HEADING_MAP[request.cell_type]
+    storage, has_url = _get_storage_with_url(session_id)
     
     try:
-        # Parse original notebook content
-        original_content = storage.get("original_content", "{}")
-        notebook_data = json.loads(original_content)
-        
-        # Find and update the cell
-        updated = False
-        for cell in notebook_data.get("cells", []):
-            if cell.get("cell_type") == "markdown":
-                source = "".join(cell.get("source", []))
-                if heading_pattern.lower() in source.lower():
-                    # Update the cell content, preserving the heading
-                    heading_line = source.split("\n")[0]
-                    # Build new content with heading + blank line + content
-                    full_content = heading_line + "\n\n" + request.content
-                    # Split into lines for proper Jupyter format (each line as separate string)
-                    content_lines = full_content.split("\n")
-                    # Add newline to each line except the last (Jupyter format)
-                    cell["source"] = [line + "\n" for line in content_lines[:-1]] + [content_lines[-1]] if content_lines else [""]
-                    updated = True
-                    break
-        
-        # If cell not found, create it using helper functions
-        if not updated:
-            insert_index = _find_cell_insertion_index(notebook_data, request.cell_type)
-            new_cell = _create_notebook_cell(heading_pattern, request.content)
-            
-            if "cells" not in notebook_data:
-                notebook_data["cells"] = []
-            notebook_data["cells"].insert(insert_index, new_cell)
-            updated = True
-            
-            # After inserting, reorder cells to ensure correct order
-            _reorder_notebook_cells(notebook_data, HEADING_MAP, CELL_ORDER)
-        
-        # Save to Google Drive
-        from services.google_drive_client import drive_client
-        file_id = drive_client.get_file_id_from_url(storage["url"])
-        if not file_id:
-            raise HTTPException(400, "Could not extract file ID from URL")
-        
-        # Convert notebook back to JSON
-        updated_content = json.dumps(notebook_data, indent=2)
-        
-        # Update file on Drive
-        success = drive_client.update_file_content(file_id, updated_content)
-        if not success:
-            raise HTTPException(500, "Failed to update file on Google Drive")
-        
-        # Update session's notebook using helper
         _update_session_notebook_field(session, request.cell_type, request.content)
-        
-        # Update storage with new content
-        storage["original_content"] = updated_content
-        # Update session data in storage
-        storage["session_data"] = session.model_dump()
-        save_session_storage(session_id, storage)
-        
-        return {"success": True, "message": f"{request.cell_type} saved to Colab notebook"}
-        
+        saved_to_colab = _save_turn_cells_to_drive(
+            session, storage, has_url, [(request.cell_type, request.content)]
+        )
+        _persist_session(session_id, session, storage)
+        msg = f"{request.cell_type} saved to Colab notebook" if saved_to_colab else f"{request.cell_type} saved to session"
+        return {"success": True, "message": msg}
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(500, f"Error saving to Colab: {str(e)}")
+        raise HTTPException(500, f"Error saving cell: {str(e)}")
 
 
 @app.post("/api/update-notebook-cells/{session_id}")
 async def update_notebook_cells(session_id: str, request: UpdateNotebookCellsRequest):
-    """Update multiple cells in the notebook and save to Colab."""
-    session = hunt_engine.get_session(session_id)
-    if not session:
-        raise HTTPException(404, "Session not found")
-    
-    # Get session storage for URL and original content
-    storage = get_session_storage(session_id)
-    if not storage or "url" not in storage:
-        raise HTTPException(400, "No source URL found - cannot save back to Colab")
+    """Update multiple cells in the notebook and save to Colab (if URL available)."""
+    session = await _get_validated_session(session_id)
+    storage, has_url = _get_storage_with_url(session_id)
     
     try:
-        # Parse original notebook content
-        original_content = storage.get("original_content", "{}")
-        notebook_data = json.loads(original_content)
+        # Update session state for all valid cells
+        cells = [(c.cell_type, c.content) for c in request.cells if c.cell_type in HEADING_MAP]
+        if not cells:
+            raise HTTPException(400, "No valid cell types provided")
         
-        updated_cells = []
+        for cell_type, content in cells:
+            _update_session_notebook_field(session, cell_type, content)
         
-        # Track which cells need to be created
-        cells_to_create = []
+        saved_to_colab = _save_turn_cells_to_drive(session, storage, has_url, cells)
+        _persist_session(session_id, session, storage)
         
-        # Update each cell
-        for cell_request in request.cells:
-            if cell_request.cell_type not in HEADING_MAP:
-                continue
-            
-            heading_pattern = HEADING_MAP[cell_request.cell_type]
-            updated = False
-            
-            for cell in notebook_data.get("cells", []):
-                if cell.get("cell_type") == "markdown":
-                    source = "".join(cell.get("source", []))
-                    if heading_pattern.lower() in source.lower():
-                        # Update the cell content, preserving the heading
-                        heading_line = source.split("\n")[0]
-                        full_content = heading_line + "\n\n" + cell_request.content
-                        content_lines = full_content.split("\n")
-                        cell["source"] = [line + "\n" for line in content_lines[:-1]] + [content_lines[-1]] if content_lines else [""]
-                        updated = True
-                        updated_cells.append(cell_request.cell_type)
-                        
-                        # Update session's notebook using helper
-                        _update_session_notebook_field(session, cell_request.cell_type, cell_request.content)
-                        break
-            
-            # If cell not found, mark it for creation
-            if not updated:
-                cells_to_create.append((cell_request, heading_pattern))
-        
-        # Create cells that don't exist using helper functions
-        if cells_to_create:
-            # Sort cells to create by their order in CELL_ORDER
-            cells_to_create_sorted = sorted(cells_to_create, key=lambda x: (
-                CELL_ORDER.index(x[0].cell_type) if x[0].cell_type in CELL_ORDER else 999
-            ))
-            
-            # Create and insert new cells in correct order
-            for cell_request, heading_pattern in cells_to_create_sorted:
-                insert_index = _find_cell_insertion_index(notebook_data, cell_request.cell_type)
-                new_cell = _create_notebook_cell(heading_pattern, cell_request.content)
-                
-                if "cells" not in notebook_data:
-                    notebook_data["cells"] = []
-                notebook_data["cells"].insert(insert_index, new_cell)
-                updated_cells.append(cell_request.cell_type)
-                
-                # Update session's notebook using helper
-                _update_session_notebook_field(session, cell_request.cell_type, cell_request.content)
-            
-            # After creating all cells, reorder to ensure correct order
-            _reorder_notebook_cells(notebook_data, HEADING_MAP, CELL_ORDER)
-        
-        if not updated_cells:
-            raise HTTPException(400, "Could not find any matching cells in notebook")
-        
-        # Save to Google Drive
-        from services.google_drive_client import drive_client
-        file_id = drive_client.get_file_id_from_url(storage["url"])
-        if not file_id:
-            raise HTTPException(400, "Could not extract file ID from URL")
-        
-        # Convert notebook back to JSON
-        updated_content = json.dumps(notebook_data, indent=2)
-        
-        # Update file on Drive
-        success = drive_client.update_file_content(file_id, updated_content)
-        if not success:
-            raise HTTPException(500, "Failed to update file on Google Drive")
-        
-        # Update storage with new content
-        storage["original_content"] = updated_content
-        # Update session data in storage
-        storage["session_data"] = session.model_dump()
-        save_session_storage(session_id, storage)
-        
-        return {
-            "success": True,
-            "message": f"Saved {len(updated_cells)} cell(s) to Colab notebook",
-            "updated_cells": updated_cells
-        }
-        
+        cell_names = [c[0] for c in cells]
+        msg = f"Saved {len(cells)} cell(s) to Colab notebook" if saved_to_colab else f"Saved {len(cells)} cell(s) to session"
+        return {"success": True, "message": msg, "updated_cells": cell_names}
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(500, f"Error saving to Colab: {str(e)}")
+        raise HTTPException(500, f"Error saving cells: {str(e)}")
 
 
 @app.post("/api/judge-reference/{session_id}")
 async def judge_reference(session_id: str):
     """Judge the original reference response to verify it's correct."""
-    session = hunt_engine.get_session(session_id)
-    if not session:
-        raise HTTPException(404, "Session not found")
+    session = await _get_validated_session(session_id)
     
     # Re-fetch notebook from Colab to get latest response_reference
     # CRITICAL: Only re-fetch for Turn 1. In multi-turn mode (turn > 1),
@@ -925,9 +1045,9 @@ async def judge_reference(session_id: str):
             # Log if response_reference changed
             original_ref = session.notebook.response_reference
             if original_ref and parsed.response_reference != original_ref:
-                print(f"DEBUG: response_reference changed in Colab. Original length: {len(original_ref)}, New length: {len(parsed.response_reference)}")
-                print(f"DEBUG: Original (first 200 chars): {original_ref[:200]}...")
-                print(f"DEBUG: New (first 200 chars): {parsed.response_reference[:200]}...")
+                logger.debug(f" response_reference changed in Colab. Original length: {len(original_ref)}, New length: {len(parsed.response_reference)}")
+                logger.debug(f" Original (first 200 chars): {original_ref[:200]}...")
+                logger.debug(f" New (first 200 chars): {parsed.response_reference[:200]}...")
             # Update session with latest notebook data
             session.notebook = parsed
             # Extract criteria count for debugging
@@ -945,18 +1065,18 @@ async def judge_reference(session_id: str):
                         criteria_ids = [item.get('id', f'C{i+1}') if isinstance(item, dict) else f'C{i+1}' 
                                        for i, item in enumerate(criteria_list)]
                 except Exception as parse_err:
-                    print(f"DEBUG: Could not parse criteria list: {parse_err}")
+                    logger.debug(f" Could not parse criteria list: {parse_err}")
             new_ref = ref[:100] if ref else "empty"
-            print(f"DEBUG: Refreshed notebook from Colab for session {session_id}.")
-            print(f"DEBUG: Old response_reference (first 100 chars): {old_ref}...")
-            print(f"DEBUG: New response_reference (first 100 chars): {new_ref}...")
-            print(f"DEBUG: Found {criteria_count} criteria: {criteria_ids}")
+            logger.debug(f" Refreshed notebook from Colab for session {session_id}.")
+            logger.debug(f" Old response_reference (first 100 chars): {old_ref}...")
+            logger.debug(f" New response_reference (first 100 chars): {new_ref}...")
+            logger.debug(f" Found {criteria_count} criteria: {criteria_ids}")
         except Exception as e:
-            print(f"WARNING: Could not refresh notebook from Colab: {e}. Using cached version.")
+            logger.warning(f"Could not refresh notebook from Colab: {e}. Using cached version.")
             import traceback
             traceback.print_exc()
     else:
-        print(f"WARNING: No storage URL found for session {session_id}. Cannot refresh from Colab.")
+        logger.warning(f"No storage URL found for session {session_id}. Cannot refresh from Colab.")
     
     notebook = session.notebook
     
@@ -970,7 +1090,7 @@ async def judge_reference(session_id: str):
         
         # Log the exact response_reference being sent to judge
         ref_to_judge = notebook.response_reference or ""
-        print(f"DEBUG: judge_reference - About to call judge with response_reference (first 500 chars): {ref_to_judge[:500]}...")
+        logger.debug(f" judge_reference - About to call judge with response_reference (first 500 chars): {ref_to_judge[:500]}...")
         import re
         import json as json_lib
         array_match = re.search(r'\[.*?\]', ref_to_judge, re.DOTALL)
@@ -980,9 +1100,9 @@ async def judge_reference(session_id: str):
                 if isinstance(criteria_list, list):
                     criteria_ids_in_ref = [item.get('id', f'C{i+1}') if isinstance(item, dict) else f'C{i+1}' 
                                           for i, item in enumerate(criteria_list)]
-                    print(f"DEBUG: judge_reference - Criteria IDs in response_reference being sent to judge: {criteria_ids_in_ref}")
+                    logger.debug(f" judge_reference - Criteria IDs in response_reference being sent to judge: {criteria_ids_in_ref}")
             except Exception as e:
-                print(f"DEBUG: judge_reference - Could not parse criteria from response_reference: {e}")
+                logger.debug(f" judge_reference - Could not parse criteria from response_reference: {e}")
         
         judge_result = await judge.judge_response(
             prompt=notebook.prompt,
@@ -994,7 +1114,7 @@ async def judge_reference(session_id: str):
             standard_response=notebook.response  # Standard response from [response] cell
         )
         
-        print(f"DEBUG: judge_reference - Judge returned criteria: {list(judge_result.get('criteria', {}).keys())}")
+        logger.debug(f" judge_reference - Judge returned criteria: {list(judge_result.get('criteria', {}).keys())}")
         
         score = judge_result.get("score")
         criteria = judge_result.get("criteria", {})
@@ -1005,25 +1125,109 @@ async def judge_reference(session_id: str):
         
         # Also return the current response_reference so frontend can re-parse criteria
         # This ensures state.criteria is always in sync with what was actually judged
-        return {
-            "success": True,
-            "score": score,
-            "explanation": judge_result.get("explanation", ""),
-            "criteria": criteria,
-            "raw_output": judge_result.get("raw_output", ""),
-            "is_passing": (score or 0) >= 1,  # Handle None score
-            "response_reference": notebook.response_reference  # Include fresh response_reference
-        }
+        return _format_judge_result(judge_result, notebook)
     except Exception as e:
         raise HTTPException(500, f"Judge error: {str(e)}")
+
+
+# ============== Calibration Endpoints ==============
+
+
+class JudgeCalibrateRequest(BaseModel):
+    """Request to judge a specific response text for calibration."""
+    response_text: str
+
+
+@app.post("/api/generate-single/{session_id}")
+async def generate_single(session_id: str):
+    """
+    Generate a single model response for calibration. No judging.
+    Uses current session config (provider, model, conversation_history, prompt).
+    """
+    session = await _get_validated_session(session_id)
+
+    if not session.notebook or not session.notebook.prompt:
+        raise HTTPException(400, "No prompt set. Please write a prompt first.")
+
+    provider = getattr(session.config, 'provider', 'openrouter')
+    model = session.config.models[0] if session.config.models else "qwen/qwen3-235b-a22b-thinking-2507"
+    conversation_history = session.config.conversation_history or []
+    prompt = session.notebook.prompt
+
+    try:
+        messages_kwarg = {"messages": conversation_history} if conversation_history else {}
+
+        if provider == 'fireworks':
+            from services.fireworks_client import get_fireworks_client
+            client = get_fireworks_client()
+        else:
+            from services.openrouter_client import get_openrouter_client
+            client = get_openrouter_client()
+
+        response_text, reasoning, error = await client.call_with_retry(
+            prompt=prompt,
+            model=model,
+            max_retries=session.config.max_retries,
+            reasoning_budget_percent=session.config.reasoning_budget_percent if provider != 'fireworks' else None,
+            **messages_kwarg
+        )
+
+        if error:
+            raise HTTPException(500, f"Model error: {error}")
+
+        return {
+            "success": True,
+            "response": response_text or "",
+            "reasoning": reasoning or "",
+            "model": model,
+            "provider": provider,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Generation error: {str(e)}")
+
+
+@app.post("/api/judge-calibration/{session_id}")
+async def judge_calibration(session_id: str, request: JudgeCalibrateRequest):
+    """
+    Judge a specific response text against current session criteria.
+    For the calibration re-judge loop — judges request.response_text
+    instead of notebook.response.
+    Returns same format as judge_reference.
+    """
+    session = await _get_validated_session(session_id)
+
+    notebook = session.notebook
+    if not notebook:
+        raise HTTPException(400, "No notebook data in session")
+
+    if not request.response_text:
+        raise HTTPException(400, "No response text provided to judge")
+
+    try:
+        from services.openai_client import get_openai_judge_client
+        judge = get_openai_judge_client()
+
+        judge_result = await judge.judge_response(
+            prompt=notebook.prompt,
+            student_response=request.response_text,
+            response_reference=notebook.response_reference,
+            judge_system_prompt=notebook.judge_system_prompt,
+            judge_prompt_template=notebook.judge_prompt_template,
+            model="gpt-5",
+            standard_response=request.response_text
+        )
+
+        return _format_judge_result(judge_result, notebook)
+    except Exception as e:
+        raise HTTPException(500, f"Judge calibration error: {str(e)}")
 
 
 @app.post("/api/start-hunt")
 async def start_hunt(request: StartHuntRequest):
     """Start a hunt (non-streaming, returns when complete)."""
-    session = hunt_engine.get_session(request.session_id)
-    if not session:
-        raise HTTPException(404, "Session not found")
+    session = await _get_validated_session(request.session_id)
     
     if request.config:
         session.config = request.config
@@ -1049,9 +1253,7 @@ async def hunt_stream(session_id: str, request: Request):
     
     Starts the hunt and streams events as they happen.
     """
-    session = hunt_engine.get_session(session_id)
-    if not session:
-        raise HTTPException(404, "Session not found")
+    session = await _get_validated_session(session_id)
     
     async def event_generator():
         queue = asyncio.Queue()
@@ -1124,7 +1326,7 @@ async def get_original_notebook(session_id: str):
 async def export_notebook(session_id: str, include_reasoning: bool = True):
     """Export modified notebook with hunt results."""
     try:
-        session = hunt_engine.get_session(session_id)
+        session = await hunt_engine.get_session_async(session_id)
         if not session:
             raise HTTPException(404, "Session not found")
         
@@ -1172,7 +1374,7 @@ async def export_notebook(session_id: str, include_reasoning: bool = True):
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Export error trace:")
+        logger.error(f"Export error trace:")
         import traceback
         traceback.print_exc()
         raise HTTPException(500, f"Export failed: {str(e)}")
@@ -1181,9 +1383,7 @@ async def export_notebook(session_id: str, include_reasoning: bool = True):
 @app.post("/api/save-reviews/{session_id}")
 async def save_reviews(session_id: str, request: Request):
     """Save human reviews for notebook export."""
-    session = hunt_engine.get_session(session_id)
-    if not session:
-        raise HTTPException(404, "Session not found")
+    session = await _get_validated_session(session_id)
     
     data = await request.json()
     reviews = data.get("reviews", {})
@@ -1383,7 +1583,7 @@ async def save_to_drive(session_id: str, request: Request):
         selected_hunt_ids = body.get("selected_hunt_ids", [])
         total_hunts_from_frontend = body.get("total_hunts")  # Total hunts from frontend (state.allResponses.length)
         
-        session = hunt_engine.get_session(session_id)
+        session = await hunt_engine.get_session_async(session_id)
         if not session:
             raise HTTPException(404, "Session not found")
             
@@ -1401,54 +1601,54 @@ async def save_to_drive(session_id: str, request: Request):
         # Generate content - FILTER to only selected results
         original_content = storage.get("original_content")
         all_results = hunt_engine.export_results(session_id)
-        print(f"DEBUG: Total results from export_results: {len(all_results)}")
-        print(f"DEBUG: All result hunt_ids: {[r.get('hunt_id') for r in all_results]}")
+        logger.debug(f" Total results from export_results: {len(all_results)}")
+        logger.debug(f" All result hunt_ids: {[r.get('hunt_id') for r in all_results]}")
         
         # Filter results to only include selected hunt IDs
         # Normalize hunt_ids to integers for comparison (handle both string and int)
         if selected_hunt_ids:
             normalized_selected = [int(hid) if isinstance(hid, str) else hid for hid in selected_hunt_ids]
-            print(f"DEBUG: Selected hunt_ids (normalized): {normalized_selected}")
+            logger.debug(f" Selected hunt_ids (normalized): {normalized_selected}")
             results = [r for r in all_results if int(r.get('hunt_id', 0)) in normalized_selected]
             # Preserve order of selected_hunt_ids
             results = sorted(results, key=lambda r: normalized_selected.index(int(r.get('hunt_id', 0))) if int(r.get('hunt_id', 0)) in normalized_selected else 999)
-            print(f"DEBUG: Filtering to {len(results)} selected results out of {len(all_results)} total")
-            print(f"DEBUG: Selected hunt_ids: {normalized_selected}, Found results: {[r.get('hunt_id') for r in results]}")
+            logger.debug(f" Filtering to {len(results)} selected results out of {len(all_results)} total")
+            logger.debug(f" Selected hunt_ids: {normalized_selected}, Found results: {[r.get('hunt_id') for r in results]}")
             
             # CRITICAL: Check if all selected hunt_ids were found
             found_hunt_ids = [int(r.get('hunt_id', 0)) for r in results]
             missing_hunt_ids = [hid for hid in normalized_selected if hid not in found_hunt_ids]
             if missing_hunt_ids:
-                print(f"ERROR: Selected hunt_ids {missing_hunt_ids} not found in all_results!")
-                print(f"ERROR: This will cause empty slots. Available hunt_ids: {[int(r.get('hunt_id', 0)) for r in all_results]}")
+                logger.error(f"Selected hunt_ids {missing_hunt_ids} not found in all_results!")
+                logger.error(f"This will cause empty slots. Available hunt_ids: {[int(r.get('hunt_id', 0)) for r in all_results]}")
                 # Check session results directly to see all hunt_ids (including non-completed)
-                session = hunt_engine.get_session(session_id)
+                session = await hunt_engine.get_session_async(session_id)
                 if session:
                     all_session_hunt_ids = [r.hunt_id for r in session.results]
-                    print(f"DEBUG: All session hunt_ids (including non-completed): {all_session_hunt_ids}")
+                    logger.debug(f" All session hunt_ids (including non-completed): {all_session_hunt_ids}")
                     missing_results = [r for r in session.results if r.hunt_id in missing_hunt_ids]
                     if missing_results:
-                        print(f"DEBUG: Missing hunt_ids found in session but not completed:")
+                        logger.debug(f" Missing hunt_ids found in session but not completed:")
                         for r in missing_results:
-                            print(f"  - hunt_id {r.hunt_id}: status={r.status.value}, has_response={bool(r.response)}")
+                            logger.debug(f"  - hunt_id {r.hunt_id}: status={r.status.value}, has_response={bool(r.response)}")
                 # This is a critical error - we can't save properly if hunt_ids are missing
                 raise HTTPException(400, f"Selected hunt_ids {missing_hunt_ids} not found in results. Available: {[int(r.get('hunt_id', 0)) for r in all_results]}")
             
             if len(results) < 4:
-                print(f"WARNING: Only {len(results)} results found, but 4 slots will be created. Slots {len(results)+1}-4 will be empty.")
+                logger.warning(f"Only {len(results)} results found, but 4 slots will be created. Slots {len(results)+1}-4 will be empty.")
         else:
             # Fallback: use all if no selection provided
             results = all_results
-            print(f"WARNING: No selected_hunt_ids provided, saving all {len(results)} results")
+            logger.warning(f"No selected_hunt_ids provided, saving all {len(results)} results")
         
         # Results are already in the correct order (preserved from selected_hunt_ids order)
-        print(f"DEBUG: Using results in order: {[r.get('hunt_id') for r in results[:4]]}")
+        logger.debug(f" Using results in order: {[r.get('hunt_id') for r in results[:4]]}")
         
         human_reviews = getattr(session, 'human_reviews', {})
         # Calculate valid response count on backend (excludes empty/error responses)
         # This ensures correct count even if frontend sends old value
         valid_response_count = count_valid_responses(all_results)
-        print(f"DEBUG: valid_response_count = {valid_response_count} (frontend sent: {total_hunts_from_frontend}, total results: {len(all_results)})")
+        logger.debug(f" valid_response_count = {valid_response_count} (frontend sent: {total_hunts_from_frontend}, total results: {len(all_results)})")
         
         modified_content = notebook_parser.export_notebook(
             original_content=original_content,
@@ -1485,7 +1685,7 @@ async def save_to_drive(session_id: str, request: Request):
     except Exception as e:
         import traceback
         traceback.print_exc()
-        print(f"Drive save error: {str(e)}")
+        logger.error(f"Drive save error: {str(e)}")
         raise HTTPException(500, f"Drive save failed: {str(e)}")
 
 
@@ -1661,9 +1861,9 @@ async def admin_status():
 class AdvanceTurnRequest(BaseModel):
     """Request to advance to the next turn in a multi-turn session."""
     selected_hunt_id: int                    # Hunt ID of the "good" response from current turn
-    next_prompt: str                          # New prompt for next turn
-    next_criteria: str                        # New criteria/rubrics for next turn
-    next_judge_prompt: Optional[str] = None   # Optional judge system prompt for next turn
+    next_prompt: Optional[str] = ""          # Optional — set later via full editor
+    next_criteria: Optional[str] = ""        # Optional — set later via full editor
+    next_judge_prompt: Optional[str] = None  # Optional judge system prompt for next turn
 
 
 @app.post("/api/advance-turn/{session_id}")
@@ -1675,9 +1875,7 @@ async def advance_turn(session_id: str, request: AdvanceTurnRequest):
     builds conversation history, and prepares the session for
     the next turn with new prompt and criteria.
     """
-    session = await hunt_engine.get_session_async(session_id)
-    if not session:
-        raise HTTPException(404, "Session not found")
+    session = await _get_validated_session(session_id)
     
     # Find the selected response from current results
     selected_result = None
@@ -1790,9 +1988,7 @@ async def mark_breaking(session_id: str):
     The trainer will then do blind human review of the 
     worst responses from this turn.
     """
-    session = await hunt_engine.get_session_async(session_id)
-    if not session:
-        raise HTTPException(404, "Session not found")
+    session = await _get_validated_session(session_id)
     
     current_turn = session.current_turn
     
@@ -1833,9 +2029,7 @@ async def get_turn_status(session_id: str):
     """
     Get current turn status, conversation history, and all past turns.
     """
-    session = await hunt_engine.get_session_async(session_id)
-    if not session:
-        raise HTTPException(404, "Session not found")
+    session = await _get_validated_session(session_id)
     
     return {
         "session_id": session_id,
@@ -1962,5 +2156,5 @@ if __name__ == "__main__":
         "main:app",
         host="0.0.0.0",
         port=8000,
-        reload=True
+        reload=False
     )

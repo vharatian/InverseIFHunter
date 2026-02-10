@@ -554,6 +554,339 @@ body {
     color: var(--text-muted);
 }
 
+/* ========== Live Terminal ========== */
+.terminal-section {
+    margin-bottom: 32px;
+}
+
+.terminal-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    user-select: none;
+}
+
+.terminal-toggle .chevron {
+    font-size: 11px;
+    color: var(--text-muted);
+    transition: transform 0.2s;
+}
+
+.terminal-toggle.open .chevron { transform: rotate(90deg); }
+
+.terminal-body {
+    background: #0d1117;
+    border: 1px solid #21262d;
+    border-radius: var(--radius);
+    margin-top: 8px;
+    max-height: 320px;
+    overflow-y: auto;
+    display: none;
+}
+
+.terminal-body.open { display: block; }
+
+.terminal-content {
+    padding: 12px 16px;
+    font-family: 'SF Mono', 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    color: #c9d1d9;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.terminal-content .line-pass { color: #3fb950; }
+.terminal-content .line-fail { color: #f85149; }
+.terminal-content .line-skip { color: #d29922; }
+.terminal-content .line-info { color: #58a6ff; }
+.terminal-content .line-time { color: #6e7681; font-size: 10px; }
+
+/* ========== Detail Side Panel ========== */
+.detail-overlay {
+    display: none;
+    position: fixed;
+    top: 0; right: 0; bottom: 0; left: 0;
+    background: rgba(0,0,0,0.3);
+    z-index: 200;
+}
+
+.detail-overlay.open { display: block; }
+
+.detail-panel {
+    position: fixed;
+    top: 0;
+    right: -440px;
+    width: 440px;
+    height: 100vh;
+    background: var(--bg);
+    border-left: 1px solid var(--border);
+    box-shadow: -8px 0 24px rgba(0,0,0,0.15);
+    z-index: 300;
+    transition: right 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+}
+
+.detail-panel.open { right: 0; }
+
+.detail-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    flex-shrink: 0;
+}
+
+.detail-close {
+    background: none;
+    border: none;
+    font-size: 18px;
+    cursor: pointer;
+    color: var(--text-muted);
+    padding: 2px 6px;
+    border-radius: 4px;
+    flex-shrink: 0;
+}
+
+.detail-close:hover { background: var(--bg-tertiary); color: var(--text); }
+
+.detail-title {
+    font-size: 14px;
+    font-weight: 600;
+    word-break: break-all;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+.detail-body { padding: 16px 20px; flex: 1; }
+
+.detail-row {
+    margin-bottom: 16px;
+}
+
+.detail-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+}
+
+.detail-value {
+    font-size: 13px;
+    color: var(--text);
+}
+
+.detail-file-link {
+    color: var(--accent);
+    text-decoration: none;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 12px;
+}
+
+.detail-file-link:hover { text-decoration: underline; }
+
+.detail-badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.detail-badge.passed { background: var(--green-bg); color: var(--green); }
+.detail-badge.failed { background: var(--red-bg); color: var(--red); }
+.detail-badge.pending { background: var(--bg-tertiary); color: var(--text-muted); }
+.detail-badge.skipped { background: var(--orange-bg); color: var(--orange); }
+
+.detail-source {
+    background: #0d1117;
+    border: 1px solid #21262d;
+    border-radius: var(--radius-sm);
+    padding: 12px;
+    font-family: 'SF Mono', 'JetBrains Mono', monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    color: #c9d1d9;
+    white-space: pre-wrap;
+    overflow-x: auto;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.detail-docstring {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 10px 12px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    font-style: italic;
+}
+
+.detail-error {
+    background: var(--red-bg);
+    border: 1px solid var(--red);
+    border-radius: var(--radius-sm);
+    padding: 10px 12px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 12px;
+    color: var(--red);
+    white-space: pre-wrap;
+    max-height: 250px;
+    overflow-y: auto;
+}
+
+/* ========== AI Test Creator Modal ========== */
+.modal-overlay {
+    display: none;
+    position: fixed;
+    top: 0; right: 0; bottom: 0; left: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 400;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal-overlay.open { display: flex; }
+
+.modal {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    width: 720px;
+    max-height: 85vh;
+    overflow-y: auto;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+}
+
+.modal-header {
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.modal-title {
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 20px;
+    cursor: pointer;
+    color: var(--text-muted);
+    padding: 2px 8px;
+    border-radius: 4px;
+}
+
+.modal-close:hover { background: var(--bg-tertiary); }
+
+.modal-body { padding: 24px; }
+
+.form-group {
+    margin-bottom: 20px;
+}
+
+.form-label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 6px;
+}
+
+.form-select, .form-input, .form-textarea {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 13px;
+}
+
+.form-select:focus, .form-input:focus, .form-textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-bg);
+}
+
+.form-textarea {
+    min-height: 80px;
+    resize: vertical;
+}
+
+.code-preview {
+    background: #0d1117;
+    border: 1px solid #21262d;
+    border-radius: var(--radius);
+    padding: 16px;
+    font-family: 'SF Mono', 'JetBrains Mono', monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    color: #c9d1d9;
+    white-space: pre-wrap;
+    max-height: 400px;
+    overflow-y: auto;
+    min-height: 200px;
+}
+
+.code-preview[contenteditable="true"] {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.modal-footer {
+    padding: 16px 24px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.modal-footer-left { display: flex; align-items: center; gap: 8px; }
+.modal-footer-right { display: flex; align-items: center; gap: 8px; }
+
+.spinner {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.btn-success {
+    background: var(--green);
+    color: #fff;
+    border-color: var(--green);
+}
+
+.btn-success:hover { opacity: 0.9; background: var(--green); }
+
+.btn-purple {
+    background: var(--purple);
+    color: #fff;
+    border-color: var(--purple);
+}
+
+.btn-purple:hover { opacity: 0.9; background: var(--purple); }
+
 /* ========== Responsive ========== */
 @media (max-width: 768px) {
     .header { padding: 10px 16px; }
@@ -561,6 +894,8 @@ body {
     .main { padding: 16px; }
     .summary-row { grid-template-columns: repeat(2, 1fr); }
     .test-cell { width: 22px; height: 22px; }
+    .detail-panel { width: 100%; right: -100%; }
+    .modal { width: 95%; margin: 10px; }
 }
 </style>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -597,6 +932,8 @@ body {
     <div class="progress-bar-container" id="progressContainer" style="flex:1;max-width:300px;">
         <div class="progress-bar-fill" id="progressFill"></div>
     </div>
+    <span style="flex:1;"></span>
+    <button class="btn btn-purple" onclick="openTestCreator()">+ New Test</button>
 </div>
 
 <!-- Main Content -->
@@ -638,6 +975,16 @@ body {
         </div>
     </div>
 
+    <!-- Live Terminal Output -->
+    <div class="terminal-section">
+        <div class="section-header terminal-toggle" id="terminalToggle" onclick="toggleTerminal()">
+            Live Output <span class="chevron">&#9654;</span>
+        </div>
+        <div class="terminal-body" id="terminalBody">
+            <div class="terminal-content" id="terminalContent">Waiting for test run...</div>
+        </div>
+    </div>
+
     <!-- Category Breakdown -->
     <div class="breakdown-section" id="breakdownSection" style="display:none;">
         <div class="section-header">Category Breakdown</div>
@@ -660,11 +1007,72 @@ body {
     </div>
 </div>
 
+<!-- Detail Side Panel -->
+<div class="detail-overlay" id="detailOverlay" onclick="closeDetail()"></div>
+<div class="detail-panel" id="detailPanel">
+    <div class="detail-header">
+        <div>
+            <div class="detail-title" id="detailTitle">-</div>
+        </div>
+        <button class="detail-close" onclick="closeDetail()">&times;</button>
+    </div>
+    <div class="detail-body" id="detailBody">
+        <p style="color:var(--text-muted); font-size:13px;">Click a test cell to view details.</p>
+    </div>
+</div>
+
+<!-- AI Test Creator Modal -->
+<div class="modal-overlay" id="aiModal">
+    <div class="modal">
+        <div class="modal-header">
+            <span class="modal-title">AI Test Generator</span>
+            <button class="modal-close" onclick="closeTestCreator()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label class="form-label">Category</label>
+                <select class="form-select" id="aiCategory">
+                    <option value="api">API</option>
+                    <option value="unit">Unit</option>
+                    <option value="e2e">E2E</option>
+                    <option value="stress">Stress</option>
+                    <option value="security">Security</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Describe the test in plain English</label>
+                <textarea class="form-textarea" id="aiDescription" placeholder="e.g. Test that uploading an empty notebook returns a 400 error with a helpful message"></textarea>
+            </div>
+            <div class="form-group" id="aiCodeGroup" style="display:none;">
+                <label class="form-label">
+                    Generated Code
+                    <button class="btn btn-sm" style="margin-left:8px;" onclick="toggleCodeEdit()">Edit</button>
+                </label>
+                <div class="code-preview" id="aiCodePreview"></div>
+            </div>
+            <div class="form-group" id="aiFilenameGroup" style="display:none;">
+                <label class="form-label">Filename</label>
+                <input class="form-input" id="aiFilename" placeholder="test_something.py">
+            </div>
+        </div>
+        <div class="modal-footer">
+            <div class="modal-footer-left">
+                <span id="aiStatus" style="font-size:12px;color:var(--text-muted);"></span>
+            </div>
+            <div class="modal-footer-right">
+                <button class="btn btn-primary" id="btnGenerate" onclick="generateTest()">Generate</button>
+                <button class="btn btn-success" id="btnSaveRun" onclick="saveAndRunTest()" style="display:none;">Save &amp; Run</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 /* ========== State ========== */
 const state = {
     tests: [],
-    testMap: {},  // nodeid → {element, status, category}
+    testMap: {},  // nodeid → {element, status, category, file, name}
+    testDetails: {},  // nodeid → {outcome, duration, error, ...} from run_complete
     totalDiscovered: 0,
     completed: 0,
     passed: 0,
@@ -729,12 +1137,13 @@ async function discoverTests(category) {
 
                 const tooltip = document.createElement('span');
                 tooltip.className = 'tooltip';
-                tooltip.textContent = t.name;
+                tooltip.textContent = `${t.name} (${t.file})`;
                 cell.appendChild(tooltip);
 
+                cell.addEventListener('click', () => openDetail(t.nodeid));
                 grid.appendChild(cell);
 
-                state.testMap[t.nodeid] = { element: cell, status: 'pending', category: cat };
+                state.testMap[t.nodeid] = { element: cell, status: 'pending', category: cat, file: t.file, name: t.name };
             }
 
             group.appendChild(grid);
@@ -768,11 +1177,14 @@ async function runTests(category) {
     document.getElementById('failuresContainer').innerHTML = '';
     updateSummary();
 
-    // Reset all cells
+    // Reset all cells and terminal
     Object.values(state.testMap).forEach(t => {
         t.element.className = 'test-cell';
         t.status = 'pending';
     });
+    state.testDetails = {};
+    clearTerminal();
+    openTerminal();
 
     // Discover tests first
     await discoverTests(category);
@@ -780,6 +1192,11 @@ async function runTests(category) {
     // Connect SSE
     if (state.eventSource) state.eventSource.close();
     state.eventSource = new EventSource(`/api/run-tests?category=${category}`);
+
+    state.eventSource.addEventListener('raw_output', (e) => {
+        const data = JSON.parse(e.data);
+        appendTerminalLine(data.line, data.elapsed);
+    });
 
     state.eventSource.addEventListener('test_result', (e) => {
         const data = JSON.parse(e.data);
@@ -847,6 +1264,11 @@ function handleRunComplete(data) {
     document.getElementById('timeValue').textContent = `${data.duration}s`;
     document.getElementById('lastRunTime').textContent =
         `Last run: ${new Date(data.timestamp).toLocaleTimeString()} (${data.category})`;
+
+    // Store per-test details from JSON report
+    if (data.test_details) {
+        state.testDetails = data.test_details;
+    }
 
     // Show failures
     if (data.failures && data.failures.length > 0) {
@@ -1052,6 +1474,253 @@ function renderTrend(runs) {
             }).join('')}
         </svg>
     `;
+}
+
+/* ========== Live Terminal ========== */
+function toggleTerminal() {
+    const toggle = document.getElementById('terminalToggle');
+    const body = document.getElementById('terminalBody');
+    toggle.classList.toggle('open');
+    body.classList.toggle('open');
+}
+
+function openTerminal() {
+    document.getElementById('terminalToggle').classList.add('open');
+    document.getElementById('terminalBody').classList.add('open');
+}
+
+function clearTerminal() {
+    document.getElementById('terminalContent').innerHTML = '';
+}
+
+function appendTerminalLine(line, elapsed) {
+    const content = document.getElementById('terminalContent');
+    const el = document.createElement('div');
+
+    // Color-code lines
+    let cls = '';
+    if (line.includes(' PASSED')) cls = 'line-pass';
+    else if (line.includes(' FAILED') || line.includes(' ERROR')) cls = 'line-fail';
+    else if (line.includes(' SKIPPED')) cls = 'line-skip';
+    else if (line.startsWith('FAILED') || line.startsWith('=')) cls = 'line-info';
+
+    const timeStr = `[${elapsed}s]`;
+    el.innerHTML = `<span class="line-time">${timeStr}</span> <span class="${cls}">${escapeHtml(line)}</span>`;
+    content.appendChild(el);
+
+    // Auto-scroll
+    const body = document.getElementById('terminalBody');
+    body.scrollTop = body.scrollHeight;
+}
+
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+/* ========== Detail Panel ========== */
+async function openDetail(nodeid) {
+    const panel = document.getElementById('detailPanel');
+    const overlay = document.getElementById('detailOverlay');
+    const title = document.getElementById('detailTitle');
+    const body = document.getElementById('detailBody');
+
+    // Parse nodeid parts
+    const parts = nodeid.split('::');
+    const file = parts[0] || '';
+    const className = parts.length === 3 ? parts[1] : '';
+    const methodName = parts[parts.length - 1] || '';
+
+    title.textContent = methodName;
+
+    // Build initial content with what we have
+    const testInfo = state.testMap[nodeid] || {};
+    const runDetail = state.testDetails[nodeid] || {};
+    const status = runDetail.outcome || testInfo.status || 'pending';
+
+    body.innerHTML = `
+        <div class="detail-row">
+            <div class="detail-label">Status</div>
+            <div class="detail-value"><span class="detail-badge ${status}">${status}</span></div>
+        </div>
+        <div class="detail-row">
+            <div class="detail-label">File</div>
+            <div class="detail-value"><a class="detail-file-link" href="vscode://file/${window.location.origin}/../${file}" title="Open in VS Code">${file}</a></div>
+        </div>
+        ${className ? `<div class="detail-row"><div class="detail-label">Class</div><div class="detail-value">${className}</div></div>` : ''}
+        <div class="detail-row">
+            <div class="detail-label">Test</div>
+            <div class="detail-value" style="font-family:monospace;font-size:13px;">${methodName}</div>
+        </div>
+        ${runDetail.duration ? `<div class="detail-row"><div class="detail-label">Duration</div><div class="detail-value">${runDetail.duration}s</div></div>` : ''}
+        <div class="detail-row" id="detailDocstring"><div class="detail-label">Loading details...</div></div>
+    `;
+
+    panel.classList.add('open');
+    overlay.classList.add('open');
+
+    // Fetch full detail from backend
+    try {
+        const r = await fetch(`/api/test-detail?nodeid=${encodeURIComponent(nodeid)}`);
+        const detail = await r.json();
+
+        let extraHtml = '';
+
+        if (detail.docstring) {
+            extraHtml += `
+                <div class="detail-row">
+                    <div class="detail-label">Description</div>
+                    <div class="detail-docstring">${escapeHtml(detail.docstring)}</div>
+                </div>`;
+        }
+
+        if (detail.class_docstring) {
+            extraHtml += `
+                <div class="detail-row">
+                    <div class="detail-label">Class Description</div>
+                    <div class="detail-docstring">${escapeHtml(detail.class_docstring)}</div>
+                </div>`;
+        }
+
+        if (detail.lineno) {
+            extraHtml += `
+                <div class="detail-row">
+                    <div class="detail-label">Line</div>
+                    <div class="detail-value">${detail.lineno}</div>
+                </div>`;
+        }
+
+        if (runDetail.error) {
+            extraHtml += `
+                <div class="detail-row">
+                    <div class="detail-label">Error</div>
+                    <div class="detail-error">${escapeHtml(runDetail.error)}</div>
+                </div>`;
+        }
+
+        if (detail.source) {
+            extraHtml += `
+                <div class="detail-row">
+                    <div class="detail-label">Source Code</div>
+                    <div class="detail-source">${escapeHtml(detail.source)}</div>
+                </div>`;
+        }
+
+        // Replace the loading placeholder
+        const placeholder = document.getElementById('detailDocstring');
+        if (placeholder) placeholder.outerHTML = extraHtml;
+    } catch (e) {
+        const placeholder = document.getElementById('detailDocstring');
+        if (placeholder) placeholder.innerHTML = `<div class="detail-label" style="color:var(--red);">Failed to load details</div>`;
+    }
+}
+
+function closeDetail() {
+    document.getElementById('detailPanel').classList.remove('open');
+    document.getElementById('detailOverlay').classList.remove('open');
+}
+
+/* ========== AI Test Creator ========== */
+function openTestCreator() {
+    document.getElementById('aiModal').classList.add('open');
+    document.getElementById('aiDescription').value = '';
+    document.getElementById('aiCodeGroup').style.display = 'none';
+    document.getElementById('aiFilenameGroup').style.display = 'none';
+    document.getElementById('btnSaveRun').style.display = 'none';
+    document.getElementById('btnGenerate').disabled = false;
+    document.getElementById('aiStatus').textContent = '';
+    document.getElementById('aiCodePreview').textContent = '';
+    document.getElementById('aiCodePreview').contentEditable = 'false';
+}
+
+function closeTestCreator() {
+    document.getElementById('aiModal').classList.remove('open');
+}
+
+async function generateTest() {
+    const desc = document.getElementById('aiDescription').value.trim();
+    if (!desc) return;
+
+    const category = document.getElementById('aiCategory').value;
+    const btn = document.getElementById('btnGenerate');
+    const status = document.getElementById('aiStatus');
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Generating...';
+    status.textContent = 'Calling AI...';
+
+    try {
+        const r = await fetch('/api/generate-test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ description: desc, category }),
+        });
+        const data = await r.json();
+
+        if (data.error) {
+            status.textContent = `Error: ${data.error}`;
+            btn.disabled = false;
+            btn.textContent = 'Generate';
+            return;
+        }
+
+        // Show the generated code
+        document.getElementById('aiCodePreview').textContent = data.code;
+        document.getElementById('aiCodeGroup').style.display = 'block';
+        document.getElementById('aiFilename').value = data.suggested_filename;
+        document.getElementById('aiFilenameGroup').style.display = 'block';
+        document.getElementById('btnSaveRun').style.display = 'inline-flex';
+        status.textContent = 'Generated successfully. Review and save.';
+    } catch (e) {
+        status.textContent = `Error: ${e.message}`;
+    }
+
+    btn.disabled = false;
+    btn.textContent = 'Regenerate';
+}
+
+function toggleCodeEdit() {
+    const preview = document.getElementById('aiCodePreview');
+    const editable = preview.contentEditable === 'true';
+    preview.contentEditable = editable ? 'false' : 'true';
+    if (!editable) preview.focus();
+}
+
+async function saveAndRunTest() {
+    const code = document.getElementById('aiCodePreview').textContent;
+    const filename = document.getElementById('aiFilename').value.trim();
+    const category = document.getElementById('aiCategory').value;
+    const status = document.getElementById('aiStatus');
+
+    if (!code || !filename) {
+        status.textContent = 'Missing code or filename.';
+        return;
+    }
+
+    status.textContent = 'Saving...';
+
+    try {
+        const r = await fetch('/api/save-test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code, filename, category }),
+        });
+        const data = await r.json();
+
+        if (data.error) {
+            status.textContent = `Error: ${data.error}`;
+            return;
+        }
+
+        status.textContent = `Saved to ${data.path}. Running...`;
+        closeTestCreator();
+
+        // Run the new test
+        setTimeout(() => runTests(category), 500);
+    } catch (e) {
+        status.textContent = `Error: ${e.message}`;
+    }
 }
 
 /* ========== Init ========== */

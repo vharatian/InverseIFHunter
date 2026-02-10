@@ -98,10 +98,14 @@ services:
     environment:
       - DASHBOARD_PORT=8001
       - TELEMETRY_LOG_PATH=/app/.telemetry/events.jsonl
+      - SESSION_STORAGE_PATH=/app/.storage
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - ML_MODEL_PATH=/app/ml_models
       - REDIS_URL=redis://redis:6379/0
     volumes:
       - telemetry-data:/app/.telemetry:ro
       - ./.storage:/app/.storage:ro
+      - ./ml_pipeline/models:/app/ml_models:ro
     depends_on:
       - model-hunter-blue
     networks:

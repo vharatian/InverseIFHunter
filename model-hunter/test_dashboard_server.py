@@ -4,28 +4,38 @@ Model Hunter — Pre-Deployment Test Dashboard Server
 A standalone FastAPI app (port 8001) that:
 - Discovers all pytest tests grouped by category
 - Runs tests via subprocess with JSON reporting
-- Streams results in real-time via SSE
+- Streams results in real-time via SSE (including raw output)
+- Provides clickable test detail with file/line/docstring
+- AI-assisted test creation via GPT
 - Stores run history for trend analysis
 
 Usage:
     python test_dashboard_server.py
     # Open http://localhost:8001
 """
+import ast
 import asyncio
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
+import textwrap
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, Query
+import httpx
+from dotenv import load_dotenv
+from fastapi import FastAPI, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
+
+load_dotenv()
 
 app = FastAPI(title="Model Hunter Test Dashboard")
 
@@ -186,6 +196,12 @@ async def run_tests(category: str = Query(default="all")):
             if not line:
                 continue
 
+            # Stream every raw line to the live terminal
+            yield {"event": "raw_output", "data": json.dumps({
+                "line": line,
+                "elapsed": round(time.time() - start_time, 2),
+            })}
+
             # Parse pytest -v output: "tests/path.py::test_name PASSED"
             if " PASSED" in line or " FAILED" in line or " ERROR" in line or " SKIPPED" in line:
                 test_count += 1
@@ -234,23 +250,34 @@ async def run_tests(category: str = Query(default="all")):
             except Exception:
                 pass
 
-        # Extract failure details from report
+        # Extract failure details and per-test details from report
         failures = []
+        test_details = {}
         if "tests" in report_data:
             for t in report_data["tests"]:
+                nodeid = t.get("nodeid", "")
+                # Build per-test detail
+                error_msg = ""
                 if t.get("outcome") in ("failed", "error"):
-                    error_msg = ""
                     if "call" in t and "longrepr" in t["call"]:
                         error_msg = t["call"]["longrepr"]
                     elif "call" in t and "crash" in t["call"]:
                         crash = t["call"]["crash"]
                         error_msg = f"{crash.get('path', '')}:{crash.get('lineno', '')}: {crash.get('message', '')}"
                     failures.append({
-                        "nodeid": t.get("nodeid", ""),
+                        "nodeid": nodeid,
                         "outcome": t.get("outcome", ""),
                         "duration": t.get("duration", 0),
-                        "error": error_msg[:2000],  # Cap error message
+                        "error": error_msg[:2000],
                     })
+
+                test_details[nodeid] = {
+                    "outcome": t.get("outcome", ""),
+                    "duration": round(t.get("duration", 0), 4),
+                    "error": error_msg[:2000] if error_msg else "",
+                    "setup_duration": round(t.get("setup", {}).get("duration", 0), 4) if isinstance(t.get("setup"), dict) else 0,
+                    "teardown_duration": round(t.get("teardown", {}).get("duration", 0), 4) if isinstance(t.get("teardown"), dict) else 0,
+                }
 
         summary = {
             "total": test_count,
@@ -261,6 +288,7 @@ async def run_tests(category: str = Query(default="all")):
             "duration": total_time,
             "exit_code": exit_code,
             "failures": failures,
+            "test_details": test_details,
             "timestamp": datetime.now().isoformat(),
             "category": category,
         }
@@ -299,6 +327,227 @@ async def get_test_history(limit: int = Query(default=20)):
         "total_runs": len(history),
     }
 
+
+# ---------------------------------------------------------------------------
+# Part 2: Test Detail Endpoint
+# ---------------------------------------------------------------------------
+
+def _parse_test_source(file_path: str, class_name: str, method_name: str) -> dict:
+    """Use AST to extract line number, docstring, and source for a test method."""
+    abs_path = BASE_DIR / file_path
+    if not abs_path.exists():
+        return {}
+
+    try:
+        source_text = abs_path.read_text()
+        tree = ast.parse(source_text)
+    except Exception:
+        return {}
+
+    source_lines = source_text.splitlines()
+    result = {}
+
+    for node in ast.walk(tree):
+        # Match class
+        if class_name and isinstance(node, ast.ClassDef) and node.name == class_name:
+            result["class_docstring"] = ast.get_docstring(node) or ""
+            result["class_lineno"] = node.lineno
+            for item in node.body:
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.name == method_name:
+                    result["lineno"] = item.lineno
+                    result["docstring"] = ast.get_docstring(item) or ""
+                    # Extract source lines
+                    start = item.lineno - 1
+                    end = item.end_lineno if hasattr(item, "end_lineno") and item.end_lineno else start + 20
+                    result["source"] = "\n".join(source_lines[start:end])
+                    return result
+
+        # Top-level function (no class)
+        if not class_name and isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == method_name:
+            result["lineno"] = node.lineno
+            result["docstring"] = ast.get_docstring(node) or ""
+            start = node.lineno - 1
+            end = node.end_lineno if hasattr(node, "end_lineno") and node.end_lineno else start + 20
+            result["source"] = "\n".join(source_lines[start:end])
+            return result
+
+    return result
+
+
+@app.get("/api/test-detail")
+async def get_test_detail(nodeid: str = Query(...)):
+    """Get detailed info for a single test: file, line, docstring, source."""
+    # Parse nodeid: tests/unit/test_hunt_engine.py::TestClassName::test_method
+    parts = nodeid.split("::")
+    file_path = parts[0] if parts else ""
+    class_name = parts[1] if len(parts) == 3 else ""
+    method_name = parts[-1] if len(parts) >= 2 else ""
+
+    detail = _parse_test_source(file_path, class_name, method_name)
+
+    # Determine category
+    cat = "other"
+    for cat_name, cat_path in CATEGORY_PATHS.items():
+        if cat_path.rstrip("/") in file_path:
+            cat = cat_name
+            break
+
+    return {
+        "nodeid": nodeid,
+        "file": file_path,
+        "class_name": class_name,
+        "method_name": method_name,
+        "category": cat,
+        "lineno": detail.get("lineno", 0),
+        "docstring": detail.get("docstring", ""),
+        "class_docstring": detail.get("class_docstring", ""),
+        "source": detail.get("source", ""),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Part 3: AI-Assisted Test Creation
+# ---------------------------------------------------------------------------
+
+class GenerateTestRequest(BaseModel):
+    description: str
+    category: str = "api"
+
+
+class SaveTestRequest(BaseModel):
+    code: str
+    filename: str
+    category: str = "api"
+
+
+def _load_context_for_category(category: str) -> str:
+    """Load conftest fixtures + one example test file as context for AI."""
+    context_parts = []
+
+    # Always include conftest
+    conftest_path = TESTS_DIR / "conftest.py"
+    if conftest_path.exists():
+        context_parts.append(f"# === tests/conftest.py ===\n{conftest_path.read_text()}")
+
+    # Find one example test from the category
+    cat_dir = TESTS_DIR / category
+    if cat_dir.exists():
+        test_files = sorted(cat_dir.glob("test_*.py"))
+        if test_files:
+            example = test_files[0]
+            content = example.read_text()
+            # Truncate if very large
+            if len(content) > 6000:
+                content = content[:6000] + "\n# ... truncated ..."
+            context_parts.append(f"# === {example.relative_to(BASE_DIR)} ===\n{content}")
+
+    return "\n\n".join(context_parts)
+
+
+@app.post("/api/generate-test")
+async def generate_test(req: GenerateTestRequest):
+    """Generate a test using OpenAI GPT from a plain-English description."""
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return JSONResponse({"error": "OPENAI_API_KEY not set"}, status_code=500)
+
+    context = _load_context_for_category(req.category)
+
+    system_prompt = textwrap.dedent(f"""\
+    You are a Python test engineer for the Model Hunter project.
+    Generate a complete, runnable pytest test file based on the user's description.
+
+    RULES:
+    - Use pytest with class-based test organization
+    - Add the correct marker: @pytest.mark.{req.category}
+    - Include module and class docstrings
+    - Use fixtures from conftest.py (client, app, minimal_notebook, create_session, etc.)
+    - Add sys.path setup at the top (like the example tests)
+    - Return ONLY the Python code, no markdown fences, no explanation
+    - Make the test thorough with clear assertions and descriptive names
+
+    AVAILABLE FIXTURES AND EXAMPLE CODE:
+    {context}
+    """)
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "gpt-4o",
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": f"Generate a {req.category} test for: {req.description}"},
+                    ],
+                    "temperature": 0.3,
+                    "max_tokens": 4000,
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            code = data["choices"][0]["message"]["content"]
+            # Strip markdown fences if present
+            code = re.sub(r'^```(?:python)?\n?', '', code, flags=re.MULTILINE)
+            code = re.sub(r'\n?```$', '', code, flags=re.MULTILINE)
+            code = code.strip()
+
+            # Suggest a filename
+            slug = re.sub(r'[^a-z0-9]+', '_', req.description.lower())[:50].strip('_')
+            suggested_filename = f"test_{slug}.py"
+
+            return {
+                "code": code,
+                "suggested_filename": suggested_filename,
+                "category": req.category,
+            }
+    except httpx.HTTPStatusError as e:
+        return JSONResponse({"error": f"OpenAI API error: {e.response.status_code}"}, status_code=502)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/save-test")
+async def save_test(req: SaveTestRequest):
+    """Save a generated test file to the appropriate tests/ directory."""
+    # Validate category
+    valid_categories = ["unit", "api", "e2e", "security", "stress"]
+    if req.category not in valid_categories:
+        return JSONResponse({"error": f"Invalid category. Use: {valid_categories}"}, status_code=400)
+
+    # Validate filename
+    if not req.filename.startswith("test_") or not req.filename.endswith(".py"):
+        return JSONResponse({"error": "Filename must match test_*.py"}, status_code=400)
+
+    # Prevent path traversal
+    if ".." in req.filename or "/" in req.filename:
+        return JSONResponse({"error": "Invalid filename"}, status_code=400)
+
+    target_dir = TESTS_DIR / req.category
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_file = target_dir / req.filename
+
+    if target_file.exists():
+        return JSONResponse({"error": f"File already exists: {target_file.relative_to(BASE_DIR)}"}, status_code=409)
+
+    try:
+        target_file.write_text(req.code)
+        return {
+            "success": True,
+            "path": str(target_file.relative_to(BASE_DIR)),
+            "message": f"Saved to {target_file.relative_to(BASE_DIR)}",
+        }
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ---------------------------------------------------------------------------
+# History helpers
+# ---------------------------------------------------------------------------
 
 def _save_run_history(summary: dict):
     """Append a run summary to the history file."""
