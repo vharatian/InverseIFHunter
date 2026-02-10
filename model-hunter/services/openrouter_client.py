@@ -44,9 +44,9 @@ class OpenRouterClient(BaseAPIClient):
     MAX_TOKENS = {
         "nvidia/nemotron-3-nano-30b-a3b": 32768,
         "qwen/qwen3-235b-a22b-thinking-2507": 131072,
-        "anthropic/claude-opus-4.5": 16384,
-        "anthropic/claude-opus-4.6": 16384,
-        "anthropic/claude-sonnet-4.5": 8192,
+        "anthropic/claude-opus-4.5": 32768,
+        "anthropic/claude-opus-4.6": 32768,
+        "anthropic/claude-sonnet-4.5": 16384,
     }
     
     def __init__(self, api_key: Optional[str] = None):
