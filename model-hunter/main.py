@@ -1258,9 +1258,9 @@ async def hunt_stream(session_id: str, request: Request):
     """
     SSE endpoint for real-time hunt progress.
 
-    Starts the hunt and subscribes to the Redis Stream for events.
-    Any app instance can serve this endpoint — events come from Redis, not memory.
-    Supports reconnection via Last-Event-ID header.
+    On first connect: starts the hunt and subscribes to Redis Stream.
+    On reconnect (Last-Event-ID present): subscribes only, replays missed events.
+    Hunt lock prevents duplicate hunts across containers.
     """
     import services.event_stream as event_stream
 
@@ -1268,14 +1268,15 @@ async def hunt_stream(session_id: str, request: Request):
 
     # Check for reconnection — browser sends Last-Event-ID header
     last_event_id = request.headers.get("Last-Event-ID")
+    is_reconnect = bool(last_event_id)
 
     async def event_generator():
-        # Start hunt in background (publishes events to Redis Stream)
-        hunt_task = asyncio.create_task(hunt_engine.run_hunt(session_id))
+        hunt_task = None
 
         try:
-            # If reconnecting, replay missed events first
-            if last_event_id:
+            if is_reconnect:
+                # RECONNECT: Don't start a new hunt. Just replay + subscribe.
+                # The hunt is either still running (on another container) or already finished.
                 missed = await event_stream.replay(session_id, last_event_id)
                 for eid, event in missed:
                     yield {
@@ -1289,10 +1290,13 @@ async def hunt_stream(session_id: str, request: Request):
                     }
                     if event.event_type in ("complete", "error"):
                         return
+            else:
+                # FIRST CONNECT: Start hunt in background.
+                # acquire_hunt_lock inside run_hunt prevents duplicates.
+                hunt_task = asyncio.create_task(hunt_engine.run_hunt(session_id))
 
             # Subscribe to Redis Stream for live events
             async for eid, event in event_stream.subscribe(session_id, last_event_id):
-                # Check if client disconnected
                 if await request.is_disconnected():
                     break
 
@@ -1311,14 +1315,13 @@ async def hunt_stream(session_id: str, request: Request):
                     })
                 }
 
-                # Stop on terminal events
                 if event.event_type in ("complete", "error"):
                     break
 
         except asyncio.CancelledError:
             pass
         finally:
-            if not hunt_task.done():
+            if hunt_task and not hunt_task.done():
                 hunt_task.cancel()
 
     return EventSourceResponse(event_generator())

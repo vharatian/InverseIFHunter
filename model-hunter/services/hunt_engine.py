@@ -103,7 +103,21 @@ class HuntEngine:
         Reads config/notebook from Redis once, then runs workers.
         Each worker writes results directly to Redis (atomic).
         Events are published to Redis Streams (any SSE subscriber picks them up).
+        Hunt lock prevents duplicate runs for the same session.
         """
+        # Acquire hunt lock — prevents duplicate hunts across containers
+        if not await store.acquire_hunt_lock(session_id):
+            logger.warning(f"Session {session_id}: Hunt already running (lock held), skipping")
+            raise ValueError(f"Hunt already running for session {session_id}")
+
+        try:
+            return await self._execute_hunt(session_id)
+        finally:
+            # Always release lock, even on error
+            await store.release_hunt_lock(session_id)
+
+    async def _execute_hunt(self, session_id: str) -> HuntSession:
+        """Internal hunt execution (called with lock held)."""
         # Read config and notebook from Redis (read-only during hunt)
         config = await store.get_config(session_id)
         notebook = await store.get_notebook(session_id)

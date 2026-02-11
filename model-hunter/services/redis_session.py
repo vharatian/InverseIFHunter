@@ -68,7 +68,7 @@ def _key(session_id: str, field: str) -> str:
 def _session_keys(session_id: str) -> List[str]:
     """All Redis keys belonging to a session (for TTL refresh / deletion)."""
     fields = ["config", "notebook", "status", "meta", "results",
-              "all_results", "turns", "history", "reviews"]
+              "all_results", "turns", "history", "reviews", "hunt_lock"]
     return [_key(session_id, f) for f in fields]
 
 
@@ -280,6 +280,41 @@ async def set_human_reviews(session_id: str, reviews: Dict[str, Any]) -> None:
     r = await get_redis()
     await r.set(_key(session_id, "reviews"), json.dumps(reviews, default=str))
     await r.expire(_key(session_id, "reviews"), SESSION_TTL)
+
+
+# ============================================================
+# Hunt Lock (prevents duplicate hunts for same session)
+# ============================================================
+
+HUNT_LOCK_TTL = 600  # 10 minutes max hunt duration
+
+async def acquire_hunt_lock(session_id: str) -> bool:
+    """
+    Try to acquire a hunt lock for this session.
+    Returns True if acquired (no hunt running), False if already locked.
+    Uses SET NX (set-if-not-exists) — atomic, no race conditions.
+    Lock auto-expires after 10 minutes (safety net for crashes).
+    """
+    r = await get_redis()
+    result = await r.set(
+        _key(session_id, "hunt_lock"),
+        "locked",
+        nx=True,
+        ex=HUNT_LOCK_TTL
+    )
+    return result is not None  # SET NX returns None if key already exists
+
+
+async def release_hunt_lock(session_id: str) -> None:
+    """Release the hunt lock after hunt completes."""
+    r = await get_redis()
+    await r.delete(_key(session_id, "hunt_lock"))
+
+
+async def is_hunt_running(session_id: str) -> bool:
+    """Check if a hunt is currently running (lock exists)."""
+    r = await get_redis()
+    return await r.exists(_key(session_id, "hunt_lock")) > 0
 
 
 # ============================================================
