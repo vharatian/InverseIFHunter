@@ -3603,13 +3603,61 @@ async function startHunt() {
     });
     
     eventSource.addEventListener('error', (event) => {
-        // EventSource auto-reconnects with Last-Event-ID.
-        // Server replays missed events from Redis Stream.
-        // Only show toast if hunt is still in progress.
         if (state.isHunting) {
-            console.log('SSE reconnecting (auto via Last-Event-ID)...');
+            // EventSource may auto-reconnect, but if it enters CLOSED state
+            // (e.g., 502 from nginx during deploy), we must reconnect manually.
+            if (eventSource.readyState === EventSource.CLOSED) {
+                console.log('SSE connection closed during hunt, reconnecting manually...');
+                eventSource.close();
+                // Reconnect after brief delay — server will replay missed events
+                setTimeout(() => {
+                    if (state.isHunting) {
+                        const newSource = new EventSource(`/api/hunt-stream/${state.sessionId}`);
+                        // Re-attach all event listeners to the new source
+                        newSource.addEventListener('hunt_result', (e) => {
+                            if (isDuplicate(e)) return;
+                            handleHuntResult(JSON.parse(e.data));
+                        });
+                        newSource.addEventListener('hunt_progress', (e) => {
+                            if (isDuplicate(e)) return;
+                            handleHuntProgress(JSON.parse(e.data));
+                        });
+                        newSource.addEventListener('hunt_start', (e) => {
+                            if (isDuplicate(e)) return;
+                            updateTableRow(JSON.parse(e.data).hunt_id, { status: 'running', model: JSON.parse(e.data).model });
+                        });
+                        newSource.addEventListener('complete', (e) => {
+                            if (isDuplicate(e)) return;
+                            handleHuntComplete(JSON.parse(e.data));
+                            newSource.close();
+                        });
+                        newSource.addEventListener('error', () => {
+                            // If still hunting and closed again, try once more after longer delay
+                            if (state.isHunting && newSource.readyState === EventSource.CLOSED) {
+                                setTimeout(() => {
+                                    if (state.isHunting) {
+                                        // Final fallback: poll for results
+                                        fetch(`/api/results/${state.sessionId}`)
+                                            .then(r => r.ok ? r.json() : Promise.reject())
+                                            .then(data => {
+                                                if (data.results && data.results.length > 0) {
+                                                    showToast(`Recovered ${data.results.length} results after reconnect.`, 'info');
+                                                    fetchAllResponses().then(() => showMultiTurnDecision());
+                                                    state.isHunting = false;
+                                                }
+                                            }).catch(() => {});
+                                    }
+                                }, 5000);
+                            }
+                        });
+                        newSource.addEventListener('ping', () => {});
+                    }
+                }, 2000);
+            } else {
+                // CONNECTING state — EventSource is auto-reconnecting, let it
+                console.log('SSE reconnecting (auto via Last-Event-ID)...');
+            }
         } else {
-            // Hunt finished but connection error — try to recover results
             eventSource.close();
             fetch(`/api/results/${state.sessionId}`)
                 .then(resp => resp.ok ? resp.json() : Promise.reject('not ok'))
