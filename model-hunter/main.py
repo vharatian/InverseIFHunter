@@ -1845,7 +1845,11 @@ async def health_check():
 @app.get("/api/version")
 async def get_version():
     """Get app version for soft-reload detection."""
-    return {"version": APP_VERSION}
+    return Response(
+        content=json.dumps({"version": APP_VERSION}),
+        media_type="application/json",
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "no-cache"}
+    )
 
 
 def count_valid_responses(results: List[Dict[str, Any]]) -> int:

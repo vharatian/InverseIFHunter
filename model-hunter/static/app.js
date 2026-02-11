@@ -37,9 +37,10 @@ async function checkVersion() {
             currentVersion = data.version;
             console.log('📦 App version:', currentVersion);
         } else if (data.version !== currentVersion) {
-            // Version changed - store it for later prompt
+            // Version changed - show prompt immediately so user sees it without having to click Start Hunt
             pendingUpdateVersion = data.version;
-            console.warn('🔄 New version detected:', data.version, '(will prompt before next task)');
+            console.warn('🔄 New version detected:', data.version);
+            showUpdatePrompt();
         }
     } catch (e) {
         // Silently fail - server might be updating
