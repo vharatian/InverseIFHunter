@@ -324,6 +324,32 @@ async def clear_results(session_id: str) -> None:
     await r.delete(_key(session_id, "results"))
 
 
+async def clear_all_results(session_id: str) -> None:
+    """Clear the accumulated all_results list."""
+    r = await get_redis()
+    await r.delete(_key(session_id, "all_results"))
+
+
+async def set_results(session_id: str, results: List[HuntResult]) -> None:
+    """Replace the current run's results list (e.g. when restoring session from storage)."""
+    r = await get_redis()
+    key = _key(session_id, "results")
+    await r.delete(key)
+    if results:
+        await r.rpush(key, *[res.model_dump_json() for res in results])
+    await r.expire(key, SESSION_TTL)
+
+
+async def set_all_results(session_id: str, results: List[HuntResult]) -> None:
+    """Replace the accumulated all_results list (e.g. when restoring session from storage)."""
+    r = await get_redis()
+    key = _key(session_id, "all_results")
+    await r.delete(key)
+    if results:
+        await r.rpush(key, *[res.model_dump_json() for res in results])
+    await r.expire(key, SESSION_TTL)
+
+
 async def incr_completed_hunts(session_id: str) -> int:
     """Atomically increment completed_hunts and return new value."""
     r = await get_redis()
@@ -361,6 +387,16 @@ async def append_turn(session_id: str, turn: TurnData) -> None:
     r = await get_redis()
     await r.rpush(_key(session_id, "turns"), turn.model_dump_json())
     await r.expire(_key(session_id, "turns"), SESSION_TTL)
+
+
+async def set_turns(session_id: str, turns: List[TurnData]) -> None:
+    """Replace the turns list (e.g. when restoring session from storage)."""
+    r = await get_redis()
+    key = _key(session_id, "turns")
+    await r.delete(key)
+    if turns:
+        await r.rpush(key, *[t.model_dump_json() for t in turns])
+    await r.expire(key, SESSION_TTL)
 
 
 async def set_current_turn(session_id: str, turn_number: int) -> None:

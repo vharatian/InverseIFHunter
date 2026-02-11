@@ -558,6 +558,24 @@ function getModelKey(modelStr) {
 }
 
 /**
+ * Get display name for a model id (e.g. "anthropic/claude-opus-4.5" → "Claude Opus 4.5").
+ * So Claude Opus 4.5 / Sonnet 4.5 / Opus 4.6 show which Claude, not just "Claude".
+ */
+function getModelDisplayName(modelId) {
+    if (!modelId) return 'Unknown';
+    for (const list of Object.values(PROVIDER_MODELS)) {
+        const found = list.find(m => m.id === modelId);
+        if (found) return found.name;
+    }
+    const lastPart = modelId.split('/').pop() || modelId;
+    if (lastPart.startsWith('claude-')) {
+        const rest = lastPart.replace(/^claude-/, '');
+        return 'Claude ' + rest.split('-').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' ');
+    }
+    return lastPart;
+}
+
+/**
  * Get judge score from a result object (handles multiple field names).
  */
 function getJudgeScore(result) {
@@ -2578,7 +2596,24 @@ function validatePromptLength() {
     const text = promptTextarea.value || '';
     const wordCount = text.trim().split(/\s+/).filter(w => w.length > 0).length;
     
-    // Update live word count display
+    // Turn 2+: no word limit/range — show count only, no validation
+    const turnAboveOne = (state.currentTurn || 1) > 1 || state.isMultiTurn;
+    if (turnAboveOne) {
+        const wordCountTextEl = document.getElementById('promptWordCountText');
+        const wordCountRangeEl = document.getElementById('promptWordCountRange');
+        const wordCountEl = document.getElementById('promptWordCount');
+        if (wordCountTextEl) wordCountTextEl.textContent = `${wordCount} word${wordCount !== 1 ? 's' : ''}`;
+        if (wordCountRangeEl) wordCountRangeEl.textContent = '';
+        if (wordCountEl) {
+            wordCountEl.style.background = 'var(--bg-tertiary)';
+            wordCountEl.style.color = 'var(--text-primary)';
+            wordCountEl.style.border = '1px solid var(--border)';
+        }
+        if (elements.promptLengthWarning) elements.promptLengthWarning.classList.add('hidden');
+        return true;
+    }
+    
+    // Turn 1: apply range from metadata
     const wordCountEl = document.getElementById('promptWordCount');
     const wordCountTextEl = document.getElementById('promptWordCountText');
     const wordCountRangeEl = document.getElementById('promptWordCountRange');
@@ -2984,7 +3019,7 @@ async function saveAllCells() {
     try {
         if (elements.saveAllBtn) {
             elements.saveAllBtn.disabled = true;
-            elements.saveAllBtn.textContent = '💾 Saving All...';
+            elements.saveAllBtn.textContent = '💾 Saving & Judging...';
         }
         
         const response = await fetch(`/api/update-notebook-cells/${state.sessionId}`, {
@@ -3021,7 +3056,7 @@ async function saveAllCells() {
     } finally {
         if (elements.saveAllBtn) {
             elements.saveAllBtn.disabled = false;
-            elements.saveAllBtn.textContent = '💾 Save All Changes to Colab';
+            elements.saveAllBtn.textContent = '💾 Save All to Colab & Judge';
         }
     }
 }
@@ -3713,13 +3748,13 @@ function initProgressUI() {
     for (let i = 1; i <= parallel_workers; i++) {
         const globalRowNum = offset + i;
         const model = models[i - 1] || models[0];
-        const shortModel = model.split('/').pop().split('-')[0];
+        const modelDisplay = getModelDisplayName(model);
         
         const row = document.createElement('tr');
         row.id = `hunt-row-${globalRowNum}`;
         row.innerHTML = `
             <td>${globalRowNum}</td>
-            <td class="model-cell" title="${model}">${shortModel}</td>
+            <td class="model-cell" title="${model}">${modelDisplay}</td>
             <td class="status-cell"><span class="score-badge pending">⏳ Pending</span></td>
             <td class="score-cell">-</td>
             <td class="issues-cell">-</td>
@@ -3745,8 +3780,7 @@ function updateTableRow(huntId, data) {
     }
     
     if (data.model) {
-        const shortModel = data.model.split('/').pop().split('-')[0];
-        row.querySelector('.model-cell').textContent = shortModel;
+        row.querySelector('.model-cell').textContent = getModelDisplayName(data.model);
     }
     
     if (data.status === 'running') {
@@ -3864,7 +3898,6 @@ function handleHuntResult(data) {
         const responseCell = row.querySelector('.response-cell');
         if (responseCell && response) {
             const responseText = response.trim();
-            const shortModel = model ? model.split('/').pop().substring(0, 20) : 'Unknown';
             
             // Store response data for slide-out panel
             state.huntResponseData[globalRowNum] = {
@@ -3943,8 +3976,7 @@ function openResponseSlideout(rowNum) {
     }
     
     if (modelEl) {
-        const shortModel = data.model.split('/').pop();
-        modelEl.textContent = shortModel;
+        modelEl.textContent = getModelDisplayName(data.model);
     }
     
     if (statusEl) {
@@ -4032,8 +4064,7 @@ function openSelectionDetailSlideout(rowNumber, result) {
     }
     
     if (modelEl) {
-        const shortModel = (result.model || 'Unknown').split('/').pop();
-        modelEl.textContent = shortModel;
+        modelEl.textContent = getModelDisplayName(result.model);
     }
     
     if (statusEl) {
@@ -4082,7 +4113,7 @@ function openGradingSlideout(result, slotIndex, rowNumber) {
     // Check if we're in read-only mode (after LLM reveal)
     const isReadOnly = state.llmRevealed;
     
-    const shortModel = result.model.split('/').pop();
+    const modelDisplay = getModelDisplayName(result.model);
     const slotNum = slotIndex !== undefined ? slotIndex + 1 : result.hunt_id;
     const responseText = result.response || 'No response available';
     const reasoningTrace = result.reasoning_trace || '';
@@ -4095,7 +4126,7 @@ function openGradingSlideout(result, slotIndex, rowNumber) {
     
     // Update header
     slotBadge.textContent = `Slot ${slotNum}`;
-    slotModel.textContent = shortModel;
+    slotModel.textContent = modelDisplay;
     
     // Build body content
     const disabledAttr = isReadOnly ? 'disabled' : '';
@@ -5216,7 +5247,7 @@ function handleContinueToNextTurn() {
     state.allResponses.forEach((r, idx) => {
         const score = r.judge_score ?? r.score ?? '?';
         const isPassing = score > 0;
-        const shortModel = (r.model || '').split('/').pop();
+        const modelDisplay = getModelDisplayName(r.model);
         
         // Build criteria badges if available
         const judgeCriteria = r.judge_criteria || {};
@@ -5245,7 +5276,7 @@ function handleContinueToNextTurn() {
         // Show FULL response content (scrollable)
         card.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-                <span style="font-weight: 600;">Hunt #${r.hunt_id} — ${shortModel}</span>
+                <span style="font-weight: 600;">Hunt #${r.hunt_id} — ${modelDisplay}</span>
                 <span style="font-weight: 700; color: ${isPassing ? 'var(--success, #10b981)' : 'var(--danger, #ef4444)'};">
                     Score: ${score} ${isPassing ? '(PASS)' : '(BREAK)'}
                 </span>
@@ -5361,6 +5392,7 @@ async function selectGoodResponse(response) {
         
         // Populate the FULL editors with blank content for the new turn
         populatePreviewTabs(state.notebook);
+        validatePromptLength(); // Turn 2+: clear word limit/range in prompt section
         
         // Show calibration panel for Turn 2+
         showCalibrationPanel();
@@ -5687,6 +5719,7 @@ async function startNextTurn() {
         
         // Update the notebook preview with new prompt/criteria
         populatePreviewTabs(state.notebook);
+        validatePromptLength(); // Turn 2+: clear word limit/range in prompt section
         
         // Re-enable the reference judge (trainer needs to validate new criteria)
         state.referenceValidated = false;
@@ -5799,7 +5832,7 @@ function displaySelectionCards() {
         const score = result.score !== undefined && result.score !== null ? Number(result.score) : null;
         const isBreaking = (judgeScore !== null && judgeScore === 0) || (score !== null && score === 0);
         
-        const shortModel = (result.model || 'unknown').split('/').pop();
+        const modelDisplay = getModelDisplayName(result.model);
         const responsePreview = (result.response || 'No response').substring(0, 120) + (result.response?.length > 120 ? '...' : '');
         
         const row = document.createElement('tr');
@@ -5821,7 +5854,7 @@ function displaySelectionCards() {
                 </button>
             </td>
             <td class="col-model">
-                <span class="model-name">${shortModel}</span>
+                <span class="model-name">${modelDisplay}</span>
             </td>
             <td class="col-status">
                 <span class="status-badge ${isBreaking ? 'break' : 'pass'}">
@@ -6554,7 +6587,7 @@ function createResultCard(result, slotIndex, rowNumber) {
     card.dataset.slotIndex = slotIndex || 0;
     card.dataset.rowNumber = rowNumber !== undefined ? rowNumber : null;
     
-    const shortModel = result.model.split('/').pop();
+    const modelDisplay = getModelDisplayName(result.model);
     const score = result.judge_score ?? 0;
     const isFailed = score === 0;
     const slotNum = slotIndex !== undefined ? slotIndex + 1 : result.hunt_id;
@@ -6570,7 +6603,7 @@ function createResultCard(result, slotIndex, rowNumber) {
     card.innerHTML = `
         <div class="slot-compact-badge">Slot ${slotNum}</div>
         <div class="slot-compact-info">
-            <div class="slot-compact-model">${shortModel}</div>
+            <div class="slot-compact-model">${modelDisplay}</div>
             <div class="slot-compact-status ${isReviewed ? 'reviewed' : ''}">
                 ${isReviewed ? '✅ Review Submitted' : `${isFailed ? '🟢 BREAK' : '🔴 PASS'} - Click to Review`}
             </div>
@@ -6598,7 +6631,7 @@ function createResultCardFull(result, slotIndex, rowNumber) {
     card.dataset.slotIndex = slotIndex || 0;
     card.dataset.rowNumber = rowNumber !== undefined ? rowNumber : null;
     
-    const shortModel = result.model.split('/').pop();
+    const modelDisplay = getModelDisplayName(result.model);
     const score = result.judge_score ?? 0;
     const isFailed = score === 0;
     const scoreEmoji = isFailed ? '🟢' : '🔴';
@@ -6650,7 +6683,7 @@ function createResultCardFull(result, slotIndex, rowNumber) {
             <div class="flex items-center gap-1">
                 <span class="slot-badge" style="background: var(--accent-primary); color: white; padding: 0.25rem 0.5rem; border-radius: 4px; font-weight: 600;">Slot ${slotNum}</span>
                 <span style="margin-left: 0.5rem; color: var(--text-secondary);">
-                    ${shortModel}
+                    ${modelDisplay}
                 </span>
             </div>
             <span class="expandable-arrow">▼</span>
@@ -6661,7 +6694,7 @@ function createResultCardFull(result, slotIndex, rowNumber) {
                 <!-- Left Panel: Response (Larger, Scrollable) -->
                 <div class="slot-response-panel">
                             <label style="font-weight: 600; display: block; margin-bottom: 0.75rem; color: var(--text-primary);">
-                        📄 Model Response (${shortModel}_${slotNum}):
+                        📄 Model Response (${modelDisplay}_${slotNum}):
                             </label>
                     <div class="code-block response-content" style="white-space: pre-wrap; line-height: 1.6; font-size: 0.9rem; max-height: 600px; overflow-y: auto;">${escapeHtml(responseText)}</div>
                     </div>

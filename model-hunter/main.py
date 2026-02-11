@@ -906,7 +906,7 @@ async def update_config(session_id: str, config: HuntConfig):
     """Update hunt configuration for a session. Restores from storage if needed."""
     session = await hunt_engine.get_session_async(session_id)
     
-    # If not in memory, try to restore from storage
+    # If not in Redis, try to restore from storage (full state so trainer doesn't lose results)
     if not session:
         storage = get_session_storage(session_id)
         if storage and "session_data" in storage:
@@ -914,9 +914,26 @@ async def update_config(session_id: str, config: HuntConfig):
                 from models.schemas import HuntSession
                 session_data = storage["session_data"]
                 session = HuntSession(**session_data)
-                # Re-persist to Redis from .storage backup
+                # Re-persist full session to Redis (not just config/notebook — preserve results and counters)
                 await redis_store.create_session(session_id, session.notebook, session.config)
-                logger.info(f"Restored session {session_id} from storage to Redis")
+                await redis_store.set_status(session_id, session.status)
+                await redis_store.set_hunt_counters(
+                    session_id,
+                    total_hunts=session.total_hunts,
+                    completed_hunts=session.completed_hunts,
+                    breaks_found=session.breaks_found,
+                )
+                await redis_store.set_accumulated_hunt_count(session_id, session.accumulated_hunt_count or 0)
+                await redis_store.set_current_turn(session_id, session.current_turn or 1)
+                await redis_store.set_conversation_history(session_id, session.conversation_history or [])
+                await redis_store.set_human_reviews(session_id, session.human_reviews or {})
+                await redis_store.set_results(session_id, session.results or [])
+                await redis_store.set_all_results(session_id, session.all_results or [])
+                await redis_store.set_turns(session_id, session.turns or [])
+                logger.info(
+                    f"Restored session {session_id} from storage to Redis "
+                    f"(results={len(session.results or [])}, all_results={len(session.all_results or [])})"
+                )
             except Exception as e:
                 logger.error(f"Error restoring session {session_id}: {e}")
                 raise HTTPException(404, "Session not found or expired")
