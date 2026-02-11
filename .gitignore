@@ -42,9 +42,11 @@ credentials.json
 Thumbs.db
 .DS_Store
 
-# Markdown docs (except README)
+# Markdown docs (except README) — keep local only, do not push
 *.md
 !README.md
+SOURCE_OF_TRUTH.md
+WORKLOG.md
 
 # Notebooks
 *.ipynb
