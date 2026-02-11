@@ -1239,6 +1239,8 @@ async def start_hunt(request: StartHuntRequest):
     if request.config:
         session.config = request.config
         session.total_hunts = request.config.parallel_workers
+        await redis_store.set_config(request.session_id, request.config)
+        await redis_store.set_meta_field(request.session_id, "total_hunts", request.config.parallel_workers)
     
     # Run hunt
     result_session = await hunt_engine.run_hunt(request.session_id)
@@ -1291,9 +1293,12 @@ async def hunt_stream(session_id: str, request: Request):
                     if event.event_type in ("complete", "error"):
                         return
             else:
-                # FIRST CONNECT: Start hunt in background.
-                # acquire_hunt_lock inside run_hunt prevents duplicates.
-                hunt_task = asyncio.create_task(hunt_engine.run_hunt(session_id))
+                # FIRST CONNECT: Check if hunt is already running (double-click guard).
+                if await redis_store.is_hunt_running(session_id):
+                    logger.warning(f"Hunt already running for {session_id}, subscribing only")
+                    hunt_task = None
+                else:
+                    hunt_task = asyncio.create_task(hunt_engine.run_hunt(session_id))
 
             # Subscribe to Redis Stream for live events
             async for eid, event in event_stream.subscribe(session_id, last_event_id):
