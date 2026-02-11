@@ -30,7 +30,7 @@ import logging
 from typing import AsyncGenerator, Tuple, Optional, List, Dict, Any
 
 from models.schemas import HuntEvent
-from services.redis_session import get_redis
+from services.redis_session import get_redis, get_redis_blocking
 
 logger = logging.getLogger(__name__)
 
@@ -79,8 +79,9 @@ async def subscribe(
     Otherwise starts from the latest event ($).
 
     Blocks efficiently using XREAD BLOCK.
+    Uses a dedicated Redis connection with long socket timeout.
     """
-    r = await get_redis()
+    r = await get_redis_blocking()
     key = _stream_key(session_id)
 
     # Start position: after last_event_id or from now ($)

@@ -40,14 +40,15 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 SESSION_TTL = 4 * 60 * 60  # 4 hours
 KEY_PREFIX = "mh:sess"
 
-# Singleton Redis connection
+# Singleton Redis connections
 _redis_client: Optional[aioredis.Redis] = None
+_redis_blocking_client: Optional[aioredis.Redis] = None
 
 
 async def get_redis() -> aioredis.Redis:
-    """Get or create the Redis connection (singleton)."""
+    """Get or create the Redis connection for normal operations (short timeout)."""
     global _redis_client
-    if _redis_client is None or _redis_client.connection_pool._available_connections == []:
+    if _redis_client is None:
         _redis_client = aioredis.from_url(
             REDIS_URL,
             encoding="utf-8",
@@ -58,6 +59,23 @@ async def get_redis() -> aioredis.Redis:
         await _redis_client.ping()
         logger.info(f"Redis connected: {REDIS_URL}")
     return _redis_client
+
+
+async def get_redis_blocking() -> aioredis.Redis:
+    """Get or create a Redis connection for blocking operations (XREAD BLOCK).
+    Uses a longer socket timeout so XREAD BLOCK doesn't get killed."""
+    global _redis_blocking_client
+    if _redis_blocking_client is None:
+        _redis_blocking_client = aioredis.from_url(
+            REDIS_URL,
+            encoding="utf-8",
+            decode_responses=True,
+            socket_connect_timeout=5,
+            socket_timeout=60,  # Long timeout for XREAD BLOCK
+        )
+        await _redis_blocking_client.ping()
+        logger.info(f"Redis blocking client connected: {REDIS_URL}")
+    return _redis_blocking_client
 
 
 def _key(session_id: str, field: str) -> str:
@@ -420,8 +438,11 @@ async def get_stats() -> Dict[str, Any]:
 
 
 async def close():
-    """Close the Redis connection."""
-    global _redis_client
+    """Close all Redis connections."""
+    global _redis_client, _redis_blocking_client
     if _redis_client:
         await _redis_client.close()
         _redis_client = None
+    if _redis_blocking_client:
+        await _redis_blocking_client.close()
+        _redis_blocking_client = None
