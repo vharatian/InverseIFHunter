@@ -1,6 +1,6 @@
 # SOURCE_OF_TRUTH
 
-> Generated: 2026-02-03 | Updated: 2026-02-08  
+> Generated: 2026-02-03 | Updated: 2026-02-10  
 > This document reflects the current state of the repository as observed in the code.
 
 ## 1. Problem Statement
@@ -34,12 +34,15 @@ The system targets finding "breaking responses" - model outputs that fail evalua
 - **Response reference format**: Must be valid JSON array or plain text `C1: description` format
 
 ### Supported Models (Observed)
-- **OpenRouter**: `nvidia/nemotron-3-nano-30b-a3b`, `qwen/qwen3-235b-a22b-thinking-2507`
+- **OpenRouter**: `nvidia/nemotron-3-nano-30b-a3b`, `qwen/qwen3-235b-a22b-thinking-2507`, `anthropic/claude-sonnet-4.5`, `anthropic/claude-opus-4.5`, `anthropic/claude-opus-4.6`
 - **Fireworks**: `accounts/fireworks/models/qwen3-235b-a22b-thinking-2507`
+- **Model-specific behavior**: Opus models require `reasoning` parameter (`effort: "high"`). Sonnet and Nemotron do not. Opus 4.5 forced through Anthropic provider (Bedrock content filtering causes empty responses). Opus 4.6 forced through Amazon Bedrock provider (Anthropic + reasoning returns empty).
 
 ### Authentication
-- **Google Drive access**: Requires service account with editor permissions on notebooks
+- **Google Drive access**: Requires service account with editor permissions on notebooks (auto-detected from `service_account.json`)
 - **API Keys required**: `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `FIREWORKS_API_KEY` (optional)
+- **Trainer registration**: Mandatory name + Turing email before using tool (stored in localStorage + `.storage/trainers.json`)
+- **Dashboard access**: Password-based (`ADMIN_PASSWORD` env var) for super admin, email-based for invited admins (`dashboard_admins.json`)
 
 ---
 
@@ -50,8 +53,8 @@ The system targets finding "breaking responses" - model outputs that fail evalua
 | Decision | Evidence |
 |----------|----------|
 | **FastAPI backend** | `main.py` uses FastAPI framework |
-| **SSE for real-time updates** | Hunt progress streamed via Server-Sent Events (`/api/hunt-stream`) |
-| **Redis for session persistence** | `session_store.py` with fallback to in-memory |
+| **SSE via Redis Streams** | Hunt progress published to Redis Streams, SSE subscribes via `XREAD BLOCK`. Auto-reconnect with `Last-Event-ID` replay. |
+| **Redis-primary stateless sessions** | `redis_session.py` with granular keys per field. No in-memory state. App instances are disposable. |
 | **Service account for Drive access** | `google_drive_client.py` uses service account credentials |
 | **Singleton pattern for clients** | All API clients use singleton getters |
 | **Connection pooling** | `base_client.py` uses httpx with shared pools |
@@ -104,7 +107,8 @@ The system targets finding "breaking responses" - model outputs that fail evalua
 
 | File | Responsibility |
 |------|----------------|
-| `model-hunter/services/session_store.py` | Redis-backed session persistence with memory fallback |
+| `model-hunter/services/redis_session.py` | Redis-primary session store with granular keys, atomic ops, hunt lock, dual Redis clients |
+| `model-hunter/services/event_stream.py` | Redis Streams for SSE events — publish, subscribe (XREAD BLOCK), replay from Last-Event-ID |
 | `model-hunter/services/rate_limiter.py` | Semaphore-based rate limiting per provider |
 | `model-hunter/services/telemetry_logger.py` | Fire-and-forget JSON logging for dashboard (includes judge_explanation) |
 | `model-hunter/services/trainer_identity.py` | Generates fun anime character names as trainer IDs (e.g., Gojo_42, Viktor_60) |
@@ -120,17 +124,21 @@ The system targets finding "breaking responses" - model outputs that fail evalua
 | `model-hunter/static/style.css` | Styling, theming, responsive design |
 | `model-hunter/static/multi-turn-workflow.html` | Multi-turn workflow reference page |
 
-### Dashboard (v2 - Enhanced)
+### Dashboard (Admin Intelligence Dashboard)
 
 | File | Responsibility |
 |------|----------------|
-| `model-hunter/dashboard/main.py` | Original v1 dashboard backend (deprecated) |
-| `model-hunter/dashboard/main_enhanced.py` | V2 dashboard backend with trainer leaderboard, criteria analysis, real-time stats |
-| `model-hunter/dashboard/log_reader.py` | Original v1 log reader (deprecated) |
-| `model-hunter/dashboard/log_reader_enhanced.py` | V2 log reader with trainer mapping, criteria difficulty, break/hunt detail lists |
-| `model-hunter/dashboard/static/index_enhanced.html` | V2 dashboard UI with tabs: Overview, Trainers, Criteria, Models, Costs, Details |
-| `model-hunter/dashboard/static/dashboard_enhanced.js` | V2 frontend JS with collapsible content, judge verdict display, criteria badges |
-| `model-hunter/dashboard/static/style_enhanced.css` | V2 dashboard styling |
+| `model-hunter/dashboard/main.py` | Admin dashboard backend with auth, all endpoints, SSE live feed |
+| `model-hunter/dashboard/auth.py` | Password + email-based auth, admin registry, test account exclusion |
+| `model-hunter/dashboard/analytics.py` | Trainer timing, criteria co-failure, judge drift, prompt clustering, anomalies |
+| `model-hunter/dashboard/analytics_cache.py` | 60s background refresh loop, incremental JSONL reading, AnalyticsSnapshot |
+| `model-hunter/dashboard/ml_inference.py` | Load .joblib ML artifacts, break prediction, what-if simulator |
+| `model-hunter/dashboard/data_export.py` | ML-ready export profiles (break prediction, criteria, model, trainer datasets) |
+| `model-hunter/dashboard/log_reader.py` | Incremental log reader with email-based trainer resolution |
+| `model-hunter/dashboard/static/index.html` | 7-section sidebar dashboard (Command Center, Trainers, Intelligence, Sessions, Models, Costs, Data Lab, System) |
+| `model-hunter/dashboard/static/dashboard.js` | Dashboard frontend (charts, SSE, what-if, admin management) |
+| `model-hunter/dashboard/static/login.html` | Email + password login page |
+| `model-hunter/dashboard/static/style.css` | Dark theme dashboard styling |
 
 ### ML Pipeline
 
@@ -158,8 +166,9 @@ The system targets finding "breaking responses" - model outputs that fail evalua
 | File | Responsibility |
 |------|----------------|
 | `model-hunter/Dockerfile` | Container image for app |
-| `model-hunter/docker-compose.yml` | Multi-container setup (blue/green app, Redis, dashboard, nginx) |
-| `model-hunter/deploy-blue-green.sh` | Automated blue-green deployment script for zero-downtime updates |
+| `model-hunter/docker-compose.yml` | Multi-container setup (blue/green app, Redis, dashboard, nginx). Healthcheck via python3. |
+| `model-hunter/deploy.sh` | Zero-downtime deploy: sequential container restart, health checks, nginx reload |
+| `model-hunter/nginx.conf` | Load-balances blue+green with upstream block, Docker DNS resolver |
 | `model-hunter/requirements.txt` | Python dependencies |
 
 ---
@@ -209,11 +218,33 @@ The system targets finding "breaking responses" - model outputs that fail evalua
 - [x] **Multi-turn advance_turn fix**: `advance_turn` now sets `session.notebook.response` to the selected good response from the completed turn, so that `judge_reference` in subsequent turns judges the correct response.
 - [x] **Cumulative hunt stats**: Hunt summary now displays cumulative hunts and breaks across all turns via `getCumulativeStats()`, not just the current turn.
 - [x] **Turn-scoped results filtering**: Introduced `previousTurnHuntIds` (Set) on the frontend to prevent results from completed turns bleeding into the current turn's display.
-- [x] **UI improvements**: Centered hunt progress section, collapsible upload section after notebook load, compact header (reduced padding), metadata sidebar hidden in multi-turn layout, increased hunt progress max-width from 800px to 1000px.
+- [x] **UI improvements**: Centered hunt progress section, collapsible upload section after notebook load, compact header (reduced padding), metadata sidebar hidden in multi-turn layout, increased hunt progress max-width from 800px to 1200px.
 - [x] **Contextual tips system**: Data-driven tips from ML analysis (break rates, criteria difficulty, model comparison) displayed at key workflow stages with rotation and animations.
 - [x] **Full content in response selection**: When selecting a passing response to carry forward, full response content is shown instead of truncated previews.
 - [x] **Pre-deployment test dashboard**: `test_dashboard_server.py` (port 8001) with `static/test-dashboard.html` -- visual test runner with SSE streaming, trend charts, category breakdown, failed test panel with tracebacks, and run history.
 - [x] **Comprehensive test suite**: 194 tests across 24 files in 5 categories: unit, API, E2E (Playwright), stress/performance, and security. Covers crash recovery, data loss, timing/network, concurrency/races, state machine transitions, trainer scenarios, and security hardening.
+
+### Recently Completed (Feb 9-10, 2026 - Dashboard, Calibration, Models, Deployment)
+
+- [x] **Admin intelligence dashboard**: Password-protected dashboard replacing old v2. 7 sections (Command Center, Trainers, Intelligence, Sessions, Models, Costs, Data Lab, System). Pre-computed analytics cache (60s refresh), trainer timing, criteria co-failure matrix, judge drift, prompt TF-IDF clustering, anomaly detection, ML break prediction (what-if simulator), 4 ML-ready export profiles.
+- [x] **Dashboard admin access management**: Super admin (password) can add/remove dashboard admins by Turing email. One-time login, 30-day cookie. Test account exclusion from analytics/ML exports.
+- [x] **Mandatory trainer registration**: Name + Turing email required before using tool. Stored in localStorage + `.storage/trainers.json`. Email sent with all API calls for accurate tracking.
+- [x] **Heartbeat tracking**: Frontend sends `POST /api/heartbeat` every 60s (visibility-aware). Enables precise trainer active time calculation in dashboard.
+- [x] **Calibration mode (Turn 2+)**: Required before hunting. Generate single response, review, judge, tweak criteria, re-judge. `POST /api/generate-single` and `POST /api/judge-calibration` endpoints.
+- [x] **Unified Turn 2+ flow**: Same full markdown editor UI as Turn 1 (replaced stripped-down nextTurnEditor). `advance_turn` now takes only `selected_hunt_id` (prompt/criteria set via editor).
+- [x] **Turn-aware Colab saving**: Turn 2+ creates new cells with headings like `**[Turn 2 - prompt]**` instead of overwriting Turn 1. All save endpoints (`update_response`, `update_notebook_cell`, `update_notebook_cells`) use `_find_or_create_turn_cell`.
+- [x] **Claude Sonnet 4.5, Opus 4.5, Opus 4.6**: Added via OpenRouter. Reasoning enabled for Opus (disabled for Sonnet/Nemotron). Opus 4.5 forced through Anthropic provider. Opus 4.6 forced through Amazon Bedrock (Anthropic + reasoning returns empty).
+- [x] **Model lock disabled**: All models selectable regardless of notebook metadata. Removed 5 layers of lock enforcement.
+- [x] **Session resilience**: All endpoints use `get_session_async` (Redis fallback) instead of memory-only `get_session`. Sessions survive server restarts.
+- [x] **Save-to-Colab fix**: All save endpoints now always update in-memory session first, attempt Colab save only if URL available. No more "No source URL found" errors.
+- [x] **Auto service account detection**: `main.py` auto-detects `service_account.json` from common paths without requiring env var.
+- [x] **Auto APP_VERSION**: Generated from file modification timestamps. No manual bumping needed.
+- [x] **Debug cleanup**: All `print(f"DEBUG:...")` replaced with `logger.debug()`. `DEBUG_MODE=false` in app.js. Only INFO+ messages in production.
+- [x] **Code deduplication**: Extracted shared helpers in main.py and app.js. Save endpoints reduced from ~40 lines each to ~10.
+- [x] **Tips update**: All 23 contextual tips rewritten to be actionable. Removed domain references and specific criteria numbers.
+- [x] **UTC timestamp consistency**: All timestamps use `datetime.utcnow().isoformat() + "Z"` throughout.
+- [x] **Timeout increase**: Base timeout increased from 120s to 180s for all model calls.
+- [x] **VM deployment**: Pulled latest main to VM, rebuilt Docker containers, disabled system nginx, configured Docker nginx with correct upstream names.
 
 ### Unclear / Needs Confirmation
 
@@ -223,10 +254,9 @@ The system targets finding "breaking responses" - model outputs that fail evalua
 
 ## 6. Known Issues / Risks (Observed)
 
-### Debug Logging in Production
+### ~~Debug Logging in Production~~ (Resolved Feb 2026)
 - **Issue**: Extensive `print(f"DEBUG: ...")` statements throughout codebase (~119 instances)
-- **Location**: `main.py`, `notebook_parser.py`, `openai_client.py`
-- **Risk**: Performance overhead, log verbosity in production
+- **Fix**: All replaced with `logger.debug()` calls. Only INFO+ messages shown in production.
 
 ### Error Handling Gaps
 - **Issue**: Some exceptions silently caught without logging
@@ -245,9 +275,36 @@ The system targets finding "breaking responses" - model outputs that fail evalua
 ### Hardcoded Values
 - **Issue**: Several configuration values hardcoded
 - **Examples**:
-  - APP_VERSION = "1.0.4" (`main.py:17`)
+  - ~~APP_VERSION = "1.0.4"~~ (Resolved: now auto-generated from file timestamps)
   - Max parallel workers = 6 (`index.html:326`)
   - Session TTL = 2 hours (`main.py:341`)
+
+### ~~Claude Opus 4.6 Empty Responses~~ (Resolved Feb 10, 2026)
+- **Issue**: Opus 4.6 returned empty responses (`completion_tokens: 1`, `content: ""`) for complex prompts
+- **Root cause**: Three-way interaction between reasoning param, provider, and prompt complexity:
+  - Without `reasoning` param: Opus 4.6 can't handle complex prompts (returns empty immediately)
+  - With `reasoning` + Anthropic provider: returns empty (provider-level bug)
+  - With `reasoning` + Amazon Bedrock provider: **works** (1800+ char responses, ~1300 reasoning tokens)
+  - OpenRouter routes randomly across providers, causing ~75% failure rate when not forced
+- **Fix**: Force Opus 4.6 through Amazon Bedrock with reasoning enabled. Opus 4.5 still forces Anthropic.
+- **Tradeoff**: Bedrock is slower (~80-90s per response vs Anthropic's ~3s), but reliable
+
+### ~~Blue-Green Deployment Not Functional~~ (Resolved Feb 11, 2026)
+- **Issue**: Old `deploy-blue-green.sh` referenced system nginx, Docker nginx had no upstream block
+- **Fix**: Complete stateless architecture migration. App is now fully stateless (all state in Redis). New `deploy.sh` rebuilds containers one at a time. Nginx load-balances both with `upstream` block + `resolver 127.0.0.11`. SSE auto-reconnects via Redis Streams. Zero trainer disruption.
+
+### Frontend State Loss on Page Refresh
+- **Issue**: Multi-turn frontend state (currentTurn, conversationHistory, turns) lost on page refresh
+- **Backend data is preserved** in Redis, but frontend doesn't call `/api/turn-status` on restore
+- **Risk**: Trainer loses multi-turn context if they refresh during Turn 2+
+
+### ~~Docker Nginx DNS Caching~~ (Resolved Feb 11, 2026)
+- **Issue**: nginx cached old container IPs → 502
+- **Fix**: Added `resolver 127.0.0.11 valid=5s` to nginx.conf. Deploy script reloads nginx after rebuild.
+
+### ~~Redis Session Persistence Broken~~ (Resolved Feb 11, 2026)
+- **Issue**: Sessions only in memory, lost on container restart
+- **Fix**: Complete rewrite. `redis_session.py` uses granular Redis keys as primary store. No in-memory dict. Atomic operations (RPUSH, HINCRBY). Sessions survive any restart.
 
 ### Missing Error Responses
 - **Issue**: Hunt can fail silently if selected hunt_ids not found in results
@@ -296,6 +353,9 @@ The system targets finding "breaking responses" - model outputs that fail evalua
 | `FIREWORKS_API_KEY` | No | Fireworks AI API key (alternative provider) |
 | `REDIS_URL` | No | Redis connection URL (default: `redis://localhost:6379/0`) |
 | `GOOGLE_SERVICE_ACCOUNT_JSON_PATH` | No | Path to service account JSON file |
+| `ADMIN_PASSWORD` | Yes (dashboard) | Password for dashboard super admin access |
+| `ML_MODEL_PATH` | No | Path to ML model artifacts for break prediction |
+| `SESSION_STORAGE_PATH` | No | Path to session storage (default: `/app/.storage`) |
 | `MAINTENANCE_MODE` | No | Set to "true" to enable maintenance mode |
 | `OPENROUTER_CONCURRENCY` | No | Max concurrent OpenRouter calls (default: 10, currently set to **50**) |
 | `FIREWORKS_CONCURRENCY` | No | Max concurrent Fireworks calls (default: 8, currently set to **4**) |
@@ -321,8 +381,50 @@ When something doesn't work, ask the user to check the browser console (F12) imm
 ### 5. Auto-Reload is Destructive During Active Use
 `reload=True` in uvicorn causes the server to restart on every file change, which cascades into page reloads, lost sessions, and broken UI state. Keep `reload=False` when users are actively using the tool. Restart manually when ready.
 
-### 6. Bump APP_VERSION on Deploy
-The frontend checks `/api/version` every 30 seconds. If version changes, it prompts trainers to reload. But this only works if `APP_VERSION` in `main.py` is bumped. Always bump it on deployment.
+### 6. APP_VERSION Auto-Generation
+APP_VERSION is now auto-generated from file modification timestamps of `main.py`, `app.js`, and `index.html`. No manual bumping needed. The frontend checks `/api/version` every 30 seconds and prompts trainers to reload when the version changes.
+
+### 7. Always Restart Nginx After Container Rebuild
+Docker nginx caches container IPs. After `docker-compose up -d --build`, always run `docker-compose restart nginx` or the proxy will return 502 Bad Gateway.
+
+### 8. Test Model Behavior Separately from Code
+When a model returns empty responses, test it directly with a raw API call before assuming a code bug. Different models have different behaviors: Claude Opus needs reasoning enabled, Bedrock has stricter content filters than Anthropic direct.
+
+### 9. Same Model, Different Providers = Different Behavior
+OpenRouter routes requests across multiple providers (Anthropic, Bedrock, Google). The same model can behave differently depending on which provider handles it. Opus 4.6 + reasoning works on Bedrock but returns empty on Anthropic. Always test with provider forcing to isolate. If a fix works sometimes but not always, suspect random provider routing.
+
+### 10. Test with the Actual User Prompt
+Simple test prompts ("Say hello") may work while the real 5000-char prompt fails. Always reproduce with the exact prompt from the user's session (check `.storage/{session_id}.json`). Prompt complexity, length, and content can trigger completely different model behavior.
+
+### 11. Separate Redis Clients for Blocking Operations
+`XREAD BLOCK` needs a long socket timeout (30s+), but normal Redis ops need a short timeout (5s). Using the same client for both causes XREAD to get killed by the socket timeout before events arrive. Always use a dedicated Redis client with a long timeout for blocking commands.
+
+---
+
+## Appendix: Deployment Guide
+
+Two deployment paths depending on what changed:
+
+**Frontend-only** (JS/CSS/HTML changes):
+```bash
+ssh mandy@34.68.227.248
+cd /home/mandy/InverseIFHunter/model-hunter
+./deploy.sh --frontend
+```
+Static files are volume-mounted. Changes are live immediately. Zero downtime.
+
+**Backend** (Python code changes):
+```bash
+ssh mandy@34.68.227.248
+cd /home/mandy/InverseIFHunter/model-hunter
+./deploy.sh
+```
+Rebuilds containers one at a time. Nginx load-balances to healthy instance. Trainers see zero disruption. SSE auto-reconnects via Redis Streams.
+
+**Status check:**
+```bash
+./deploy.sh --status
+```
 
 ---
 
@@ -345,5 +447,9 @@ The frontend checks `/api/version` every 30 seconds. If version changes, it prom
 | GET | `/api/review-results/{session_id}` | Get 4 results for review |
 | POST | `/api/advance-turn/{session_id}` | Advance to next turn with selected response, new prompt, and new criteria |
 | GET | `/api/turn-status/{session_id}` | Get current turn, conversation history, and all past turns |
+| POST | `/api/register-trainer` | Register trainer (name + email) |
+| POST | `/api/heartbeat` | Trainer heartbeat for activity tracking |
+| POST | `/api/generate-single/{session_id}` | Generate single model response (calibration) |
+| POST | `/api/judge-calibration/{session_id}` | Judge a specific response (calibration re-judge loop) |
 | GET | `/api/health` | Health check |
-| GET | `/api/version` | Get app version |
+| GET | `/api/version` | Get app version (auto-generated from file timestamps) |
