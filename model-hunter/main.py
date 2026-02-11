@@ -70,12 +70,8 @@ try:
 except ImportError:
     _trainer_identity_enabled = False
 
-# Session store import - wrapped to never fail
-try:
-    from services.session_store import get_session_store
-    _session_store_enabled = True
-except ImportError:
-    _session_store_enabled = False
+# Redis session store (stateless — all state in Redis)
+import services.redis_session as redis_store
 
 # Rate limiter import - wrapped to never fail
 try:
@@ -299,12 +295,21 @@ def _get_storage_with_url(session_id: str):
     return storage, has_url
 
 
-def _persist_session(session_id: str, session: HuntSession, storage: Optional[dict] = None):
-    """Persist session state to disk storage."""
+async def _persist_session(session_id: str, session: HuntSession, storage: Optional[dict] = None):
+    """Persist session state to disk storage and Redis."""
     if storage is None:
         storage = get_session_storage(session_id) or {}
     storage["session_data"] = session.model_dump()
     save_session_storage(session_id, storage)
+
+    # Also persist key fields to Redis
+    try:
+        if session.notebook:
+            await redis_store.set_notebook(session_id, session.notebook)
+        if session.config:
+            await redis_store.set_config(session_id, session.config)
+    except Exception as e:
+        logger.error(f"Failed to persist session {session_id} to Redis: {e}")
 
 
 def _save_cells_to_drive(storage: dict, notebook_data: dict) -> bool:
@@ -398,13 +403,11 @@ async def lifespan(app: FastAPI):
     logger.info("🔥 Model Hunter starting up...")
     
     # Initialize Redis session store
-    if _session_store_enabled:
-        try:
-            store = get_session_store()
-            stats = await store.get_stats()
-            logger.info(f"📦 Session store: {stats['backend']} ({stats['active_sessions']} active sessions)")
-        except Exception as e:
-            logger.warning(f"⚠️ Session store initialization: {e}")
+    try:
+        stats = await redis_store.get_stats()
+        logger.info(f"📦 Redis session store: {stats['status']} ({stats['active_sessions']} active sessions)")
+    except Exception as e:
+        logger.warning(f"⚠️ Redis session store initialization: {e}")
     
     # Initialize rate limiter
     if _rate_limiter_enabled:
@@ -420,13 +423,11 @@ async def lifespan(app: FastAPI):
     # Shutdown - cleanup
     logger.info("🛑 Model Hunter shutting down...")
     
-    # Close session store
-    if _session_store_enabled:
-        try:
-            store = get_session_store()
-            await store.close()
-        except Exception:
-            pass
+    # Close Redis session store
+    try:
+        await redis_store.close()
+    except Exception:
+        pass
     
     # Close rate limiter
     if _rate_limiter_enabled:
@@ -702,7 +703,7 @@ async def upload_notebook(request: Request, file: UploadFile = File(...)):
         
         # Create session
         config = HuntConfig()
-        session = hunt_engine.create_session(parsed, config)
+        session = await hunt_engine.create_session(parsed, config)
         
         # Get trainer identity — prefer email from header/query, fallback to fingerprint
         trainer_email = request.headers.get("X-Trainer-Email", request.query_params.get("trainer_email", ""))
@@ -779,7 +780,7 @@ async def fetch_notebook(http_request: Request, request: NotebookURLRequest):
         
         # Create session
         config = HuntConfig()
-        session = hunt_engine.create_session(parsed, config)
+        session = await hunt_engine.create_session(parsed, config)
         
         # Get trainer identity — prefer email from request body, fallback to fingerprint
         trainer_email = request.trainer_email or ""
@@ -901,8 +902,9 @@ async def update_config(session_id: str, config: HuntConfig):
                 from models.schemas import HuntSession
                 session_data = storage["session_data"]
                 session = HuntSession(**session_data)
-                hunt_engine.sessions[session_id] = session
-                logger.info(f"Restored session {session_id} from storage")
+                # Re-persist to Redis from .storage backup
+                await redis_store.create_session(session_id, session.notebook, session.config)
+                logger.info(f"Restored session {session_id} from storage to Redis")
             except Exception as e:
                 logger.error(f"Error restoring session {session_id}: {e}")
                 raise HTTPException(404, "Session not found or expired")
@@ -928,12 +930,16 @@ async def update_config(session_id: str, config: HuntConfig):
         logger.info(f"Session {session_id}: Preserved custom_judge_system_prompt during config update")
     
     session.total_hunts = config.parallel_workers
-    
+
+    # Persist config to Redis
+    await redis_store.set_config(session_id, session.config)
+    await redis_store.set_meta_field(session_id, "total_hunts", session.total_hunts)
+
     # Update storage
     storage = get_session_storage(session_id) or {}
     storage["session_data"] = session.model_dump()
     save_session_storage(session_id, storage)
-    
+
     return {"success": True, "config": config.model_dump()}
 
 
@@ -961,7 +967,7 @@ async def update_response(session_id: str, request: UpdateResponseRequest):
         saved_to_colab = _save_turn_cells_to_drive(
             session, storage, has_url, [("response", request.response)]
         )
-        _persist_session(session_id, session, storage)
+        await _persist_session(session_id, session, storage)
         msg = "Response saved to Colab notebook" if saved_to_colab else "Response saved to session"
         return {"success": True, "message": msg}
     except HTTPException:
@@ -984,7 +990,7 @@ async def update_notebook_cell(session_id: str, request: UpdateNotebookCellReque
         saved_to_colab = _save_turn_cells_to_drive(
             session, storage, has_url, [(request.cell_type, request.content)]
         )
-        _persist_session(session_id, session, storage)
+        await _persist_session(session_id, session, storage)
         msg = f"{request.cell_type} saved to Colab notebook" if saved_to_colab else f"{request.cell_type} saved to session"
         return {"success": True, "message": msg}
     except HTTPException:
@@ -1009,7 +1015,7 @@ async def update_notebook_cells(session_id: str, request: UpdateNotebookCellsReq
             _update_session_notebook_field(session, cell_type, content)
         
         saved_to_colab = _save_turn_cells_to_drive(session, storage, has_url, cells)
-        _persist_session(session_id, session, storage)
+        await _persist_session(session_id, session, storage)
         
         cell_names = [c[0] for c in cells]
         msg = f"Saved {len(cells)} cell(s) to Colab notebook" if saved_to_colab else f"Saved {len(cells)} cell(s) to session"
@@ -1050,6 +1056,7 @@ async def judge_reference(session_id: str):
                 logger.debug(f" New (first 200 chars): {parsed.response_reference[:200]}...")
             # Update session with latest notebook data
             session.notebook = parsed
+            await redis_store.set_notebook(session_id, parsed)
             # Extract criteria count for debugging
             import re
             import json as json_lib
@@ -1250,53 +1257,70 @@ async def start_hunt(request: StartHuntRequest):
 async def hunt_stream(session_id: str, request: Request):
     """
     SSE endpoint for real-time hunt progress.
-    
-    Starts the hunt and streams events as they happen.
+
+    Starts the hunt and subscribes to the Redis Stream for events.
+    Any app instance can serve this endpoint — events come from Redis, not memory.
+    Supports reconnection via Last-Event-ID header.
     """
+    import services.event_stream as event_stream
+
     session = await _get_validated_session(session_id)
-    
+
+    # Check for reconnection — browser sends Last-Event-ID header
+    last_event_id = request.headers.get("Last-Event-ID")
+
     async def event_generator():
-        queue = asyncio.Queue()
-        
-        async def callback(event: HuntEvent):
-            await queue.put(event)
-        
-        # Start hunt in background
-        hunt_task = asyncio.create_task(
-            hunt_engine.run_hunt(session_id, progress_callback=callback)
-        )
-        
+        # Start hunt in background (publishes events to Redis Stream)
+        hunt_task = asyncio.create_task(hunt_engine.run_hunt(session_id))
+
         try:
-            while True:
-                # Check if client disconnected
-                if await request.is_disconnected():
-                    hunt_task.cancel()
-                    break
-                
-                try:
-                    event = await asyncio.wait_for(queue.get(), timeout=1.0)
+            # If reconnecting, replay missed events first
+            if last_event_id:
+                missed = await event_stream.replay(session_id, last_event_id)
+                for eid, event in missed:
                     yield {
+                        "id": eid,
                         "event": event.event_type,
+                        "retry": 500,
                         "data": json.dumps({
                             "hunt_id": event.hunt_id,
                             **event.data
                         })
                     }
-                    
-                    # Stop on complete or error
                     if event.event_type in ("complete", "error"):
-                        break
-                        
-                except asyncio.TimeoutError:
-                    # Send keepalive
+                        return
+
+            # Subscribe to Redis Stream for live events
+            async for eid, event in event_stream.subscribe(session_id, last_event_id):
+                # Check if client disconnected
+                if await request.is_disconnected():
+                    break
+
+                if event is None:
+                    # Timeout from XREAD BLOCK — send keepalive
                     yield {"event": "ping", "data": "{}"}
-                    
+                    continue
+
+                yield {
+                    "id": eid,
+                    "event": event.event_type,
+                    "retry": 500,
+                    "data": json.dumps({
+                        "hunt_id": event.hunt_id,
+                        **event.data
+                    })
+                }
+
+                # Stop on terminal events
+                if event.event_type in ("complete", "error"):
+                    break
+
         except asyncio.CancelledError:
             pass
         finally:
             if not hunt_task.done():
                 hunt_task.cancel()
-    
+
     return EventSourceResponse(event_generator())
 
 
@@ -1692,25 +1716,17 @@ async def save_to_drive(session_id: str, request: Request):
 @app.get("/api/results/{session_id}")
 async def get_all_results(session_id: str):
     """Get ALL results for a session (for selection UI) - accumulated across all runs."""
-    session = hunt_engine.sessions.get(session_id)
-    if not session:
-        return {"count": 0, "results": []}
-    
-    # Return ALL accumulated results across all runs (not just current run)
-    # all_results contains completed results from all hunt runs
-    all_accumulated = session.all_results if session.all_results else []
-    
-    # Also include any completed results from current run that haven't been accumulated yet
-    current_completed = [r for r in session.results if r.status.value == "completed"]
-    
-    # Merge: all_accumulated + current_completed (avoiding duplicates by hunt_id)
-    existing_ids = {r.hunt_id for r in all_accumulated}
-    merged_results = list(all_accumulated) + [r for r in current_completed if r.hunt_id not in existing_ids]
-    
-    # Telemetry: Log results viewing (trainer reviewing results for slot selection)
+    merged_results = await hunt_engine._get_all_accumulated_results_async(session_id)
+
+    if not merged_results:
+        return {"count": 0, "results": [], "accumulated_count": 0}
+
+    all_accumulated = await redis_store.get_all_results(session_id)
+
+    # Telemetry
     try:
         if _telemetry_enabled:
-            breaking = sum(1 for r in merged_results if getattr(r, 'score', None) == 0)
+            breaking = sum(1 for r in merged_results if r.judge_score == 0)
             get_telemetry().log_event("results_viewed", {
                 "session_id": session_id,
                 "total_results": len(merged_results),
@@ -1719,7 +1735,7 @@ async def get_all_results(session_id: str):
             })
     except Exception:
         pass
-    
+
     return {
         "count": len(merged_results),
         "results": [r.model_dump() for r in merged_results],
@@ -1730,7 +1746,7 @@ async def get_all_results(session_id: str):
 @app.get("/api/breaking-results/{session_id}")
 async def get_breaking_results(session_id: str):
     """Get only the breaking (score 0) results."""
-    results = hunt_engine.get_breaking_results(session_id)
+    results = await hunt_engine.get_breaking_results_async(session_id)
     return {
         "count": len(results),
         "results": [r.model_dump() for r in results]
@@ -1743,7 +1759,7 @@ async def get_review_results(session_id: str):
     Get 4 selected responses for human review.
     Priority: 4 failed (score 0) OR 3 failed + 1 passed.
     """
-    results = hunt_engine.get_selected_for_review(session_id, target_count=4)
+    results = await hunt_engine.get_selected_for_review_async(session_id, target_count=4)
     return {
         "count": len(results),
         "results": [r.model_dump() for r in results],
@@ -1774,17 +1790,15 @@ async def health_check():
     }
     
     # Check Redis
-    if _session_store_enabled:
-        try:
-            store = get_session_store()
-            stats = await store.get_stats()
-            health["redis"] = {
-                "status": "connected" if stats["backend"] == "redis" else "fallback",
-                "backend": stats["backend"],
-                "active_sessions": stats["active_sessions"]
-            }
-        except Exception as e:
-            health["redis"] = {"status": "error", "error": str(e)}
+    try:
+        stats = await redis_store.get_stats()
+        health["redis"] = {
+            "status": stats["status"],
+            "backend": stats["backend"],
+            "active_sessions": stats["active_sessions"]
+        }
+    except Exception as e:
+        health["redis"] = {"status": "error", "error": str(e)}
     
     # Check rate limiter
     if _rate_limiter_enabled:
@@ -1824,25 +1838,20 @@ async def admin_status():
     """Detailed admin status endpoint with all system metrics."""
     status = {
         "timestamp": datetime.utcnow().isoformat() + "Z",
-        "sessions": {
-            "in_memory": len(hunt_engine.sessions),
-            "session_ids": list(hunt_engine.sessions.keys())[:10]  # First 10 only
-        }
+        "sessions": {}
     }
-    
+
     # Redis status
-    if _session_store_enabled:
-        try:
-            store = get_session_store()
-            stats = await store.get_stats()
-            redis_sessions = await store.list_sessions()
-            status["redis"] = {
-                **stats,
-                "session_count": len(redis_sessions),
-                "session_ids": redis_sessions[:10]  # First 10 only
-            }
-        except Exception as e:
-            status["redis"] = {"error": str(e)}
+    try:
+        stats = await redis_store.get_stats()
+        redis_sessions = await redis_store.list_sessions()
+        status["sessions"] = {
+            **stats,
+            "session_count": len(redis_sessions),
+            "session_ids": redis_sessions[:10]
+        }
+    except Exception as e:
+        status["sessions"] = {"error": str(e)}
     
     # Rate limiter status
     if _rate_limiter_enabled:
@@ -1948,14 +1957,20 @@ async def advance_turn(session_id: str, request: AdvanceTurnRequest):
     session.breaks_found = 0
     session.status = HuntStatus.PENDING
     
-    # Persist to Redis
-    if _session_store_enabled:
-        try:
-            store = get_session_store()
-            await store.save_session(session_id, session.model_dump())
-        except Exception as e:
-            logger.error(f"Failed to persist session after turn advance: {e}")
-    
+    # Persist to Redis (granular writes)
+    try:
+        await redis_store.set_config(session_id, session.config)
+        await redis_store.set_notebook(session_id, session.notebook)
+        await redis_store.set_status(session_id, session.status)
+        await redis_store.set_conversation_history(session_id, session.conversation_history)
+        await redis_store.set_current_turn(session_id, session.current_turn)
+        await redis_store.set_hunt_counters(session_id, total_hunts=0, completed_hunts=0, breaks_found=0)
+        await redis_store.clear_results(session_id)
+        if turn_data:
+            await redis_store.append_turn(session_id, turn_data)
+    except Exception as e:
+        logger.error(f"Failed to persist session after turn advance: {e}")
+
     # Also persist to disk storage
     try:
         storage = get_session_storage(session_id)
@@ -2004,14 +2019,13 @@ async def mark_breaking(session_id: str):
     session.turns.append(turn_data)
     session.notebook.is_multi_turn = len(session.turns) > 1
     
-    # Persist
-    if _session_store_enabled:
-        try:
-            store = get_session_store()
-            await store.save_session(session_id, session.model_dump())
-        except Exception as e:
-            logger.error(f"Failed to persist session after mark-breaking: {e}")
-    
+    # Persist to Redis
+    try:
+        await redis_store.set_notebook(session_id, session.notebook)
+        await redis_store.append_turn(session_id, turn_data)
+    except Exception as e:
+        logger.error(f"Failed to persist session after mark-breaking: {e}")
+
     logger.info(f"Session {session_id}: Turn {current_turn} marked as breaking "
                 f"(total turns: {len(session.turns)})")
     
@@ -2052,15 +2066,18 @@ async def get_active_hunts():
     """
     active_count = 0
     active_sessions = []
-    
-    for sid, session in hunt_engine.sessions.items():
-        if session.status == HuntStatus.RUNNING:
+
+    all_session_ids = await redis_store.list_sessions()
+    for sid in all_session_ids:
+        status = await redis_store.get_status(sid)
+        if status == HuntStatus.RUNNING:
+            meta = await redis_store.get_meta(sid)
             active_count += 1
             active_sessions.append({
                 "session_id": sid,
-                "current_turn": session.current_turn,
-                "completed_hunts": session.completed_hunts,
-                "total_hunts": session.total_hunts,
+                "current_turn": int(meta.get("current_turn", 1)),
+                "completed_hunts": int(meta.get("completed_hunts", 0)),
+                "total_hunts": int(meta.get("total_hunts", 0)),
             })
     
     return {

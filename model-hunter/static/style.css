@@ -4008,8 +4008,27 @@ body.sidebar-visible .container.multi-turn-layout {
     font-size: 0.82rem;
     font-family: var(--font-body);
 }
-.btn-destructive-outline:hover {
+.btn-destructive-outline:hover:not(:disabled) {
     background: var(--danger-bg);
+}
+.btn-destructive-outline:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    border-color: var(--text-muted);
+    color: var(--text-muted);
+}
+
+.review-readiness-warning {
+    background: rgba(255, 193, 7, 0.12);
+    border: 1px solid rgba(255, 193, 7, 0.4);
+    border-radius: var(--radius-md);
+    padding: 0.75rem 1rem;
+    margin-bottom: 1rem;
+    color: var(--warning);
+    font-size: 0.9rem;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
 }
 
 .btn-continue-primary {

@@ -4,15 +4,15 @@ Hunt Engine Service
 Orchestrates parallel hunts with:
 - Configurable parallelism (1-16 workers)
 - Progress tracking and SSE broadcasting
-- Early termination when target breaks found
 - Result aggregation with reasoning traces
-- Redis-backed session persistence (survives restarts)
+- Redis-primary session persistence (stateless — survives restarts)
+- Atomic Redis operations (no in-process locks)
 - Rate-limited API calls (prevents overload)
 """
 import asyncio
 import uuid
 import logging
-from typing import List, Dict, Any, Optional, AsyncGenerator, Callable
+from typing import List, Dict, Any, Optional, Callable
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -24,14 +24,6 @@ try:
 except ImportError:
     _telemetry_enabled = False
 
-# Session store import - wrapped to never fail
-try:
-    from services.session_store import get_session_store
-    _session_store_enabled = True
-except ImportError:
-    _session_store_enabled = False
-    logger.warning("Session store not available - sessions will not persist")
-
 # Rate limiter import - wrapped to never fail
 try:
     from services.rate_limiter import get_rate_limiter
@@ -41,9 +33,9 @@ except ImportError:
     logger.warning("Rate limiter not available - API calls will not be throttled")
 
 from models.schemas import (
-    HuntConfig, 
-    HuntResult, 
-    HuntSession, 
+    HuntConfig,
+    HuntResult,
+    HuntSession,
     HuntStatus,
     HuntEvent,
     ParsedNotebook,
@@ -51,21 +43,30 @@ from models.schemas import (
 )
 from services.openrouter_client import get_openrouter_client
 from services.openai_client import get_openai_judge_client
+import services.redis_session as store
+import services.event_stream as events
 
 
 class HuntEngine:
-    """Orchestrates parallel model hunts with progress tracking and persistence."""
-    
-    def __init__(self):
-        self.sessions: Dict[str, HuntSession] = {}
-        self._event_callbacks: Dict[str, List[Callable]] = {}
-        self._session_locks: Dict[str, asyncio.Lock] = {}  # Lock per session for atomic updates
-    
-    def create_session(self, notebook: ParsedNotebook, config: HuntConfig) -> HuntSession:
-        """Create a new hunt session and persist to Redis."""
+    """
+    Orchestrates parallel model hunts.
+
+    Fully stateless — all session state lives in Redis.
+    No in-memory session dict, no in-process locks.
+    Any app instance can serve any request.
+    """
+
+    # ------------------------------------------------------------------
+    # Session lifecycle (delegates to redis_session)
+    # ------------------------------------------------------------------
+
+    async def create_session(self, notebook: ParsedNotebook, config: HuntConfig) -> HuntSession:
+        """Create a new hunt session in Redis."""
         session_id = str(uuid.uuid4())[:8]
-        
-        session = HuntSession(
+        await store.create_session(session_id, notebook, config)
+
+        # Return a HuntSession object for the caller
+        return HuntSession(
             session_id=session_id,
             notebook=notebook,
             config=config,
@@ -75,330 +76,258 @@ class HuntEngine:
             breaks_found=0,
             status=HuntStatus.PENDING
         )
-        
-        self.sessions[session_id] = session
-        self._session_locks[session_id] = asyncio.Lock()  # Create lock for this session
-        
-        # Persist to Redis (fire-and-forget, don't block)
-        if _session_store_enabled:
-            asyncio.create_task(self._persist_session(session))
-        
-        return session
-    
-    async def _persist_session(self, session: HuntSession):
-        """Persist session to Redis. Fire-and-forget."""
-        try:
-            store = get_session_store()
-            await store.save_session(session.session_id, session.model_dump())
-            logger.debug(f"Session {session.session_id} persisted to Redis")
-        except Exception as e:
-            logger.error(f"Failed to persist session {session.session_id}: {e}")
-    
-    def get_session(self, session_id: str) -> Optional[HuntSession]:
-        """Get session by ID (from memory only - use get_session_async for Redis)."""
-        return self.sessions.get(session_id)
-    
+
     async def get_session_async(self, session_id: str) -> Optional[HuntSession]:
-        """
-        Get session by ID with Redis fallback.
-        
-        Checks memory first, then Redis if not found.
-        Restores session to memory if found in Redis.
-        """
-        # Check memory first
-        if session_id in self.sessions:
-            return self.sessions[session_id]
-        
-        # Try Redis
-        if _session_store_enabled:
-            try:
-                store = get_session_store()
-                data = await store.get_session(session_id)
-                if data:
-                    # Restore session from Redis
-                    session = HuntSession(**data)
-                    self.sessions[session_id] = session
-                    self._session_locks[session_id] = asyncio.Lock()
-                    logger.info(f"Session {session_id} restored from Redis")
-                    return session
-            except Exception as e:
-                logger.error(f"Failed to restore session {session_id} from Redis: {e}")
-        
-        return None
-    
-    async def run_hunt(
-        self,
-        session_id: str,
-        progress_callback: Optional[Callable[[HuntEvent], None]] = None
-    ) -> HuntSession:
+        """Get session from Redis. Returns None if not found."""
+        return await store.get_full_session(session_id)
+
+    # Keep sync version for backward compat (wraps async)
+    def get_session(self, session_id: str) -> Optional[HuntSession]:
+        """Sync wrapper — prefer get_session_async."""
+        try:
+            loop = asyncio.get_running_loop()
+            # If we're in an async context, we can't call run_until_complete.
+            # Return None and let callers use get_session_async instead.
+            return None
+        except RuntimeError:
+            return None
+
+    # ------------------------------------------------------------------
+    # Hunt execution
+    # ------------------------------------------------------------------
+
+    async def run_hunt(self, session_id: str) -> HuntSession:
         """
         Run parallel hunts for a session.
-        
-        Args:
-            session_id: Session ID to run
-            progress_callback: Optional callback for progress updates
-        
-        Returns:
-            Updated session with results
+
+        Reads config/notebook from Redis once, then runs workers.
+        Each worker writes results directly to Redis (atomic).
+        Events are published to Redis Streams (any SSE subscriber picks them up).
         """
-        session = self.sessions.get(session_id)
-        if not session:
-            raise ValueError(f"Session {session_id} not found")
-        
-        # RESET session counters for new run (but keep all_results!)
-        session.completed_hunts = 0
-        session.breaks_found = 0
-        session.results = []  # Reset current run results only
-        session.status = HuntStatus.RUNNING
-        
-        # Get the starting hunt ID from config (sent by frontend from its localStorage count)
-        # This ensures backend and frontend use the SAME hunt_id numbering
-        run_start_id = session.config.hunt_offset
-        
-        # Update total_hunts to match config (in case it wasn't synced)
-        session.total_hunts = session.config.parallel_workers
-        
-        logger.info(f"Session {session_id}: Starting hunt run with offset {run_start_id}, workers={session.config.parallel_workers}, total_hunts={session.total_hunts}")
-        
+        # Read config and notebook from Redis (read-only during hunt)
+        config = await store.get_config(session_id)
+        notebook = await store.get_notebook(session_id)
+        if not config or not notebook:
+            raise ValueError(f"Session {session_id} not found or missing config/notebook")
+
+        # Reset counters for this run
+        await store.clear_results(session_id)
+        await store.set_hunt_counters(
+            session_id,
+            total_hunts=config.parallel_workers,
+            completed_hunts=0,
+            breaks_found=0
+        )
+        await store.set_status(session_id, HuntStatus.RUNNING)
+
+        run_start_id = config.hunt_offset
+
+        logger.info(f"Session {session_id}: Starting hunt run with offset {run_start_id}, "
+                     f"workers={config.parallel_workers}, total_hunts={config.parallel_workers}")
+
         # Telemetry: Log hunt start
         if _telemetry_enabled:
             try:
                 get_telemetry().log_hunt_start(
                     session_id=session_id,
-                    workers=session.config.parallel_workers,
-                    models=session.config.models,
-                    target_breaks=session.config.target_breaks
+                    workers=config.parallel_workers,
+                    models=config.models,
+                    target_breaks=config.target_breaks
                 )
             except Exception:
                 pass
-        
-        # Emit start event
-        if progress_callback:
-            await progress_callback(HuntEvent(
-                event_type="start",
-                data={
-                    "session_id": session_id,
-                    "total_hunts": session.total_hunts,
-                    "target_breaks": session.config.target_breaks,
-                    "run_start_id": run_start_id  # Tell frontend the starting ID
-                }
-            ))
-        
-        # Create hunt tasks with GLOBALLY UNIQUE hunt IDs
+
+        # Emit start event to Redis Stream
+        await events.publish(session_id, HuntEvent(
+            event_type="start",
+            data={
+                "session_id": session_id,
+                "total_hunts": config.parallel_workers,
+                "target_breaks": config.target_breaks,
+                "run_start_id": run_start_id
+            }
+        ))
+
+        # Create hunt tasks
         tasks = []
-        for i in range(session.config.parallel_workers):
-            # Use globally unique hunt_id: run_start_id + i + 1 (1-based)
+        for i in range(config.parallel_workers):
             hunt_id = run_start_id + i + 1
-            model = session.config.models[i % len(session.config.models)]
-            
-            # Initialize result placeholder
-            result = HuntResult(
-                hunt_id=hunt_id,
-                model=model,
-                status=HuntStatus.PENDING
-            )
-            session.results.append(result)
-            
-            # Create task
+            model = config.models[i % len(config.models)]
+
             task = asyncio.create_task(
                 self._run_single_hunt(
-                    session=session,
-                    result=result,
-                    progress_callback=progress_callback
+                    session_id=session_id,
+                    hunt_id=hunt_id,
+                    model=model,
+                    config=config,
+                    notebook=notebook,
                 )
             )
             tasks.append(task)
-        
-        # Run tasks with early termination check
+
+        # Run all tasks to completion
         try:
-            await self._run_with_early_stop(
-                tasks=tasks,
-                session=session,
-                progress_callback=progress_callback
-            )
+            await self._run_with_early_stop(tasks)
         except Exception as e:
-            session.status = HuntStatus.FAILED
-            if progress_callback:
-                await progress_callback(HuntEvent(
-                    event_type="error",
-                    data={"error": str(e)}
-                ))
-        
+            await store.set_status(session_id, HuntStatus.FAILED)
+            await events.publish(session_id, HuntEvent(
+                event_type="error",
+                data={"error": str(e)}
+            ))
+
         # Final status
-        if session.status != HuntStatus.FAILED:
-            session.status = HuntStatus.COMPLETED
-        
-        # Accumulate results into all_results (for history across runs)
-        for result in session.results:
+        current_status = await store.get_status(session_id)
+        if current_status != HuntStatus.FAILED:
+            await store.set_status(session_id, HuntStatus.COMPLETED)
+
+        # Accumulate current results into all_results
+        current_results = await store.get_results(session_id)
+        for result in current_results:
             if result.status == HuntStatus.COMPLETED:
-                session.all_results.append(result)
-        
-        # Update accumulated hunt count to match what frontend expects
-        # (hunt_offset + parallel_workers = new total)
-        session.accumulated_hunt_count = session.config.hunt_offset + session.config.parallel_workers
-        logger.info(f"Session {session_id}: Accumulated {len(session.all_results)} total results, total hunts now {session.accumulated_hunt_count}")
-        
+                await store.append_all_result(session_id, result)
+
+        # Update accumulated hunt count
+        new_count = config.hunt_offset + config.parallel_workers
+        await store.set_accumulated_hunt_count(session_id, new_count)
+
+        all_results = await store.get_all_results(session_id)
+        meta = await store.get_meta(session_id)
+        completed_hunts = int(meta.get("completed_hunts", 0))
+        breaks_found = int(meta.get("breaks_found", 0))
+
+        logger.info(f"Session {session_id}: Accumulated {len(all_results)} total results, "
+                     f"total hunts now {new_count}")
+
         # Telemetry: Log hunt completion
         if _telemetry_enabled:
             try:
                 get_telemetry().log_hunt_complete(
                     session_id=session_id,
-                    completed_hunts=session.completed_hunts,
-                    breaks_found=session.breaks_found,
-                    success=session.breaks_found >= session.config.target_breaks
+                    completed_hunts=completed_hunts,
+                    breaks_found=breaks_found,
+                    success=breaks_found >= config.target_breaks
                 )
             except Exception:
                 pass
-        
-        # Emit complete event with all accumulated results
-        if progress_callback:
-            await progress_callback(HuntEvent(
-                event_type="complete",
-                data={
-                    "session_id": session_id,
-                    "completed_hunts": session.completed_hunts,
-                    "breaks_found": session.breaks_found,
-                    "success": session.breaks_found >= session.config.target_breaks,
-                    "total_accumulated": len(session.all_results)  # Tell frontend total count
-                }
-            ))
-        
-        # Persist final session state to Redis
-        if _session_store_enabled:
-            await self._persist_session(session)
-        
-        return session
-    
-    async def _run_with_early_stop(
-        self,
-        tasks: List[asyncio.Task],
-        session: HuntSession,
-        progress_callback: Optional[Callable]
-    ):
+
+        # Emit complete event to Redis Stream
+        await events.publish(session_id, HuntEvent(
+            event_type="complete",
+            data={
+                "session_id": session_id,
+                "completed_hunts": completed_hunts,
+                "breaks_found": breaks_found,
+                "success": breaks_found >= config.target_breaks,
+                "total_accumulated": len(all_results)
+            }
+        ))
+
+        # Return full session for the caller
+        return await store.get_full_session(session_id)
+
+    async def _run_with_early_stop(self, tasks: List[asyncio.Task]):
         """Run all tasks to completion (no early stop - per manager requirement)."""
         pending = set(tasks)
-        
+
         while pending:
-            # Wait for any task to complete
             done, pending = await asyncio.wait(
                 pending,
                 return_when=asyncio.FIRST_COMPLETED
             )
-            
-            # Process completed tasks
+
             for task in done:
                 try:
                     await task
-                except Exception as e:
-                    # Error handled in _run_single_hunt
+                except Exception:
                     pass
-            
-            # NOTE: No early stop - we run ALL hunts even if target is reached
-            # This is per manager requirement: need 4 responses total
-    
+
     async def _run_single_hunt(
         self,
-        session: HuntSession,
-        result: HuntResult,
-        progress_callback: Optional[Callable]
+        session_id: str,
+        hunt_id: int,
+        model: str,
+        config: HuntConfig,
+        notebook: ParsedNotebook,
     ):
-        """Run a single hunt: call model, then judge."""
-        result.status = HuntStatus.RUNNING
-        
-        # Emit progress
-        if progress_callback:
-            await progress_callback(HuntEvent(
-                event_type="hunt_start",
-                hunt_id=result.hunt_id,
-                data={"model": result.model}
-            ))
-        
+        """Run a single hunt: call model, then judge. Write result to Redis."""
+        result = HuntResult(
+            hunt_id=hunt_id,
+            model=model,
+            status=HuntStatus.RUNNING
+        )
+
+        # Emit progress to Redis Stream
+        await events.publish(session_id, HuntEvent(
+            event_type="hunt_start",
+            hunt_id=hunt_id,
+            data={"model": model}
+        ))
+
         try:
-            # Step 1: Call the model based on provider
-            provider = getattr(session.config, 'provider', 'openrouter')
-            
-            # Wrap prompt with explanation request
-            enhanced_prompt = f"{session.notebook.prompt}"
-            
-            # Multi-turn: pass conversation history to model (empty list for single-turn)
-            conversation_history = session.config.conversation_history or []
+            # Step 1: Call the model
+            provider = getattr(config, 'provider', 'openrouter')
+            enhanced_prompt = notebook.prompt
+
+            conversation_history = config.conversation_history or []
             messages_kwarg = {"messages": conversation_history} if conversation_history else {}
-            
-            # Use rate limiter if available
+
             rate_limiter = get_rate_limiter() if _rate_limiter_enabled else None
-            
-            # Emit progress: calling model
-            if progress_callback:
-                await progress_callback(HuntEvent(
-                    event_type="hunt_progress",
-                    hunt_id=result.hunt_id,
-                    data={"step": "calling_model", "message": f"🔄 Calling {provider}..."}
-                ))
-            
+
+            await events.publish(session_id, HuntEvent(
+                event_type="hunt_progress",
+                hunt_id=hunt_id,
+                data={"step": "calling_model", "message": f"🔄 Calling {provider}..."}
+            ))
+
             if provider == 'fireworks':
                 from services.fireworks_client import get_fireworks_client
-                fireworks = get_fireworks_client()
-                
-                # Fireworks uses reasoning_effort API parameter to separate reasoning
-                # No prompt modification needed - API returns reasoning in reasoning_content field
+                client = get_fireworks_client()
                 if rate_limiter:
                     async with rate_limiter.acquire("fireworks"):
-                        response, reasoning, error = await fireworks.call_with_retry(
-                            prompt=enhanced_prompt,
-                            model=result.model,
-                            max_retries=session.config.max_retries,
-                            **messages_kwarg
+                        response, reasoning, error = await client.call_with_retry(
+                            prompt=enhanced_prompt, model=model,
+                            max_retries=config.max_retries, **messages_kwarg
                         )
                 else:
-                    response, reasoning, error = await fireworks.call_with_retry(
-                        prompt=enhanced_prompt,
-                        model=result.model,
-                        max_retries=session.config.max_retries,
-                        **messages_kwarg
+                    response, reasoning, error = await client.call_with_retry(
+                        prompt=enhanced_prompt, model=model,
+                        max_retries=config.max_retries, **messages_kwarg
                     )
             else:
-                # Default to OpenRouter
-                openrouter = get_openrouter_client()
+                client = get_openrouter_client()
                 if rate_limiter:
                     async with rate_limiter.acquire("openrouter"):
-                        response, reasoning, error = await openrouter.call_with_retry(
-                            prompt=enhanced_prompt,
-                            model=result.model,
-                            max_retries=session.config.max_retries,
-                            reasoning_budget_percent=session.config.reasoning_budget_percent,
+                        response, reasoning, error = await client.call_with_retry(
+                            prompt=enhanced_prompt, model=model,
+                            max_retries=config.max_retries,
+                            reasoning_budget_percent=config.reasoning_budget_percent,
                             **messages_kwarg
                         )
                 else:
-                    response, reasoning, error = await openrouter.call_with_retry(
-                        prompt=enhanced_prompt,
-                        model=result.model,
-                        max_retries=session.config.max_retries,
-                        reasoning_budget_percent=session.config.reasoning_budget_percent,
+                    response, reasoning, error = await client.call_with_retry(
+                        prompt=enhanced_prompt, model=model,
+                        max_retries=config.max_retries,
+                        reasoning_budget_percent=config.reasoning_budget_percent,
                         **messages_kwarg
                     )
-            
-            # Emit progress: received response
-            if progress_callback and not error:
-                await progress_callback(HuntEvent(
+
+            if not error:
+                await events.publish(session_id, HuntEvent(
                     event_type="hunt_progress",
-                    hunt_id=result.hunt_id,
+                    hunt_id=hunt_id,
                     data={"step": "received_response", "message": "📥 Response received"}
                 ))
-            
+
             if error:
-                # Model failed to respond after retries = FAILED (not breaking)
-                # Don't count as a break - just an error
                 result.status = HuntStatus.FAILED
-                result.judge_score = None  # No score, not a break
+                result.judge_score = None
                 result.is_breaking = False
                 result.error = f"⚠️ Model failed after 3 tries: {error}"
                 result.response = ""
                 result.reasoning_trace = reasoning or ""
             elif not response or not response.strip():
-                # Empty response (possibly due to timeout or token limit)
-                # Per manager: treat as ERROR, not breaking - judgment not useful
                 result.status = HuntStatus.FAILED
-                result.judge_score = None  # No score, not a break
+                result.judge_score = None
                 result.is_breaking = False
                 result.error = "⚠️ Model returned empty response (possible timeout or token limit exceeded)"
                 result.response = ""
@@ -406,51 +335,43 @@ class HuntEngine:
             else:
                 result.response = response
                 result.reasoning_trace = reasoning
-                
-                # Emit progress: starting judgment
-                if progress_callback:
-                    await progress_callback(HuntEvent(
-                        event_type="hunt_progress",
-                        hunt_id=result.hunt_id,
-                        data={"step": "judging", "message": "⚖️ Judging response..."}
-                    ))
-                
-                # Step 2: Judge the response (only if we have actual content)
-                await self._judge_response(session, result)
-            
+
+                await events.publish(session_id, HuntEvent(
+                    event_type="hunt_progress",
+                    hunt_id=hunt_id,
+                    data={"step": "judging", "message": "⚖️ Judging response..."}
+                ))
+
+                # Step 2: Judge the response
+                await self._judge_response(config, notebook, result)
+
         except Exception as e:
-            # Exception = FAILED (not breaking)
             result.status = HuntStatus.FAILED
-            result.judge_score = None  # No score, not a break
+            result.judge_score = None
             result.is_breaking = False
             result.error = f"⚠️ Error: {str(e)}"
             result.response = ""
-        
-        # Update session stats atomically using lock
-        lock = self._session_locks.get(session.session_id)
-        if lock:
-            async with lock:
-                session.completed_hunts += 1
-                if result.is_breaking:
-                    session.breaks_found += 1
-                
-                completed = session.completed_hunts
-                total = session.total_hunts
-                breaks = session.breaks_found
+
+        # Write result to Redis (atomic RPUSH)
+        await store.append_result(session_id, result)
+
+        # Update counters atomically in Redis (no locks needed)
+        completed = await store.incr_completed_hunts(session_id)
+        breaks = 0
+        if result.is_breaking:
+            breaks = await store.incr_breaks_found(session_id)
         else:
-            # Fallback if no lock (shouldn't happen)
-            session.completed_hunts += 1
-            if result.is_breaking:
-                session.breaks_found += 1
-            completed = session.completed_hunts
-            total = session.total_hunts
-            breaks = session.breaks_found
-        
-        # Telemetry: Log hunt result with searchable content
+            meta = await store.get_meta(session_id)
+            breaks = int(meta.get("breaks_found", 0))
+
+        total_meta = await store.get_meta(session_id)
+        total = int(total_meta.get("total_hunts", 0))
+
+        # Telemetry
         if _telemetry_enabled:
             try:
                 get_telemetry().log_hunt_result(
-                    session_id=session.session_id,
+                    session_id=session_id,
                     hunt_id=result.hunt_id,
                     model=result.model,
                     score=result.judge_score,
@@ -463,169 +384,134 @@ class HuntEngine:
                 )
             except Exception:
                 pass
-        
-        # Persist session state after each result (for resilience)
-        if _session_store_enabled:
-            asyncio.create_task(self._persist_session(session))
-        
-        # Emit result (outside lock to avoid deadlock)
-        if progress_callback:
-            await progress_callback(HuntEvent(
-                event_type="hunt_result",
-                hunt_id=result.hunt_id,
-                data={
-                    "status": result.status.value,
-                    "score": result.judge_score,
-                    "is_breaking": result.is_breaking,
-                    "error": result.error,
-                    "response": result.response,  # Include response for blind judging
-                    "reasoning_trace": result.reasoning_trace,  # Include reasoning
-                    "model": result.model,  # Include model for display
-                    "completed": completed,
-                    "total": total,
-                    "breaks": breaks
-                }
-            ))
-    
-    async def _judge_response(self, session: HuntSession, result: HuntResult):
+
+        # Emit result to Redis Stream
+        await events.publish(session_id, HuntEvent(
+            event_type="hunt_result",
+            hunt_id=result.hunt_id,
+            data={
+                "status": result.status.value,
+                "score": result.judge_score,
+                "is_breaking": result.is_breaking,
+                "error": result.error,
+                "response": result.response,
+                "reasoning_trace": result.reasoning_trace,
+                "model": result.model,
+                "completed": completed,
+                "total": total,
+                "breaks": breaks
+            }
+        ))
+
+    async def _judge_response(self, config: HuntConfig, notebook: ParsedNotebook, result: HuntResult):
         """Judge a model response using GPT-5 with rate limiting."""
         try:
             judge = get_openai_judge_client()
-            
-            # Use custom judge prompt if provided
-            judge_system = session.config.custom_judge_system_prompt or session.notebook.judge_system_prompt
-            
-            # Use rate limiter for OpenAI judge calls
+
+            judge_system = config.custom_judge_system_prompt or notebook.judge_system_prompt
+
             rate_limiter = get_rate_limiter() if _rate_limiter_enabled else None
-            
+
             async def make_judge_call():
                 return await judge.judge_response(
-                    prompt=session.notebook.prompt,
+                    prompt=notebook.prompt,
                     student_response=result.response,
-                    response_reference=session.notebook.response_reference,
+                    response_reference=notebook.response_reference,
                     judge_system_prompt=judge_system,
-                    judge_prompt_template=session.notebook.judge_prompt_template,
-                    model=session.config.judge_model,
-                    independent_judging=True,  # Always use independent judging
-                    standard_response=session.notebook.response  # Standard response from [response] cell
+                    judge_prompt_template=notebook.judge_prompt_template,
+                    model=config.judge_model,
+                    independent_judging=True,
+                    standard_response=notebook.response
                 )
-            
+
             if rate_limiter:
                 async with rate_limiter.acquire("openai"):
                     judge_result = await make_judge_call()
             else:
                 judge_result = await make_judge_call()
-            
+
             result.judge_score = judge_result.get("score")
-            
-            # Retry judge if score is None (unparsed)
+
+            # Retry judge if score is None
             retry_count = 0
             while result.judge_score is None and retry_count < 3:
                 retry_count += 1
                 logger.warning(f"Judge returned None score for Hunt {result.hunt_id}, retrying ({retry_count}/3)...")
-                
-                async def retry_judge_call():
-                    return await judge.judge_response(
-                        prompt=session.notebook.prompt,
-                        student_response=result.response,
-                        response_reference=session.notebook.response_reference,
-                        judge_system_prompt=judge_system,
-                        judge_prompt_template=session.notebook.judge_prompt_template,
-                        model=session.config.judge_model,
-                        standard_response=session.notebook.response  # Standard response from [response] cell
-                    )
-                
+
                 if rate_limiter:
                     async with rate_limiter.acquire("openai"):
-                        judge_result = await retry_judge_call()
+                        judge_result = await make_judge_call()
                 else:
-                    judge_result = await retry_judge_call()
-                    
+                    judge_result = await make_judge_call()
+
                 result.judge_score = judge_result.get("score")
-            
+
             if result.judge_score is None:
                 logger.warning(f"Judge failed after retries for Hunt {result.hunt_id}")
                 logger.warning(f"Raw Judge Output: {judge_result.get('raw_output', '')[:500]}...")
-            
+
             result.judge_output = judge_result.get("raw_output", "")
             result.judge_criteria = judge_result.get("criteria", {})
             result.judge_explanation = judge_result.get("explanation", "")
-            
-            # Score 0 = model breaking
+
             result.is_breaking = result.judge_score == 0
             result.status = HuntStatus.COMPLETED
-            
+
             if judge_result.get("error"):
                 result.error = judge_result["error"]
-            
+
         except Exception as e:
             result.error = f"Judge error: {str(e)}"
             result.status = HuntStatus.FAILED
-    
-    def get_breaking_results(self, session_id: str) -> List[HuntResult]:
-        """Get all breaking (score 0) results from a session (across all runs)."""
-        session = self.sessions.get(session_id)
-        if not session:
-            return []
-        
-        # Check all_results (accumulated across runs) + current run's results
-        all_results = self._get_all_accumulated_results(session)
+
+    # ------------------------------------------------------------------
+    # Result queries (read from Redis)
+    # ------------------------------------------------------------------
+
+    async def get_breaking_results_async(self, session_id: str) -> List[HuntResult]:
+        """Get all breaking (score 0) results from a session."""
+        all_results = await self._get_all_accumulated_results_async(session_id)
         return [r for r in all_results if r.is_breaking]
-    
-    def _get_all_accumulated_results(self, session: HuntSession) -> List[HuntResult]:
-        """Helper: Get all accumulated results including current run."""
-        all_accumulated = list(session.all_results) if session.all_results else []
+
+    # Sync wrapper for backward compat
+    def get_breaking_results(self, session_id: str) -> List[HuntResult]:
+        """Sync wrapper — returns empty list. Use get_breaking_results_async."""
+        return []
+
+    async def _get_all_accumulated_results_async(self, session_id: str) -> List[HuntResult]:
+        """Get all accumulated results including current run."""
+        all_accumulated = await store.get_all_results(session_id)
         existing_ids = {r.hunt_id for r in all_accumulated}
-        current_completed = [r for r in session.results if r.status == HuntStatus.COMPLETED and r.hunt_id not in existing_ids]
+        current_results = await store.get_results(session_id)
+        current_completed = [r for r in current_results
+                             if r.status == HuntStatus.COMPLETED and r.hunt_id not in existing_ids]
         return all_accumulated + current_completed
-    
-    def get_selected_for_review(self, session_id: str, target_count: int = 4) -> List[HuntResult]:
-        """
-        Select responses for human review. Priority:
-        - All failed (score 0) if we have 4+ failed
-        - Otherwise: 3 failed + 1 passed
-        - If fewer failed, include more passed to reach target_count
-        
-        Only includes completed results (not errors).
-        """
-        session = self.sessions.get(session_id)
-        if not session:
-            return []
-        
-        # Use all accumulated results across all runs
-        all_results = self._get_all_accumulated_results(session)
-        
-        # Separate completed results by score
+
+    async def get_selected_for_review_async(self, session_id: str, target_count: int = 4) -> List[HuntResult]:
+        """Select responses for human review."""
+        all_results = await self._get_all_accumulated_results_async(session_id)
+
         completed = [r for r in all_results if r.status == HuntStatus.COMPLETED and r.judge_score is not None]
-        failed = [r for r in completed if r.judge_score == 0]  # Score 0 = failed/breaking
-        passed = [r for r in completed if r.judge_score >= 1]  # Score 1+ = passed
-        
+        failed = [r for r in completed if r.judge_score == 0]
+        passed = [r for r in completed if r.judge_score >= 1]
+
         selected = []
-        
-        # Priority 1: Take up to target_count failed responses
         selected.extend(failed[:target_count])
-        
-        # Priority 2: If we don't have enough, add passed responses
         if len(selected) < target_count:
             remaining = target_count - len(selected)
             selected.extend(passed[:remaining])
-        
+
         return selected
-    
-    def export_results(self, session_id: str) -> List[Dict[str, Any]]:
-        """Export ALL accumulated results in format suitable for notebook export."""
-        session = self.sessions.get(session_id)
-        if not session:
-            return []
-        
-        # Use all_results (accumulated across all runs)
-        # Also include current run's completed results that haven't been accumulated yet
-        all_accumulated = list(session.all_results) if session.all_results else []
-        existing_ids = {r.hunt_id for r in all_accumulated}
-        
-        current_completed = [r for r in session.results if r.status == HuntStatus.COMPLETED and r.hunt_id not in existing_ids]
-        all_results = all_accumulated + current_completed
-        
+
+    # Sync wrapper for backward compat
+    def get_selected_for_review(self, session_id: str, target_count: int = 4) -> List[HuntResult]:
+        """Sync wrapper — returns empty list. Use get_selected_for_review_async."""
+        return []
+
+    async def export_results_async(self, session_id: str) -> List[Dict[str, Any]]:
+        """Export ALL accumulated results for notebook export."""
+        all_results = await self._get_all_accumulated_results_async(session_id)
+
         return [
             {
                 "hunt_id": r.hunt_id,
@@ -633,14 +519,19 @@ class HuntEngine:
                 "response": r.response,
                 "reasoning_trace": r.reasoning_trace,
                 "judge_output": r.judge_output,
-                "judge_score": r.judge_score,  # Use judge_score for consistency
-                "judge_criteria": r.judge_criteria,  # Include criteria for LLM judge output
-                "judge_explanation": r.judge_explanation,  # Include explanation
-                "score": r.judge_score,  # Keep score for backward compatibility
+                "judge_score": r.judge_score,
+                "judge_criteria": r.judge_criteria,
+                "judge_explanation": r.judge_explanation,
+                "score": r.judge_score,
                 "is_breaking": r.is_breaking
             }
             for r in all_results
         ]
+
+    # Sync wrapper for backward compat
+    def export_results(self, session_id: str) -> List[Dict[str, Any]]:
+        """Sync wrapper — returns empty list. Use export_results_async."""
+        return []
 
 
 # Singleton instance

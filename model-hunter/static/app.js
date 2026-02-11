@@ -3542,106 +3542,91 @@ async function startHunt() {
     // Scroll to progress section
     elements.progressSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
     
-    // Start SSE stream with reconnection support
-    let eventSource = null;
-    let reconnectAttempts = 0;
-    const maxReconnectAttempts = 3;
-    const reconnectDelay = 2000; // 2 seconds
+    // Start SSE stream with auto-reconnection via Redis Streams
+    // Server sends id: and retry: 500 with each event.
+    // Browser's native EventSource auto-reconnects with Last-Event-ID header.
+    // Server replays missed events from Redis Stream on reconnect.
+    const seenEventIds = new Set();  // Dedup replayed events
     
-    function connectSSE() {
-        eventSource = new EventSource(`/api/hunt-stream/${state.sessionId}`);
-        
-        eventSource.onmessage = (event) => {
-            console.log('SSE message:', event.data);
-        };
-        
-        eventSource.addEventListener('start', (event) => {
-            const data = JSON.parse(event.data);
-            console.log('Hunt started:', data);
-            reconnectAttempts = 0; // Reset on successful connection
-        });
-        
-        eventSource.addEventListener('hunt_start', (event) => {
-            const data = JSON.parse(event.data);
-            updateTableRow(data.hunt_id, { status: 'running', model: data.model });
-        });
-        
-        eventSource.addEventListener('hunt_progress', (event) => {
-            const data = JSON.parse(event.data);
-            handleHuntProgress(data);
-        });
-        
-        eventSource.addEventListener('hunt_result', (event) => {
-            const data = JSON.parse(event.data);
-            handleHuntResult(data);
-        });
-        
-        eventSource.addEventListener('early_stop', (event) => {
-            const data = JSON.parse(event.data);
-            showToast(data.reason, 'info');
-        });
-        
-        eventSource.addEventListener('complete', (event) => {
-            const data = JSON.parse(event.data);
-            handleHuntComplete(data);
+    const eventSource = new EventSource(`/api/hunt-stream/${state.sessionId}`);
+    
+    eventSource.onmessage = (event) => {
+        console.log('SSE message:', event.data);
+    };
+    
+    // Dedup helper — returns true if this event was already processed
+    function isDuplicate(event) {
+        if (event.lastEventId && seenEventIds.has(event.lastEventId)) {
+            return true;
+        }
+        if (event.lastEventId) {
+            seenEventIds.add(event.lastEventId);
+        }
+        return false;
+    }
+    
+    eventSource.addEventListener('start', (event) => {
+        if (isDuplicate(event)) return;
+        const data = JSON.parse(event.data);
+        console.log('Hunt started:', data);
+    });
+    
+    eventSource.addEventListener('hunt_start', (event) => {
+        if (isDuplicate(event)) return;
+        const data = JSON.parse(event.data);
+        updateTableRow(data.hunt_id, { status: 'running', model: data.model });
+    });
+    
+    eventSource.addEventListener('hunt_progress', (event) => {
+        if (isDuplicate(event)) return;
+        const data = JSON.parse(event.data);
+        handleHuntProgress(data);
+    });
+    
+    eventSource.addEventListener('hunt_result', (event) => {
+        if (isDuplicate(event)) return;
+        const data = JSON.parse(event.data);
+        handleHuntResult(data);
+    });
+    
+    eventSource.addEventListener('early_stop', (event) => {
+        if (isDuplicate(event)) return;
+        const data = JSON.parse(event.data);
+        showToast(data.reason, 'info');
+    });
+    
+    eventSource.addEventListener('complete', (event) => {
+        if (isDuplicate(event)) return;
+        const data = JSON.parse(event.data);
+        handleHuntComplete(data);
+        eventSource.close();
+    });
+    
+    eventSource.addEventListener('error', (event) => {
+        // EventSource auto-reconnects with Last-Event-ID.
+        // Server replays missed events from Redis Stream.
+        // Only show toast if hunt is still in progress.
+        if (state.isHunting) {
+            console.log('SSE reconnecting (auto via Last-Event-ID)...');
+        } else {
+            // Hunt finished but connection error — try to recover results
             eventSource.close();
-        });
-        
-        eventSource.addEventListener('error', (event) => {
-            console.error('SSE error:', event);
-            eventSource.close();
-            
-            // Try to reconnect if hunt is still in progress
-            if (state.isHunting && reconnectAttempts < maxReconnectAttempts) {
-                reconnectAttempts++;
-                console.log(`SSE reconnect attempt ${reconnectAttempts}/${maxReconnectAttempts}...`);
-                showToast(`Connection lost. Reconnecting... (${reconnectAttempts}/${maxReconnectAttempts})`, 'warning');
-                
-                setTimeout(() => {
-                    if (state.isHunting) {
-                        connectSSE();
-                    }
-                }, reconnectDelay * reconnectAttempts);
-                return;
-            }
-            
-            // Max reconnect attempts reached or hunt finished
-            state.isHunting = false;
-            
-            // Remove loading state from button
-            elements.startHuntBtn.classList.remove('loading');
-            elements.startHuntBtn.disabled = false;
-            
-            // Update status to show error
-            if (elements.huntStatus) {
-                elements.huntStatus.querySelector('.status-dot').className = 'status-dot failed';
-                elements.statusText.textContent = 'Error - Connection lost';
-            }
-            
-            // Try to recover completed results
             fetch(`/api/results/${state.sessionId}`)
                 .then(resp => resp.ok ? resp.json() : Promise.reject('not ok'))
                 .then(recoveryData => {
                     const recoveredCount = (recoveryData.results || []).length;
                     if (recoveredCount > 0) {
-                        showToast(`Connection lost. Recovered ${recoveredCount} completed results. You can review them or run more hunts.`, 'warning');
+                        showToast(`Recovered ${recoveredCount} results.`, 'info');
                         fetchAllResponses().then(() => showMultiTurnDecision());
-                    } else {
-                        showToast('Hunt connection error. Please try again.', 'error');
                     }
                 })
-                .catch(() => {
-                    showToast('Hunt connection error. Please try again.', 'error');
-                });
-        });
-        
-        eventSource.addEventListener('ping', () => {
-            // Keepalive, ignore
-        });
-    }
+                .catch(() => {});
+        }
+    });
     
-    // Start the connection
-    connectSSE();
+    eventSource.addEventListener('ping', () => {
+        // Keepalive, ignore
+    });
 }
 
 function initProgressUI() {
@@ -4832,6 +4817,10 @@ function showMultiTurnDecision() {
     // Populate decision summary stats
     const hunts = state.allResponses?.length || 0;
     const breaks = (state.allResponses || []).filter(r => (r.judge_score === 0 || r.score === 0)).length;
+    const passes = (state.allResponses || []).filter(r => {
+        const s = r.judge_score !== undefined && r.judge_score !== null ? Number(r.judge_score) : (r.score !== undefined && r.score !== null ? Number(r.score) : null);
+        return s !== null && s > 0;
+    }).length;
     const turnStat = document.getElementById('decisionTurnStat');
     const huntStat = document.getElementById('decisionHuntStat');
     const breakStat = document.getElementById('decisionBreakStat');
@@ -4844,6 +4833,37 @@ function showMultiTurnDecision() {
     // Update "Continue to Turn X" button text
     const nextTurnSpan = document.getElementById('decisionNextTurn');
     if (nextTurnSpan) nextTurnSpan.textContent = state.currentTurn + 1;
+    
+    // --- Review Readiness Check ---
+    // Need either (4 breaking) or (3 breaking + 1 passing) to proceed to review
+    const canReview = (breaks >= 4) || (breaks >= 3 && passes >= 1);
+    const markBreakingBtn = document.getElementById('markBreakingBtn');
+    const reviewWarning = document.getElementById('reviewReadinessWarning');
+    
+    if (canReview) {
+        // Ready for review — enable button, hide warning
+        if (markBreakingBtn) {
+            markBreakingBtn.disabled = false;
+            markBreakingBtn.title = '';
+        }
+        if (reviewWarning) reviewWarning.classList.add('hidden');
+    } else {
+        // Not ready — disable button, show warning with what's needed
+        if (markBreakingBtn) {
+            markBreakingBtn.disabled = true;
+            markBreakingBtn.title = 'Need 4 breaking or 3 breaking + 1 passing to proceed';
+        }
+        if (reviewWarning) {
+            let msg = '';
+            if (breaks < 3) {
+                msg = `Need at least 3 breaking responses (currently ${breaks}). Run more hunts!`;
+            } else if (breaks === 3 && passes === 0) {
+                msg = `Have 3 breaking but need at least 1 passing response (currently ${passes}). Run more hunts, or get 1 more breaking for 4 total.`;
+            }
+            reviewWarning.innerHTML = `<span style="margin-right: 0.5rem;">⚠️</span>${msg}`;
+            reviewWarning.classList.remove('hidden');
+        }
+    }
     
     // Render the tabbed turn history (shows all completed turns + current)
     renderTurnHistoryTabs();

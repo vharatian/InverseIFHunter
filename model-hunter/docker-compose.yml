@@ -17,9 +17,9 @@ services:
     networks:
       - model-hunter-network
 
-  # Blue-Green Deployment: Two identical app instances
-  # Blue runs on port 8000, Green runs on port 8002
-  # System nginx switches between them for zero-downtime deploys
+  # Stateless app instances — both active behind nginx load balancer.
+  # Deploy: rebuild one at a time. Nginx auto-routes to the healthy one.
+  # All state lives in Redis — killing either instance loses nothing.
 
   model-hunter-blue:
     build: .
@@ -43,11 +43,11 @@ services:
       - telemetry-data:/app/.telemetry
       - ./static:/app/static:ro
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8000/api/health" ]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
+      start_period: 15s
     depends_on:
       redis:
         condition: service_healthy
@@ -76,11 +76,11 @@ services:
       - telemetry-data:/app/.telemetry
       - ./static:/app/static:ro
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8002/api/health" ]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/api/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
+      start_period: 15s
     depends_on:
       redis:
         condition: service_healthy
