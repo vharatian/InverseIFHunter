@@ -1194,11 +1194,12 @@ function handleNotebookLoaded(data, isUrl = false) {
     const fileIdMatch = notebookUrl.match(/\/d\/([a-zA-Z0-9_-]+)/);
     state.notebookId = fileIdMatch ? fileIdMatch[1] : data.session_id;
     
-    // Load existing hunt count for this notebook
-    state.totalHuntsCount = loadHuntCount(state.notebookId);
-    state.huntsThisTurn = 0;  // Reset per-turn counter on fresh load
-    state.huntLimitReached = state.huntsThisTurn >= MAX_HUNTS_PER_NOTEBOOK;
-    console.log(`📊 Hunt count for notebook ${state.notebookId}: total=${state.totalHuntsCount}, thisTurn=${state.huntsThisTurn}/${MAX_HUNTS_PER_NOTEBOOK}`);
+    // Reset hunt count for new session (new notebook load = fresh start)
+    clearHuntCount(state.notebookId);
+    state.totalHuntsCount = 0;
+    state.huntsThisTurn = 0;
+    state.huntLimitReached = false;
+    console.log(`📊 Hunt count reset for notebook ${state.notebookId}: new session ${data.session_id}`);
     
     // Update hunt limit UI
     updateHuntLimitUI();
