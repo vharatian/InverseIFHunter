@@ -98,75 +98,78 @@ class HuntEngine:
 
     async def run_hunt(self, session_id: str) -> HuntSession:
         """
-        Run parallel hunts for a session.
+        Run parallel hunts for a session. Resumable.
 
-        Reads config/notebook from Redis once, then runs workers.
-        Each worker writes results directly to Redis (atomic).
+        If called fresh: runs all hunts from scratch.
+        If called as a re-claim (container died mid-hunt): checks which
+        hunts already completed in Redis and only runs the remaining ones.
+
         Events are published to Redis Streams (any SSE subscriber picks them up).
-        Hunt lock prevents duplicate runs for the same session.
+        Called by hunt_worker, not directly by HTTP endpoints.
         """
-        # Acquire hunt lock — prevents duplicate hunts across containers
-        if not await store.acquire_hunt_lock(session_id):
-            logger.warning(f"Session {session_id}: Hunt already running (lock held), skipping")
-            raise ValueError(f"Hunt already running for session {session_id}")
-
-        try:
-            return await self._execute_hunt(session_id)
-        finally:
-            # Always release lock, even on error
-            await store.release_hunt_lock(session_id)
-
-    async def _execute_hunt(self, session_id: str) -> HuntSession:
-        """Internal hunt execution (called with lock held)."""
-        # Read config and notebook from Redis (read-only during hunt)
         config = await store.get_config(session_id)
         notebook = await store.get_notebook(session_id)
         if not config or not notebook:
             raise ValueError(f"Session {session_id} not found or missing config/notebook")
 
-        # Reset counters for this run
-        await store.clear_results(session_id)
-        await store.set_hunt_counters(
-            session_id,
-            total_hunts=config.parallel_workers,
-            completed_hunts=0,
-            breaks_found=0
-        )
-        await store.set_status(session_id, HuntStatus.RUNNING)
-
         run_start_id = config.hunt_offset
 
-        logger.info(f"Session {session_id}: Starting hunt run with offset {run_start_id}, "
-                     f"workers={config.parallel_workers}, total_hunts={config.parallel_workers}")
+        # Check for already-completed results (from a dead worker that partially finished)
+        existing_results = await store.get_results(session_id)
+        completed_hunt_ids = {r.hunt_id for r in existing_results}
+        is_resume = len(completed_hunt_ids) > 0
 
-        # Telemetry: Log hunt start
-        if _telemetry_enabled:
-            try:
-                get_telemetry().log_hunt_start(
-                    session_id=session_id,
-                    workers=config.parallel_workers,
-                    models=config.models,
-                    target_breaks=config.target_breaks
-                )
-            except Exception:
-                pass
+        if is_resume:
+            logger.info(f"Session {session_id}: RESUMING hunt — {len(completed_hunt_ids)} results already in Redis, "
+                         f"hunt_ids: {completed_hunt_ids}")
+            # Don't clear results or reset counters — we're continuing
+            await store.set_status(session_id, HuntStatus.RUNNING)
+        else:
+            # Fresh run — reset everything
+            await store.clear_results(session_id)
+            await store.set_hunt_counters(
+                session_id,
+                total_hunts=config.parallel_workers,
+                completed_hunts=0,
+                breaks_found=0
+            )
+            await store.set_status(session_id, HuntStatus.RUNNING)
 
-        # Emit start event to Redis Stream
-        await events.publish(session_id, HuntEvent(
-            event_type="start",
-            data={
-                "session_id": session_id,
-                "total_hunts": config.parallel_workers,
-                "target_breaks": config.target_breaks,
-                "run_start_id": run_start_id
-            }
-        ))
+            logger.info(f"Session {session_id}: Starting FRESH hunt run with offset {run_start_id}, "
+                         f"workers={config.parallel_workers}")
 
-        # Create hunt tasks
+            # Telemetry
+            if _telemetry_enabled:
+                try:
+                    get_telemetry().log_hunt_start(
+                        session_id=session_id,
+                        workers=config.parallel_workers,
+                        models=config.models,
+                        target_breaks=config.target_breaks
+                    )
+                except Exception:
+                    pass
+
+            # Emit start event
+            await events.publish(session_id, HuntEvent(
+                event_type="start",
+                data={
+                    "session_id": session_id,
+                    "total_hunts": config.parallel_workers,
+                    "target_breaks": config.target_breaks,
+                    "run_start_id": run_start_id
+                }
+            ))
+
+        # Build the list of hunts to run (skip already-completed ones)
         tasks = []
         for i in range(config.parallel_workers):
             hunt_id = run_start_id + i + 1
             model = config.models[i % len(config.models)]
+
+            if hunt_id in completed_hunt_ids:
+                logger.info(f"Session {session_id}: Skipping hunt {hunt_id} (already completed)")
+                continue
 
             task = asyncio.create_task(
                 self._run_single_hunt(
@@ -179,15 +182,18 @@ class HuntEngine:
             )
             tasks.append(task)
 
-        # Run all tasks to completion
-        try:
-            await self._run_with_early_stop(tasks)
-        except Exception as e:
-            await store.set_status(session_id, HuntStatus.FAILED)
-            await events.publish(session_id, HuntEvent(
-                event_type="error",
-                data={"error": str(e)}
-            ))
+        if not tasks:
+            logger.info(f"Session {session_id}: All hunts already completed, nothing to run")
+        else:
+            # Run remaining tasks
+            try:
+                await self._run_with_early_stop(tasks)
+            except Exception as e:
+                await store.set_status(session_id, HuntStatus.FAILED)
+                await events.publish(session_id, HuntEvent(
+                    event_type="error",
+                    data={"error": str(e)}
+                ))
 
         # Final status
         current_status = await store.get_status(session_id)
@@ -212,7 +218,7 @@ class HuntEngine:
         logger.info(f"Session {session_id}: Accumulated {len(all_results)} total results, "
                      f"total hunts now {new_count}")
 
-        # Telemetry: Log hunt completion
+        # Telemetry
         if _telemetry_enabled:
             try:
                 get_telemetry().log_hunt_complete(
@@ -224,7 +230,7 @@ class HuntEngine:
             except Exception:
                 pass
 
-        # Emit complete event to Redis Stream
+        # Emit complete event
         await events.publish(session_id, HuntEvent(
             event_type="complete",
             data={
@@ -236,7 +242,6 @@ class HuntEngine:
             }
         ))
 
-        # Return full session for the caller
         return await store.get_full_session(session_id)
 
     async def _run_with_early_stop(self, tasks: List[asyncio.Task]):

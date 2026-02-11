@@ -418,10 +418,22 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"⚠️ Rate limiter initialization: {e}")
     
+    # Start hunt worker loop (processes jobs from Redis queue)
+    from services.hunt_worker import run_worker_loop
+    worker_task = asyncio.create_task(run_worker_loop())
+    logger.info("🏗️ Hunt worker started")
+
     yield
-    
+
     # Shutdown - cleanup
     logger.info("🛑 Model Hunter shutting down...")
+
+    # Stop hunt worker
+    worker_task.cancel()
+    try:
+        await worker_task
+    except asyncio.CancelledError:
+        pass
     
     # Close Redis session store
     try:
@@ -1260,11 +1272,13 @@ async def hunt_stream(session_id: str, request: Request):
     """
     SSE endpoint for real-time hunt progress.
 
-    On first connect: starts the hunt and subscribes to Redis Stream.
-    On reconnect (Last-Event-ID present): subscribes only, replays missed events.
-    Hunt lock prevents duplicate hunts across containers.
+    Submits a hunt job to the Redis job queue (processed by hunt_worker).
+    Subscribes to the Redis event stream for live updates.
+    On reconnect (Last-Event-ID): replays missed events, no new job submitted.
+    Hunt execution is fully decoupled — survives container restarts.
     """
     import services.event_stream as event_stream
+    from services.hunt_worker import submit_hunt_job
 
     session = await _get_validated_session(session_id)
 
@@ -1273,12 +1287,9 @@ async def hunt_stream(session_id: str, request: Request):
     is_reconnect = bool(last_event_id)
 
     async def event_generator():
-        hunt_task = None
-
         try:
             if is_reconnect:
-                # RECONNECT: Don't start a new hunt. Just replay + subscribe.
-                # The hunt is either still running (on another container) or already finished.
+                # RECONNECT: Don't submit a new job. Just replay + subscribe.
                 missed = await event_stream.replay(session_id, last_event_id)
                 for eid, event in missed:
                     yield {
@@ -1293,14 +1304,12 @@ async def hunt_stream(session_id: str, request: Request):
                     if event.event_type in ("complete", "error"):
                         return
             else:
-                # FIRST CONNECT: Check if hunt is already running (double-click guard).
-                if await redis_store.is_hunt_running(session_id):
-                    logger.warning(f"Hunt already running for {session_id}, subscribing only")
-                    hunt_task = None
-                else:
-                    hunt_task = asyncio.create_task(hunt_engine.run_hunt(session_id))
+                # FIRST CONNECT: Submit hunt job to the worker queue.
+                # The job is picked up by whichever worker is available.
+                # If this container dies, the other container re-claims the job.
+                await submit_hunt_job(session_id)
 
-            # Subscribe to Redis Stream for live events
+            # Subscribe to Redis Stream for live events (from any worker)
             async for eid, event in event_stream.subscribe(session_id, last_event_id):
                 if await request.is_disconnected():
                     break
@@ -1325,9 +1334,6 @@ async def hunt_stream(session_id: str, request: Request):
 
         except asyncio.CancelledError:
             pass
-        finally:
-            if hunt_task and not hunt_task.done():
-                hunt_task.cancel()
 
     return EventSourceResponse(event_generator())
 
