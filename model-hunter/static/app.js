@@ -1757,6 +1757,7 @@ async function saveToDrive() {
             : '✅ Successfully saved to Colab notebook!';
         
         showToast(successMessage, missingReviews.length > 0 ? 'warning' : 'success');
+        triggerColabConfetti();
         
     } catch (error) {
         console.error('Drive Save Error:', error);
@@ -7540,6 +7541,36 @@ async function warmupConnections() {
         // Silent fail - warm-up is optional optimization
         console.log('Connection warm-up skipped:', error.message);
     }
+}
+
+function triggerColabConfetti() {
+    if (typeof confetti !== 'function') return;
+    const colors = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6'];
+    function burst() {
+        confetti({
+            particleCount: 100,
+            spread: 70,
+            origin: { y: 0.85 },
+            colors: colors
+        });
+        confetti({
+            particleCount: 50,
+            angle: 60,
+            spread: 55,
+            origin: { x: 0.2, y: 0.9 },
+            colors: colors
+        });
+        confetti({
+            particleCount: 50,
+            angle: 120,
+            spread: 55,
+            origin: { x: 0.8, y: 0.9 },
+            colors: colors
+        });
+    }
+    burst();
+    setTimeout(burst, 400);
+    setTimeout(burst, 800);
 }
 
 function showToast(message, type = 'info') {

@@ -236,3 +236,21 @@
     - Frontend state loss on page refresh (multi-turn state not restored from Redis on reload)
     - Opus 4.6 via Bedrock is slower (~80-90s vs ~3s) but reliable
     - get_full_session overhead: reconstructs entire session for every API call (low priority)
+- Date: 2026-02-11
+  Agent: Claude (Cursor)
+  Task: Restore-from-storage fix, UI labels, model display names, turn 2+ word limit, VM deploy
+  Changes:
+    - Restore-from-storage: When update_config restores session from disk to Redis, now writes full session (results, all_results, turns, counters, status, conversation_history, human_reviews). Added redis_session helpers: set_results, set_all_results, set_turns, clear_all_results. Resolves trainer losing progress when config update runs after Redis had lost the session.
+    - Save All button: Renamed to "Save All to Colab & Judge" (index.html + app.js); loading state "Saving & Judging..." so it's clear the action also runs judge when response cell is saved.
+    - Model display names: Added getModelDisplayName() in app.js; hunt table, slide-outs, selection cards, and grading UI now show "Claude Opus 4.5", "Claude Sonnet 4.5", "Claude Opus 4.6" instead of "Claude". Uses PROVIDER_MODELS lookup plus fallback for claude-* ids.
+    - Turn 2+ prompt: No word limit/range in prompt section for turns above 1. validatePromptLength() returns true and shows only word count (no range, no warning) when currentTurn > 1 or isMultiTurn. Call validatePromptLength() after populatePreviewTabs in both advance-turn flows so range clears when entering turn 2.
+    - Judge reference: User asked to allow empty [response]; reverted to keep requirement (must have [response] to judge).
+    - Deploy: Committed and pushed feature/multi-turn; merged to main and pushed. SSH to VM (mandy@34.68.227.248), cd ~/InverseIFHunter/model-hunter, ./deploy.sh. Full zero-downtime deploy completed; both blue and green rebuilt and healthy.
+  Files touched:
+    - model-hunter/main.py (restore full session in update_config)
+    - model-hunter/services/redis_session.py (set_results, set_all_results, set_turns, clear_all_results)
+    - model-hunter/static/app.js (getModelDisplayName, button label, validatePromptLength turn 2+ branch, validatePromptLength after advance)
+    - model-hunter/static/index.html (Save All to Colab & Judge)
+    - SOURCE_OF_TRUTH.md (updated date, redis_session description, Recently Completed, resolved restore-from-storage issue)
+    - WORKLOG.md (this entry)
+  Open items: None

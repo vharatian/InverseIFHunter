@@ -1,6 +1,6 @@
 # SOURCE_OF_TRUTH
 
-> Generated: 2026-02-03 | Updated: 2026-02-10  
+> Generated: 2026-02-03 | Updated: 2026-02-11  
 > This document reflects the current state of the repository as observed in the code.
 
 ## 1. Problem Statement
@@ -107,7 +107,7 @@ The system targets finding "breaking responses" - model outputs that fail evalua
 
 | File | Responsibility |
 |------|----------------|
-| `model-hunter/services/redis_session.py` | Redis-primary session store with granular keys, atomic ops, hunt lock, dual Redis clients |
+| `model-hunter/services/redis_session.py` | Redis-primary session store with granular keys, atomic ops, dual Redis clients; set_results/set_all_results/set_turns for full session restore from storage |
 | `model-hunter/services/event_stream.py` | Redis Streams for SSE events — publish, subscribe (XREAD BLOCK), replay from Last-Event-ID |
 | `model-hunter/services/rate_limiter.py` | Semaphore-based rate limiting per provider |
 | `model-hunter/services/telemetry_logger.py` | Fire-and-forget JSON logging for dashboard (includes judge_explanation) |
@@ -246,6 +246,14 @@ The system targets finding "breaking responses" - model outputs that fail evalua
 - [x] **Timeout increase**: Base timeout increased from 120s to 180s for all model calls.
 - [x] **VM deployment**: Pulled latest main to VM, rebuilt Docker containers, disabled system nginx, configured Docker nginx with correct upstream names.
 
+### Recently Completed (Feb 11, 2026 - Restore, UI, Turn 2+)
+
+- [x] **Restore-from-storage fix**: When `update_config` restores a session from disk to Redis (e.g. after Redis eviction or restart), it now writes the full session: results, all_results, turns, counters, status, conversation_history, human_reviews. Trainers no longer lose hunt progress when changing config after a restore. New helpers in `redis_session.py`: `set_results`, `set_all_results`, `set_turns`, `clear_all_results`.
+- [x] **Save All button label**: Renamed to "Save All to Colab & Judge" (and "Saving & Judging..." while running) because the action saves all cells and also runs judge reference when the response cell was saved.
+- [x] **Model display names**: Hunt progress and all model labels now show the specific Claude variant (e.g. "Claude Opus 4.5", "Claude Sonnet 4.5", "Claude Opus 4.6") instead of just "Claude". Added `getModelDisplayName()` in app.js; used in table, slide-outs, selection UI.
+- [x] **No word limit for turn 2+**: Prompt section word limit/range from metadata is only enforced on turn 1. For turns above 1, we show word count only (no range, no warning, no block on save). `validatePromptLength()` skips range when `currentTurn > 1` or `isMultiTurn`; called after advancing turn so range clears immediately.
+- [x] **VM deploy**: Merged feature/multi-turn into main, pushed; ran `./deploy.sh` on VM (mandy@34.68.227.248). Zero-downtime deploy completed; both blue and green healthy.
+
 ### Unclear / Needs Confirmation
 
 - GitHub Actions workflows (`ml_analysis.yml`, `ml_analysis_simple.yml`) - trigger conditions unclear
@@ -305,6 +313,10 @@ The system targets finding "breaking responses" - model outputs that fail evalua
 ### ~~Redis Session Persistence Broken~~ (Resolved Feb 11, 2026)
 - **Issue**: Sessions only in memory, lost on container restart
 - **Fix**: Complete rewrite. `redis_session.py` uses granular Redis keys as primary store. No in-memory dict. Atomic operations (RPUSH, HINCRBY). Sessions survive any restart.
+
+### ~~Restore-from-Storage Wipes Results~~ (Resolved Feb 11, 2026)
+- **Issue**: When session was missing in Redis but present on disk, `update_config` called `create_session()` which only wrote config/notebook and reset counters. Results, all_results, turns were lost.
+- **Fix**: Restore path now writes full session to Redis: status, hunt counters, accumulated_hunt_count, current_turn, conversation_history, human_reviews, results, all_results, turns via new `set_results`, `set_all_results`, `set_turns` in redis_session.py.
 
 ### Missing Error Responses
 - **Issue**: Hunt can fail silently if selected hunt_ids not found in results
