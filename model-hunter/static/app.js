@@ -62,7 +62,9 @@ function showUpdatePrompt() {
             left: 0;
             right: 0;
             bottom: 0;
-            background: rgba(0, 0, 0, 0.6);
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
             display: flex;
             justify-content: center;
             align-items: center;
@@ -85,7 +87,7 @@ function showUpdatePrompt() {
             <div style="font-size: 48px; margin-bottom: 16px;">🔄</div>
             <h3 style="margin: 0 0 12px 0; color: var(--text-primary, #fff); font-size: 18px;">New Version Available</h3>
             <p style="margin: 0 0 24px 0; color: var(--text-secondary, #aaa); font-size: 14px; line-height: 1.5;">
-                A new version has been deployed. It's recommended to refresh before starting a new task for the latest changes.
+                A new version is available. Refreshing is recommended so you get the latest changes.
             </p>
             <div style="display: flex; gap: 12px; justify-content: center;">
                 <button id="update-refresh-btn" style="
@@ -106,7 +108,7 @@ function showUpdatePrompt() {
                     border-radius: 8px;
                     cursor: pointer;
                     font-size: 14px;
-                ">Continue Anyway</button>
+                ">Continue with current version for now</button>
             </div>
         `;
         
@@ -114,14 +116,80 @@ function showUpdatePrompt() {
         document.body.appendChild(overlay);
         
         // Handle buttons
-        dialog.querySelector('#update-refresh-btn').onclick = () => {
-            window.location.reload();
+        dialog.querySelector('#update-refresh-btn').onclick = async () => {
+            const ok = await showAppModal({
+                title: 'Refresh page?',
+                message: 'Refreshing will reload the page. Any unsaved changes will be lost and cannot be recovered.\n\nOK to refresh, Cancel to go back.',
+                buttons: [
+                    { label: 'Cancel', primary: false, value: false },
+                    { label: 'OK', primary: true, value: true }
+                ]
+            });
+            if (ok) {
+                window.location.reload();
+            }
         };
-        
+
         dialog.querySelector('#update-continue-btn').onclick = () => {
             overlay.remove();
             resolve(true); // Continue with action
         };
+    });
+}
+
+/**
+ * Centered modal with blurred backdrop. Use instead of alert/confirm for consistent UX.
+ * @param {{ title: string, message: string, buttons: Array<{ label: string, primary?: boolean, value: any }> }} options
+ * @returns {Promise<any>} Resolves with the value of the clicked button.
+ */
+function showAppModal(options) {
+    return new Promise((resolve) => {
+        const { title, message, buttons } = options;
+        const overlay = document.createElement('div');
+        overlay.className = 'app-modal-overlay';
+        overlay.style.cssText = `
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 10001;
+        `;
+        const dialog = document.createElement('div');
+        dialog.className = 'app-modal-dialog';
+        dialog.style.cssText = `
+            background: var(--bg-secondary, #1e1e2e);
+            border-radius: 12px;
+            padding: 24px 28px;
+            max-width: 440px;
+            width: 90%;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+            border: 1px solid var(--border, #333);
+        `;
+        const messageHtml = (message || '').split('\n').map(line => escapeHtml(line)).join('<br>');
+        dialog.innerHTML = `
+            <h3 class="app-modal-title" style="margin:0 0 12px 0; color: var(--text-primary, #fff); font-size: 17px;">${escapeHtml(title)}</h3>
+            <p class="app-modal-message" style="margin:0 0 20px 0; color: var(--text-secondary, #ccc); font-size: 14px; line-height: 1.5;">${messageHtml}</p>
+            <div class="app-modal-buttons" style="display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap;"></div>
+        `;
+        const btnContainer = dialog.querySelector('.app-modal-buttons');
+        buttons.forEach((b) => {
+            const btn = document.createElement('button');
+            btn.textContent = b.label;
+            btn.style.cssText = b.primary
+                ? `background: var(--primary, #2563eb); color: #fff; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600;`
+                : `background: transparent; color: var(--text-secondary, #aaa); border: 1px solid var(--border, #555); padding: 10px 20px; border-radius: 8px; cursor: pointer; font-size: 14px;`;
+            btn.onclick = () => {
+                overlay.remove();
+                resolve(b.value);
+            };
+            btnContainer.appendChild(btn);
+        });
+        overlay.appendChild(dialog);
+        document.body.appendChild(overlay);
     });
 }
 
@@ -490,6 +558,51 @@ const elements = {
 // ============== Hunt Limit Constants ==============
 const MAX_HUNTS_PER_NOTEBOOK = 16;  // Now applies PER TURN (not global)
 const HUNT_COUNT_STORAGE_PREFIX = 'modelHunter_huntCount_';
+const MIN_EXPLANATION_WORDS = 10;   // Human review explanation minimum word count
+
+function countWords(text) {
+    return (text || '').trim().split(/\s+/).filter(Boolean).length;
+}
+
+/** Returns list of "Slot N: issue" strings for reviews missing criteria grading or min word count. */
+function getIncompleteReviewIssues(reviews) {
+    const list = [];
+    for (let i = 0; i < reviews.length; i++) {
+        const review = reviews[i];
+        const reviewNum = i + 1;
+        const issues = [];
+        const gradingBasis = review.grading_basis || {};
+        const gradedCriteria = Object.keys(gradingBasis).filter(k =>
+            gradingBasis[k] && (gradingBasis[k].toUpperCase() === 'PASS' || gradingBasis[k].toUpperCase() === 'FAIL')
+        );
+        if (gradedCriteria.length === 0) issues.push('missing criteria grading');
+        const explanation = (review.explanation || '').trim();
+        const words = countWords(review.explanation || '');
+        if (!explanation) issues.push('missing explanation');
+        else if (words < MIN_EXPLANATION_WORDS) issues.push(`explanation too short (minimum ${MIN_EXPLANATION_WORDS} words required)`);
+        if (issues.length > 0) list.push(`Slot ${reviewNum}: ${issues.join(', ')}`);
+    }
+    return list;
+}
+
+/** Shared message body for incomplete-reviews modal. */
+function getIncompleteReviewsModalMessage(incompleteList) {
+    return `Each review needs criteria grades (PASS/FAIL for each criterion) and an explanation of at least ${MIN_EXPLANATION_WORDS} words.\n\nIncomplete: ${incompleteList.join('; ')}`;
+}
+
+/** Returns label for word count under explanation field. */
+function getWordCountLabel(words) {
+    return `Words: ${words} (minimum ${MIN_EXPLANATION_WORDS} required)`;
+}
+
+/** Returns error message if explanation has fewer than MIN_EXPLANATION_WORDS; null if valid. */
+function getExplanationValidationError(notes) {
+    const wordCount = countWords(notes);
+    if (wordCount < MIN_EXPLANATION_WORDS) {
+        return `Explanation must be at least ${MIN_EXPLANATION_WORDS} words (currently ${wordCount})`;
+    }
+    return null;
+}
 
 // ============== Turn Color System ==============
 const TURN_COLORS = [
@@ -1434,25 +1547,16 @@ function handleNotebookLoaded(data, isUrl = false) {
 async function saveToDrive() {
     if (!state.sessionId) return;
     
-    // ===== SARCASTIC CONFIRMATION DIALOG =====
-    const confirmed = confirm(
-        `🚨 FINAL WARNING: ONE-TIME ACTION 🚨\n\n` +
-        `Are you ABSOLUTELY, POSITIVELY, 100% CERTAIN you want to save?\n\n` +
-        `Because once you click "OK", there's no going back.\n` +
-        `No undo button. No "oops, let me fix that".\n` +
-        `This is it. The point of no return.\n\n` +
-        `Did you:\n` +
-        `✅ Review all selected responses carefully?\n` +
-        `✅ Grade all criteria correctly?\n` +
-        `✅ Write explanations that make sense?\n` +
-        `✅ Double-check everything?\n\n` +
-        `If you're not 100% sure, click "Cancel" and go back.\n` +
-        `If you're ready to commit to this forever, click "OK".\n\n` +
-        `Last chance to back out...`
-    );
-    
+    const confirmed = await showAppModal({
+        title: 'Save to notebook?',
+        message: 'This is the final save. After this, your notebook will be updated accordingly.',
+        buttons: [
+            { label: 'Cancel', primary: false, value: false },
+            { label: 'OK', primary: true, value: true }
+        ]
+    });
     if (!confirmed) {
-        showToast('Smart move. Double-check everything before saving!', 'info');
+        showToast('Save cancelled.', 'info');
         return;
     }
     
@@ -1496,45 +1600,15 @@ async function saveToDrive() {
         return;
     }
     
-    // ===== VALIDATION 1b: Check each review has criteria grading and explanation =====
-    const incompleteReviews = [];
-    
-    for (let i = 0; i < reviews.length; i++) {
-        const review = reviews[i];
-        const reviewNum = i + 1;
-        const issues = [];
-        
-        // Check for criteria grading
-        const gradingBasis = review.grading_basis || {};
-        const gradedCriteria = Object.keys(gradingBasis).filter(k => 
-            gradingBasis[k] && (gradingBasis[k].toUpperCase() === 'PASS' || gradingBasis[k].toUpperCase() === 'FAIL')
-        );
-        
-        if (gradedCriteria.length === 0) {
-            issues.push('missing criteria grading');
-        }
-        
-        // Check for explanation
-        const explanation = (review.explanation || '').trim();
-        if (!explanation || explanation.length < 10) {
-            issues.push('missing or too short explanation');
-        }
-        
-        if (issues.length > 0) {
-            incompleteReviews.push(`Slot ${reviewNum}: ${issues.join(', ')}`);
-        }
-    }
-    
+    // ===== VALIDATION 1b: Check each review has criteria grading and explanation (min 10 words) =====
+    const incompleteReviews = getIncompleteReviewIssues(reviews);
     if (incompleteReviews.length > 0) {
-        showToast(`${incompleteReviews.length} review(s) incomplete. Add criteria grading and explanation.`, 'error');
-        alert(
-            `Cannot save: Incomplete reviews!\n\n` +
-            `Each review must have:\n` +
-            `• Criteria grading (PASS/FAIL for each criterion)\n` +
-            `• A detailed explanation (at least 10 characters)\n\n` +
-            `Incomplete reviews:\n${incompleteReviews.join('\n')}\n\n` +
-            `Please complete all reviews before saving.`
-        );
+        showToast(`${incompleteReviews.length} review(s) incomplete.`, 'error');
+        await showAppModal({
+            title: 'Please complete all reviews before saving',
+            message: getIncompleteReviewsModalMessage(incompleteReviews),
+            buttons: [ { label: 'OK', primary: true, value: true } ]
+        });
         return;
     }
     
@@ -1618,25 +1692,12 @@ async function saveToDrive() {
             judgment: reviewsForBackend[hid].judgment
         })));
         
-        // VALIDATION: Check if reviews are missing before saving
+        // VALIDATION: No save without reviews — block even in edge cases
         if (missingReviews.length > 0) {
-            const missingHuntIds = missingReviews.map(m => m.hunt_id).join(', ');
-            const missingRowNumbers = missingReviews.map(m => m.row_number).join(', ');
-            
-            const warningMessage = 
-                `⚠️ WARNING: Reviews are missing for ${missingReviews.length} hunt(s):\n\n` +
-                `Hunt IDs: ${missingHuntIds}\n` +
-                `Row Numbers: ${missingRowNumbers}\n\n` +
-                `These will be saved with empty review data.\n\n` +
-                `Did you submit your reviews? Click "Cancel" to review them first, or "OK" to continue saving.`;
-            
-            const proceed = confirm(warningMessage);
-            if (!proceed) {
-                showToast('Save cancelled. Please complete your reviews first.', 'info');
-                btn.disabled = false;
-                btn.textContent = originalText;
-                return;
-            }
+            showToast('Cannot save: all 4 slots must have a review. Please complete reviews for every selected slot.', 'error');
+            btn.disabled = false;
+            btn.textContent = originalText;
+            return;
         }
         
         // ===== WYSIWYG SNAPSHOT APPROACH =====
@@ -4197,7 +4258,10 @@ function openGradingSlideout(result, slotIndex, rowNumber) {
         <div class="grading-section">
             <div class="grading-section-title">📝 Explanation ${isReadOnly ? '<span style="color: var(--warning); font-size: 0.8rem;">(Locked)</span>' : ''}</div>
             <textarea class="grading-notes-textarea" data-hunt-id="${huntId}" 
-                placeholder="Explain your grading decisions..." ${disabledAttr} style="${textareaStyle}">${escapeHtml(existingNotes)}</textarea>
+                placeholder="Explain your grading decisions (minimum ${MIN_EXPLANATION_WORDS} words required)..." ${disabledAttr} style="${textareaStyle}">${escapeHtml(existingNotes)}</textarea>
+            ${isReadOnly ? '' : `
+            <div class="grading-word-count" data-hunt-id="${huntId}" style="margin-top: 0.5rem; font-size: 0.9rem; font-weight: 600; color: var(--text-muted);">${getWordCountLabel(countWords(existingNotes))}</div>
+            `}
         </div>
         
         <!-- Submit Button -->
@@ -4207,7 +4271,7 @@ function openGradingSlideout(result, slotIndex, rowNumber) {
                     🔒 Review submitted and locked
                 </div>
             ` : `
-                <button class="btn btn-primary grading-submit-btn" data-hunt-id="${huntId}" data-slot-index="${slotIndex}" data-row-number="${rowNumber}">
+                <button class="btn btn-primary grading-submit-btn" data-hunt-id="${huntId}" data-slot-index="${slotIndex}" data-row-number="${rowNumber}" disabled style="opacity: 0.7;">
                     ✅ Submit Review
                 </button>
             `}
@@ -4244,7 +4308,6 @@ function openGradingSlideout(result, slotIndex, rowNumber) {
 }
 
 function setupGradingSlideoutEvents(container, huntId, result, slotIndex, rowNumber) {
-    // Reasoning toggle
     const reasoningToggle = container.querySelector('.reasoning-toggle-btn');
     const reasoningContent = container.querySelector('.reasoning-content');
     const reasoningArrow = container.querySelector('.reasoning-arrow');
@@ -4257,7 +4320,27 @@ function setupGradingSlideoutEvents(container, huntId, result, slotIndex, rowNum
         });
     }
     
-    // Criteria buttons
+    const notesTextarea = container.querySelector('.grading-notes-textarea');
+    const wordCountEl = container.querySelector('.grading-word-count');
+    const submitBtn = container.querySelector('.grading-submit-btn');
+    const criteriaIds = (state.criteria || []).map(c => c.id);
+    
+    function updateSlideoutSubmitState() {
+        const notes = notesTextarea ? (notesTextarea.value || '').trim() : '';
+        const words = countWords(notes);
+        if (wordCountEl) {
+            wordCountEl.textContent = getWordCountLabel(words);
+            wordCountEl.style.color = words >= MIN_EXPLANATION_WORDS ? 'var(--success)' : 'var(--text-muted)';
+        }
+        const grades = (state.humanReviews[huntId] || {}).grades || {};
+        const allGraded = criteriaIds.length > 0 && criteriaIds.every(id => grades[id] !== undefined);
+        const canSubmit = allGraded && words >= MIN_EXPLANATION_WORDS;
+        if (submitBtn) {
+            submitBtn.disabled = !canSubmit;
+            submitBtn.style.opacity = canSubmit ? '1' : '0.7';
+        }
+    }
+    
     container.querySelectorAll('.grading-btn-pass').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -4265,12 +4348,11 @@ function setupGradingSlideoutEvents(container, huntId, result, slotIndex, rowNum
             const row = btn.closest('.grading-criterion');
             row.querySelector('.grading-btn-pass').classList.add('active');
             row.querySelector('.grading-btn-fail').classList.remove('active');
-            
-            // Store grade
             if (!state.humanReviews[huntId]) {
                 state.humanReviews[huntId] = { grades: {}, notes: '', submitted: false };
             }
             state.humanReviews[huntId].grades[criterion] = 1;
+            updateSlideoutSubmitState();
         });
     });
     
@@ -4281,45 +4363,46 @@ function setupGradingSlideoutEvents(container, huntId, result, slotIndex, rowNum
             const row = btn.closest('.grading-criterion');
             row.querySelector('.grading-btn-fail').classList.add('active');
             row.querySelector('.grading-btn-pass').classList.remove('active');
-            
-            // Store grade
             if (!state.humanReviews[huntId]) {
                 state.humanReviews[huntId] = { grades: {}, notes: '', submitted: false };
             }
             state.humanReviews[huntId].grades[criterion] = 0;
+            updateSlideoutSubmitState();
         });
     });
     
-    // Notes textarea
-    const notesTextarea = container.querySelector('.grading-notes-textarea');
     if (notesTextarea) {
         notesTextarea.addEventListener('input', () => {
             if (!state.humanReviews[huntId]) {
                 state.humanReviews[huntId] = { grades: {}, notes: '', submitted: false };
             }
             state.humanReviews[huntId].notes = notesTextarea.value;
+            updateSlideoutSubmitState();
         });
     }
     
-    // Submit button
-    const submitBtn = container.querySelector('.grading-submit-btn');
     if (submitBtn) {
         submitBtn.addEventListener('click', () => {
             submitGradingReview(huntId, result, slotIndex, rowNumber);
         });
     }
+    
+    updateSlideoutSubmitState();
 }
 
 function submitGradingReview(huntId, result, slotIndex, rowNumber) {
     const review = state.humanReviews[huntId] || {};
     const grades = review.grades || {};
-    const notes = review.notes || '';
+    const notes = (review.notes || '').trim();
     
-    // Check if all criteria are graded
     const allGraded = (state.criteria || []).every(c => grades[c.id] !== undefined);
-    
     if (!allGraded) {
         showToast('Please grade all criteria before submitting', 'warning');
+        return;
+    }
+    const explanationErr = getExplanationValidationError(notes);
+    if (explanationErr) {
+        showToast(explanationErr, 'error');
         return;
     }
     
@@ -4613,9 +4696,12 @@ async function fetchAllResponsesAndShowSelection(completedHunts, breaksFound) {
         if (!criteriaMet) {
             // Don't show selection - criteria not met
             elements.selectionSection.classList.add('hidden');
-            let errorMsg = `⚠️ Need at least 3 breaks (score 0). Currently have ${totalBreaks}. Run more hunts!`;
-            showToast(errorMsg, 'warning');
-            alert(`Cannot proceed to human review:\n\n${errorMsg}\n\nPlease run more hunts until criteria is met.`);
+            showToast(`Need at least 3 breaking responses. You have ${totalBreaks}.`, 'warning');
+            await showAppModal({
+                title: 'You need at least 3 breaking responses to continue',
+                message: `You have ${totalBreaks} right now. Run more hunts, then try again.`,
+                buttons: [ { label: 'OK', primary: true, value: true } ]
+            });
             return;
         }
         
@@ -6217,7 +6303,7 @@ function updateSelectionCount() {
     });
 }
 
-function confirmSelection() {
+async function confirmSelection() {
     if (state.selectedRowNumbers.length === 0) {
         showToast('Please select at least 1 hunt to review', 'error');
         return;
@@ -6299,30 +6385,25 @@ function confirmSelection() {
         
         console.error('❌ LLM JUDGE DIVERSITY CHECK FAILED:', votesSummary);
         
-        showToast('LLM Judge criterion diversity required: At least one criterion must have both PASS and FAIL in LLM judge results. Run more hunts to get diverse LLM judgments.', 'error');
-        alert(
-            `Cannot confirm selection: Missing LLM Judge criterion diversity!\n\n` +
-            `Requirement: At least one criterion (C1, C2, etc.) must receive both a PASS and a FAIL from LLM judges across the selected responses.\n\n` +
-            `Current LLM judge votes:\n  ${votesSummary}\n\n` +
-            `⚠️ NOTE: This checks LLM judge diversity, not human judge diversity.\n` +
-            `Run more hunts until LLM judges give diverse results, then try selecting again.`
-        );
-        // CRITICAL: Return here to prevent confirmation
+        showToast('Selection needs more variety in LLM judge results.', 'error');
+        await showAppModal({
+            title: "Selection can't be confirmed yet",
+            message: `At least one criterion (e.g. C1) must have both a PASS and a FAIL from the LLM judge across your 4 chosen responses. You can run more hunts to get more varied results, or update your criteria, then try selecting again.`,
+            buttons: [ { label: 'OK', primary: true, value: true } ]
+        });
         return;
     }
     
     console.log('✅ LLM Judge diversity check passed');
     
-    // ===== CONFIRMATION DIALOG =====
-    const confirmed = confirm(
-        `🎯 Moving to Human Review Stage 🎯\n\n` +
-        `You've selected ${selectedResults.length} hunt(s) (${breakingCount} breaking, ${passingCount} passing).\n\n` +
-        `These hunts will be moved to the human review stage.\n` +
-        `You can still change your selection later if needed.\n\n` +
-        `Click "Cancel" to go back and adjust your selection.\n` +
-        `Click "OK" to proceed to human review.`
-    );
-    
+    const confirmed = await showAppModal({
+        title: 'Move these 4 to human review?',
+        message: `These 4 responses will go to the review step. You won't be able to change which 4 are selected until you finish all 4 reviews or refresh the page.`,
+        buttons: [
+            { label: 'Cancel', primary: false, value: false },
+            { label: 'OK', primary: true, value: true }
+        ]
+    });
     if (!confirmed) {
         showToast('You can adjust your selection and try again.', 'info');
         return;
@@ -6482,24 +6563,46 @@ function updateReviewProgress() {
     }
 }
 
-function revealLLMJudgments() {
-    // FIX 3: Ensure exactly 4 reviews are complete before allowing reveal
+async function revealLLMJudgments() {
     const selectedRowNumbers = state.selectedRowNumbers || [];
     if (selectedRowNumbers.length === 0) {
         showToast('Please select hunts first', 'error');
         return;
     }
-    
     if (selectedRowNumbers.length !== 4) {
         showToast(`Must have exactly 4 hunts selected. Currently: ${selectedRowNumbers.length}`, 'error');
         return;
     }
     
     const reviewKeys = selectedRowNumbers.map(rn => `row_${rn}`);
-    const completedReviews = reviewKeys.filter(key => state.humanReviews && state.humanReviews[key]);
+    const reviews = reviewKeys.map(key => state.humanReviews && state.humanReviews[key]).filter(Boolean);
     
-    if (completedReviews.length !== 4) {
-        showToast(`Only ${completedReviews.length}/4 review(s) complete. Please complete all 4 reviews before revealing LLM judgments.`, 'error');
+    if (reviews.length !== 4) {
+        showToast(`Only ${reviews.length}/4 review(s) complete. Please complete all 4 reviews before revealing.`, 'error');
+        return;
+    }
+    
+    const incompleteReviews = getIncompleteReviewIssues(reviews);
+    if (incompleteReviews.length > 0) {
+        showToast('Complete all reviews (criteria + minimum 10 words) before revealing.', 'error');
+        await showAppModal({
+            title: 'Please complete all reviews before revealing',
+            message: getIncompleteReviewsModalMessage(incompleteReviews),
+            buttons: [ { label: 'OK', primary: true, value: true } ]
+        });
+        return;
+    }
+    
+    const confirmed = await showAppModal({
+        title: 'Reveal LLM judgments?',
+        message: 'After revealing, you cannot edit or change your human reviews—everything will be locked. Continue to reveal and lock, or Cancel to edit your human reviews.',
+        buttons: [
+            { label: 'Cancel', primary: false, value: false },
+            { label: 'Continue', primary: true, value: true }
+        ]
+    });
+    if (!confirmed) {
+        showToast('You can edit your reviews, then reveal when ready.', 'info');
         return;
     }
     
@@ -6737,9 +6840,10 @@ function createResultCardFull(result, slotIndex, rowNumber) {
                                     Explanation:
                                 </label>
                             <textarea class="human-review-notes" data-hunt-id="${result.hunt_id}" placeholder="Explain your grading decisions (which criteria failed and why)..." style="width: 100%; min-height: 150px; padding: 0.75rem; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-primary); color: var(--text-primary); font-size: 0.9rem; resize: vertical; font-family: inherit; line-height: 1.5;"></textarea>
+                                <div class="human-review-word-count" data-hunt-id="${result.hunt_id}" style="margin-top: 0.35rem; font-size: 0.8rem; color: var(--text-muted);">${getWordCountLabel(0)}</div>
                 </div>
                 
-                            <button class="btn btn-primary submit-human-review-btn" data-hunt-id="${result.hunt_id}" style="width: 100%; padding: 0.875rem; font-weight: 600; font-size: 0.95rem; border-radius: 8px;">
+                            <button class="btn btn-primary submit-human-review-btn" data-hunt-id="${result.hunt_id}" disabled style="width: 100%; padding: 0.875rem; font-weight: 600; font-size: 0.95rem; border-radius: 8px; opacity: 0.7;">
                                 ✅ Submit Human Review
                             </button>
                             <div class="human-review-status" data-hunt-id="${result.hunt_id}" style="margin-top: 0.75rem; font-size: 0.85rem; color: var(--text-muted); text-align: center;"></div>
@@ -6814,14 +6918,31 @@ function createResultCardFull(result, slotIndex, rowNumber) {
         });
     }
     
-    // Get submit button reference for enabling when criteria are clicked
     const submitBtn = card.querySelector('.submit-human-review-btn');
+    const notesTextarea = card.querySelector('.human-review-notes');
+    const wordCountEl = card.querySelector('.human-review-word-count');
+    const criteriaGradingEl = card.querySelector('.criteria-grading[data-hunt-id="' + result.hunt_id + '"]');
+    
+    function updateReviewSubmitButtonState() {
+        const notes = notesTextarea ? (notesTextarea.value || '').trim() : '';
+        const words = countWords(notes);
+        if (wordCountEl) {
+            wordCountEl.textContent = getWordCountLabel(words);
+            wordCountEl.style.color = words >= MIN_EXPLANATION_WORDS ? 'var(--success)' : 'var(--text-muted)';
+        }
+        const rows = criteriaGradingEl ? criteriaGradingEl.querySelectorAll('.criterion-row') : [];
+        const allGraded = rows.length > 0 && Array.from(rows).every(row => row.dataset.grade);
+        const canSubmit = allGraded && words >= MIN_EXPLANATION_WORDS;
+        if (submitBtn && !submitBtn.textContent.includes('Submitted')) {
+            submitBtn.disabled = !canSubmit;
+            submitBtn.style.opacity = canSubmit ? '1' : '0.7';
+        }
+    }
     
     // Criterion pass/fail button handlers
     card.querySelectorAll('.criterion-pass').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
-            const criterion = btn.dataset.criterion;
             const row = btn.closest('.criterion-row');
             row.querySelector('.criterion-pass').classList.add('active');
             row.querySelector('.criterion-pass').style.background = 'var(--success)';
@@ -6830,19 +6951,13 @@ function createResultCardFull(result, slotIndex, rowNumber) {
             row.querySelector('.criterion-fail').style.background = 'transparent';
             row.querySelector('.criterion-fail').style.color = 'var(--danger)';
             row.dataset.grade = 'pass';
-            
-            // Enable submit button when criteria is selected
-            if (submitBtn) {
-                submitBtn.disabled = false;
-                submitBtn.style.opacity = '1';
-            }
+            updateReviewSubmitButtonState();
         });
     });
     
     card.querySelectorAll('.criterion-fail').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
-            const criterion = btn.dataset.criterion;
             const row = btn.closest('.criterion-row');
             row.querySelector('.criterion-fail').classList.add('active');
             row.querySelector('.criterion-fail').style.background = 'var(--danger)';
@@ -6851,38 +6966,26 @@ function createResultCardFull(result, slotIndex, rowNumber) {
             row.querySelector('.criterion-pass').style.background = 'transparent';
             row.querySelector('.criterion-pass').style.color = 'var(--success)';
             row.dataset.grade = 'fail';
-            
-            // Enable submit button when criteria is selected
-            if (submitBtn) {
-                submitBtn.disabled = false;
-                submitBtn.style.opacity = '1';
-            }
+            updateReviewSubmitButtonState();
         });
     });
     
-    // Submit human review button
-    card.querySelector('.submit-human-review-btn').addEventListener('click', (e) => {
-        e.stopPropagation();
-        const rowNum = card.dataset.rowNumber !== null && card.dataset.rowNumber !== undefined 
-            ? Number(card.dataset.rowNumber) 
-            : null;
-        submitHumanReview(result.hunt_id, card, slotNum, rowNum);
-    });
-    
-    // Re-enable submit button when user types in textarea or changes criteria
-    const notesTextarea = card.querySelector('.human-review-notes');
-    
-    // Listen for textarea input to re-enable submit (if it was previously submitted)
     notesTextarea.addEventListener('input', () => {
+        updateReviewSubmitButtonState();
         if (submitBtn && submitBtn.disabled && submitBtn.textContent.includes('Submitted')) {
             submitBtn.disabled = false;
             submitBtn.textContent = '✅ Submit Human Review';
             submitBtn.style.background = '';
-        } else if (submitBtn) {
-            // Also enable if not disabled but just to be sure
-            submitBtn.disabled = false;
-            submitBtn.style.opacity = '1';
+            updateReviewSubmitButtonState();
         }
+    });
+    
+    card.querySelector('.submit-human-review-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        const rowNum = card.dataset.rowNumber !== null && card.dataset.rowNumber !== undefined
+            ? Number(card.dataset.rowNumber)
+            : null;
+        submitHumanReview(result.hunt_id, card, slotNum, rowNum);
     });
     
     // Also re-enable on any criteria button click if already submitted
@@ -6966,12 +7069,9 @@ async function submitHumanReview(huntId, card, slotNum, rowNumber) {
     const statusEl = card.querySelector(`.human-review-status[data-hunt-id="${huntId}"]`);
     const criteriaGrading = card.querySelector(`.criteria-grading[data-hunt-id="${huntId}"]`);
     
-    // Use row number as key if available, otherwise fall back to hunt_id
-    // Row number ensures uniqueness across different runs
     const reviewKey = rowNumber !== null && rowNumber !== undefined ? `row_${rowNumber}` : `hunt_${huntId}`;
     
-    // Collect grades for each criterion
-    const criterionRows = criteriaGrading.querySelectorAll('.criterion-row');
+    const criterionRows = criteriaGrading ? criteriaGrading.querySelectorAll('.criterion-row') : [];
     const grading = {};
     let allGraded = true;
     
@@ -6981,14 +7081,17 @@ async function submitHumanReview(huntId, card, slotNum, rowNumber) {
         if (!grade) {
             allGraded = false;
         } else {
-            // Store as uppercase for consistency
-            grading[criterionId] = grade.toUpperCase(); // 'pass' -> 'PASS', 'fail' -> 'FAIL'
+            grading[criterionId] = grade.toUpperCase();
         }
     });
     
-    // Validate all criteria are graded
     if (!allGraded) {
         showToast('Please grade all criteria before submitting', 'error');
+        return;
+    }
+    const explanationErr = getExplanationValidationError(notes);
+    if (explanationErr) {
+        showToast(explanationErr, 'error');
         return;
     }
     
@@ -6998,25 +7101,6 @@ async function submitHumanReview(huntId, card, slotNum, rowNumber) {
     const passCount = Object.values(grading).filter(v => v.toUpperCase() === 'PASS').length;
     const passRate = totalCriteria > 0 ? passCount / totalCriteria : 0;
     const overallJudgment = passRate > 0.5 ? 'pass' : 'fail';
-    
-    // ===== SARCASTIC CONFIRMATION DIALOG =====
-    const gradingSummary = Object.entries(grading).map(([k, v]) => `${k}: ${v}`).join(', ');
-    const confirmed = confirm(
-        `📝 SUBMITTING REVIEW FOR SLOT ${slotNum} 📝\n\n` +
-        `Your grading: ${gradingSummary}\n` +
-        `Pass rate: ${passCount}/${totalCriteria} (${Math.round(passRate * 100)}%)\n` +
-        `Overall: ${overallJudgment.toUpperCase()}\n\n` +
-        `Are you sure about these grades?\n` +
-        `Double-checked your explanation?\n\n` +
-        `(Note: You can edit this later, but it's better to get it right the first time!)\n\n` +
-        `Click "Cancel" to review again.\n` +
-        `Click "OK" to submit.`
-    );
-    
-    if (!confirmed) {
-        showToast('Take your time! Make sure everything is correct.', 'info');
-        return;
-    }
     
     // Store human review in state with slot info and criteria
     // Use row number as key to ensure uniqueness across runs
@@ -7546,32 +7630,42 @@ async function warmupConnections() {
 
 function triggerColabConfetti() {
     if (typeof confetti !== 'function') return;
-    const colors = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6'];
-    function burst() {
+    const colors = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4'];
+    function fullScreenBurst() {
+        // Left edge, middle height: fire at angle toward top-right, high velocity to reach top
         confetti({
-            particleCount: 100,
-            spread: 70,
-            origin: { y: 0.85 },
-            colors: colors
+            particleCount: 240,
+            spread: 130,
+            angle: 45,
+            origin: { x: 0, y: 0.5 },
+            startVelocity: 62,
+            scalar: 1.15,
+            colors,
         });
+        // Right edge, middle height: fire at angle toward top-left, high velocity to reach top
         confetti({
-            particleCount: 50,
-            angle: 60,
-            spread: 55,
-            origin: { x: 0.2, y: 0.9 },
-            colors: colors
+            particleCount: 240,
+            spread: 130,
+            angle: 135,
+            origin: { x: 1, y: 0.5 },
+            startVelocity: 62,
+            scalar: 1.15,
+            colors,
         });
+        // Bottom center: arc upward to cover top
         confetti({
-            particleCount: 50,
-            angle: 120,
-            spread: 55,
-            origin: { x: 0.8, y: 0.9 },
-            colors: colors
+            particleCount: 280,
+            spread: 180,
+            angle: 90,
+            origin: { x: 0.5, y: 1 },
+            startVelocity: 50,
+            scalar: 1.2,
+            colors,
         });
     }
-    burst();
-    setTimeout(burst, 400);
-    setTimeout(burst, 800);
+    fullScreenBurst();
+    setTimeout(fullScreenBurst, 320);
+    setTimeout(fullScreenBurst, 640);
 }
 
 function showToast(message, type = 'info') {
