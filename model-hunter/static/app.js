@@ -4182,10 +4182,15 @@ function openGradingSlideout(result, slotIndex, rowNumber) {
     const reasoningTrace = result.reasoning_trace || '';
     const huntId = result.hunt_id;
     
-    // Get existing review data if any
-    const existingReview = state.humanReviews?.[huntId] || {};
-    const existingNotes = existingReview.notes || '';
-    const existingGrades = existingReview.grades || {};
+    // DEBUG: Log hunt IDs to verify uniqueness across slots
+    console.log(`🔍 openGradingSlideout: huntId=${huntId}, slotIndex=${slotIndex}, rowNumber=${rowNumber}, existingReviewKeys=`, Object.keys(state.humanReviews || {}));
+    
+    // Get existing review data ONLY if it was previously submitted
+    // Prevents cross-contamination between slots when huntId is shared or undefined
+    const existingReview = state.humanReviews?.[huntId];
+    const hasSubmittedReview = existingReview && existingReview.submitted;
+    const existingNotes = hasSubmittedReview ? (existingReview.notes || '') : '';
+    const existingGrades = hasSubmittedReview ? (existingReview.grades || {}) : {};
     
     // Update header
     slotBadge.textContent = `Slot ${slotNum}`;
@@ -7628,45 +7633,176 @@ async function warmupConnections() {
     }
 }
 
-function triggerColabConfetti() {
+// ============== Celebration Effects Engine ==============
+// Lightweight canvas particle engine for spark/firework effects
+(function initCelebrationCanvas() {
+    if (document.getElementById('celebrationCanvas')) return;
+    const canvas = document.createElement('canvas');
+    canvas.id = 'celebrationCanvas';
+    canvas.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;pointer-events:none;z-index:99999;';
+    document.body.appendChild(canvas);
+
+    const flashEl = document.createElement('div');
+    flashEl.id = 'celebrationFlash';
+    flashEl.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;pointer-events:none;z-index:99998;opacity:0;transition:opacity 0.05s;';
+    document.body.appendChild(flashEl);
+})();
+
+const _celeb = {
+    particles: [],
+    running: false,
+    get canvas() { return document.getElementById('celebrationCanvas'); },
+    get ctx() { return this.canvas?.getContext('2d'); },
+    get flash() { return document.getElementById('celebrationFlash'); }
+};
+
+function _celebResize() {
+    const c = _celeb.canvas;
+    if (c) { c.width = window.innerWidth; c.height = window.innerHeight; }
+}
+window.addEventListener('resize', _celebResize);
+
+class _CelebParticle {
+    constructor(x, y, opts = {}) {
+        this.x = x; this.y = y;
+        this.vx = opts.vx || 0; this.vy = opts.vy || 0;
+        this.gravity = opts.gravity ?? 0.12;
+        this.friction = opts.friction ?? 0.98;
+        this.alpha = 1;
+        this.decay = opts.decay || (0.01 + Math.random() * 0.02);
+        this.size = opts.size || (1 + Math.random() * 3);
+        this.color = opts.color || '#ffd700';
+        this.trail = opts.trail ?? true;
+        this.glow = opts.glow ?? true;
+        this.prevX = x; this.prevY = y;
+    }
+    update() {
+        this.prevX = this.x; this.prevY = this.y;
+        this.vx *= this.friction; this.vy *= this.friction;
+        this.vy += this.gravity;
+        this.x += this.vx; this.y += this.vy;
+        this.alpha -= this.decay;
+    }
+    draw(ctx) {
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, this.alpha);
+        if (this.trail) {
+            ctx.beginPath();
+            ctx.moveTo(this.prevX, this.prevY);
+            ctx.lineTo(this.x, this.y);
+            ctx.strokeStyle = this.color;
+            ctx.lineWidth = this.size * 0.8;
+            ctx.stroke();
+        }
+        if (this.glow) { ctx.shadowBlur = this.size * 6; ctx.shadowColor = this.color; }
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.fillStyle = this.color;
+        ctx.fill();
+        ctx.restore();
+    }
+}
+
+function _celebAnimate() {
+    const ctx = _celeb.ctx;
+    if (!ctx || _celeb.particles.length === 0) {
+        _celeb.running = false;
+        if (ctx) ctx.clearRect(0, 0, _celeb.canvas.width, _celeb.canvas.height);
+        return;
+    }
+    ctx.clearRect(0, 0, _celeb.canvas.width, _celeb.canvas.height);
+    _celeb.particles = _celeb.particles.filter(p => p.alpha > 0);
+    _celeb.particles.forEach(p => { p.update(); p.draw(ctx); });
+    requestAnimationFrame(_celebAnimate);
+}
+
+function _celebStart() {
+    if (!_celeb.running) { _celeb.running = true; _celebAnimate(); }
+}
+
+function _celebFlash(color, opacity, duration) {
+    const f = _celeb.flash;
+    if (!f) return;
+    f.style.background = color;
+    f.style.opacity = opacity;
+    setTimeout(() => { f.style.opacity = 0; }, duration);
+}
+
+// ── Effect 1: Classic Confetti (side cannons) ──
+function _celebConfettiClassic() {
     if (typeof confetti !== 'function') return;
     const colors = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4'];
-    function fullScreenBurst() {
-        // Left edge, middle height: fire at angle toward top-right, high velocity to reach top
-        confetti({
-            particleCount: 240,
-            spread: 130,
-            angle: 45,
-            origin: { x: 0, y: 0.5 },
-            startVelocity: 62,
-            scalar: 1.15,
-            colors,
-        });
-        // Right edge, middle height: fire at angle toward top-left, high velocity to reach top
-        confetti({
-            particleCount: 240,
-            spread: 130,
-            angle: 135,
-            origin: { x: 1, y: 0.5 },
-            startVelocity: 62,
-            scalar: 1.15,
-            colors,
-        });
-        // Bottom center: arc upward to cover top
-        confetti({
-            particleCount: 280,
-            spread: 180,
-            angle: 90,
-            origin: { x: 0.5, y: 1 },
-            startVelocity: 50,
-            scalar: 1.2,
-            colors,
-        });
+    function burst() {
+        confetti({ particleCount: 40, spread: 80, angle: 55, origin: { x: 0, y: 0.6 }, startVelocity: 50, scalar: 1.1, colors });
+        confetti({ particleCount: 40, spread: 80, angle: 125, origin: { x: 1, y: 0.6 }, startVelocity: 50, scalar: 1.1, colors });
+        confetti({ particleCount: 40, spread: 100, angle: 90, origin: { x: 0.5, y: 0.9 }, startVelocity: 45, scalar: 1.1, colors });
     }
-    fullScreenBurst();
-    setTimeout(fullScreenBurst, 320);
-    setTimeout(fullScreenBurst, 640);
+    burst();
+    setTimeout(burst, 300);
+    setTimeout(burst, 600);
 }
+
+// ── Effect: Firework Rockets (canvas sparks) ──
+function _celebFireworkRockets() {
+    _celebResize();
+    const ctx = _celeb.ctx;
+    if (!ctx) { _celebConfettiClassic(); return; } // fallback
+    ctx.clearRect(0, 0, _celeb.canvas.width, _celeb.canvas.height);
+    const w = _celeb.canvas.width, h = _celeb.canvas.height;
+    const burstColors = [
+        ['#ff6b6b', '#ff4500', '#ffd700'],
+        ['#4ecdc4', '#00ff88', '#87ceeb'],
+        ['#a78bfa', '#ff6b9d', '#ff1493'],
+        ['#ffd700', '#ffa500', '#ffff00']
+    ];
+
+    function launchRocket(delay) {
+        setTimeout(() => {
+            const x = w * (0.2 + Math.random() * 0.6);
+            const targetY = h * (0.15 + Math.random() * 0.3);
+            const colors = burstColors[Math.floor(Math.random() * burstColors.length)];
+            let y = h;
+            const trailInterval = setInterval(() => {
+                y -= 12;
+                _celeb.particles.push(new _CelebParticle(x + (Math.random() - 0.5) * 3, y, {
+                    vx: (Math.random() - 0.5) * 0.5, vy: -0.5,
+                    gravity: 0.02, decay: 0.03, size: 2,
+                    color: '#ffd700', trail: false, glow: true
+                }));
+                _celebStart();
+                if (y <= targetY) {
+                    clearInterval(trailInterval);
+                    _celebFlash(colors[0], 0.15, 150);
+                    for (let i = 0; i < 60; i++) {
+                        const angle = Math.random() * Math.PI * 2;
+                        const speed = 2 + Math.random() * 7;
+                        _celeb.particles.push(new _CelebParticle(x, targetY, {
+                            vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
+                            gravity: 0.06, decay: 0.006 + Math.random() * 0.012,
+                            size: 1 + Math.random() * 2.5,
+                            color: colors[Math.floor(Math.random() * colors.length)],
+                            trail: true, glow: true
+                        }));
+                    }
+                    _celebStart();
+                }
+            }, 25);
+        }, delay);
+    }
+    launchRocket(0);
+    launchRocket(600);
+    launchRocket(1200);
+    launchRocket(2000);
+}
+
+// ── Main trigger — randomly picks confetti or fireworks ──
+function triggerColabConfetti() {
+    const effects = [_celebConfettiClassic, _celebFireworkRockets];
+    const pick = effects[Math.floor(Math.random() * effects.length)];
+    console.log(`🎉 Celebration effect: ${pick.name}`);
+    pick();
+}
+
 
 function showToast(message, type = 'info') {
     const toast = document.createElement('div');
