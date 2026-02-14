@@ -47,6 +47,10 @@ Thumbs.db
 !README.md
 SOURCE_OF_TRUTH.md
 WORKLOG.md
+# Refactored branch: allow key docs
+!model-hunter-refactored/REFACTORING_LOG.md
+!model-hunter-refactored/REFACTORING_AUDIT.md
+!model-hunter-refactored/docs/*.md
 
 # Notebooks
 *.ipynb

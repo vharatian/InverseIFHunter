@@ -1,0 +1,971 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Model Hunter - Red Team LLM Models</title>
+    <meta name="description" content="Red-team LLM models with parallel hunts and automated judging">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <!-- Modern Hunter Fonts -->
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css?v=24">
+    <!-- Marked.js for Markdown parsing -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+
+<body>
+    <!-- Trainer Registration Modal (mandatory, non-dismissible) -->
+    <!-- Hidden by default. Inline script below shows it only if not registered. -->
+    <div id="trainerRegistrationModal" class="trainer-reg-overlay hidden">
+        <div class="trainer-reg-card">
+            <h2 class="trainer-reg-title">Welcome to Model Hunter</h2>
+            <p class="trainer-reg-subtitle">Please enter your details to get started. You only need to do this once.</p>
+            <form id="trainerRegForm" class="trainer-reg-form" autocomplete="on" onsubmit="return false;">
+                <div class="trainer-reg-field">
+                    <label for="trainerNameInput">Name</label>
+                    <input type="text" id="trainerNameInput" name="name" placeholder="e.g. Tyler" required
+                        autocomplete="name" class="trainer-reg-input">
+                </div>
+                <div class="trainer-reg-field">
+                    <label for="trainerEmailInput">Turing Email</label>
+                    <input type="email" id="trainerEmailInput" name="email" placeholder="e.g. tyler@turing.com" required
+                        autocomplete="email" class="trainer-reg-input">
+                </div>
+                <button type="submit" class="btn btn-primary btn-lg trainer-reg-btn" id="trainerRegSubmitBtn">
+                    Get Started
+                </button>
+            </form>
+        </div>
+    </div>
+    <script>
+        // Show registration modal immediately if not registered (runs before app.js)
+        if (!localStorage.getItem('trainer_email') || !localStorage.getItem('trainer_name')) {
+            document.getElementById('trainerRegistrationModal').classList.remove('hidden');
+        }
+        // Clean up URL if registration form leaked query params
+        if (window.location.search.includes('name=') || window.location.search.includes('email=')) {
+            window.history.replaceState({}, '', window.location.pathname);
+        }
+    </script>
+
+    <!-- Header -->
+    <header class="header">
+        <div class="container header-content">
+            <div class="trainer-identity" id="trainerIdentity" style="display: none;">
+                <span class="trainer-identity-label" id="trainerIdentityLabel"></span>
+                <button class="trainer-identity-change" id="trainerChangeBtn" title="Change identity">Change</button>
+            </div>
+            <div class="header-actions" style="margin-left: auto; display: flex; align-items: center; gap: 0.5rem;">
+                <span id="adminModeIndicator" class="admin-mode-badge hidden" title="Admin mode (click to disable)">🟢 Admin</span>
+                <button class="theme-toggle" id="themeToggle" title="Toggle theme">
+                    🌙
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Turn Journey Bar (sticky, hidden until multi-turn) -->
+    <nav class="turn-journey-bar" id="turnJourneyBar">
+        <!-- Journey steps rendered dynamically by JS -->
+    </nav>
+
+    <!-- Main Content -->
+    <main class="container" id="mainContainer">
+        <!-- Conversation Thread (left rail, hidden until multi-turn) -->
+        <aside class="conversation-thread" id="conversationThread">
+            <div class="thread-title">Conversation</div>
+            <!-- Thread nodes rendered dynamically by JS -->
+        </aside>
+        <!-- Main content area wrapper (shifts right when thread is visible) -->
+        <div class="main-content-area" id="mainContentArea">
+            <!-- Notebook Upload Section (collapsible after load) -->
+            <section class="section" id="uploadSection">
+                <div class="card">
+                    <div class="card-header upload-toggle-header" id="uploadToggleHeader"
+                        style="cursor: pointer; user-select: none;">
+                        <h2 class="card-title">
+                            <span class="card-title-icon">📓</span>
+                            <span id="uploadHeaderText">Load Notebook</span>
+                        </h2>
+                        <span class="upload-toggle-chevron" id="uploadChevron"
+                            style="font-size: 0.75rem; color: var(--text-muted); transition: transform 0.2s ease;">▼</span>
+                    </div>
+
+                    <div id="uploadBody" class="upload-collapsible-body">
+                        <div id="uploadTab" class="tab-content">
+                            <div class="url-input-section">
+                                <label for="colabUrlInput">Paste Colab Notebook URL</label>
+                                <div class="url-input-group">
+                                    <input type="url" id="colabUrlInput"
+                                        placeholder="https://colab.research.google.com/drive/..." class="url-input">
+                                    <button type="button" id="fetchUrlBtn" class="btn btn-secondary fetch-btn-cute">
+                                        📥 Fetch
+                                    </button>
+                                </div>
+                                <small style="color: var(--text-muted); margin-top: 0.5rem; display: block;">
+                                    Supports: Colab share links, Google Drive links, raw .ipynb URLs
+                                </small>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </section>
+
+            <!-- Fixed Left Sidebar for Metadata (Visible throughout) -->
+            <aside class="metadata-sidebar" id="metadataSidebar" style="display: none;">
+                <div class="metadata-sidebar-header">
+                    <h3 class="metadata-sidebar-title">
+                        <span class="metadata-icon">📊</span>
+                        Metadata
+                    </h3>
+                    <button class="metadata-toggle-btn" id="metadataToggleBtn" title="Toggle metadata sidebar">
+                        <span class="metadata-toggle-icon">▼</span>
+                    </button>
+                </div>
+                <div class="metadata-sidebar-content" id="metadataGrid">
+                    <!-- Metadata fields will be populated dynamically -->
+                </div>
+            </aside>
+
+            <!-- Configuration Section -->
+            <section class="section hidden" id="configSection">
+                <!-- Notebook Preview Card -->
+                <div class="card" id="notebookPreviewCard">
+                    <div class="card-header">
+                        <h2 class="card-title">
+                            <span class="card-title-icon">📋</span>
+                            <span id="previewTitleText">Notebook Preview</span>
+                            <span class="turn-badge section-turn-badge" id="previewTurnBadge"></span>
+                        </h2>
+                    </div>
+
+                    <div class="tabs" id="previewTabs">
+                        <button class="tab active" data-preview="promptAndResponse">Prompt & Response</button>
+                        <button class="tab" data-preview="modelref">Model Reference</button>
+                        <button class="tab" data-preview="judge">Judge System Prompt</button>
+                    </div>
+
+                    <div id="previewContent" class="preview-content">
+                        <!-- Prompt & Response (stacked: Prompt on top, Response below) -->
+                        <div id="previewPromptAndResponse" class="preview-panel prompt-response-stack">
+                            <!-- Prompt Section -->
+                            <div id="previewPrompt" class="prompt-response-section">
+                            <div
+                                style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                                <label style="font-weight: 600; display: block; margin: 0;">
+                                    Prompt
+                                </label>
+                                <div id="promptWordCount"
+                                    style="font-size: 0.9rem; font-weight: 600; padding: 0.25rem 0.75rem; border-radius: var(--radius-sm); transition: all var(--transition-fast);">
+                                    <span id="promptWordCountText">0 words</span>
+                                    <span id="promptWordCountRange" style="margin-left: 0.5rem; opacity: 0.7;"></span>
+                                </div>
+                            </div>
+                            <div id="promptLengthWarning" class="prompt-length-warning hidden"></div>
+
+                            <!-- Markdown Split Editor -->
+                            <div class="markdown-editor-container">
+                                <!-- Toolbar -->
+                                <div class="markdown-toolbar" data-target="promptMarkdown">
+                                    <button type="button" class="md-btn" data-md="heading" title="Heading">H</button>
+                                    <button type="button" class="md-btn" data-md="bold"
+                                        title="Bold (**text**)"><strong>B</strong></button>
+                                    <button type="button" class="md-btn" data-md="italic"
+                                        title="Italic (*text*)"><em>I</em></button>
+                                    <button type="button" class="md-btn" data-md="code"
+                                        title="Code (`code`)">&lt;&gt;</button>
+                                    <div class="md-separator"></div>
+                                    <button type="button" class="md-btn" data-md="link"
+                                        title="Link [text](url)">🔗</button>
+                                    <button type="button" class="md-btn" data-md="quote"
+                                        title="Blockquote (> text)">❝</button>
+                                    <div class="md-separator"></div>
+                                    <button type="button" class="md-btn" data-md="ul" title="Bullet list">•</button>
+                                    <button type="button" class="md-btn" data-md="ol" title="Numbered list">1.</button>
+                                    <button type="button" class="md-btn" data-md="hr" title="Horizontal rule">—</button>
+                                    <div class="md-separator"></div>
+                                    <button type="button" class="md-btn" data-md="math"
+                                        title="LaTeX math ($formula$)">Ψ</button>
+                                    <button type="button" class="md-btn" data-md="codeblock" title="Code block">{
+                                        }</button>
+                                    <label class="markdown-toggle">
+                                        <span>Preview</span>
+                                        <input type="checkbox" class="preview-toggle" data-preview="promptPreviewPane"
+                                            checked>
+                                    </label>
+                                </div>
+
+                                <!-- Split View -->
+                                <div class="markdown-split-view" data-editor="prompt">
+                                    <div class="markdown-editor-pane">
+                                        <div class="pane-header">📝 Edit (Markdown supported)</div>
+                                        <textarea id="promptMarkdown" class="markdown-textarea"
+                                            placeholder="Enter prompt here...&#10;&#10;Markdown supported:&#10;**bold** *italic* `code`&#10;- bullet list&#10;1. numbered list"></textarea>
+                                    </div>
+                                    <div class="resize-handle" title="Drag to resize"></div>
+                                    <div class="markdown-preview-pane" id="promptPreviewPane">
+                                        <div class="pane-header">👁️ Live Preview</div>
+                                        <div id="promptPreview" class="markdown-preview"></div>
+                                    </div>
+                                </div>
+                            </div>
+                            </div>
+
+                            <!-- Response Section (below Prompt) -->
+                            <div id="previewReference" class="prompt-response-section">
+                            <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Expected
+                                Response</label>
+
+                            <!-- Markdown Split Editor -->
+                            <div class="markdown-editor-container">
+                                <!-- Toolbar -->
+                                <div class="markdown-toolbar" data-target="responseMarkdown">
+                                    <button type="button" class="md-btn" data-md="heading" title="Heading">H</button>
+                                    <button type="button" class="md-btn" data-md="bold"
+                                        title="Bold (**text**)"><strong>B</strong></button>
+                                    <button type="button" class="md-btn" data-md="italic"
+                                        title="Italic (*text*)"><em>I</em></button>
+                                    <button type="button" class="md-btn" data-md="code"
+                                        title="Code (`code`)">&lt;&gt;</button>
+                                    <div class="md-separator"></div>
+                                    <button type="button" class="md-btn" data-md="link"
+                                        title="Link [text](url)">🔗</button>
+                                    <button type="button" class="md-btn" data-md="quote"
+                                        title="Blockquote (> text)">❝</button>
+                                    <div class="md-separator"></div>
+                                    <button type="button" class="md-btn" data-md="ul" title="Bullet list">•</button>
+                                    <button type="button" class="md-btn" data-md="ol" title="Numbered list">1.</button>
+                                    <button type="button" class="md-btn" data-md="hr" title="Horizontal rule">—</button>
+                                    <div class="md-separator"></div>
+                                    <button type="button" class="md-btn" data-md="math"
+                                        title="LaTeX math ($formula$)">Ψ</button>
+                                    <button type="button" class="md-btn" data-md="codeblock" title="Code block">{
+                                        }</button>
+                                    <label class="markdown-toggle">
+                                        <span>Preview</span>
+                                        <input type="checkbox" class="preview-toggle" data-preview="responsePreviewPane"
+                                            checked>
+                                    </label>
+                                </div>
+
+                                <!-- Split View -->
+                                <div class="markdown-split-view" data-editor="response">
+                                    <div class="markdown-editor-pane">
+                                        <div class="pane-header">📝 Edit (Markdown supported)</div>
+                                        <textarea id="responseMarkdown" class="markdown-textarea"
+                                            placeholder="Enter expected response here..."></textarea>
+                                    </div>
+                                    <div class="resize-handle" title="Drag to resize"></div>
+                                    <div class="markdown-preview-pane" id="responsePreviewPane">
+                                        <div class="pane-header">👁️ Live Preview</div>
+                                        <div id="referencePreview" class="markdown-preview"></div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Test Prompt (Turn 1 only): generate response before writing criteria -->
+                            <div id="turn1TestPromptPanel" class="card hidden" style="margin-top: 1rem;">
+                                <div class="card-header">
+                                    <h3 class="card-title" style="font-size: 1rem;">
+                                        <span>🧪 Test Prompt</span>
+                                    </h3>
+                                </div>
+                                <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1rem;">
+                                    Test your prompt before writing criteria. Pick a model below. Latest generated response is saved.
+                                </p>
+                                <div class="turn1-model-row" style="display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1rem;">
+                                    <div class="form-group" style="flex: 1; min-width: 120px; max-width: 160px;">
+                                        <label for="turn1ProviderSelect">Provider</label>
+                                        <select id="turn1ProviderSelect" style="width: 100%;">
+                                            <option value="openrouter">OpenRouter</option>
+                                            <option value="fireworks">Fireworks AI</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group" style="flex: 1; min-width: 180px; max-width: 220px;">
+                                        <label for="turn1ModelSelect">Model</label>
+                                        <select id="turn1ModelSelect" style="width: 100%;">
+                                            <option value="nvidia/nemotron-3-nano-30b-a3b">Nemotron-3-Nano (Fast)</option>
+                                            <option value="qwen/qwen3-235b-a22b-thinking-2507">Qwen3-235B (Thinking)</option>
+                                            <option value="anthropic/claude-sonnet-4.5">Claude Sonnet 4.5</option>
+                                            <option value="anthropic/claude-opus-4.5">Claude Opus 4.5</option>
+                                            <option value="anthropic/claude-opus-4.6">Claude Opus 4.6</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div style="display: flex; gap: 0.75rem; margin-bottom: 0.5rem; flex-wrap: wrap;">
+                                    <button type="button" class="btn btn-secondary" id="turn1GenerateBtn">
+                                        Generate Response
+                                    </button>
+                                </div>
+                                <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem;">
+                                    You can regenerate with a different model. Latest is used.
+                                </p>
+                                <div id="turn1TestPromptLoading" class="hidden"
+                                    style="padding: 1rem; text-align: center; color: var(--text-muted);">
+                                    <span>Generating response...</span>
+                                </div>
+                                <div id="turn1TestPromptResponseArea" class="hidden">
+                                    <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Generated Response:</label>
+                                    <div id="turn1TestPromptResponseText" style="
+                                        background: var(--bg-primary);
+                                        border: 1px solid var(--border);
+                                        border-radius: 8px;
+                                        padding: 1rem;
+                                        font-size: 0.9rem;
+                                        color: var(--text-secondary);
+                                        white-space: pre-wrap;
+                                        max-height: 300px;
+                                        overflow-y: auto;
+                                        line-height: 1.5;
+                                    "></div>
+                                    <div id="turn1TestPromptModelInfo"
+                                        style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.5rem;"></div>
+                                </div>
+                            </div>
+
+                            <div class="judge-reference-section">
+                                <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.75rem; justify-content: center;">
+                                    <button class="btn btn-secondary" id="judgeBeforeHuntBtn"
+                                        title="Judge the reference response before starting hunt">
+                                        ⚖️ Judge Reference
+                                    </button>
+                                </div>
+                                <p style="font-size: 0.85rem; color: var(--text-muted);">
+                                    ⚖️ <strong>Judge</strong>: Validates response against criteria. Changes auto-save.
+                                </p>
+                            </div>
+
+                            <!-- Judge Result (below response editor, always visible when shown) -->
+                            <div id="referenceJudgeResult" class="judge-result-container hidden"></div>
+                            </div>
+                        </div>
+
+                        <!-- Model Reference Tab -->
+                        <div id="previewModelref" class="preview-panel hidden">
+                            <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">
+                                Response Reference (Grading Criteria)
+                            </label>
+                            <div class="structured-input-container">
+                                <div class="structured-input-help">
+                                    💡 <strong>Format:</strong> Enter criteria in this format (one per line):<br>
+                                    <code>C1: Your first criterion description here</code><br>
+                                    <code>C2: Your second criterion description here</code><br>
+                                    The system will automatically convert this to JSON format.
+                                </div>
+                                <textarea class="structured-input-editor" id="modelrefPreview"
+                                    placeholder="C1: Does the response explicitly state that none of the provided options are correct?&#10;C2: Does the response identify the core flaw?&#10;C3: Does the response clarify the historical fact?&#10;C4: Does the response distinguish between real and fictional elements?"></textarea>
+                            </div>
+                        </div>
+
+                        <!-- Judge System Prompt Tab -->
+                        <div id="previewJudge" class="preview-panel hidden">
+                            <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Judge System
+                                Prompt</label>
+
+                            <!-- Markdown Split Editor -->
+                            <div class="markdown-editor-container">
+                                <!-- Toolbar -->
+                                <div class="markdown-toolbar" data-target="judgeMarkdown">
+                                    <button type="button" class="md-btn" data-md="heading" title="Heading">H</button>
+                                    <button type="button" class="md-btn" data-md="bold"
+                                        title="Bold (**text**)"><strong>B</strong></button>
+                                    <button type="button" class="md-btn" data-md="italic"
+                                        title="Italic (*text*)"><em>I</em></button>
+                                    <button type="button" class="md-btn" data-md="code"
+                                        title="Code (`code`)">&lt;&gt;</button>
+                                    <div class="md-separator"></div>
+                                    <button type="button" class="md-btn" data-md="link"
+                                        title="Link [text](url)">🔗</button>
+                                    <button type="button" class="md-btn" data-md="quote"
+                                        title="Blockquote (> text)">❝</button>
+                                    <div class="md-separator"></div>
+                                    <button type="button" class="md-btn" data-md="ul" title="Bullet list">•</button>
+                                    <button type="button" class="md-btn" data-md="ol" title="Numbered list">1.</button>
+                                    <button type="button" class="md-btn" data-md="hr" title="Horizontal rule">—</button>
+                                    <div class="md-separator"></div>
+                                    <button type="button" class="md-btn" data-md="codeblock" title="Code block">{
+                                        }</button>
+                                    <label class="markdown-toggle">
+                                        <span>Preview</span>
+                                        <input type="checkbox" class="preview-toggle" data-preview="judgePreviewPane"
+                                            checked>
+                                    </label>
+                                </div>
+
+                                <!-- Split View -->
+                                <div class="markdown-split-view" data-editor="judge">
+                                    <div class="markdown-editor-pane">
+                                        <div class="pane-header">📝 Edit (Markdown supported)</div>
+                                        <textarea id="judgeMarkdown" class="markdown-textarea"
+                                            placeholder="Enter judge system prompt here..."></textarea>
+                                    </div>
+                                    <div class="resize-handle" title="Drag to resize"></div>
+                                    <div class="markdown-preview-pane" id="judgePreviewPane">
+                                        <div class="pane-header">👁️ Live Preview</div>
+                                        <div id="judgePreview" class="markdown-preview"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Save All Button (outside tabs, always visible) -->
+                    <div
+                        style="margin-top: 1rem; padding-top: 1rem; border-top: var(--border-width) solid var(--border); display: flex; justify-content: center;">
+                        <button class="btn save-all-btn" id="saveAllBtn">
+                            💾 Save All & Judge
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Calibration Panel (Turn 2+ only, hidden by default) -->
+                <div class="card hidden" id="calibrationPanel">
+                    <div class="card-header">
+                        <h2 class="card-title">
+                            <span class="card-title-icon">🔬</span>
+                            <span>Calibration</span>
+                            <span class="turn-badge section-turn-badge" id="calibrationTurnBadge"></span>
+                        </h2>
+                    </div>
+
+                    <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1rem;">
+                        Generate a single response, review it, then judge it against your criteria.
+                        Tweak your criteria or judge prompt and re-judge until calibrated.
+                        You must judge at least once before starting a hunt.
+                    </p>
+
+                    <div style="display: flex; gap: 0.75rem; margin-bottom: 1rem;">
+                        <button class="btn btn-secondary" id="generateOneBtn" type="button">
+                            Generate 1 Response
+                        </button>
+                        <button class="btn btn-secondary hidden" id="regenerateBtn" type="button">
+                            Regenerate
+                        </button>
+                        <button class="btn btn-primary hidden" id="judgeCalibrationBtn" type="button">
+                            Judge This Response
+                        </button>
+                    </div>
+
+                    <!-- Loading indicator -->
+                    <div id="calibrationLoading" class="hidden"
+                        style="padding: 1rem; text-align: center; color: var(--text-muted);">
+                        <span id="calibrationLoadingText">Generating response...</span>
+                    </div>
+
+                    <!-- Generated response display -->
+                    <div id="calibrationResponseArea" class="hidden">
+                        <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Generated
+                            Response:</label>
+                        <div id="calibrationResponseText" style="
+                        background: var(--bg-primary);
+                        border: 1px solid var(--border);
+                        border-radius: 8px;
+                        padding: 1rem;
+                        font-size: 0.9rem;
+                        color: var(--text-secondary);
+                        white-space: pre-wrap;
+                        max-height: 400px;
+                        overflow-y: auto;
+                        line-height: 1.5;
+                    "></div>
+                        <div id="calibrationModelInfo"
+                            style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.5rem;"></div>
+                    </div>
+
+                    <!-- Judge result display -->
+                    <div id="calibrationJudgeResult" class="hidden" style="margin-top: 1rem;"></div>
+                </div>
+
+                <!-- Hunt Configuration Card (NOW SECOND) -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">
+                            <span class="card-title-icon">⚙️</span>
+                            Hunt Configuration
+                        </h2>
+                    </div>
+
+                    <div class="config-grid">
+                        <!-- Number of Hunts -->
+                        <div class="form-group" style="grid-column: 1 / -1;">
+                            <label>Select the number of hunts to start</label>
+                            <input type="hidden" id="parallelWorkers" value="4">
+                            <div class="hunt-presets">
+                                <button type="button" class="preset-btn" data-value="1">1</button>
+                                <button type="button" class="preset-btn" data-value="2">2</button>
+                                <button type="button" class="preset-btn" data-value="4">4</button>
+                                <button type="button" class="preset-btn" data-value="6">6</button>
+                            </div>
+                        </div>
+
+                        <!-- Provider -->
+                        <div class="form-group">
+                            <label for="providerSelect">Provider</label>
+                            <select id="providerSelect">
+                                <option value="openrouter">OpenRouter</option>
+                                <option value="fireworks">Fireworks AI</option>
+                            </select>
+                        </div>
+
+                        <!-- Model -->
+                        <div class="form-group">
+                            <label for="modelSelect">Model</label>
+                            <select id="modelSelect">
+                                <option value="nvidia/nemotron-3-nano-30b-a3b">Nemotron-3-Nano (Fast)</option>
+                                <option value="qwen/qwen3-235b-a22b-thinking-2507">Qwen3-235B (Thinking)</option>
+                                <option value="anthropic/claude-sonnet-4.5">Claude Sonnet 4.5</option>
+                                <option value="anthropic/claude-opus-4.5">Claude Opus 4.5</option>
+                                <option value="anthropic/claude-opus-4.6">Claude Opus 4.6</option>
+                            </select>
+                            <small id="modelLockedIndicator" class="model-locked-hint hidden"
+                                style="display: none; color: var(--warning); font-size: 0.8rem; margin-top: 0.25rem;">
+                                🔒 Locked to <strong id="modelLockedName">-</strong> (from notebook metadata)
+                            </small>
+                        </div>
+
+                        <!-- Judge Model (fixed to GPT-5) -->
+                        <div class="form-group">
+                            <label for="judgeModel">Judge Model</label>
+                            <select id="judgeModel" disabled>
+                                <option value="gpt-5">GPT-5</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="hunt-action-section">
+                        <div style="display: flex; gap: 0.75rem; align-items: center; justify-content: center;">
+                            <button class="btn btn-primary btn-lg" id="startHuntBtn">
+                                🚀 Start Hunt
+                            </button>
+                        </div>
+                        <p
+                            style="text-align: center; color: var(--text-muted); font-size: 0.8rem; margin-top: 0.75rem;">
+                            Note: Each turn allows up to 16 hunts. Starting a new turn resets the hunt counter.
+                        </p>
+                        <div id="configTipContainer"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Progress Section -->
+            <section class="section hidden" id="progressSection">
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">
+                            <span class="card-title-icon">📊</span>
+                            <span id="progressTitleText">Hunt Progress</span>
+                            <span class="turn-badge section-turn-badge" id="progressTurnBadge"></span>
+                        </h2>
+                        <div class="status" id="huntStatus">
+                            <span class="status-dot running"></span>
+                            <span id="statusText">Running...</span>
+                        </div>
+                    </div>
+
+                    <div class="progress-container">
+                        <div class="progress-turn-info" id="progressTurnInfo" style="display:none;">
+                            <span class="turn-scope" id="progressTurnScope"></span>
+                            <span class="cumulative" id="progressCumulative"></span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+                        </div>
+                        <div class="progress-stats">
+                            <span id="progressText">0 / 0 hunts complete</span>
+                            <span id="progressPercent">0%</span>
+                        </div>
+                    </div>
+
+                    <div style="margin: 1rem 0;">
+                        <label style="font-size: 0.9rem;">Breaks Found:</label>
+                        <div class="breaks-indicator" id="breaksIndicator">
+                            <!-- Dots will be added dynamically -->
+                        </div>
+                    </div>
+
+                    <!-- Live Results Table -->
+                    <div style="overflow-x: auto;">
+                        <table class="results-table">
+                            <thead>
+                                <tr>
+                                    <th>Hunt</th>
+                                    <th>Model</th>
+                                    <th>Response</th>
+                                    <th>Status</th>
+                                    <th>Score</th>
+                                    <th>Result</th>
+                                </tr>
+                            </thead>
+                            <tbody id="resultsTableBody">
+                                <!-- Rows added dynamically -->
+                            </tbody>
+                        </table>
+                    </div>
+                    <div id="huntingTipContainer"></div>
+                </div>
+            </section>
+
+            <!-- Multi-Turn Section -->
+            <section class="section hidden" id="multiTurnSection">
+                <!-- Turn History Card (always visible once multi-turn starts) -->
+                <div class="card" id="turnHistoryCard" style="margin-bottom: 1rem;">
+                    <div class="card-header" style="padding-bottom: 0;">
+                        <h2 class="card-title">
+                            <span class="card-title-icon">🔄</span>
+                            Turn History
+                        </h2>
+                    </div>
+                    <!-- Turn Tabs -->
+                    <div id="turnHistoryTabs"
+                        style="display: flex; gap: 0; border-bottom: 2px solid var(--border); overflow-x: auto; padding: 0 1rem;">
+                        <!-- Turn tab buttons rendered dynamically -->
+                    </div>
+                    <!-- Turn Tab Content -->
+                    <div id="turnHistoryContent" style="padding: 1rem;">
+                        <!-- Content for selected turn rendered dynamically -->
+                    </div>
+                </div>
+
+                <!-- Decision Card (current turn actions) -->
+                <div class="card" id="multiTurnDecisionCard">
+                    <div class="card-header">
+                        <h2 class="card-title">
+                            <span class="card-title-icon">⚡</span>
+                            <span id="multiTurnTitle">Turn 1 Complete — What Next?</span>
+                        </h2>
+                    </div>
+
+                    <!-- Decision Panel: Asymmetric Fork -->
+                    <div id="multiTurnDecisionPanel">
+                        <!-- Summary stats bar -->
+                        <div class="decision-summary" id="decisionSummary">
+                            <span class="decision-summary-stat" id="decisionTurnStat"></span>
+                            <span class="decision-summary-stat" id="decisionHuntStat"></span>
+                            <span class="decision-summary-stat" id="decisionBreakStat"></span>
+                        </div>
+
+                        <!-- Review readiness warning (shown when not enough results) -->
+                        <div id="reviewReadinessWarning" class="review-readiness-warning hidden">
+                            ⚠️ Need more hunt results to proceed to review.
+                        </div>
+
+                        <!-- Two-card asymmetric fork -->
+                        <div class="decision-fork">
+                            <!-- Destructive: End & Review (left, smaller, outline) -->
+                            <div class="decision-card destructive">
+                                <div class="decision-card-heading">Found a Breaking Response?</div>
+                                <div class="decision-card-desc">
+                                    End the session. Select 4 responses for human review and save to notebook.
+                                </div>
+                                <button class="btn-destructive-outline" id="markBreakingBtn">
+                                    End &amp; Review
+                                </button>
+                            </div>
+
+                            <!-- Primary: Continue (right, larger, solid) -->
+                            <div class="decision-card primary">
+                                <div class="decision-card-heading">No Breaking Yet?</div>
+                                <div class="decision-card-desc">
+                                    Pick a passing response and write the next turn's prompt and criteria.
+                                </div>
+                                <button class="btn-continue-primary" id="continueToNextTurnBtn">
+                                    Continue to Turn <span id="decisionNextTurn">2</span> &rarr;
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Dynamic multi-turn tip -->
+                        <div id="multiTurnTipContainer"></div>
+                    </div>
+
+                    <!-- Good Response Picker (shown when "Continue" is clicked) -->
+                    <div id="goodResponsePicker" class="hidden" style="margin-top: 1.5rem;">
+                        <h4 style="margin-bottom: 0.75rem;">Select a passing response to carry forward:</h4>
+                        <div id="goodResponseList" style="display: flex; flex-direction: column; gap: 0.5rem;">
+                            <!-- Response cards rendered dynamically -->
+                        </div>
+                    </div>
+
+                    <!-- Next Turn Editor (shown after good response is selected) -->
+                    <div id="nextTurnEditor" class="hidden"
+                        style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid var(--border);">
+                        <h4 style="margin-bottom: 1rem;">Write Turn <span id="nextTurnNumber">2</span></h4>
+
+                        <div class="form-group" style="margin-bottom: 1rem;">
+                            <label for="nextTurnPrompt" style="font-weight: 600;">New Prompt</label>
+                            <textarea id="nextTurnPrompt" class="markdown-textarea" rows="6"
+                                placeholder="Enter the prompt for the next turn..."></textarea>
+                        </div>
+
+                        <div class="form-group" style="margin-bottom: 1rem;">
+                            <label for="nextTurnCriteria" style="font-weight: 600;">New Criteria / Rubrics</label>
+                            <textarea id="nextTurnCriteria" class="markdown-textarea" rows="6"
+                                placeholder="C1: First criterion for this turn&#10;C2: Second criterion&#10;C3: Third criterion"></textarea>
+                            <small style="color: var(--text-muted);">Use the same format as model reference: C1:
+                                description, C2: description, etc.</small>
+                        </div>
+
+                        <div class="form-group" style="margin-bottom: 1rem;">
+                            <label for="nextTurnJudgePrompt" style="font-weight: 600;">
+                                Judge System Prompt <span style="font-weight: 400; color: var(--text-muted);">(optional
+                                    — defaults to previous turn's)</span>
+                            </label>
+                            <textarea id="nextTurnJudgePrompt" class="markdown-textarea" rows="4"
+                                placeholder="Leave empty to use the same judge prompt from the previous turn..."></textarea>
+                        </div>
+
+                        <button class="btn btn-primary btn-lg" id="startNextTurnBtn" style="width: 100%;">
+                            🚀 Start Turn <span id="startNextTurnNumber">2</span> Hunt
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Response Selection Section (NEW) -->
+            <section class="section hidden" id="selectionSection">
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">
+                            <span class="card-title-icon">✅</span>
+                            Select Responses for Review
+                        </h2>
+                    </div>
+
+                    <div class="selection-instructions">
+                        <p><strong>Instructions:</strong> Select exactly <strong>4 responses</strong> for human review.
+                        </p>
+                        <p><strong>Valid:</strong> <span class="valid-combo">4 breaking</span> OR <span
+                                class="valid-combo">3 breaking + 1 passing</span></p>
+                        <div id="selectionTipContainer"></div>
+                    </div>
+
+                    <div id="selectionGrid" class="selection-table-container">
+                        <!-- Selection table added dynamically -->
+                    </div>
+
+                    <div class="selection-footer">
+                        <div id="selectionCount" class="selection-count">Selected: 0 / 4</div>
+                        <button class="btn btn-primary btn-lg" id="confirmSelectionBtn" disabled>
+                            ✅ Confirm Selection & Start Review
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Breaking Results Section -->
+            <section class="section hidden" id="resultsSection">
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">
+                            <span class="card-title-icon">🔴</span>
+                            Model Breaking Responses
+                        </h2>
+
+                    </div>
+
+                    <!-- Review Progress (top) -->
+                    <div id="reviewProgressContainer"
+                        style="margin-bottom: 1rem; padding: 1rem; background: var(--bg-tertiary); border-radius: 8px;">
+                        <div
+                            style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+                            <div>
+                                <strong>Human Review Progress:</strong>
+                                <span id="reviewProgressText" style="margin-left: 0.5rem;">0 / 4 completed</span>
+                            </div>
+                        </div>
+                        <p id="reviewInstructions"
+                            style="margin: 0.5rem 0 0 0; font-size: 0.85rem; color: var(--text-muted);">
+                            Complete all 4 human reviews, then scroll down to reveal LLM judgments and save.
+                        </p>
+                    </div>
+
+                    <div id="breakingResults">
+                        <!-- Results cards added dynamically -->
+                    </div>
+
+                    <div id="saveDriveContainer" class="hidden"
+                        style="padding: 1.5rem; text-align: center; border-top: 1px solid var(--border); position: relative; background: var(--bg-card); margin-top: 2rem;">
+
+                        <!-- Action Buttons Row -->
+                        <div
+                            style="display: flex; justify-content: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem;">
+                            <button class="btn btn-primary btn-lg" id="revealLLMBtnBottom" disabled>
+                                👁️ Reveal LLM Judgments
+                            </button>
+                            <button class="btn btn-primary btn-lg" id="saveDriveBtn" disabled style="opacity: 0.5;">
+                                💾 Save to Colab Notebook
+                            </button>
+                        </div>
+
+                        <!-- Progress/Status Message -->
+                        <p id="bottomInstructions" style="margin: 0; color: var(--text-muted); font-size: 0.9rem;">
+                            Complete all 4 human reviews → Click "Reveal LLM Judgments" → Save will be enabled
+                        </p>
+                    </div>
+
+                    <div id="noBreaksMessage" class="empty-state hidden">
+                        <div class="empty-state-icon">🎉</div>
+                        <p>No breaking responses found. The model held strong!</p>
+                    </div>
+                    <div id="resultsTipContainer"></div>
+                </div>
+            </section>
+
+            <!-- All Results Summary -->
+            <section class="section hidden" id="summarySection">
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">
+                            <span class="card-title-icon">📋</span>
+                            Hunt Summary
+                        </h2>
+                    </div>
+
+                    <div class="notebook-info">
+                        <div class="info-item">
+                            <div class="info-label">Total Hunts</div>
+                            <div class="info-value" id="summaryTotal">-</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">Breaks Found</div>
+                            <div class="info-value" id="summaryBreaks">-</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">Success Rate</div>
+                            <div class="info-value" id="summarySuccess">-</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">Target Met</div>
+                            <div class="info-value" id="summaryMet">-</div>
+                        </div>
+                    </div>
+                    <div id="summaryTipContainer"></div>
+                </div>
+            </section>
+        </div><!-- /.main-content-area -->
+    </main>
+
+    <!-- Human Blind Judging Modal -->
+    <div id="blindJudgeModal" class="modal hidden">
+        <div class="modal-backdrop"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>🧑‍⚖️ Human Judgment Required</h3>
+                <span class="modal-subtitle">Judge this response before seeing LLM results</span>
+            </div>
+
+            <div class="modal-body">
+                <div class="judge-section">
+                    <label class="judge-label">Hunt #<span id="judgeHuntId">1</span> - Model Response:</label>
+                    <div class="judge-response-box" id="judgeResponseText">
+                        Loading response...
+                    </div>
+                </div>
+
+                <div class="judge-section">
+                    <label class="judge-label">Your Judgment:</label>
+                    <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.5rem;">
+                        Based on the response reference criteria, does this response PASS or FAIL?
+                    </p>
+                    <div class="judge-buttons">
+                        <button class="btn btn-success btn-lg" id="humanJudgePass">
+                            ✅ PASS (Score 1)
+                        </button>
+                        <button class="btn btn-danger btn-lg" id="humanJudgeFail">
+                            ❌ FAIL (Score 0)
+                        </button>
+                        <button class="btn btn-secondary" id="humanJudgeSkip">
+                            Skip
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Revealed after human judges -->
+                <div id="llmJudgeReveal" class="hidden">
+                    <hr style="margin: 1.5rem 0; border-color: var(--border);">
+                    <div class="judge-comparison">
+                        <div class="comparison-item">
+                            <div class="comparison-label">Your Judgment</div>
+                            <div class="comparison-value" id="humanJudgeResult">-</div>
+                        </div>
+                        <div class="comparison-item">
+                            <div class="comparison-label">LLM Judge (GPT-5)</div>
+                            <div class="comparison-value" id="llmJudgeResult">-</div>
+                        </div>
+                        <div class="comparison-item">
+                            <div class="comparison-label">Match?</div>
+                            <div class="comparison-value" id="judgeMatch">-</div>
+                        </div>
+                    </div>
+                    <button class="btn btn-primary" id="nextHuntBtn" style="margin-top: 1rem; width: 100%;">
+                        Next Hunt →
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Response Slide-out Panel (for viewing responses during hunt) -->
+    <div class="response-slideout-backdrop" id="responseSlideoutBackdrop"></div>
+    <div class="response-slideout" id="responseSlideout">
+        <div class="slideout-resize-handle" id="responseSlideoutResizeHandle" title="Drag to resize"></div>
+        <div class="response-slideout-header">
+            <div class="response-slideout-title">
+                <span>📄</span>
+                <span id="slideoutTitle">Hunt #1 Response</span>
+            </div>
+            <button class="response-slideout-close" id="slideoutCloseBtn" title="Close">&times;</button>
+        </div>
+        <div class="response-slideout-meta" id="slideoutMeta">
+            <div class="response-slideout-meta-item">
+                <span class="response-slideout-meta-label">Model:</span>
+                <span class="response-slideout-meta-value" id="slideoutModel">-</span>
+            </div>
+            <div class="response-slideout-meta-item">
+                <span class="response-slideout-meta-label">Status:</span>
+                <span class="response-slideout-meta-value" id="slideoutStatus">-</span>
+            </div>
+            <div class="response-slideout-meta-item">
+                <span class="response-slideout-meta-label">Score:</span>
+                <span class="response-slideout-meta-value" id="slideoutScore">-</span>
+            </div>
+        </div>
+        <div class="response-slideout-content">
+            <div class="response-slideout-text" id="slideoutResponseText">
+                Loading response...
+            </div>
+        </div>
+    </div>
+
+    <!-- Grading Slide-out Panel (for human review of slots) -->
+    <div class="grading-slideout-backdrop" id="gradingSlideoutBackdrop"></div>
+    <div class="grading-slideout" id="gradingSlideout">
+        <div class="slideout-resize-handle" id="gradingSlideoutResizeHandle" title="Drag to resize"></div>
+        <div class="grading-slideout-header">
+            <div class="grading-slideout-title">
+                <span class="grading-slot-badge" id="gradingSlotBadge">Slot 1</span>
+                <span id="gradingSlotModel">Model</span>
+                <span id="gradingProgressText" class="grading-progress-text"></span>
+            </div>
+            <button class="grading-slideout-close" id="gradingSlideoutCloseBtn" title="Close">&times;</button>
+        </div>
+        <div class="grading-slideout-body" id="gradingSlideoutBody">
+            <!-- Content populated dynamically -->
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toastContainer" style="position: fixed; bottom: 1rem; right: 1rem; z-index: 1000;"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
+
+
+
+    <script type="module" src="/static/app.js?v=256"></script>
+</body>
+
+</html>
