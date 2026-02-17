@@ -344,10 +344,12 @@ export function initStructuredInput() {
             if (!criterion) return;
             const textarea = elements.modelrefPreview;
             if (!textarea) return;
-            const current = textarea.value;
-            // Always add on a new line: append newline + "Cn: " (never at cursor/end-of-line/middle)
-            const prefix = current.length === 0 ? '' : (current.endsWith('\n') ? '' : '\n');
-            const toInsert = current.length === 0 ? `${criterion}: ` : `${prefix}\n${criterion}: `;
+            let current = textarea.value;
+            // Ensure content ends with newline so new criterion is on its own line (never at end of C3, etc.)
+            if (current.length > 0 && !current.endsWith('\n') && !current.endsWith('\r')) {
+                current = current + '\n';
+            }
+            const toInsert = current.length === 0 ? `${criterion}: ` : `\n${criterion}: `;
             textarea.value = current + toInsert;
             textarea.focus();
             textarea.setSelectionRange(textarea.value.length, textarea.value.length);

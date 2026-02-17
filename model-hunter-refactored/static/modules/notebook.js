@@ -18,7 +18,8 @@ import {
     renderInsightTip,
     startTipRotation,
     getIncompleteReviewIssues,
-    getIncompleteReviewsModalMessage
+    getIncompleteReviewsModalMessage,
+    getModelDisplayName
 } from './utils.js';
 import { showToast, showError, triggerColabConfetti } from './celebrations.js';
 import { clearPreviousResults, formatJudgeCriteriaDisplay, warmupConnections, setReviewModeButtonsDisabled } from './results.js';
@@ -1045,6 +1046,8 @@ export function populatePreviewTabs(notebook) {
         validateModelReferenceAndCriteria(notebook.response_reference || '');
     }
     
+    renderLiveExportPreview();
+    
     // Initialize rich text editors
     initRichTextEditors();
     
@@ -1951,8 +1954,91 @@ export function initPreviewTabs() {
             document.querySelectorAll('.preview-panel').forEach(p => p.classList.add('hidden'));
             const targetPanel = document.getElementById(panelId);
             if (targetPanel) targetPanel.classList.remove('hidden');
+            if (previewType === 'liveExport') renderLiveExportPreview();
         });
     });
+}
+
+/**
+ * Build live export preview (what would be saved to Colab)
+ * Updates as user edits, hunts, selects, and reviews.
+ */
+function buildLiveExportHtml() {
+    const prompt = document.getElementById('promptMarkdown')?.value || state.notebook?.prompt || '';
+    const response = document.getElementById('responseMarkdown')?.value || state.notebook?.response || '';
+    const criteria = document.getElementById('modelrefPreview')?.value || state.notebook?.response_reference || '';
+    const judge = document.getElementById('judgeMarkdown')?.value || state.notebook?.judge_system_prompt || '';
+    
+    const selectedRows = state.selectedRowNumbers || [];
+    const results = selectedRows.map(rn => state.allResponses?.[rn]).filter(Boolean);
+    const reviews = state.humanReviews || {};
+    
+    const isMulti = state.isMultiTurn && state.turns?.length > 0;
+    const turnNum = isMulti ? (state.currentTurn || state.turns?.length) : 1;
+    
+    let html = '';
+    
+    const section = (title, content) => {
+        if (!content) return '';
+        return `<div class="live-export-section"><h4>${escapeHtml(title)}</h4><div class="live-export-body">${escapeHtml(content)}</div></div>`;
+    };
+    
+    html += section(`Turn ${turnNum} - prompt`, prompt);
+    html += section(`Turn ${turnNum} - response`, response);
+    html += section(`Turn ${turnNum} - response_reference`, criteria);
+    html += section(`Turn ${turnNum} - judge_system_prompt`, judge);
+    
+    const modelPrefix = results[0]?.model ? (results[0].model.toLowerCase().includes('nemotron') ? 'Nemotron' : results[0].model.toLowerCase().includes('qwen') ? 'Qwen' : 'Model') : 'Model';
+    
+    for (let i = 0; i < 4; i++) {
+        const r = results[i];
+        const slot = i + 1;
+        const resp = r?.response || '(empty)';
+        html += section(`Turn ${turnNum} - ${modelPrefix}_${slot}`, resp);
+        
+        const llm = r?.judge_explanation || (r?.judge_criteria ? JSON.stringify(r.judge_criteria, null, 2) : '') || '(pending)';
+        html += section(`Turn ${turnNum} - llm_judge_${slot}`, llm);
+        
+        const reviewKey = `row_${selectedRows[i]}`;
+        const review = reviews[reviewKey];
+        const human = review ? (review.explanation || JSON.stringify(review.grading_basis || {}, null, 2)) : '(pending)';
+        html += section(`Turn ${turnNum} - human_judge_${slot}`, human);
+    }
+    
+    const perModel = {};
+    const countResult = (r) => r?.model && r?.response && String(r.response).trim() && !r?.error;
+    (state.allResponses || []).forEach(r => {
+        if (countResult(r)) perModel[r.model] = (perModel[r.model] || 0) + 1;
+    });
+    if (state.isMultiTurn && state.turns) {
+        state.turns.forEach(t => {
+            (t.results || []).forEach(r => {
+                if (countResult(r)) perModel[r.model] = (perModel[r.model] || 0) + 1;
+            });
+        });
+    }
+    const attemptsLines = Object.entries(perModel).length > 0
+        ? Object.entries(perModel).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${getModelDisplayName(k)}: ${v}`).join('\n')
+        : String((state.allResponses || []).filter(countResult).length);
+    html += section('number_of_attempts_made', attemptsLines);
+    
+    return html || '<p class="text-muted">Load a notebook and start editing to see the live export preview.</p>';
+}
+
+export function renderLiveExportPreview() {
+    const el = document.getElementById('liveExportContent');
+    if (!el) return;
+    el.innerHTML = buildLiveExportHtml();
+}
+
+/**
+ * Update Live Export tab if visible. Call from autosave, hunt complete, selection, reviews.
+ */
+export function scheduleLiveExportUpdate() {
+    const panel = document.getElementById('previewLiveExport');
+    if (panel && !panel.classList.contains('hidden')) {
+        renderLiveExportPreview();
+    }
 }
 
 
