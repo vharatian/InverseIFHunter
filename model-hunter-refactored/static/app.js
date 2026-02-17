@@ -216,21 +216,21 @@ function initEventListeners() {
         });
     });
     
-    // Add criterion buttons (insert C1:, C2:, etc. at cursor)
+    // Add criterion buttons (always add C1:, C2:, etc. on a new line, never at cursor)
     document.querySelectorAll('.add-criterion-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             const targetId = btn.dataset.target;
             const prefix = btn.dataset.prefix || 'C1';
             const textarea = document.getElementById(targetId);
             if (!textarea || btn.disabled) return;
-            const insert = `${prefix}: `;
-            const start = textarea.selectionStart;
-            const end = textarea.selectionEnd;
-            const before = textarea.value.substring(0, start);
-            const after = textarea.value.substring(end);
-            const newVal = before + insert + after;
-            textarea.value = newVal;
-            textarea.selectionStart = textarea.selectionEnd = start + insert.length;
+            let current = textarea.value;
+            // Ensure content ends with newline so new criterion is on its own line
+            if (current.length > 0 && !current.endsWith('\n') && !current.endsWith('\r')) {
+                current = current + '\n';
+            }
+            const toInsert = current.length === 0 ? `${prefix}: ` : `\n${prefix}: `;
+            textarea.value = current + toInsert;
+            textarea.selectionStart = textarea.selectionEnd = textarea.value.length;
             textarea.focus();
             textarea.dispatchEvent(new Event('input', { bubbles: true }));
         });
