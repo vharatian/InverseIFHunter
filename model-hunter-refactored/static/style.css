@@ -3747,33 +3747,6 @@ input[type="range"]::-moz-range-thumb:hover {
     font-weight: 600;
 }
 
-/* Live Export Preview */
-.live-export-content {
-    max-height: 600px;
-    overflow-y: auto;
-}
-.live-export-section {
-    margin-bottom: 1.25rem;
-    padding-bottom: 1rem;
-    border-bottom: 1px solid var(--border);
-}
-.live-export-section:last-child {
-    border-bottom: none;
-}
-.live-export-section h4 {
-    font-size: 0.9rem;
-    color: var(--accent-primary);
-    margin: 0 0 0.5rem 0;
-    font-weight: 600;
-}
-.live-export-body {
-    font-size: 0.9rem;
-    white-space: pre-wrap;
-    word-break: break-word;
-    color: var(--text-primary);
-    line-height: 1.5;
-}
-
 /* Empty preview placeholder */
 .markdown-preview:empty::before {
     content: 'Preview will appear here...';

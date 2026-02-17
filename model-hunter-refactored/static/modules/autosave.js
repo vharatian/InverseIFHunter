@@ -12,7 +12,7 @@ import { showToast, showError } from './celebrations.js';
 import { validatePromptLength } from './editors.js';
 import { convertStructuredToJSON } from './editors.js';
 import { ensurePrettyPrintJSON } from './utils.js';
-import { updateOriginalNotebookWithCell, scheduleLiveExportUpdate } from './notebook.js';
+import { updateOriginalNotebookWithCell } from './notebook.js';
 
 const DEBOUNCE_MS = 800;
 const RETRY_DELAYS = [1000, 2000, 4000];
@@ -220,16 +220,10 @@ export function initAutosave() {
         else setStatus('prompt', STATUS.UNSAVED, promptSection);
     };
 
-    let liveExportTimer = null;
-    const onLiveExportInput = () => {
-        if (liveExportTimer) clearTimeout(liveExportTimer);
-        liveExportTimer = setTimeout(() => { scheduleLiveExportUpdate(); liveExportTimer = null; }, 400);
-    };
     if (promptInput) promptInput.addEventListener('input', onInput);
-    if (responseInput) responseInput.addEventListener('input', () => { scheduleBatchSave(); onLiveExportInput(); });
-    if (modelrefInput) modelrefInput.addEventListener('input', () => { scheduleBatchSave(); onLiveExportInput(); });
-    if (judgeInput) judgeInput.addEventListener('input', () => { scheduleBatchSave(); onLiveExportInput(); });
-    if (promptInput) promptInput.addEventListener('input', onLiveExportInput);
+    if (responseInput) responseInput.addEventListener('input', scheduleBatchSave);
+    if (modelrefInput) modelrefInput.addEventListener('input', scheduleBatchSave);
+    if (judgeInput) judgeInput.addEventListener('input', scheduleBatchSave);
 }
 
 /**

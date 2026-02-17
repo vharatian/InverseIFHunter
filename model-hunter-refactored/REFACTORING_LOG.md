@@ -316,10 +316,9 @@
 - **Files:** `services/notebook_parser.py` (export_notebook, export_multi_turn_notebook, format_number_of_attempts_made, get_model_display_name), `services/snapshot_service.py` (per_model_hunts), `routes/notebook.py`, `static/modules/notebook.js` (per_model_hunts computation)
 - Status: DONE
 
-### Live Export Preview — Feb 17, 2026 ✅
+### Live Export Preview — Feb 17, 2026 (Removed)
 
-- **Feature:** In-app Live Export tab in preview panel. Shows Colab export content as user edits, hunts, selects, and reviews.
-- **Updates on:** prompt/response edits (400ms debounce), hunt complete, selection confirm, human reviews.
-- **Files:** `static/index.html`, `static/modules/notebook.js`, `static/modules/autosave.js`, `static/modules/results.js`, `static/style.css`
-- Status: DONE
+- **Was:** In-app Live Export tab in preview panel. Removed due to not working reliably.
+- **Reverted:** Tab, panel, buildLiveExportHtml, renderLiveExportPreview, scheduleLiveExportUpdate; autosave/results wiring; CSS.
+- Status: REMOVED
 
