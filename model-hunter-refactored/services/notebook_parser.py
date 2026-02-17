@@ -7,14 +7,61 @@ Parses .ipynb files and extracts structured data including:
 - Judge prompts and system prompts
 - Model/judge result slots
 """
+import asyncio
 import json
 import logging
 import re
 import httpx
+
+# Service account timeout: fail fast and use fallback if Drive API doesn't respond in time
+SERVICE_ACCOUNT_TIMEOUT = 10.0
 from typing import Dict, Any, Optional, List, Tuple
 from models.schemas import ParsedNotebook, NotebookCell
 
 logger = logging.getLogger(__name__)
+
+# Display names for known models (mirrors config.js PROVIDER_MODELS). Use version/numbers for same-model variants.
+PROVIDER_MODELS = {
+    'openrouter': [
+        {'id': 'nvidia/nemotron-3-nano-30b-a3b', 'name': 'Nemotron-3-Nano (Fast)'},
+        {'id': 'qwen/qwen3-235b-a22b-thinking-2507', 'name': 'Qwen3-235B (Thinking)'},
+        {'id': 'anthropic/claude-sonnet-4.5', 'name': 'Claude Sonnet 4.5'},
+        {'id': 'anthropic/claude-opus-4.5', 'name': 'Claude Opus 4.5'},
+        {'id': 'anthropic/claude-opus-4.6', 'name': 'Claude Opus 4.6'},
+    ],
+    'fireworks': [
+        {'id': 'accounts/fireworks/models/qwen3-235b-a22b-thinking-2507', 'name': 'Qwen3-235B (Thinking)'},
+    ],
+}
+
+
+def get_model_display_name(model_id: str) -> str:
+    """Get display name for a model ID. Uses version names/numbers for same-model variants."""
+    if not model_id:
+        return 'Unknown'
+    for models in PROVIDER_MODELS.values():
+        for m in models:
+            if m['id'] == model_id:
+                return m['name']
+    last_part = model_id.split('/')[-1] if '/' in model_id else model_id
+    if last_part.startswith('claude-'):
+        rest = last_part.replace('claude-', '')
+        return 'Claude ' + ' '.join(s[:1].upper() + s[1:] for s in rest.split('-'))
+    return last_part
+
+
+def format_number_of_attempts_made(
+    per_model_hunts: Optional[Dict[str, int]] = None,
+    total_hunts_ran: int = 0
+) -> str:
+    """Format number_of_attempts_made as markdown list per model with display names."""
+    if per_model_hunts and len(per_model_hunts) > 0:
+        lines = []
+        for model_id, count in sorted(per_model_hunts.items(), key=lambda x: (-x[1], x[0])):
+            display = get_model_display_name(model_id)
+            lines.append(f"{display}: {count}")
+        return '\n'.join(lines)
+    return str(total_hunts_ran)
 
 
 class NotebookParser:
@@ -55,9 +102,18 @@ class NotebookParser:
         
         # If it's a Colab/Drive URL, use service account to read (SECURE)
         if file_id:
+            sa_error = None
             try:
-                content = self._read_with_service_account(file_id)
-            except Exception as sa_error:
+                # Run sync Drive API call in thread to avoid blocking; 10s timeout then fallback
+                content = await asyncio.wait_for(
+                    asyncio.to_thread(self._read_with_service_account, file_id),
+                    timeout=SERVICE_ACCOUNT_TIMEOUT,
+                )
+            except (asyncio.TimeoutError, Exception) as e:
+                sa_error = e
+                content = None
+                logger.info(f"Service account fetch failed or timed out ({SERVICE_ACCOUNT_TIMEOUT}s): {e}. Using fallback.")
+            if content is None:
                 # Fallback to public URL methods if service account fails
                 async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
                     download_methods = [
@@ -506,10 +562,14 @@ class NotebookParser:
         results: List[Dict[str, Any]],
         include_reasoning: bool = True,
         human_reviews: Dict[str, Any] = None,
-        total_hunts_ran: int = 0
+        total_hunts_ran: int = 0,
+        per_model_hunts: Optional[Dict[str, int]] = None
     ) -> str:
         """
         Export modified notebook with hunt results.
+        
+        Uses **[Turn 1 - prompt]**, **[Turn 1 - response]**, etc. for n=1.
+        number_of_attempts_made: per-model markdown list with display names.
         
         Args:
             original_content: Original notebook JSON string
@@ -518,6 +578,7 @@ class NotebookParser:
             include_reasoning: Whether to append reasoning traces
             human_reviews: Dict of human reviews keyed by hunt_id
             total_hunts_ran: Total number of hunts ran across all attempts
+            per_model_hunts: Optional model_id -> count for number_of_attempts_made
         
         Returns:
             Modified notebook JSON string
@@ -824,7 +885,8 @@ class NotebookParser:
             # Combine pass rate summary with criteria details
             criteria_summary = f"{pass_rate_text}, here are the details:\n\n" + "\n".join(criteria_details) if criteria_details else pass_rate_text
             
-            grading_json = json.dumps({k: v.upper() for k, v in judge_criteria.items()}, indent=2)
+            grading_json = json.dumps({k: v.upper() for k, v in judge_criteria.items()}, indent=2, ensure_ascii=False)
+            answer_json = json.dumps({"answer_score": judge_score}, indent=2, ensure_ascii=False)
             
             return f"""[Grading Basis]:
 
@@ -832,7 +894,9 @@ class NotebookParser:
 
 [Score]: {judge_score} point(s)
 
-[JSON]: {{"answer_score": {judge_score}}}
+[JSON]:
+
+{answer_json}
 
 [Explanation]:
 
@@ -842,9 +906,9 @@ class NotebookParser:
         def format_human_judge_content(review):
             grading_basis = review.get('grading_basis', {}) if review else {}
             if grading_basis:
-                grading_json = json.dumps({k: v.upper() for k, v in grading_basis.items()}, indent=2)
+                grading_json = json.dumps({k: v.upper() for k, v in grading_basis.items()}, indent=2, ensure_ascii=False)
             else:
-                grading_json = "{}"
+                grading_json = json.dumps({}, indent=2)
             
             # Calculate score based on 50% rule: if MORE than 50% criteria are PASS, overall is PASS (score 1)
             # If 50% or less pass, it's FAIL (score 0, breaking) - matches LLM judge logic
@@ -853,6 +917,7 @@ class NotebookParser:
             score = 1 if pass_count > total_criteria / 2 else 0
             
             explanation = (review.get('explanation', '') or review.get('notes', '')) if review else ''
+            answer_json = json.dumps({"answer_score": score}, indent=2, ensure_ascii=False)
             
             return f"""[Grading Basis]:
 
@@ -860,7 +925,9 @@ class NotebookParser:
 
 [Score]: {score} point(s)
 
-[JSON]: {{"answer_score": {score}}}
+[JSON]:
+
+{answer_json}
 
 [Explanation]:
 
@@ -894,8 +961,8 @@ class NotebookParser:
                     if not result and slot_num <= len(results):
                         result = results[slot_num - 1]
                     response_text = result.get('response', '') if result else ''
-                    # Use correct model prefix from results, not original heading
-                    correct_heading = f"{model_prefix_capitalized}_{slot_num}"
+                    # Use correct model prefix from results; Turn 1 heading
+                    correct_heading = f"Turn 1 - {model_prefix_capitalized}_{slot_num}"
                     cell['source'] = [f"**[{correct_heading}]**\n\n{response_text}"]
                     updated_slots.add(f"model_{slot_num}")
                     slot_cells_dict[(slot_num, 'model')] = cell
@@ -906,7 +973,7 @@ class NotebookParser:
                     if not result and slot_num <= len(results):
                         result = results[slot_num - 1]
                     llm_content = format_llm_judge_content(result)
-                    cell['source'] = [f"**[{heading_original}]**\n\n{llm_content}"]
+                    cell['source'] = [f"**[Turn 1 - {heading_original}]**\n\n{llm_content}"]
                     updated_slots.add(f"judge_{slot_num}")
                     slot_cells_dict[(slot_num, 'llm_judge')] = cell
                     logger.debug("Updated llm_judge_%d cell", slot_num)
@@ -922,7 +989,7 @@ class NotebookParser:
                         expected_hunt_id = int(slot_result.get('hunt_id', 0)) if slot_result else None
                         logger.debug("Updating human_judge_%d cell - expected hunt_id: %s, review judgment: %s", slot_num, expected_hunt_id, review.get('judgment') if review else None)
                     human_content = format_human_judge_content(review)
-                    cell['source'] = [f"**[{heading_original}]**\n\n{human_content}"]
+                    cell['source'] = [f"**[Turn 1 - {heading_original}]**\n\n{human_content}"]
                     updated_slots.add(f"human_{slot_num}")
                     slot_cells_dict[(slot_num, 'human_judge')] = cell
                     logger.debug("Updated human_judge_%d cell (review present: %s, has_grading_basis: %s)", slot_num, review is not None, bool(review.get('grading_basis') if review else False))
@@ -933,7 +1000,7 @@ class NotebookParser:
                         if not result and slot_num <= len(results):
                             result = results[slot_num - 1]
                         reasoning_trace = result.get('reasoning_trace', '') if result else ''
-                        cell['source'] = [f"**[{heading_original}]**\n\n{reasoning_trace}"]
+                        cell['source'] = [f"**[Turn 1 - {heading_original}]**\n\n{reasoning_trace}"]
                         updated_slots.add(f"reasoning_{slot_num}")
                         slot_cells_dict[(slot_num, 'reasoning_trace')] = cell
                         logger.debug("Updated reasoning_trace_%d cell", slot_num)
@@ -943,12 +1010,10 @@ class NotebookParser:
             else:
                 # Not a slot cell - check if it's number_of_attempts_made
                 if heading_lower == 'number_of_attempts_made':
-                    # Use total_hunts_ran which should be len(all_results) - total completed hunts
-                    new_attempts = total_hunts_ran
-                    # Don't clamp - show actual count
-                    cell['source'] = [f"**[{heading_original}]**:\n\n{new_attempts}"]
+                    attempts_content = format_number_of_attempts_made(per_model_hunts, total_hunts_ran)
+                    cell['source'] = [f"**[number_of_attempts_made]**:\n\n{attempts_content}"]
                     updated_slots.add('number_of_attempts_made')
-                    logger.debug("Updated number_of_attempts_made cell to %d (total completed hunts)", new_attempts)
+                    logger.debug("Updated number_of_attempts_made cell")
                 # Keep all non-slot cells in their original order (for now)
                 non_slot_cells.append(cell)
         
@@ -965,7 +1030,7 @@ class NotebookParser:
                     "cell_type": "markdown",
                     "id": f"auto_model_{slot_num}",
                     "metadata": {},
-                    "source": [f"**[{model_prefix_capitalized}_{slot_num}]**\n\n{response_text}"]
+                    "source": [f"**[Turn 1 - {model_prefix_capitalized}_{slot_num}]**\n\n{response_text}"]
                 }
                 logger.debug("Created model_%d cell", slot_num)
             
@@ -976,7 +1041,7 @@ class NotebookParser:
                     "cell_type": "markdown",
                     "id": f"auto_llm_judge_{slot_num}",
                     "metadata": {},
-                    "source": [f"**[llm_judge_{slot_num}]**\n\n{llm_content}"]
+                    "source": [f"**[Turn 1 - llm_judge_{slot_num}]**\n\n{llm_content}"]
                 }
                 logger.debug("Created llm_judge_%d cell", slot_num)
             
@@ -995,7 +1060,7 @@ class NotebookParser:
                     "cell_type": "markdown",
                     "id": f"auto_human_{slot_num}",
                     "metadata": {},
-                    "source": [f"**[human_judge_{slot_num}]**\n\n{human_content}"]
+                    "source": [f"**[Turn 1 - human_judge_{slot_num}]**\n\n{human_content}"]
                 }
                 logger.debug("Created human_judge_%d cell (review present: %s, has_grading_basis: %s)", slot_num, review is not None, bool(review.get('grading_basis') if review else False))
             
@@ -1006,7 +1071,7 @@ class NotebookParser:
                     "cell_type": "markdown",
                     "id": f"auto_reasoning_trace_{slot_num}",
                     "metadata": {},
-                    "source": [f"**[reasoning_trace_{slot_num}]**\n\n{reasoning_trace}"]
+                    "source": [f"**[Turn 1 - reasoning_trace_{slot_num}]**\n\n{reasoning_trace}"]
                 }
                 logger.debug("Created reasoning_trace_%d cell", slot_num)
         
@@ -1036,19 +1101,38 @@ class NotebookParser:
         # Step 6: Add number_of_attempts_made cell at the end if it doesn't exist
         attempts_cell_found = 'number_of_attempts_made' in updated_slots
         if not attempts_cell_found:
-            # Use total_hunts_ran which should be len(all_results) - total completed hunts
-            new_attempts = total_hunts_ran
-            # Don't clamp - show actual count
+            attempts_content = format_number_of_attempts_made(per_model_hunts, total_hunts_ran)
             final_cells.append({
                 "cell_type": "markdown",
                 "id": "auto_attempts_counter",
                 "metadata": {},
-                "source": [f"**[number_of_attempts_made]**:\n\n{new_attempts}"]
+                "source": [f"**[number_of_attempts_made]**:\n\n{attempts_content}"]
             })
-            logger.debug("Created number_of_attempts_made cell with count=%d (total completed hunts)", new_attempts)
+            logger.debug("Created number_of_attempts_made cell")
+        
+        # Step 7: Update base cells (prompt, response, response_reference, judge_system_prompt) to Turn 1 headings
+        turn1_base_headings = ('prompt', 'response', 'response_reference', 'judge_system_prompt', 'judge_prompt_template')
+        for cell in final_cells:
+            source = cell.get('source', [])
+            if not source:
+                continue
+            content = ''.join(s if isinstance(s, str) else str(s) for s in source)
+            match = self.HEADING_PATTERN.search(content)
+            if match:
+                inner = match.group(1).strip()
+                inner_lower = inner.lower()
+                # Skip if already has "Turn N -" prefix
+                if 'turn' in inner_lower and ' - ' in inner:
+                    continue
+                if inner_lower in turn1_base_headings:
+                    new_heading = f"**[Turn 1 - {inner}]**"
+                    content = content[:match.start()] + new_heading + content[match.end():]
+                    cell['source'] = [content]
         
         notebook['cells'] = final_cells
         logger.debug("Final notebook has %d cells", len(final_cells))
+        from helpers.notebook_helpers import pretty_print_json_in_notebook
+        pretty_print_json_in_notebook(notebook)
         return json.dumps(notebook, indent=2)
 
     def export_multi_turn_notebook(
@@ -1060,24 +1144,16 @@ class NotebookParser:
         include_reasoning: bool = True,
         human_reviews: dict = None,
         total_hunts_ran: int = 0,
-        conversation_history: list = None
+        conversation_history: list = None,
+        per_model_hunts: Optional[Dict[str, int]] = None
     ) -> str:
         """
-        Export multi-turn notebook with all turns' data.
+        Export multi-turn notebook. Latest turn first, then previous turns (newest first).
         
-        Non-breaking turns get: prompt_K, response_reference_K, selected_response_K, selected_judge_K
-        Breaking turn gets: full 4-response treatment (same as single-turn)
-        Turn 1 uses original field names (no _1 suffix) for backward compat.
-        
-        Args:
-            original_content: Original notebook JSON string
-            parsed: Parsed notebook data
-            turns: List of TurnData dicts (all turns including breaking)
-            breaking_turn_results: List of hunt results for the breaking turn
-            include_reasoning: Whether to include reasoning traces
-            human_reviews: Dict of human reviews for breaking turn
-            total_hunts_ran: Total hunts across all turns
-            conversation_history: Full conversation history
+        Latest turn: **[Turn N - prompt]**, response, response_reference, judge_system_prompt,
+        model slots, llm_judge, human_judge, reasoning_trace.
+        Previous turns: **[Turn K - prompt]**, selected_response, response_reference, selected_judge.
+        number_of_attempts_made: per-model markdown list with display names.
         """
         if isinstance(original_content, str):
             notebook = json.loads(original_content)
@@ -1095,20 +1171,19 @@ class NotebookParser:
         conversation_history = conversation_history or []
         
         if not turns:
-            # No turns data, fall back to single-turn export
             return self.export_notebook(
                 original_content=original_content,
                 parsed=parsed,
                 results=breaking_turn_results,
                 include_reasoning=include_reasoning,
                 human_reviews=human_reviews,
-                total_hunts_ran=total_hunts_ran
+                total_hunts_ran=total_hunts_ran,
+                per_model_hunts=per_model_hunts
             )
         
         total_turns = len(turns)
-        breaking_turn_num = turns[-1].get('turn_number', total_turns) if turns else 1
+        bt_num = turns[-1].get('turn_number', total_turns) if turns else 1
         
-        # If only 1 turn (single-turn case), use standard export for backward compat
         if total_turns == 1:
             return self.export_notebook(
                 original_content=original_content,
@@ -1116,7 +1191,8 @@ class NotebookParser:
                 results=breaking_turn_results,
                 include_reasoning=include_reasoning,
                 human_reviews=human_reviews,
-                total_hunts_ran=total_hunts_ran
+                total_hunts_ran=total_hunts_ran,
+                per_model_hunts=per_model_hunts
             )
         
         # Multi-turn export
@@ -1153,63 +1229,28 @@ class NotebookParser:
                 continue
             non_slot_cells.append(cell)
         
-        # Step 2: Helper to create a markdown cell
+        # Step 2: Helper to create a markdown cell with **[heading]** format
         def make_cell(heading, content, cell_id=None):
             return {
                 "cell_type": "markdown",
-                "id": cell_id or f"auto_{heading.lower().replace(' ', '_')}",
+                "id": cell_id or f"auto_{heading.lower().replace(' ', '_').replace('-', '_')}",
                 "metadata": {},
                 "source": [f"**[{heading}]**\n\n{content}"]
             }
         
-        # Step 3: Build multi-turn cells for non-breaking turns
         multi_turn_cells = []
         
-        for turn in turns[:-1]:  # All turns except the last (breaking) one
-            turn_num = turn.get('turn_number', 1)
-            prompt = turn.get('prompt', '')
-            criteria = turn.get('response_reference', '')
-            selected = turn.get('selected_response', '')
-            judge_result = turn.get('judge_result', {})
-            
-            if turn_num == 1:
-                # Turn 1: Use original field names (backward compat — prompt, response_reference already exist)
-                # Add selected response and judge for turn 1
-                multi_turn_cells.append(make_cell(
-                    'selected_response_1', selected, f'auto_selected_response_1'))
-                if judge_result:
-                    judge_text = self._format_turn_judge(judge_result)
-                    multi_turn_cells.append(make_cell(
-                        'selected_judge_1', judge_text, f'auto_selected_judge_1'))
-            else:
-                # Turn 2+: Use _K suffix
-                multi_turn_cells.append(make_cell(
-                    f'prompt_{turn_num}', prompt, f'auto_prompt_{turn_num}'))
-                multi_turn_cells.append(make_cell(
-                    f'response_reference_{turn_num}', criteria, f'auto_response_reference_{turn_num}'))
-                multi_turn_cells.append(make_cell(
-                    f'selected_response_{turn_num}', selected, f'auto_selected_response_{turn_num}'))
-                if judge_result:
-                    judge_text = self._format_turn_judge(judge_result)
-                    multi_turn_cells.append(make_cell(
-                        f'selected_judge_{turn_num}', judge_text, f'auto_selected_judge_{turn_num}'))
-        
-        # Step 4: Build breaking turn cells (full 4-response treatment)
-        # Use the standard export logic but as cells
+        # Step 3: LATEST TURN FIRST (breaking turn) - full structure with Turn N headings
         breaking_turn = turns[-1]
-        bt_num = breaking_turn.get('turn_number', total_turns)
         bt_prompt = breaking_turn.get('prompt', '')
         bt_criteria = breaking_turn.get('response_reference', '')
+        bt_ref_response = parsed.response  # Reference response judged before hunt
         
-        # Breaking turn prompt and criteria
-        if bt_num > 1:
-            multi_turn_cells.append(make_cell(
-                f'prompt_{bt_num}', bt_prompt, f'auto_prompt_{bt_num}'))
-            multi_turn_cells.append(make_cell(
-                f'response_reference_{bt_num}', bt_criteria, f'auto_response_reference_{bt_num}'))
+        multi_turn_cells.append(make_cell(f'Turn {bt_num} - prompt', bt_prompt, f'auto_turn{bt_num}_prompt'))
+        multi_turn_cells.append(make_cell(f'Turn {bt_num} - response', bt_ref_response or '', f'auto_turn{bt_num}_response'))
+        multi_turn_cells.append(make_cell(f'Turn {bt_num} - response_reference', bt_criteria, f'auto_turn{bt_num}_response_reference'))
+        multi_turn_cells.append(make_cell(f'Turn {bt_num} - judge_system_prompt', parsed.judge_system_prompt or '', f'auto_turn{bt_num}_judge_system_prompt'))
         
-        # Breaking turn: 4 model responses + judges + human reviews + reasoning
-        # Determine model prefix
         model_prefix = "model"
         if breaking_turn_results:
             first_model = breaking_turn_results[0].get('model', '')
@@ -1219,7 +1260,6 @@ class NotebookParser:
                 model_prefix = 'qwen'
         model_prefix_cap = model_prefix.capitalize()
         
-        # Build slot_to_review mapping
         slot_to_review = {}
         for key_str, review in human_reviews.items():
             slot_num = review.get('slotNum')
@@ -1230,67 +1270,69 @@ class NotebookParser:
         
         for slot_num in range(1, 5):
             result = breaking_turn_results[slot_num - 1] if slot_num <= len(breaking_turn_results) else None
-            
-            # Model response
             response_text = result.get('response', '') if result else ''
             multi_turn_cells.append(make_cell(
-                f'{model_prefix_cap}_{slot_num}', response_text, f'auto_bt_model_{slot_num}'))
+                f'Turn {bt_num} - {model_prefix_cap}_{slot_num}', response_text, f'auto_bt_model_{slot_num}'))
             
-            # LLM judge
             if result:
                 judge_criteria = result.get('judge_criteria', {})
                 judge_score = result.get('judge_score', result.get('score', 0))
                 judge_explanation = result.get('judge_explanation', '')
-                grading_json = json.dumps({k: v.upper() for k, v in judge_criteria.items()}, indent=2) if judge_criteria else '{}'
-                llm_content = f"[Grading Basis]:\n\n{grading_json}\n\n[Score]: {judge_score} point(s)\n\n[JSON]: {{\"answer_score\": {judge_score}}}\n\n[Explanation]:\n\n{judge_explanation}"
+                grading_json = json.dumps({k: v.upper() for k, v in judge_criteria.items()}, indent=2, ensure_ascii=False) if judge_criteria else json.dumps({}, indent=2)
+                answer_json = json.dumps({"answer_score": judge_score}, indent=2, ensure_ascii=False)
+                llm_content = f"[Grading Basis]:\n\n{grading_json}\n\n[Score]: {judge_score} point(s)\n\n[JSON]:\n\n{answer_json}\n\n[Explanation]:\n\n{judge_explanation}"
             else:
                 llm_content = ''
             multi_turn_cells.append(make_cell(
-                f'llm_judge_{slot_num}', llm_content, f'auto_bt_llm_judge_{slot_num}'))
+                f'Turn {bt_num} - llm_judge_{slot_num}', llm_content, f'auto_bt_llm_judge_{slot_num}'))
             
-            # Human judge
             review = slot_to_review.get(slot_num)
             if review:
                 grading_basis = review.get('grading_basis', {})
-                grading_json = json.dumps({k: v.upper() for k, v in grading_basis.items()}, indent=2) if grading_basis else '{}'
+                grading_json = json.dumps({k: v.upper() for k, v in grading_basis.items()}, indent=2, ensure_ascii=False) if grading_basis else json.dumps({}, indent=2)
                 total_criteria = len(grading_basis)
                 pass_count = sum(1 for v in grading_basis.values() if str(v).upper() == 'PASS')
                 score = 1 if pass_count > total_criteria / 2 else 0
                 explanation = review.get('explanation', '') or review.get('notes', '')
-                human_content = f"[Grading Basis]:\n\n{grading_json}\n\n[Score]: {score} point(s)\n\n[JSON]: {{\"answer_score\": {score}}}\n\n[Explanation]:\n\n{explanation}"
+                answer_json = json.dumps({"answer_score": score}, indent=2, ensure_ascii=False)
+                human_content = f"[Grading Basis]:\n\n{grading_json}\n\n[Score]: {score} point(s)\n\n[JSON]:\n\n{answer_json}\n\n[Explanation]:\n\n{explanation}"
             else:
                 human_content = ''
             multi_turn_cells.append(make_cell(
-                f'human_judge_{slot_num}', human_content, f'auto_bt_human_judge_{slot_num}'))
+                f'Turn {bt_num} - human_judge_{slot_num}', human_content, f'auto_bt_human_judge_{slot_num}'))
             
-            # Reasoning trace
             if include_reasoning:
                 reasoning = result.get('reasoning_trace', '') if result else ''
                 multi_turn_cells.append(make_cell(
-                    f'reasoning_trace_{slot_num}', reasoning, f'auto_bt_reasoning_{slot_num}'))
+                    f'Turn {bt_num} - reasoning_trace_{slot_num}', reasoning, f'auto_bt_reasoning_{slot_num}'))
         
-        # Step 5: Add metadata cells
-        # Conversation history
-        history_json = json.dumps(conversation_history, indent=2) if conversation_history else '[]'
+        # Step 4: PREVIOUS TURNS (newest first: N-1, N-2, ..., 1)
+        prev_turns = list(turns[:-1])
+        prev_turns.reverse()  # Newest first
+        for turn in prev_turns:
+            k = turn.get('turn_number', 1)
+            prompt = turn.get('prompt', '')
+            criteria = turn.get('response_reference', '')
+            selected = turn.get('selected_response', '')
+            judge_result = turn.get('judge_result', {})
+            multi_turn_cells.append(make_cell(f'Turn {k} - prompt', prompt, f'auto_turn{k}_prompt'))
+            multi_turn_cells.append(make_cell(f'Turn {k} - selected_response', selected, f'auto_turn{k}_selected_response'))
+            multi_turn_cells.append(make_cell(f'Turn {k} - response_reference', criteria, f'auto_turn{k}_response_reference'))
+            if judge_result:
+                judge_text = self._format_turn_judge(judge_result)
+                multi_turn_cells.append(make_cell(f'Turn {k} - selected_judge', judge_text, f'auto_turn{k}_selected_judge'))
+        
+        # Step 5: number_of_attempts_made (last) - per-model markdown list
+        attempts_content = format_number_of_attempts_made(per_model_hunts, total_hunts_ran)
         multi_turn_cells.append(make_cell(
-            'conversation_history', history_json, 'auto_conversation_history'))
+            'number_of_attempts_made', attempts_content, 'auto_attempts_counter'))
         
-        # Number of turns
-        multi_turn_cells.append(make_cell(
-            'number_of_turns', str(total_turns), 'auto_number_of_turns'))
-        
-        # Breaking turn number
-        multi_turn_cells.append(make_cell(
-            'breaking_turn', str(bt_num), 'auto_breaking_turn'))
-        
-        # Number of attempts made
-        multi_turn_cells.append(make_cell(
-            'number_of_attempts_made', str(total_hunts_ran), 'auto_attempts_counter'))
-        
-        # Step 6: Combine: non-slot cells + multi-turn cells
+        # Step 6: Combine: non-slot cells (metadata only) + multi-turn cells
         notebook['cells'] = non_slot_cells + multi_turn_cells
         
         logger.debug("Multi-turn export: %d turns, breaking at turn %d, %d total cells", total_turns, bt_num, len(notebook['cells']))
+        from helpers.notebook_helpers import pretty_print_json_in_notebook
+        pretty_print_json_in_notebook(notebook)
         return json.dumps(notebook, indent=2)
     
     def _format_turn_judge(self, judge_result: dict) -> str:
@@ -1299,7 +1341,8 @@ class NotebookParser:
         criteria = judge_result.get('criteria', {})
         explanation = judge_result.get('explanation', '')
         
-        grading_json = json.dumps({k: v.upper() for k, v in criteria.items()}, indent=2) if criteria else '{}'
+        grading_json = json.dumps({k: v.upper() for k, v in criteria.items()}, indent=2, ensure_ascii=False) if criteria else json.dumps({}, indent=2)
+        answer_json = json.dumps({"answer_score": score}, indent=2, ensure_ascii=False)
         
         return f"""[Grading Basis]:
 
@@ -1307,7 +1350,9 @@ class NotebookParser:
 
 [Score]: {score} point(s)
 
-[JSON]: {{"answer_score": {score}}}
+[JSON]:
+
+{answer_json}
 
 [Explanation]:
 

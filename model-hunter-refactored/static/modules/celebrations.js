@@ -9,7 +9,7 @@
 import { elements } from './dom.js';
 import { state, getCumulativeStats } from './state.js';
 import { displayBreakingResults } from './results.js';
-import { renderInsightTip, getUserFriendlyError, escapeHtml } from './utils.js';
+import { renderInsightTip, getUserFriendlyError, escapeHtml, debugLog } from './utils.js';
 
 // ============== Celebration Effects Engine ==============
 // Lightweight canvas particle engine for spark/firework effects
@@ -177,7 +177,7 @@ export function _celebFireworkRockets() {
 export function triggerColabConfetti() {
     const effects = [_celebConfettiClassic, _celebFireworkRockets];
     const pick = effects[Math.floor(Math.random() * effects.length)];
-    console.log(`🎉 Celebration effect: ${pick.name}`);
+    debugLog(`🎉 Celebration effect: ${pick.name}`);
     pick();
 }
 

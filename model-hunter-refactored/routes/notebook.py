@@ -488,7 +488,8 @@ async def save_snapshot(request: Request):
                     include_reasoning=snapshot.include_reasoning,
                     human_reviews=snapshot.human_reviews,
                     total_hunts_ran=total_hunts_ran,
-                    conversation_history=conversation_history
+                    conversation_history=conversation_history,
+                    per_model_hunts=getattr(snapshot, 'per_model_hunts', None)
                 )
             else:
                 modified_content = notebook_parser.export_notebook(
@@ -497,7 +498,8 @@ async def save_snapshot(request: Request):
                     results=results,
                     include_reasoning=snapshot.include_reasoning,
                     human_reviews=snapshot.human_reviews,
-                    total_hunts_ran=total_hunts_ran
+                    total_hunts_ran=total_hunts_ran,
+                    per_model_hunts=getattr(snapshot, 'per_model_hunts', None)
                 )
             
             success = drive_client.update_file_content(file_id, modified_content)

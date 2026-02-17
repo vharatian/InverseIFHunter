@@ -18,7 +18,10 @@ import {
     renderInsightTip,
     startTipRotation,
     getIncompleteReviewIssues,
-    getIncompleteReviewsModalMessage
+    getIncompleteReviewsModalMessage,
+    debugLog,
+    ensurePrettyPrintJSON,
+    updateCriteriaButtonsState
 } from './utils.js';
 import { showToast, showError, triggerColabConfetti } from './celebrations.js';
 import { clearPreviousResults, formatJudgeCriteriaDisplay, warmupConnections, setReviewModeButtonsDisabled } from './results.js';
@@ -77,7 +80,7 @@ export async function syncTurnStatusFromBackend(sessionId) {
         // Hide Turn 1 Test Prompt panel when in Turn 2+
         updateTurn1TestPromptVisibility();
     } catch (e) {
-        console.debug('Turn status sync skipped:', e);
+        debugLog('Turn status sync skipped:', e);
     }
 }
 
@@ -114,7 +117,7 @@ export function updateOriginalNotebookWithCell(cellHeading, content) {
         if (cellIndex >= 0) {
             // Update existing cell
             cells[cellIndex].source = [formattedContent];
-            console.log(`✅ Updated existing cell [${cellHeading}] in originalNotebookJson`);
+            debugLog(`✅ Updated existing cell [${cellHeading}] in originalNotebookJson`);
         } else {
             // Find insertion point - after metadata, before any model slots
             // Look for judge_system_prompt or judge_prompt_template as anchor
@@ -144,12 +147,12 @@ export function updateOriginalNotebookWithCell(cellHeading, content) {
             };
             
             cells.splice(insertIndex, 0, newCell);
-            console.log(`✅ Added new cell [${cellHeading}] to originalNotebookJson at index ${insertIndex}`);
+            debugLog(`✅ Added new cell [${cellHeading}] to originalNotebookJson at index ${insertIndex}`);
         }
         
         notebook.cells = cells;
         state.originalNotebookJson = JSON.stringify(notebook, null, 2);
-        console.log(`📝 originalNotebookJson updated, now has ${cells.length} cells`);
+        debugLog(`📝 originalNotebookJson updated, now has ${cells.length} cells`);
         
     } catch (e) {
         console.error('Failed to update originalNotebookJson:', e);
@@ -211,7 +214,7 @@ export function initFileUpload() {
             const handleFetchClick = (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                console.log('Fetch button clicked');
+                debugLog('Fetch button clicked');
                 fetchFromUrl();
             };
             
@@ -229,14 +232,14 @@ export function initFileUpload() {
             fetchBtn.style.pointerEvents = 'auto';
             fetchBtn.style.cursor = 'pointer';
             
-            console.log('✅ Fetch button setup complete', fetchBtn);
+            debugLog('✅ Fetch button setup complete', fetchBtn);
         } else {
             console.error('fetchUrlBtn element not found during initialization');
             // Retry after a short delay in case DOM isn't ready
             setTimeout(() => {
                 const retryBtn = document.getElementById('fetchUrlBtn');
                 if (retryBtn) {
-                    console.log('Found fetch button on retry, setting up...');
+                    debugLog('Found fetch button on retry, setting up...');
                     setupFetchButton();
                 } else {
                     console.error('❌ Fetch button still not found after retry');
@@ -290,7 +293,7 @@ export async function uploadFile(file) {
 }
 
 export async function fetchFromUrl() {
-    console.log('fetchFromUrl called');
+    debugLog('fetchFromUrl called');
     
     // Re-get elements in case they changed
     if (!elements.colabUrlInput) {
@@ -318,8 +321,22 @@ export async function fetchFromUrl() {
         return;
     }
     
+    // Validate URL format: Colab, Google Drive, or raw .ipynb
+    const colabMatch = /colab\.research\.google\.com/i.test(url);
+    const driveMatch = /drive\.google\.com/i.test(url);
+    const ipynbMatch = /\.ipynb(\?|$)/i.test(url);
+    const looksLikeUrl = /^https?:\/\//i.test(url);
+    if (!looksLikeUrl) {
+        showToast('Please enter a valid URL (e.g. https://colab.research.google.com/drive/...)', 'error');
+        return;
+    }
+    if (!colabMatch && !driveMatch && !ipynbMatch) {
+        showToast('URL should be a Colab notebook, Google Drive link, or raw .ipynb file', 'error');
+        return;
+    }
+    
     try {
-        console.log('Fetching from URL:', url);
+        debugLog('Fetching from URL:', url);
         showToast('Fetching notebook from URL...', 'info');
         elements.fetchUrlBtn.disabled = true;
         elements.fetchUrlBtn.textContent = '⏳ Fetching...';
@@ -331,7 +348,7 @@ export async function fetchFromUrl() {
             body: JSON.stringify({ url, trainer_email: trainerInfo?.email, trainer_name: trainerInfo?.name })
         });
         
-        console.log('Response status:', response.status);
+        debugLog('Response status:', response.status);
         
         if (!response.ok) {
             let errorMessage = 'Fetch failed';
@@ -345,7 +362,7 @@ export async function fetchFromUrl() {
         }
         
         const data = await response.json();
-        console.log('Notebook loaded successfully:', data.session_id);
+        debugLog('Notebook loaded successfully:', data.session_id);
         handleNotebookLoaded(data, true);
         
     } catch (error) {
@@ -388,7 +405,7 @@ export function handleNotebookLoaded(data, isUrl = false) {
     state.totalHuntsCount = 0;
     state.huntsThisTurn = 0;
     state.huntLimitReached = false;
-    console.log(`📊 Hunt count reset for notebook ${state.notebookId}: new session ${data.session_id}`);
+    debugLog(`📊 Hunt count reset for notebook ${state.notebookId}: new session ${data.session_id}`);
     
     // Update hunt limit UI
     updateHuntLimitUI();
@@ -396,7 +413,7 @@ export function handleNotebookLoaded(data, isUrl = false) {
     // Save sessionId to localStorage for restoration on refresh
     if (data.session_id) {
         localStorage.setItem('modelHunter_sessionId', data.session_id);
-        console.log('💾 Saved sessionId to localStorage:', data.session_id);
+        debugLog('💾 Saved sessionId to localStorage:', data.session_id);
         // Sync turn status from backend (restore turns and conversation history for multi-turn sessions)
         syncTurnStatusFromBackend(data.session_id);
     }
@@ -442,11 +459,11 @@ export function handleNotebookLoaded(data, isUrl = false) {
     let modelSource = null; // Track where we got the model from
     
     // First, try to get model from metadata (most explicit) - PRIORITY 1
-    console.log('🔍 Checking metadata for model:', data.notebook.metadata);
+    debugLog('🔍 Checking metadata for model:', data.notebook.metadata);
     if (data.notebook.metadata) {
         const metadata = data.notebook.metadata;
-        console.log('   Metadata keys:', Object.keys(metadata));
-        console.log('   Full metadata:', JSON.stringify(metadata, null, 2));
+        debugLog('   Metadata keys:', Object.keys(metadata));
+        debugLog('   Full metadata:', JSON.stringify(metadata, null, 2));
         
         // Try multiple variations: Model, model, MODEL, and case-insensitive search
         let rawModel = metadata.Model || metadata.model || metadata['Model'] || metadata['model'];
@@ -456,7 +473,7 @@ export function handleNotebookLoaded(data, isUrl = false) {
             const modelKey = Object.keys(metadata).find(k => k.toLowerCase() === 'model');
             if (modelKey) {
                 rawModel = metadata[modelKey];
-                console.log(`   Found model key (case-insensitive): "${modelKey}" = "${rawModel}"`);
+                debugLog(`   Found model key (case-insensitive): "${modelKey}" = "${rawModel}"`);
             }
         }
         
@@ -465,23 +482,23 @@ export function handleNotebookLoaded(data, isUrl = false) {
             // Handles cases like "Model: - qwen" -> "qwen", " - qwen" -> "qwen"
             modelPrefix = rawModel.toString().trim().replace(/^[-:\s]+/, '').trim();
             if (modelPrefix) {
-                console.log(`✅ Detected model from metadata: "${rawModel}" -> "${modelPrefix}"`);
+                debugLog(`✅ Detected model from metadata: "${rawModel}" -> "${modelPrefix}"`);
                 modelSource = 'metadata';
             } else {
                 console.warn(`⚠️ Model value in metadata was empty after cleaning: "${rawModel}"`);
             }
         } else {
-            console.log('   No Model field found in metadata');
+            debugLog('   No Model field found in metadata');
         }
     } else {
-        console.log('   No metadata object found');
+        debugLog('   No metadata object found');
     }
     
     // Fallback: extract from model_slots ONLY if metadata didn't provide a model - PRIORITY 2
     if (!modelPrefix && data.notebook.model_prefix) {
         modelPrefix = data.notebook.model_prefix;
         modelSource = 'model_slots';
-        console.log(`⚠️ Using model prefix from model_slots (metadata had no valid Model field): ${modelPrefix}`);
+        debugLog(`⚠️ Using model prefix from model_slots (metadata had no valid Model field): ${modelPrefix}`);
     }
     
     // Warn if there's a conflict between metadata and model_slots
@@ -492,12 +509,12 @@ export function handleNotebookLoaded(data, isUrl = false) {
     
     // If still no model, check if default should be used
     if (!modelPrefix) {
-        console.log('⚠️ No model detected from metadata or model_slots. Will use default (Qwen).');
+        debugLog('⚠️ No model detected from metadata or model_slots. Will use default (Qwen).');
         modelPrefix = 'qwen'; // Set default
         modelSource = 'default';
     }
     
-    console.log(`📌 Final model selection: "${modelPrefix}" (source: ${modelSource})`);
+    debugLog(`📌 Final model selection: "${modelPrefix}" (source: ${modelSource})`);
     
     // Map model prefix to model ID
     if (modelPrefix) {
@@ -505,31 +522,31 @@ export function handleNotebookLoaded(data, isUrl = false) {
         let modelId = null;
         let provider = 'openrouter'; // Default provider
         
-        console.log(`🔍 Mapping model prefix: "${modelPrefix}" (lowercase: "${modelPrefixLower}")`);
+        debugLog(`🔍 Mapping model prefix: "${modelPrefix}" (lowercase: "${modelPrefixLower}")`);
         
         if (modelPrefixLower === 'nemotron' || modelPrefixLower.includes('nemotron')) {
             modelId = 'nvidia/nemotron-3-nano-30b-a3b';
             provider = 'openrouter';
-            console.log(`  → Mapped to Nemotron`);
+            debugLog(`  → Mapped to Nemotron`);
         } else if (modelPrefixLower === 'qwen' || modelPrefixLower.includes('qwen')) {
             // Prefer openrouter if available, fallback to fireworks
             if (PROVIDER_MODELS['openrouter']?.some(m => m.id.includes('qwen'))) {
                 modelId = 'qwen/qwen3-235b-a22b-thinking-2507';
                 provider = 'openrouter';
-                console.log(`  → Mapped to Qwen (OpenRouter)`);
+                debugLog(`  → Mapped to Qwen (OpenRouter)`);
             } else if (PROVIDER_MODELS['fireworks']?.some(m => m.id.includes('qwen'))) {
                 modelId = 'accounts/fireworks/models/qwen3-235b-a22b-thinking-2507';
                 provider = 'fireworks';
-                console.log(`  → Mapped to Qwen (Fireworks)`);
+                debugLog(`  → Mapped to Qwen (Fireworks)`);
             }
         } else if (modelPrefixLower === 'sonnet' || modelPrefixLower.includes('sonnet')) {
             modelId = 'anthropic/claude-sonnet-4.5';
             provider = 'openrouter';
-            console.log(`  → Mapped to Claude Sonnet 4.5`);
+            debugLog(`  → Mapped to Claude Sonnet 4.5`);
         } else if (modelPrefixLower === 'opus' || modelPrefixLower.includes('opus')) {
             modelId = 'anthropic/claude-opus-4.5';
             provider = 'openrouter';
-            console.log(`  → Mapped to Claude Opus 4.5`);
+            debugLog(`  → Mapped to Claude Opus 4.5`);
         } else {
             console.warn(`⚠️ Unknown model prefix: "${modelPrefix}". Will use default (Qwen).`);
             // Default to Qwen if unknown
@@ -554,7 +571,7 @@ export function handleNotebookLoaded(data, isUrl = false) {
         }
     } else {
         // No model detected - use default (Qwen)
-        console.log('ℹ️ No model detected, using default: Qwen');
+        debugLog('ℹ️ No model detected, using default: Qwen');
         if (elements.providerSelect && elements.modelSelect) {
             elements.providerSelect.value = 'openrouter';
             updateModelOptions();
@@ -571,7 +588,7 @@ export function handleNotebookLoaded(data, isUrl = false) {
     // Reset Start Hunt button state (must validate new notebook first) — keep enabled in admin mode
     if (elements.startHuntBtn && !state.adminMode) {
         elements.startHuntBtn.disabled = true;
-        elements.startHuntBtn.title = 'Judge the reference response first (click "Judge Reference Response")';
+        elements.startHuntBtn.title = 'Validate the reference response first (click "Check Ideal Response")';
     } else if (state.adminMode && elements.startHuntBtn) {
         elements.startHuntBtn.disabled = false;
         elements.startHuntBtn.title = 'Admin mode';
@@ -685,7 +702,7 @@ export async function saveToDrive() {
     const passCount = reviews.filter(r => r.judgment === 'good' || r.judgment === 'pass').length;
     
     // Log combination for informational purposes only
-    console.log(`Saving ${reviews.length} review(s): ${failCount} failing, ${passCount} passing`);
+    debugLog(`Saving ${reviews.length} review(s): ${failCount} failing, ${passCount} passing`);
     
     // ===== VALIDATION: Check if diversity check was already passed at confirmation — bypass in admin mode =====
     if (!state.adminMode && !state.diversityCheckPassed) {
@@ -694,7 +711,7 @@ export async function saveToDrive() {
         return;
     }
     
-    console.log('✅ Diversity check already passed at confirmation - proceeding with save');
+    debugLog('✅ Diversity check already passed at confirmation - proceeding with save');
     
     // ===== All validations passed - proceed with save =====
     const btn = document.getElementById('saveDriveBtn');
@@ -713,21 +730,21 @@ export async function saveToDrive() {
         const reviewsForBackend = {};
         const missingReviews = [];
         
-        console.log('DEBUG: Preparing reviews for backend:');
-        console.log('  selectedRowNumbers:', selectedRowNumbers);
-        console.log('  selectedResults hunt_ids:', selectedResults.map(r => r.hunt_id));
-        console.log('  state.humanReviews keys:', Object.keys(state.humanReviews || {}));
+        debugLog('DEBUG: Preparing reviews for backend:');
+        debugLog('  selectedRowNumbers:', selectedRowNumbers);
+        debugLog('  selectedResults hunt_ids:', selectedResults.map(r => r.hunt_id));
+        debugLog('  state.humanReviews keys:', Object.keys(state.humanReviews || {}));
         
         selectedRowNumbers.forEach((rn, index) => {
             const reviewKey = `row_${rn}`;
             const review = state.humanReviews[reviewKey];
             const currentSlotNum = index + 1;
             
-            console.log(`DEBUG: Processing slot ${currentSlotNum}:`);
-            console.log(`  row_number: ${rn}, reviewKey: ${reviewKey}`);
-            console.log(`  review exists: ${!!review}`);
-            console.log(`  selectedResults[${index}] exists: ${!!selectedResults[index]}`);
-            console.log(`  selectedResults[${index}].hunt_id: ${selectedResults[index]?.hunt_id}`);
+            debugLog(`DEBUG: Processing slot ${currentSlotNum}:`);
+            debugLog(`  row_number: ${rn}, reviewKey: ${reviewKey}`);
+            debugLog(`  review exists: ${!!review}`);
+            debugLog(`  selectedResults[${index}] exists: ${!!selectedResults[index]}`);
+            debugLog(`  selectedResults[${index}].hunt_id: ${selectedResults[index]?.hunt_id}`);
             
             if (review && selectedResults[index]) {
                 // CRITICAL FIX: Use slotNum as part of the key to handle duplicate hunt_ids
@@ -741,10 +758,10 @@ export async function saveToDrive() {
                     slotNum: currentSlotNum,  // Use current position, not the old slotNum from review
                     timestamp: review.timestamp
                 };
-                console.log(`  ✓ Mapped review for hunt_id ${selectedResults[index].hunt_id} -> slot ${currentSlotNum} (key: ${uniqueKey}, old slotNum was ${review.slotNum})`);
+                debugLog(`  ✓ Mapped review for hunt_id ${selectedResults[index].hunt_id} -> slot ${currentSlotNum} (key: ${uniqueKey}, old slotNum was ${review.slotNum})`);
             } else if (selectedResults[index]) {
                 // Review missing for this hunt
-                console.log(`  ✗ MISSING REVIEW for slot ${currentSlotNum}, hunt_id ${selectedResults[index].hunt_id}`);
+                debugLog(`  ✗ MISSING REVIEW for slot ${currentSlotNum}, hunt_id ${selectedResults[index].hunt_id}`);
                 missingReviews.push({
                     hunt_id: selectedResults[index].hunt_id,
                     row_number: rn,
@@ -753,7 +770,7 @@ export async function saveToDrive() {
             }
         });
         
-        console.log('DEBUG: Final reviewsForBackend:', Object.keys(reviewsForBackend).map(hid => ({
+        debugLog('DEBUG: Final reviewsForBackend:', Object.keys(reviewsForBackend).map(hid => ({
             hunt_id: hid,
             slotNum: reviewsForBackend[hid].slotNum,
             judgment: reviewsForBackend[hid].judgment
@@ -791,7 +808,7 @@ export async function saveToDrive() {
             r.response && r.response.trim() && !r.error
         ).length;
         
-        console.log('📸 Creating snapshot:', {
+        debugLog('📸 Creating snapshot:', {
             selectedResults: selectedResults.length,
             resultsOrder: selectedResults.map(r => r.hunt_id),
             reviews: Object.keys(reviewsForBackend).length,
@@ -816,7 +833,7 @@ export async function saveToDrive() {
                     originalNotebookJson = data.original_notebook_json;
                     // Cache it in state for future use
                     state.originalNotebookJson = originalNotebookJson;
-                    console.log('✅ Retrieved original notebook from session storage');
+                    debugLog('✅ Retrieved original notebook from session storage');
                 } else {
                     console.error('Failed to fetch original notebook:', await response.text());
                 }
@@ -835,6 +852,20 @@ export async function saveToDrive() {
             ? state.multiTurnTotalHunts + validResponseCount 
             : validResponseCount;
         
+        // Per-model hunt counts for number_of_attempts_made (display names used by backend)
+        const perModelHunts = {};
+        const isValid = (r) => r?.model && r?.response && String(r.response).trim() && !r?.error;
+        if (state.isMultiTurn) {
+            for (const turn of state.turns || []) {
+                for (const r of turn.results || []) {
+                    if (isValid(r)) perModelHunts[r.model] = (perModelHunts[r.model] || 0) + 1;
+                }
+            }
+        }
+        for (const r of state.allResponses || []) {
+            if (isValid(r)) perModelHunts[r.model] = (perModelHunts[r.model] || 0) + 1;
+        }
+        
         const snapshot = {
             original_notebook_json: originalNotebookJson,
             url: notebookUrl,
@@ -842,6 +873,7 @@ export async function saveToDrive() {
             human_reviews: reviewsForBackend,
             total_hunts_ran: totalHunts,
             include_reasoning: true,
+            per_model_hunts: Object.keys(perModelHunts).length > 0 ? perModelHunts : undefined,
             metadata: {
                 parsed_notebook: {
                     filename: state.notebook?.filename || 'notebook.ipynb',
@@ -879,7 +911,7 @@ export async function saveToDrive() {
         }
         
         const result = await response.json();
-        console.log('✅ Snapshot saved successfully:', result);
+        debugLog('✅ Snapshot saved successfully:', result);
         
         const successMessage = missingReviews.length > 0
             ? `✅ Saved to Google Drive! (Note: ${missingReviews.length} hunt(s) saved without reviews)`
@@ -953,14 +985,15 @@ export function populatePreviewTabs(notebook) {
             // Already in structured format or plain text
             elements.modelrefPreview.value = responseRef;
         }
+        updateCriteriaButtonsState('modelrefPreview');
     }
     
     // Display metadata FIRST - before any validation that might cause early return
     // This ensures metadata is always shown even if other parts of the notebook are invalid
-    console.log('📊 Notebook metadata received:', notebook.metadata);
-    console.log('📊 Metadata type:', typeof notebook.metadata);
-    console.log('📊 Metadata keys:', notebook.metadata ? Object.keys(notebook.metadata) : 'null');
-    console.log('📊 Full notebook object keys:', Object.keys(notebook));
+    debugLog('📊 Notebook metadata received:', notebook.metadata);
+    debugLog('📊 Metadata type:', typeof notebook.metadata);
+    debugLog('📊 Metadata keys:', notebook.metadata ? Object.keys(notebook.metadata) : 'null');
+    debugLog('📊 Full notebook object keys:', Object.keys(notebook));
     
     // Try multiple ways to get metadata
     let metadataToDisplay = null;
@@ -974,7 +1007,7 @@ export function populatePreviewTabs(notebook) {
         metadataToDisplay = {};
     }
     
-    console.log('📊 Calling displayMetadata with:', metadataToDisplay);
+    debugLog('📊 Calling displayMetadata with:', metadataToDisplay);
     displayMetadata(metadataToDisplay);
     
     // Validate Model Reference is valid JSON format
@@ -1030,16 +1063,16 @@ export function populatePreviewTabs(notebook) {
         // This must happen BEFORE any modifications to response_reference
         if (!state.initialCriteria || !Array.isArray(state.initialCriteria) || state.initialCriteria.length === 0) {
             state.initialCriteria = JSON.parse(JSON.stringify(parsedCriteria)); // Deep copy
-            console.log('✅ INITIAL CRITERIA SET (first time):', state.initialCriteria.map(c => c.id));
-            console.log('   Full initial criteria:', state.initialCriteria);
+            debugLog('✅ INITIAL CRITERIA SET (first time):', state.initialCriteria.map(c => c.id));
+            debugLog('   Full initial criteria:', state.initialCriteria);
         } else {
-            console.log('✅ INITIAL CRITERIA PRESERVED (not overwritten):', state.initialCriteria.map(c => c.id));
-            console.log('   Current criteria:', parsedCriteria.map(c => c.id));
-            console.log('   Missing from current:', state.initialCriteria
+            debugLog('✅ INITIAL CRITERIA PRESERVED (not overwritten):', state.initialCriteria.map(c => c.id));
+            debugLog('   Current criteria:', parsedCriteria.map(c => c.id));
+            debugLog('   Missing from current:', state.initialCriteria
                 .filter(c => !parsedCriteria.find(pc => pc.id === c.id))
                 .map(c => c.id));
         }
-        console.log('Parsed current criteria:', state.criteria);
+        debugLog('Parsed current criteria:', state.criteria);
         
         // Validate Model Reference: Check JSON format AND criteria completeness
         validateModelReferenceAndCriteria(notebook.response_reference || '');
@@ -1092,9 +1125,9 @@ export function updateAdminModeIndicator(on) {
 // ============== Metadata Display ==============
 
 export function displayMetadata(metadata) {
-    console.log('📊 displayMetadata called with:', metadata);
-    console.log('📊 metadataSidebar element:', elements.metadataSidebar);
-    console.log('📊 metadataGrid element:', elements.metadataGrid);
+    debugLog('📊 displayMetadata called with:', metadata);
+    debugLog('📊 metadataSidebar element:', elements.metadataSidebar);
+    debugLog('📊 metadataGrid element:', elements.metadataGrid);
     
     if (!elements.metadataSidebar || !elements.metadataGrid) {
         console.error('❌ Metadata sidebar elements not found!', {
@@ -1104,9 +1137,9 @@ export function displayMetadata(metadata) {
         return;
     }
     
-    console.log('📊 Displaying metadata:', metadata);
-    console.log('📊 Metadata keys:', metadata ? Object.keys(metadata) : 'null');
-    console.log('📊 Full metadata object:', JSON.stringify(metadata, null, 2));
+    debugLog('📊 Displaying metadata:', metadata);
+    debugLog('📊 Metadata keys:', metadata ? Object.keys(metadata) : 'null');
+    debugLog('📊 Full metadata object:', JSON.stringify(metadata, null, 2));
     
     state.metadata = metadata || {};
     
@@ -1128,7 +1161,7 @@ export function displayMetadata(metadata) {
                 min: parseInt(match[1]),
                 max: parseInt(match[2])
             };
-            console.log('✅ Prompt length range set:', state.promptLengthRange);
+            debugLog('✅ Prompt length range set:', state.promptLengthRange);
             // Update word count display after range is set
             setTimeout(() => validatePromptLength(), 100);
         }
@@ -1299,7 +1332,7 @@ export function displayMetadata(metadata) {
         itemsAdded++;
     });
     
-    console.log('📊 Metadata display summary:', {
+    debugLog('📊 Metadata display summary:', {
         hasAnyData,
         itemsAdded,
         childrenCount: elements.metadataGrid.children.length,
@@ -1310,7 +1343,7 @@ export function displayMetadata(metadata) {
     // This ensures sidebar shows even if some fields are missing
     const shouldShow = hasAnyData || itemsAdded > 0 || elements.metadataGrid.children.length > 0;
     
-    console.log('📊 Metadata sidebar visibility check:', {
+    debugLog('📊 Metadata sidebar visibility check:', {
         hasAnyData,
         itemsAdded,
         childrenCount: elements.metadataGrid.children.length,
@@ -1324,7 +1357,7 @@ export function displayMetadata(metadata) {
             elements.metadataSidebar.style.display = 'block';
             elements.metadataSidebar.classList.remove('collapsed');
             document.body.classList.add('sidebar-visible');
-            console.log('✅ Metadata sidebar displayed with', elements.metadataGrid.children.length, 'items');
+            debugLog('✅ Metadata sidebar displayed with', elements.metadataGrid.children.length, 'items');
         } else {
             console.error('❌ Metadata sidebar element not found!');
         }
@@ -1381,7 +1414,7 @@ export async function saveCell(cellType) {
             if (!state.convertedModelRefJSON) {
                 convertStructuredToJSON();
             }
-            content = state.convertedModelRefJSON || '';
+            content = ensurePrettyPrintJSON(state.convertedModelRefJSON || '');
             if (!content) {
                 showToast('⚠️ Please ensure Model Reference is in valid format', 'error');
                 return;
@@ -1522,7 +1555,7 @@ export async function saveAllCells() {
     if (state.convertedModelRefJSON) {
         cellsToSave.push({
             cell_type: 'response_reference',
-            content: state.convertedModelRefJSON
+            content: ensurePrettyPrintJSON(state.convertedModelRefJSON)
         });
     } else {
         // Fallback: save raw criteria text (Turn 2+ may not have JSON format)
@@ -1531,7 +1564,7 @@ export async function saveAllCells() {
         if (modelrefContent) {
             cellsToSave.push({
                 cell_type: 'response_reference',
-                content: modelrefContent
+                content: ensurePrettyPrintJSON(modelrefContent)
             });
         }
     }
@@ -1591,7 +1624,7 @@ export async function saveAllCells() {
     } finally {
         if (elements.saveAllBtn) {
             elements.saveAllBtn.disabled = false;
-            elements.saveAllBtn.textContent = '💾 Save All & Judge';
+            elements.saveAllBtn.textContent = '💾 Save & Check';
         }
     }
 }
@@ -1684,10 +1717,10 @@ export function validateModelReferenceAndCriteria(responseReference) {
             elements.startHuntBtn.title = '';
         } else {
             elements.startHuntBtn.disabled = true;
-            elements.startHuntBtn.title = 'Model Reference is valid. Click "Judge Reference Response" to validate.';
+            elements.startHuntBtn.title = 'Model Reference is valid. Click "Check Ideal Response" to validate.';
         }
     }
-    console.log('✅ Model Reference validation passed: JSON valid and all criteria present');
+    debugLog('✅ Model Reference validation passed: JSON valid and all criteria present');
 }
 
 // Validate that Model Reference is valid JSON format with criteria
@@ -1744,10 +1777,10 @@ export function validateModelReferenceJSON(responseReference) {
 // 1. JSON array: [{"id": "C1", "criteria1": "..."}, ...]
 // 2. Plain text: "C1: ...\nC2: ...\nC3: ..."
 export function parseCriteria(responseReference) {
-    console.log('=== parseCriteria DEBUG ===');
-    console.log('Input type:', typeof responseReference);
-    console.log('Input length:', responseReference ? responseReference.length : 0);
-    console.log('Input preview (first 500 chars):', responseReference ? responseReference.substring(0, 500) : 'NULL/UNDEFINED');
+    debugLog('=== parseCriteria DEBUG ===');
+    debugLog('Input type:', typeof responseReference);
+    debugLog('Input length:', responseReference ? responseReference.length : 0);
+    debugLog('Input preview (first 500 chars):', responseReference ? responseReference.substring(0, 500) : 'NULL/UNDEFINED');
     
     if (!responseReference || !responseReference.trim()) {
         const error = 'Empty response_reference - cannot parse criteria';
@@ -1757,9 +1790,9 @@ export function parseCriteria(responseReference) {
     
     // Clean the input - remove any leading/trailing whitespace
     const cleaned = responseReference.trim();
-    console.log('Cleaned length:', cleaned.length);
-    console.log('Contains [:', cleaned.includes('['));
-    console.log('Contains ]:', cleaned.includes(']'));
+    debugLog('Cleaned length:', cleaned.length);
+    debugLog('Contains [:', cleaned.includes('['));
+    debugLog('Contains ]:', cleaned.includes(']'));
     
     try {
         // First, try to parse the entire string as JSON (most common case)
@@ -1772,14 +1805,14 @@ export function parseCriteria(responseReference) {
             if (Array.isArray(parsed)) {
                 criteriaArray = parsed;
                 jsonArrayStr = cleaned;
-                console.log('✅ Parsed as direct JSON array');
+                debugLog('✅ Parsed as direct JSON array');
             } else {
                 // It's JSON but not an array
                 throw new Error('Parsed JSON is not an array');
             }
         } catch (jsonParseError) {
             // Not pure JSON, try to extract JSON array from text
-            console.log('Not pure JSON, attempting extraction. Error:', jsonParseError.message);
+            debugLog('Not pure JSON, attempting extraction. Error:', jsonParseError.message);
             
             // Try to find JSON array with balanced brackets (most robust method)
             let bracketCount = 0;
@@ -1818,7 +1851,7 @@ export function parseCriteria(responseReference) {
                 try {
                     jsonArrayStr = arrayMatch;
                     criteriaArray = JSON.parse(jsonArrayStr);
-                    console.log('✅ Extracted and parsed JSON array from text');
+                    debugLog('✅ Extracted and parsed JSON array from text');
                 } catch (parseError) {
                     console.error('Failed to parse extracted array:', parseError);
                     console.error('Extracted string:', arrayMatch.substring(0, 200));
@@ -1828,7 +1861,7 @@ export function parseCriteria(responseReference) {
             
             // If still no criteriaArray, try plain text format: "C1: ...\nC2: ..."
             if (!criteriaArray) {
-                console.log('Trying plain text format (C1: ..., C2: ..., etc.)');
+                debugLog('Trying plain text format (C1: ..., C2: ..., etc.)');
                 const plainTextPattern = /^(C\d+)\s*[:：]\s*(.+)$/gim;
                 const matches = [...cleaned.matchAll(plainTextPattern)];
                 
@@ -1838,7 +1871,7 @@ export function parseCriteria(responseReference) {
                         [`criteria${idx + 1}`]: match[2].trim()
                     }));
                     isPlainTextFormat = true;
-                    console.log(`✅ Parsed ${matches.length} criteria from plain text format`);
+                    debugLog(`✅ Parsed ${matches.length} criteria from plain text format`);
                 } else {
                     // No format matched
                     const error = 'No JSON array or plain text criteria (C1:, C2:, etc.) found in response_reference';
@@ -1886,7 +1919,7 @@ export function parseCriteria(responseReference) {
         }
         
         if (criteria.length > 0) {
-            console.log('Parsed criteria from JSON array:', criteria);
+            debugLog('Parsed criteria from JSON array:', criteria);
             return criteria;
         }
         
@@ -1905,7 +1938,7 @@ export function parseCriteria(responseReference) {
                     }
                 }
                 if (criteria.length > 0) {
-                    console.log('Parsed criteria from embedded JSON:', criteria);
+                    debugLog('Parsed criteria from embedded JSON:', criteria);
                     return criteria;
                 }
             } catch (e) {
@@ -1955,161 +1988,30 @@ export function initPreviewTabs() {
     });
 }
 
-
-
-// Combined Save & Judge function for Response tab
-export async function saveAndJudgeResponse() {
-    if (!state.sessionId) {
-        showToast('Please load a notebook first', 'error');
-        return;
-    }
-    
-    // Check minimum 3 criteria requirement
-    const currentRefText = elements.modelrefPreview?.textContent || '';
-    let currentCriteria;
-    try {
-        currentCriteria = parseCriteria(currentRefText);
-    } catch (error) {
-        console.error('Failed to parse criteria:', error);
-        showError(error, { operation: 'Parse criteria' });
-        return;
-    }
-    if (currentCriteria.length < 3) {
-        showToast(`❌ Minimum 3 criteria required. Currently have ${currentCriteria.length}. Please add more criteria before saving.`, 'error');
-        return;
-    }
-    
-    const btn = elements.saveAndJudgeResponseBtn;
-    if (!btn) {
-        showToast('Save & Judge button not found', 'error');
-        return;
-    }
-    const resultDiv = elements.referenceJudgeResult;
-    // Get response from rich text editor (contenteditable div)
-    const responseEditor = elements.referencePreview;
-    const newResponse = responseEditor?.textContent || responseEditor?.innerText || '';
-    
-    if (!newResponse.trim()) {
-        showToast('Response cannot be empty', 'error');
-        return;
-    }
-    
-    try {
-        btn.disabled = true;
-        btn.textContent = '💾 Saving...';
-        // Don't hide result div - keep response editor visible
-        if (resultDiv) {
-            resultDiv.innerHTML = '';
-            resultDiv.classList.add('hidden');
-        }
-        
-        // Step 1: Save to Colab
-        const saveResponse = await fetch(`/api/update-response/${state.sessionId}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ response: newResponse })
-        });
-        
-        if (!saveResponse.ok) {
-            const error = await saveResponse.json();
-            throw new Error(error.detail || 'Failed to save to Colab');
-        }
-        
-        // CRITICAL: Update originalNotebookJson so snapshot saves include this cell
-        updateOriginalNotebookWithCell('response', newResponse);
-        
-        showToast('✅ Saved to Colab!', 'success');
-        btn.textContent = '⚖️ Judging...';
-        
-        // Step 2: Judge
-        const judgeResponse = await fetch(`/api/judge-reference/${state.sessionId}`, {
-            method: 'POST'
-        });
-        
-        if (!judgeResponse.ok) {
-            if (judgeResponse.status === 404) {
-                showToast('⚠️ Session expired. Please reload the notebook.', 'error');
-                throw new Error('Session not found. Please reload the notebook from Colab.');
-            }
-            const error = await judgeResponse.json();
-            throw new Error(error.detail || 'Judge failed');
-        }
-        
-        const data = await judgeResponse.json();
-        
-        // Update state.criteria from judge result
-        let criteria = data.criteria || {};
-        let criteriaEntries = Object.entries(criteria);
-        
-        // Check for missing criteria
-        const evaluatedCriteria = criteriaEntries.map(([id]) => id);
-        const missingCriteria = (state.initialCriteria || [])
-            .filter(c => !evaluatedCriteria.includes(c.id))
-            .map(c => [c.id, c.criteria]);
-        const hasMissingCriteria = missingCriteria.length > 0;
-        
-        // Determine if all criteria pass
-        const allCriteriaPass = criteriaEntries.length > 0 && 
-            criteriaEntries.every(([k, v]) => String(v).toUpperCase() === 'PASS');
-        const isPassing = allCriteriaPass && !hasMissingCriteria;
-        
-        // Update reference validated state
-        state.referenceValidated = isPassing;
-        
-        // Enable/disable Start Hunt based on result — admin mode: always enable; review mode: always disable
-        if (elements.startHuntBtn) {
-            if (state.selectionConfirmed && !state.adminMode) {
-                elements.startHuntBtn.disabled = true;
-                elements.startHuntBtn.title = 'Complete reviews or refresh page to unlock';
-            } else if (state.adminMode) {
-                elements.startHuntBtn.disabled = false;
-                elements.startHuntBtn.title = 'Admin mode';
-            } else if (!state.modelRefValid) {
-                elements.startHuntBtn.disabled = true;
-                elements.startHuntBtn.title = 'Model Reference must be valid JSON before hunting';
-            } else if (hasMissingCriteria) {
-                const missingIds = missingCriteria.map(([id]) => id).join(', ');
-                elements.startHuntBtn.disabled = true;
-                elements.startHuntBtn.title = `Missing criteria: ${missingIds}. Please add them back to response_reference and re-judge.`;
-            } else if (isPassing && !hasMissingCriteria) {
-                elements.startHuntBtn.disabled = false;
-                elements.startHuntBtn.title = '';
+/**
+ * Initialize collapsible sections in the reference judge result (Criteria Breakdown, Judge Explanation).
+ * Sections are collapsed by default; click header to expand.
+ */
+function _initReferenceJudgeCollapsibles(container) {
+    if (!container) return;
+    container.querySelectorAll('.reference-judge-collapsible-header').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const targetId = btn.dataset.target;
+            const body = container.querySelector(`#${targetId}`);
+            const chevron = btn.querySelector('.reference-judge-collapsible-chevron');
+            if (!body || !chevron) return;
+            const isCollapsed = body.classList.contains('collapsed');
+            if (isCollapsed) {
+                body.classList.remove('collapsed');
+                chevron.textContent = '▼';
+                btn.setAttribute('aria-expanded', 'true');
             } else {
-                elements.startHuntBtn.disabled = true;
-                elements.startHuntBtn.title = 'All criteria must pass before starting hunt';
+                body.classList.add('collapsed');
+                chevron.textContent = '▶';
+                btn.setAttribute('aria-expanded', 'false');
             }
-        }
-        
-        // Show toasts
-        if (hasMissingCriteria) {
-            const missingIds = missingCriteria.map(([id]) => id).join(', ');
-            showToast(`Saved, but MISSING CRITERIA: ${missingIds}`, 'warning');
-        } else if (isPassing) {
-            showToast('Saved & Verified! Ready to hunt.', 'success');
-        } else {
-            showToast('Saved, but criteria failed. Fix before hunting.', 'info');
-        }
-        
-        // Display result (reusing the logic from judgeReferenceResponse would be better, but copying for now is safer/faster)
-        // Actually, let's just delegate to judgeReferenceResponse logic if possible, but the button text update is custom here.
-        // For now, I'll rely on judgeReferenceResponse to do the UI update if called separately, but here we just show Toast.
-        // Wait, the user wants the UI update too.
-        // Let's copy the UI update logic from judgeReferenceResponse or make it shared.
-        // Given complexity, I will just call judgeReferenceResponse() instead of manual fetch if I can?
-        // But saveAndJudgeResponse does TWO things.
-        // I'll stick to what I pasted above for now, but I realized I didn't include the UI update code block in `saveAndJudgeResponse`.
-        
-        // Let's use the code I read from app.js which HAD the logic.
-        // I will paste judgeReferenceResponse and saveResponseOnly fully.
-        
-    } catch (error) {
-        showError(error, { operation: 'Operation' });
-        state.referenceValidated = false;
-        if (elements.startHuntBtn && !state.adminMode) elements.startHuntBtn.disabled = true;
-    } finally {
-        btn.disabled = false;
-        btn.textContent = '💾 Save & Verify';
-    }
+        });
+    });
 }
 
 export async function judgeReferenceResponse() {
@@ -2271,22 +2173,33 @@ export async function judgeReferenceResponse() {
         if (missing.length > 0) statusMsg = `MISSING CRITERIA: ${missing.map(x => x[0]).join(',')}`;
         
         resultDiv.innerHTML = `
-            <div style="padding: 1rem; background: var(--bg-primary); border-radius: 8px; border: 1px solid ${missing.length > 0 ? 'var(--warning)' : (isPassing ? 'var(--success)' : 'var(--danger)')};">
+            <div class="reference-judge-result" style="padding: 1rem; background: var(--bg-primary); border-radius: 8px; border: 1px solid ${missing.length > 0 ? 'var(--warning)' : (isPassing ? 'var(--success)' : 'var(--danger)')};">
                 <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
                     <span class="score-badge ${isPassing ? 'score-1' : 'score-0'}">${isPassing ? '✅' : '❌'} Score: ${data.score}</span>
                     <span style="font-weight: 600;">${statusMsg}</span>
                 </div>
-                <div style="margin-top: 0.75rem;">
-                    <label style="font-weight: 600; font-size: 0.9rem;">📋 Criteria Breakdown:</label>
-                    ${criteriaHtml}
+                <div class="reference-judge-collapsible">
+                    <button type="button" class="reference-judge-collapsible-header" data-target="reference-criteria-body" aria-expanded="false">
+                        <span class="reference-judge-collapsible-label">📋 Criteria Breakdown</span>
+                        <span class="reference-judge-collapsible-chevron">▶</span>
+                    </button>
+                    <div id="reference-criteria-body" class="reference-judge-collapsible-body collapsed">
+                        ${criteriaHtml}
+                    </div>
                 </div>
-                <div style="margin-top: 0.75rem;">
-                    <label style="font-weight: 600; font-size: 0.9rem;">📝 Judge Explanation:</label>
-                    <p style="margin-top: 0.25rem; font-size: 0.9rem; color: var(--text-secondary); white-space: pre-wrap;">${escapeHtml(data.explanation || 'No explanation')}</p>
+                <div class="reference-judge-collapsible">
+                    <button type="button" class="reference-judge-collapsible-header" data-target="reference-explanation-body" aria-expanded="false">
+                        <span class="reference-judge-collapsible-label">📝 Judge Explanation</span>
+                        <span class="reference-judge-collapsible-chevron">▶</span>
+                    </button>
+                    <div id="reference-explanation-body" class="reference-judge-collapsible-body collapsed">
+                        <p style="margin-top: 0.25rem; font-size: 0.9rem; color: var(--text-secondary); white-space: pre-wrap;">${escapeHtml(data.explanation || 'No explanation')}</p>
+                    </div>
                 </div>
             </div>
         `;
         resultDiv.classList.remove('hidden');
+        _initReferenceJudgeCollapsibles(resultDiv);
         if (elements.referencePreview) elements.referencePreview.scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'nearest' });
         
         const passCount = criteriaEntries.filter(([k, v]) => String(v).toUpperCase() === 'PASS').length;
@@ -2306,7 +2219,7 @@ export async function judgeReferenceResponse() {
     } finally {
         if (btn) {
             btn.disabled = false;
-            if (btn.id === 'judgeBeforeHuntBtn') btn.textContent = '⚖️ Judge Reference';
+            if (btn.id === 'judgeBeforeHuntBtn') btn.textContent = '⚖️ Check Ideal Response';
             else if (btn.id === 'judgeReferenceBtn') btn.textContent = '⚖️ Judge Only';
         }
     }
@@ -2359,7 +2272,7 @@ export async function saveResponseOnly() {
 // ============== Turn 1 Test Prompt (Generate Response Before Criteria) ==============
 
 /**
- * Show the Turn 1 Test Prompt panel when in Turn 1.
+ * Show the Test Prompt panel (used in all turns, same as Turn 1).
  */
 export function showTurn1TestPromptPanel() {
     const panel = document.getElementById('turn1TestPromptPanel');
@@ -2367,7 +2280,7 @@ export function showTurn1TestPromptPanel() {
 }
 
 /**
- * Hide the Turn 1 Test Prompt panel (e.g. when advancing to Turn 2).
+ * Hide the Test Prompt panel.
  */
 export function hideTurn1TestPromptPanel() {
     const panel = document.getElementById('turn1TestPromptPanel');
@@ -2375,15 +2288,10 @@ export function hideTurn1TestPromptPanel() {
 }
 
 /**
- * Update visibility based on current turn. Show only in Turn 1.
+ * Update visibility: show Test Prompt for all turns (Turn 1 and Turn 2+).
  */
 export function updateTurn1TestPromptVisibility() {
-    const turn = state.currentTurn ?? 1;
-    if (turn === 1) {
-        showTurn1TestPromptPanel();
-    } else {
-        hideTurn1TestPromptPanel();
-    }
+    showTurn1TestPromptPanel();
 }
 
 /**

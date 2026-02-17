@@ -128,14 +128,12 @@ class TestNotebookExport:
             "".join(c.get("source", [])) for c in notebook["cells"]
         )
 
-        # Verify multi-turn cells exist
-        assert "**[prompt_2]**" in all_sources
-        assert "**[prompt_3]**" in all_sources
-        assert "**[selected_response_1]**" in all_sources
-        assert "**[selected_response_2]**" in all_sources
-        assert "**[conversation_history]**" in all_sources
-        assert "**[number_of_turns]**" in all_sources
-        assert "**[breaking_turn]**" in all_sources
+        # Verify multi-turn cells exist (new format: Turn N - prompt, etc.)
+        assert "**[Turn 2 - prompt]**" in all_sources
+        assert "**[Turn 3 - prompt]**" in all_sources
+        assert "**[Turn 1 - selected_response]**" in all_sources
+        assert "**[Turn 2 - selected_response]**" in all_sources
+        assert "**[number_of_attempts_made]**" in all_sources
 
     def test_multi_turn_export_turn1_no_suffix(self):
         """Turn 1 should use original field names (no _1 suffix) for compat."""
@@ -168,11 +166,9 @@ class TestNotebookExport:
         all_sources = " ".join(
             "".join(c.get("source", [])) for c in notebook["cells"]
         )
-        # Turn 1 uses **[prompt]** not **[prompt_1]**
-        assert "**[prompt]**" in all_sources
-        assert "**[prompt_1]**" not in all_sources
-        # Turn 2 uses **[prompt_2]**
-        assert "**[prompt_2]**" in all_sources
+        # All turns use Turn N - format (Turn 1 - prompt, Turn 2 - prompt)
+        assert "**[Turn 1 - prompt]**" in all_sources
+        assert "**[Turn 2 - prompt]**" in all_sources
 
     def test_export_preserves_number_of_attempts(self):
         """total_hunts_ran should be written to number_of_attempts_made cell."""

@@ -96,9 +96,11 @@ def _save_cells_to_drive(storage: dict, notebook_data: dict) -> bool:
     """Save notebook JSON to Google Drive. Returns True on success."""
     try:
         from services.google_drive_client import drive_client
+        from helpers.notebook_helpers import pretty_print_json_in_notebook
         file_id = drive_client.get_file_id_from_url(storage["url"])
         if not file_id:
             return False
+        pretty_print_json_in_notebook(notebook_data)
         updated_content = json.dumps(notebook_data, indent=2)
         success = drive_client.update_file_content(file_id, updated_content)
         if success:

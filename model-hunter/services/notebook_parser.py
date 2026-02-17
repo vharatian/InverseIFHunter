@@ -7,9 +7,16 @@ Parses .ipynb files and extracts structured data including:
 - Judge prompts and system prompts
 - Model/judge result slots
 """
+import asyncio
 import json
+import logging
 import re
 import httpx
+
+logger = logging.getLogger(__name__)
+
+# Service account timeout: fail fast and use fallback if Drive API doesn't respond in time
+SERVICE_ACCOUNT_TIMEOUT = 10.0
 from typing import Dict, Any, Optional, List, Tuple
 from models.schemas import ParsedNotebook, NotebookCell
 
@@ -52,9 +59,18 @@ class NotebookParser:
         
         # If it's a Colab/Drive URL, use service account to read (SECURE)
         if file_id:
+            sa_error = None
             try:
-                content = self._read_with_service_account(file_id)
-            except Exception as sa_error:
+                # Run sync Drive API call in thread to avoid blocking; 10s timeout then fallback
+                content = await asyncio.wait_for(
+                    asyncio.to_thread(self._read_with_service_account, file_id),
+                    timeout=SERVICE_ACCOUNT_TIMEOUT,
+                )
+            except (asyncio.TimeoutError, Exception) as e:
+                sa_error = e
+                content = None
+                logger.info(f"Service account fetch failed or timed out ({SERVICE_ACCOUNT_TIMEOUT}s): {e}. Using fallback.")
+            if content is None:
                 # Fallback to public URL methods if service account fails
                 async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
                     download_methods = [

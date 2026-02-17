@@ -3,8 +3,91 @@ Notebook Cell Helpers
 
 Constants and utility functions for manipulating Jupyter notebook cell structures.
 """
+import json
 from typing import List
 from models.schemas import HuntSession
+
+
+def _pretty_print_json_in_string(s: str) -> str:
+    """
+    Find JSON objects/arrays in a string and replace with pretty-printed versions (indent=2).
+    Used for grading_basis, judge_criteria, and any other JSON in notebook cells.
+    """
+    if not s or not s.strip():
+        return s
+    result = []
+    i = 0
+    decoder = json.JSONDecoder()
+    while i < len(s):
+        # Find next { or [
+        next_obj = s.find("{", i)
+        next_arr = s.find("[", i)
+        next_start = -1
+        if next_obj >= 0 and (next_arr < 0 or next_obj < next_arr):
+            next_start = next_obj
+        elif next_arr >= 0:
+            next_start = next_arr
+        if next_start < 0:
+            result.append(s[i:])
+            break
+        result.append(s[i:next_start])
+        try:
+            obj, end = decoder.raw_decode(s, next_start)
+            # end is the index in s of the first char after the parsed value (absolute, not offset)
+            pretty = json.dumps(obj, indent=2, ensure_ascii=False)
+            result.append(pretty)
+            i = end
+        except (json.JSONDecodeError, ValueError):
+            result.append(s[next_start])
+            i = next_start + 1
+    return "".join(result)
+
+
+def pretty_print_json_in_notebook(notebook_data: dict) -> None:
+    """
+    Walk through all cells and pretty-print any JSON content in the source.
+    Modifies notebook_data in place. Ensures grading_basis, judge_criteria,
+    response_reference, conversation_history, etc. are all human-readable.
+    Joins source lines first so JSON split across lines is handled correctly.
+    """
+    for cell in notebook_data.get("cells", []):
+        source = cell.get("source", [])
+        if not isinstance(source, list) or not source:
+            continue
+        # Join all lines to get full content (handles both single-string and multi-line format)
+        full_content = "".join(s if isinstance(s, str) else str(s) for s in source)
+        if "{" not in full_content and "[" not in full_content:
+            continue
+        # Pretty-print all JSON in the content
+        full_content = _pretty_print_json_in_string(full_content)
+        # Split back into Jupyter format: each line as separate string with \n except last
+        content_lines = full_content.split("\n")
+        new_source = [line + "\n" for line in content_lines[:-1]]
+        if content_lines:
+            new_source.append(content_lines[-1] if content_lines[-1] else "")
+        cell["source"] = new_source
+
+
+def _pretty_print_json_content(cell_type: str, content: str) -> str:
+    """
+    If content is valid JSON, re-serialize with indent=2 for human readability in Colab.
+    Each criteria object on its own line, with space after commas, and a blank line
+    between criteria for clear visual separation.
+    Applies to response_reference (criteria), and any JSON-formatted cell content.
+    """
+    if not content or not content.strip():
+        return content
+    if cell_type != "response_reference":
+        return content
+    try:
+        parsed = json.loads(content)
+        pretty = json.dumps(parsed, indent=2, ensure_ascii=False)
+        # Add blank line between array elements for clearer separation in Colab
+        if isinstance(parsed, list) and len(parsed) > 1:
+            pretty = pretty.replace("},\n  {", "},\n\n  {")
+        return pretty
+    except (json.JSONDecodeError, TypeError):
+        return content
 
 
 # ============== Shared Constants ==============
@@ -43,6 +126,7 @@ def _find_or_create_turn_cell(notebook_data: dict, cell_type: str, content: str,
     For Turn 1, updates the original cell. For Turn 2+, creates/updates turn-specific cells.
     Returns True if the notebook_data was modified.
     """
+    content = _pretty_print_json_content(cell_type, content)
     heading = _get_turn_heading(cell_type, turn)
     heading_lower = heading.lower()
     

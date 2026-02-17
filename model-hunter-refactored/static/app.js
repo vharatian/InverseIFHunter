@@ -36,9 +36,10 @@ import {
     closeGradingSlideout,
     initSlideoutResize,
     confirmSelection,
-    revealLLMJudgments
+    revealLLMJudgments,
+    handleChangeSelection
 } from './modules/results.js';
-import { initMultiTurnListeners, initCalibrationListeners } from './modules/multiturn.js';
+import { initMultiTurnListeners } from './modules/multiturn.js';
 import { 
     initRichTextEditors, 
     initResizablePanels, 
@@ -48,10 +49,11 @@ import {
 } from './modules/editors.js';
 import { initAutosave, initNextTurnAutosave, initGradingAutosave, resetAllStatuses } from './modules/autosave.js';
 import { handleHumanJudgment, showNextBlindJudge, showToast, showError } from './modules/celebrations.js';
+import { debugLog, updateCriteriaButtonsState } from './modules/utils.js';
 
 // Initialize Application
 document.addEventListener('DOMContentLoaded', async () => {
-    console.log('🚀 Model Hunter initializing...');
+    debugLog('🚀 Model Hunter initializing...');
     
     try {
         // 1. Initialize Theme (immediate visual update)
@@ -69,7 +71,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         initHuntNumberControls();
         initPreviewTabs();
         initSlideoutResize();
-        initCalibrationListeners();
         
         // Notebook / Editor Inits (ensure they run if notebook.js doesn't auto-run them on import)
         // Check if notebook.js exports an init function? No, it exports specific inits.
@@ -97,7 +98,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // 8. Setup backup handlers (e.g. valid onclicks if listeners fail)
         setupBackupHandlers();
         
-        console.log('✅ Model Hunter initialized successfully');
+        debugLog('✅ Model Hunter initialized successfully');
         
     } catch (error) {
         console.error('❌ Initialization failed:', error);
@@ -189,6 +190,8 @@ function initEventListeners() {
     if (confirmBtn) confirmBtn.addEventListener('click', confirmSelection);
     const revealBtn = document.getElementById('revealLLMBtnBottom') || elements.revealLLMBtn;
     if (revealBtn) revealBtn.addEventListener('click', revealLLMJudgments);
+    const changeSelBtn = document.getElementById('changeSelectionBtn') || elements.changeSelectionBtn;
+    if (changeSelBtn) changeSelBtn.addEventListener('click', handleChangeSelection);
     
     // Slideouts
     elements.slideoutCloseBtn?.addEventListener('click', closeResponseSlideout);
@@ -196,6 +199,51 @@ function initEventListeners() {
     
     document.getElementById('gradingSlideoutCloseBtn')?.addEventListener('click', closeGradingSlideout);
     document.getElementById('gradingSlideoutBackdrop')?.addEventListener('click', closeGradingSlideout);
+    
+    // How it works link
+    document.getElementById('howItWorksLink')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        const modal = document.getElementById('howItWorksModal');
+        if (modal) {
+            modal.classList.remove('hidden');
+        }
+    });
+    
+    // How it works modal dismiss
+    document.querySelectorAll('[data-dismiss="howItWorksModal"]').forEach(el => {
+        el.addEventListener('click', () => {
+            document.getElementById('howItWorksModal')?.classList.add('hidden');
+        });
+    });
+    
+    // Add criterion buttons (insert C1:, C2:, etc. at cursor)
+    document.querySelectorAll('.add-criterion-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const targetId = btn.dataset.target;
+            const prefix = btn.dataset.prefix || 'C1';
+            const textarea = document.getElementById(targetId);
+            if (!textarea || btn.disabled) return;
+            const insert = `${prefix}: `;
+            const start = textarea.selectionStart;
+            const end = textarea.selectionEnd;
+            const before = textarea.value.substring(0, start);
+            const after = textarea.value.substring(end);
+            const newVal = before + insert + after;
+            textarea.value = newVal;
+            textarea.selectionStart = textarea.selectionEnd = start + insert.length;
+            textarea.focus();
+            textarea.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+    });
+
+    // Update criteria button states when content changes (dim/disable already-present IDs)
+    ['modelrefPreview', 'nextTurnCriteria'].forEach(targetId => {
+        const el = document.getElementById(targetId);
+        if (el) {
+            el.addEventListener('input', () => updateCriteriaButtonsState(targetId));
+            updateCriteriaButtonsState(targetId);
+        }
+    });
     
     // Escape Key
     document.addEventListener('keydown', (e) => {
@@ -214,18 +262,18 @@ async function restoreSession() {
     const savedSessionId = localStorage.getItem('modelHunter_sessionId');
     if (!savedSessionId) return;
     
-    console.log('🔄 Attempting to restore session:', savedSessionId);
+        debugLog('🔄 Attempting to restore session:', savedSessionId);
     try {
         const response = await fetch(`/api/session/${savedSessionId}`);
         if (response.ok) {
             const sessionData = await response.json();
-            console.log('✅ Session restored:', sessionData);
+            debugLog('✅ Session restored:', sessionData);
             state.sessionId = savedSessionId;
             // Restore multi-turn state from Redis (turns, conversationHistory, currentTurn)
             await syncTurnStatusFromBackend(savedSessionId);
             showToast('🔄 Session found! Please reload the notebook to continue.', 'info');
         } else if (response.status === 404) {
-            console.log('⚠️ Session expired');
+            debugLog('⚠️ Session expired');
             localStorage.removeItem('modelHunter_sessionId');
             showToast('⚠️ Previous session expired. Please load a new notebook.', 'warning');
         }

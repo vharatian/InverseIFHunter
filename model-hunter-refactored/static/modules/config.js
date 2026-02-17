@@ -6,6 +6,14 @@ export const DEBUG_MODE = false;
 
 export const VERSION_CHECK_INTERVAL = 30000;
 
+/** Model IDs that use reasoning (slower, 1-2 min). Others are faster (~30s). */
+export const REASONING_MODEL_IDS = [
+    'anthropic/claude-opus-4.5',
+    'anthropic/claude-opus-4.6',
+    'qwen/qwen3-235b-a22b-thinking-2507',
+    'accounts/fireworks/models/qwen3-235b-a22b-thinking-2507'
+];
+
 export const PROVIDER_MODELS = {
     'openrouter': [
         { id: 'nvidia/nemotron-3-nano-30b-a3b', name: 'Nemotron-3-Nano (Fast)' },
@@ -21,9 +29,10 @@ export const PROVIDER_MODELS = {
 
 export const MAX_HUNTS_PER_NOTEBOOK = 16;
 
-/** Admin mode password (turing + hunt + model combo). Testing only. */
-export const ADMIN_MODE_PASSWORD = 'turinghuntmodel';
+/** Admin mode password (testing only). */
+export const ADMIN_MODE_PASSWORD = 'testmodel';
 export const HUNT_COUNT_STORAGE_PREFIX = 'modelHunter_huntCount_';
+export const TIPS_PAUSED_KEY = 'modelHunter_tipsPaused';
 export const MIN_EXPLANATION_WORDS = 10;
 
 export const TURN_COLORS = [

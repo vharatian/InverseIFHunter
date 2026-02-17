@@ -8,7 +8,7 @@
 
 import { elements } from './dom.js';
 import { state } from './state.js';
-import { renderInsightTip } from './utils.js';
+import { renderInsightTip, debugLog } from './utils.js';
 import { showToast } from './celebrations.js';
 import { PROVIDER_MODELS } from './config.js';
 import { validateModelReferenceAndCriteria } from './notebook.js';
@@ -376,7 +376,7 @@ export function convertStructuredToJSON() {
                     // It's already valid JSON criteria format - use it directly
                     criteria = parsed;
                     jsonString = JSON.stringify(criteria, null, 2);
-                    console.log('✅ Detected valid JSON format, using directly');
+                    debugLog('✅ Detected valid JSON format, using directly');
                 } else {
                     // Invalid structure, fall through to structured text parsing
                     throw new Error('Invalid JSON structure');
@@ -387,7 +387,7 @@ export function convertStructuredToJSON() {
             }
         } catch (jsonError) {
             // Not valid JSON or not in expected format, try structured text format
-            console.log('Not valid JSON, trying structured text format');
+            debugLog('Not valid JSON, trying structured text format');
             
             // Parse structured text format: C1: description, C2: description, etc.
             const lines = inputText.split('\n').filter(line => line.trim());
@@ -739,5 +739,5 @@ export function updateModelOptions(skipDefaultSelection = false) {
         state.config.models = [elements.modelSelect.value];
     }
     
-    console.log(`Updated models for provider: ${provider}, selected: ${elements.modelSelect.value} (skipDefault: ${skipDefaultSelection})`);
+    debugLog(`Updated models for provider: ${provider}, selected: ${elements.modelSelect.value} (skipDefault: ${skipDefaultSelection})`);
 }

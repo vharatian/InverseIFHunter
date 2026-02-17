@@ -27,6 +27,8 @@ class NotebookSnapshot(BaseModel):
     total_hunts_ran: int  # Total hunts across all runs
     include_reasoning: bool = True  # Whether to include reasoning traces
     metadata: Optional[Dict[str, Any]] = None  # Additional metadata (parsed notebook data)
+    # Per-model hunt counts for number_of_attempts_made (model_id -> count). Frontend computes from allResponses/turns.
+    per_model_hunts: Optional[Dict[str, int]] = None
     
     @field_validator('human_reviews', mode='before')
     @classmethod
@@ -141,7 +143,8 @@ class SnapshotService:
             human_reviews=normalized_reviews,
             total_hunts_ran=int(snapshot.total_hunts_ran),
             include_reasoning=snapshot.include_reasoning,
-            metadata=snapshot.metadata
+            metadata=snapshot.metadata,
+            per_model_hunts=snapshot.per_model_hunts
         )
         
         logger.info(f"✅ Snapshot normalized: {len(normalized_results)} results (order preserved)")

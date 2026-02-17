@@ -1,8 +1,8 @@
 /**
- * multiturn.js — Turn-Aware UI, Multi-Turn Flow, Calibration
+ * multiturn.js — Turn-Aware UI, Multi-Turn Flow
  * 
  * Handles turn journey bar, conversation thread, multi-turn decisions,
- * calibration mode, turn history, and turn advancement.
+ * turn history, and turn advancement.
  * 
  * Dependencies: config.js, utils.js, state.js, dom.js (+ celebrations, results, notebook, editors, hunt)
  */
@@ -14,18 +14,15 @@ import {
     renderInsightTip,
     getTurnColor,
     getTurnColorClass,
-    getModelDisplayName
+    getModelDisplayName,
+    debugLog,
+    ensurePrettyPrintJSON
 } from './utils.js';
 import { showToast, showError } from './celebrations.js';
 import { fetchAllResponses, fetchAllResponsesAndShowSelection } from './results.js';
-import { populatePreviewTabs } from './notebook.js';
+import { populatePreviewTabs, showTurn1TestPromptPanel } from './notebook.js';
 import { validatePromptLength, convertStructuredToJSON } from './editors.js';
-// It uses showCalibrationPanel internally, so no import needed if it's in the same file.
-// It uses startHunt (for calibration).
 import { updateHuntLimitUI } from './hunt.js';
-// This circular dependency is fine as long as they are not used at top-level.
-// startHunt is called inside handleCalibrationGenerate -> fine.
-// showMultiTurnDecision is called inside handleHuntComplete -> fine.
 
 // ============== Turn-Aware UI Functions (Journey Bar, Thread, Badges) ==============
 
@@ -241,16 +238,28 @@ export function updateTurnAwareUI() {
         if (previewTitle) previewTitle.textContent = 'Prompt & Criteria';
     }
     
-    // Update per-turn progress info
+    // Update per-turn progress info (always show during hunt so users know it's per-turn)
     const turnInfo = document.getElementById('progressTurnInfo');
     const turnScope = document.getElementById('progressTurnScope');
     const cumulative = document.getElementById('progressCumulative');
-    if (turnInfo && (state.isMultiTurn || turn > 1)) {
+    if (turnInfo) {
         turnInfo.style.display = 'flex';
-        if (turnScope) turnScope.textContent = `Turn ${turn}`;
-        if (cumulative) {
+        // Clarify turn context: single turn vs multi-turn
+        if (turnScope) {
+            if (!state.isMultiTurn && turn === 1) {
+                turnScope.textContent = 'Turn 1 (single turn)';
+            } else if (state.turns?.length > 0) {
+                const totalTurns = state.turns.length + 1;
+                turnScope.textContent = `Turn ${turn} of ${totalTurns}`;
+            } else {
+                turnScope.textContent = `Turn ${turn}`;
+            }
+        }
+        if (cumulative && (state.isMultiTurn || turn > 1)) {
             const globalTotal = state.multiTurnTotalHunts + (state.allResponses?.length || 0);
             cumulative.textContent = globalTotal > 0 ? `${globalTotal} total across ${turn} turns` : '';
+        } else if (cumulative) {
+            cumulative.textContent = '';
         }
     }
     
@@ -263,6 +272,9 @@ export function updateTurnAwareUI() {
     // Update the decision fork "next turn" number
     const decisionNextTurn = document.getElementById('decisionNextTurn');
     if (decisionNextTurn) decisionNextTurn.textContent = turn + 1;
+    
+    // Show Test Prompt panel (same UI for Turn 1 and Turn 2+)
+    showTurn1TestPromptPanel();
     
     // Render journey bar and thread if multi-turn
     if (state.isMultiTurn || turn > 1) {
@@ -328,12 +340,16 @@ export function showMultiTurnDecision() {
         }
         if (reviewWarning) {
             let msg = '';
-            if (breaks < 3) {
+            if (breaks === 0) {
+                msg = 'No breaks this round. Try tightening one criterion or running more hunts.';
+            } else if (breaks < 3) {
                 msg = `Need at least 3 breaking responses (currently ${breaks}). Run more hunts!`;
             } else if (breaks === 3 && passes === 0) {
                 msg = `Have 3 breaking but need at least 1 passing response (currently ${passes}). Run more hunts, or get 1 more breaking for 4 total.`;
             }
-            reviewWarning.innerHTML = `<span style="margin-right: 0.5rem;">⚠️</span>${msg}`;
+            reviewWarning.innerHTML = breaks === 0
+                ? `<span style="margin-right: 0.5rem;">💪</span>${msg}`
+                : `<span style="margin-right: 0.5rem;">⚠️</span>${msg}`;
             reviewWarning.classList.remove('hidden');
         }
     }
@@ -408,7 +424,9 @@ export function renderTurnHistoryTabs() {
             white-space: nowrap;
             transition: all 0.2s;
         `;
-        tab.textContent = `Turn ${turn.turnNumber} ✓`;
+        const breaks = (turn.results || []).filter(r => (r.judge_score === 0 || r.score === 0)).length;
+        const summary = turn.results?.length ? `${breaks} break${breaks !== 1 ? 's' : ''} found` : '';
+        tab.textContent = summary ? `Turn ${turn.turnNumber}: ${summary} ✓` : `Turn ${turn.turnNumber} ✓`;
         
         tab.addEventListener('mouseenter', () => {
             if (!tab.classList.contains('active-turn-tab')) {
@@ -464,10 +482,14 @@ export function renderTurnContent(container, turn) {
     
     let html = '';
     
-    // Turn status badge (with per-turn color)
+    // Turn status badge with one-line summary (e.g. "Turn 1: 4 breaks found, continued with selected response")
     const turnColor = getTurnColor(turn.turnNumber);
+    const summaryLine = turn.results?.length
+        ? `${breaks} break${breaks !== 1 ? 's' : ''} found${turn.selectedResponse ? ', continued with selected response' : ''}`
+        : '';
     html += `<div style="display: flex; gap: 0.5rem; align-items: center; margin-bottom: 1rem; flex-wrap: wrap;">`;
     html += `<span class="turn-badge ${getTurnColorClass(turn.turnNumber)}">Turn ${turn.turnNumber}</span>`;
+    if (summaryLine) html += `<span style="font-size: 0.85rem; color: var(--text-secondary);">${escapeHtml(summaryLine)}</span>`;
     if (turn.results && turn.results.length > 0) {
         html += `<span style="font-size: 0.8rem; color: var(--text-muted);">${turn.results.length} hunts &mdash; ${breaks} breaks, ${passes} passes</span>`;
     }
@@ -612,7 +634,7 @@ export async function handleContinueToNextTurn() {
         return;
     }
     
-    console.log('[handleContinueToNextTurn] Rendering', state.allResponses.length, 'response cards');
+    debugLog('[handleContinueToNextTurn] Rendering', state.allResponses.length, 'response cards');
     
     state.allResponses.forEach((r, idx) => {
         const score = r.judge_score ?? r.score ?? '?';
@@ -692,9 +714,9 @@ export async function selectGoodResponse(response) {
     if (modelRefEl) {
         try {
             convertStructuredToJSON();
-            currentCriteria = state.convertedModelRefJSON || modelRefEl.value || currentCriteria;
+            currentCriteria = ensurePrettyPrintJSON(state.convertedModelRefJSON || modelRefEl.value || currentCriteria);
         } catch {
-            currentCriteria = modelRefEl.value || currentCriteria;
+            currentCriteria = ensurePrettyPrintJSON(modelRefEl.value || currentCriteria);
         }
     }
     
@@ -788,18 +810,12 @@ export async function selectGoodResponse(response) {
         populatePreviewTabs(state.notebook);
         validatePromptLength(); // Turn 2+: clear word limit/range in prompt section
         
-        // Hide Turn 1 Test Prompt panel (we're now in Turn 2+)
-        const { hideTurn1TestPromptPanel } = await import('./notebook.js');
-        hideTurn1TestPromptPanel();
-
-        // Show calibration panel for Turn 2+
-        showCalibrationPanel();
-        
-        // Disable hunt button until calibration is done — bypass in admin mode
+        // Show Test Prompt panel (same as Turn 1); hunt disabled until Judge Reference passes
+        showTurn1TestPromptPanel();
         state.referenceValidated = false;
         if (elements.startHuntBtn && !state.adminMode) {
             elements.startHuntBtn.disabled = true;
-            elements.startHuntBtn.title = 'Complete calibration first (generate + judge at least once)';
+            elements.startHuntBtn.title = 'Check Ideal Response first';
         } else if (state.adminMode && elements.startHuntBtn) {
             elements.startHuntBtn.disabled = false;
             elements.startHuntBtn.title = 'Admin mode';
@@ -819,7 +835,7 @@ export async function selectGoodResponse(response) {
         elements.configSection?.classList.remove('hidden');
         elements.configSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         
-        showToast(`Turn ${state.currentTurn} — Write your prompt and criteria, then calibrate before hunting.`, 'success');
+        showToast(`Turn ${state.currentTurn} — Write your prompt and criteria, then check ideal response before hunting.`, 'success');
         
     } catch (error) {
         console.error('Error advancing turn:', error);
@@ -827,183 +843,6 @@ export async function selectGoodResponse(response) {
         // Re-enable response cards on error
         cards.forEach(card => { card.style.opacity = '1'; card.style.pointerEvents = 'auto'; });
     }
-}
-
-// ============== Calibration Mode (Turn 2+) ==============
-
-// Stores the last generated response for re-judging
-let _calibrationResponse = null;
-let _calibrationJudged = false; // Must judge at least once before hunting
-
-export function showCalibrationPanel() {
-    const panel = document.getElementById('calibrationPanel');
-    if (panel) {
-        panel.classList.remove('hidden');
-        // Update turn badge
-        const badge = document.getElementById('calibrationTurnBadge');
-        if (badge) badge.textContent = `Turn ${state.currentTurn}`;
-        // Reset state
-        _calibrationResponse = null;
-        _calibrationJudged = false;
-        document.getElementById('calibrationResponseArea')?.classList.add('hidden');
-        document.getElementById('calibrationJudgeResult')?.classList.add('hidden');
-        document.getElementById('calibrationLoading')?.classList.add('hidden');
-        document.getElementById('regenerateBtn')?.classList.add('hidden');
-        document.getElementById('judgeCalibrationBtn')?.classList.add('hidden');
-        document.getElementById('generateOneBtn')?.classList.remove('hidden');
-    }
-}
-
-export function hideCalibrationPanel() {
-    const panel = document.getElementById('calibrationPanel');
-    if (panel) panel.classList.add('hidden');
-}
-
-export async function calibrationGenerateOne() {
-    if (!state.sessionId) return;
-
-    // Show loading
-    const loadingEl = document.getElementById('calibrationLoading');
-    const loadingText = document.getElementById('calibrationLoadingText');
-    const genBtn = document.getElementById('generateOneBtn');
-    const regenBtn = document.getElementById('regenerateBtn');
-    
-    if (loadingEl) { loadingEl.classList.remove('hidden'); loadingText.textContent = 'Generating response...'; }
-    if (genBtn) genBtn.disabled = true;
-    if (regenBtn) regenBtn.disabled = true;
-
-    try {
-        const res = await fetch(`/api/generate-single/${state.sessionId}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({})  // Empty body: use session config (model, provider, prompt)
-        });
-
-        if (!res.ok) {
-            const err = await res.json();
-            throw new Error(err.detail || 'Generation failed');
-        }
-
-        const data = await res.json();
-        _calibrationResponse = data.response || '';
-
-        // Display the response
-        const responseArea = document.getElementById('calibrationResponseArea');
-        const responseText = document.getElementById('calibrationResponseText');
-        const modelInfo = document.getElementById('calibrationModelInfo');
-        
-        if (responseText) responseText.textContent = _calibrationResponse;
-        if (modelInfo) modelInfo.textContent = `Model: ${data.model || 'unknown'} | Provider: ${data.provider || 'unknown'}`;
-        if (responseArea) responseArea.classList.remove('hidden');
-
-        // Show Regenerate and Judge buttons
-        if (regenBtn) { regenBtn.classList.remove('hidden'); regenBtn.disabled = false; }
-        document.getElementById('judgeCalibrationBtn')?.classList.remove('hidden');
-
-        // Hide the initial Generate button, show Regenerate instead
-        if (genBtn) genBtn.classList.add('hidden');
-        
-        showToast('Response generated. Review it, then judge when ready.', 'info');
-
-    } catch (error) {
-        showError(error, { operation: 'Generate response' });
-    } finally {
-        if (loadingEl) loadingEl.classList.add('hidden');
-        if (genBtn) genBtn.disabled = false;
-        if (regenBtn) regenBtn.disabled = false;
-    }
-}
-
-export async function calibrationJudge() {
-    if (!state.sessionId || !_calibrationResponse) {
-        showToast('No response to judge. Generate one first.', 'error');
-        return;
-    }
-
-    const judgeBtn = document.getElementById('judgeCalibrationBtn');
-    const loadingEl = document.getElementById('calibrationLoading');
-    const loadingText = document.getElementById('calibrationLoadingText');
-    
-    if (judgeBtn) { judgeBtn.disabled = true; judgeBtn.textContent = 'Judging...'; }
-    if (loadingEl) { loadingEl.classList.remove('hidden'); loadingText.textContent = 'Running judge...'; }
-
-    try {
-        const res = await fetch(`/api/judge-calibration/${state.sessionId}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ response_text: _calibrationResponse })
-        });
-
-        if (!res.ok) {
-            const err = await res.json();
-            throw new Error(err.detail || 'Judge failed');
-        }
-
-        const data = await res.json();
-        _calibrationJudged = true;
-
-        // Display judge results
-        const criteria = data.criteria || {};
-        const score = data.score;
-        const isPassing = (score || 0) >= 1;
-        const scoreColor = isPassing ? 'var(--success, #10b981)' : 'var(--danger, #ef4444)';
-        
-        const resultDiv = document.getElementById('calibrationJudgeResult');
-        if (resultDiv) {
-
-            // Build criteria badges
-            let criteriaHtml = '';
-            for (const [k, v] of Object.entries(criteria)) {
-                const isPass = String(v).toUpperCase() === 'PASS';
-                criteriaHtml += `<span style="display: inline-block; padding: 0.15rem 0.5rem; margin: 0.15rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; background: ${isPass ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)'}; color: ${isPass ? 'var(--success,#10b981)' : 'var(--danger,#ef4444)'};">${escapeHtml(k)}: ${escapeHtml(String(v))}</span>`;
-            }
-
-            resultDiv.innerHTML = `
-                <div style="padding: 1rem; background: var(--bg-primary); border-radius: 8px; border: 1px solid ${scoreColor};">
-                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
-                        <span style="font-weight: 700; color: ${scoreColor};">Score: ${score} ${isPassing ? '(PASS)' : '(FAIL)'}</span>
-                    </div>
-                    <div style="margin-bottom: 0.75rem;">
-                        <label style="font-weight: 600; font-size: 0.85rem;">Criteria Breakdown:</label>
-                        <div style="margin-top: 0.25rem;">${criteriaHtml || '<span style="color:var(--text-muted);">No criteria data</span>'}</div>
-                    </div>
-                    <div>
-                        <label style="font-weight: 600; font-size: 0.85rem;">Judge Explanation:</label>
-                        <p style="margin-top: 0.25rem; font-size: 0.85rem; color: var(--text-secondary); white-space: pre-wrap;">${escapeHtml(data.explanation || 'No explanation')}</p>
-                    </div>
-                    <p style="margin-top: 0.75rem; font-size: 0.8rem; color: var(--text-muted);">
-                        You can tweak your criteria or judge prompt above, then click "Judge This Response" again to re-judge the same response.
-                    </p>
-                </div>
-            `;
-            resultDiv.classList.remove('hidden');
-        }
-
-        // Enable hunt button now that calibration is done
-        state.referenceValidated = true;
-        if (elements.startHuntBtn) {
-            elements.startHuntBtn.disabled = false;
-            elements.startHuntBtn.title = '';
-        }
-
-        showToast(isPassing ? 'Judge PASSED. You can start hunting or re-calibrate.' : 'Judge FAILED. Tweak criteria and re-judge, or start hunting.', isPassing ? 'success' : 'info');
-
-    } catch (error) {
-        showError(error, { operation: 'Judge calibration' });
-    } finally {
-        if (judgeBtn) { judgeBtn.disabled = false; judgeBtn.textContent = 'Judge This Response'; }
-        if (loadingEl) loadingEl.classList.add('hidden');
-    }
-}
-
-export function initCalibrationListeners() {
-    const genBtn = document.getElementById('generateOneBtn');
-    const regenBtn = document.getElementById('regenerateBtn');
-    const judgeBtn = document.getElementById('judgeCalibrationBtn');
-
-    if (genBtn) genBtn.addEventListener('click', calibrationGenerateOne);
-    if (regenBtn) regenBtn.addEventListener('click', calibrationGenerateOne); // Regenerate = same function
-    if (judgeBtn) judgeBtn.addEventListener('click', calibrationJudge);
 }
 
 /**
@@ -1063,9 +902,9 @@ export async function startNextTurn() {
         if (modelRefEl) {
             try {
                 convertStructuredToJSON();
-                completedCriteria = state.convertedModelRefJSON || modelRefEl.value || completedCriteria;
+                completedCriteria = ensurePrettyPrintJSON(state.convertedModelRefJSON || modelRefEl.value || completedCriteria);
             } catch {
-                completedCriteria = modelRefEl.value || completedCriteria;
+                completedCriteria = ensurePrettyPrintJSON(modelRefEl.value || completedCriteria);
             }
         }
         
@@ -1153,10 +992,8 @@ export async function startNextTurn() {
         // Reset initial criteria so judge validates against new turn's criteria
         state.initialCriteria = null;
         
-        // Hide Turn 1 Test Prompt panel; show calibration for Turn 2+
-        const { hideTurn1TestPromptPanel } = await import('./notebook.js');
-        hideTurn1TestPromptPanel();
-        showCalibrationPanel();
+        // Show Test Prompt panel (same as Turn 1)
+        showTurn1TestPromptPanel();
         
         // Update all turn-aware UI (journey bar, thread, badges, progress info)
         updateTurnAwareUI();

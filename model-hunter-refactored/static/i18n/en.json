@@ -1,0 +1,34 @@
+{
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "close": "Close",
+    "retry": "Retry",
+    "loading": "Loading..."
+  },
+  "header": {
+    "howItWorks": "How it works",
+    "admin": "Admin"
+  },
+  "registration": {
+    "title": "Welcome to Model Hunter",
+    "subtitle": "Please enter your details to get started. You only need to do this once.",
+    "name": "Name",
+    "email": "Turing Email",
+    "getStarted": "Get Started"
+  },
+  "upload": {
+    "loadNotebook": "Load Notebook",
+    "pasteUrl": "Paste Colab Notebook URL",
+    "fetch": "Fetch"
+  },
+  "hunt": {
+    "findBreakingResponses": "Find Breaking Responses",
+    "checkIdealResponse": "Check Ideal Response",
+    "saveAndCheck": "Save & Check"
+  },
+  "mobile": {
+    "title": "Model Hunter works best on desktop or laptop",
+    "message": "Please open this page on a computer for the best experience."
+  }
+}

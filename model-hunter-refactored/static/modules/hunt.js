@@ -8,25 +8,17 @@
  */
 
 import { elements } from './dom.js';
-import { MAX_HUNTS_PER_NOTEBOOK, PROVIDER_MODELS } from './config.js';
+import { MAX_HUNTS_PER_NOTEBOOK, PROVIDER_MODELS, REASONING_MODEL_IDS } from './config.js';
 import { 
     loadHuntCount, 
     saveHuntCount, 
     getModelDisplayName, 
     renderInsightTip, 
     startTipRotation,
-    getTurnColor 
+    getTurnColor,
+    debugLog,
+    escapeHtml
 } from './utils.js';
-
-function escapeHtml(unsafe) {
-    if (!unsafe) return '';
-    return String(unsafe)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
-}
 import { state } from './state.js';
 import { showToast } from './celebrations.js';
 import { 
@@ -328,12 +320,12 @@ export async function startHunt() {
     // incrementHuntCount calls updateHuntLimitUI which modifies the UI input values!
     // If we call getConfig() after, it reads the modified (lower) values.
     state.config = getConfig();
-    console.log(`📊 Config captured with ${state.config.parallel_workers} workers BEFORE increment`);
+    debugLog(`📊 Config captured with ${state.config.parallel_workers} workers BEFORE increment`);
     
     // Increment hunt count immediately (before the hunt starts)
     // This will update UI but we already captured the config
     incrementHuntCount(state.notebookId, requestedHunts);
-    console.log(`📊 Hunt count incremented: ${state.totalHuntsCount}/${MAX_HUNTS_PER_NOTEBOOK}, offset for this run: ${huntOffset}`);
+    debugLog(`📊 Hunt count incremented: ${state.totalHuntsCount}/${MAX_HUNTS_PER_NOTEBOOK}, offset for this run: ${huntOffset}`);
     
     state.isHunting = true;
     state.results = [];
@@ -398,7 +390,7 @@ export async function startHunt() {
     const eventSource = new EventSource(`/api/hunt-stream/${state.sessionId}`);
     
     eventSource.onmessage = (event) => {
-        console.log('SSE message:', event.data);
+        debugLog('SSE message:', event.data);
     };
     
     // Dedup helper — returns true if this event was already processed
@@ -415,7 +407,7 @@ export async function startHunt() {
     eventSource.addEventListener('start', (event) => {
         if (isDuplicate(event)) return;
         const data = JSON.parse(event.data);
-        console.log('Hunt started:', data);
+        debugLog('Hunt started:', data);
     });
     
     eventSource.addEventListener('hunt_start', (event) => {
@@ -454,7 +446,7 @@ export async function startHunt() {
             // EventSource may auto-reconnect, but if it enters CLOSED state
             // (e.g., 502 from nginx during deploy), we must reconnect manually.
             if (eventSource.readyState === EventSource.CLOSED) {
-                console.log('SSE connection closed during hunt, reconnecting manually...');
+                debugLog('SSE connection closed during hunt, reconnecting manually...');
                 eventSource.close();
                 // Reconnect after brief delay — server will replay missed events
                 setTimeout(() => {
@@ -502,7 +494,7 @@ export async function startHunt() {
                 }, 2000);
             } else {
                 // CONNECTING state — EventSource is auto-reconnecting, let it
-                console.log('SSE reconnecting (auto via Last-Event-ID)...');
+                debugLog('SSE reconnecting (auto via Last-Event-ID)...');
             }
         } else {
             eventSource.close();
@@ -549,7 +541,7 @@ export function initProgressUI() {
     // Use the offset that was set BEFORE incrementing (in startHunt)
     const offset = state.currentRunStartOffset;
     
-    console.log(`📊 initProgressUI: totalHuntsCount=${state.totalHuntsCount}, parallel_workers=${parallel_workers}, offset=${offset}`);
+    debugLog(`📊 initProgressUI: totalHuntsCount=${state.totalHuntsCount}, parallel_workers=${parallel_workers}, offset=${offset}`);
     
     // Reset progress for THIS run only
     if (elements.progressFill) elements.progressFill.style.width = '0%';
@@ -585,6 +577,7 @@ export function initProgressUI() {
         
         const row = document.createElement('tr');
         row.id = `hunt-row-${globalRowNum}`;
+        row.dataset.modelId = model || '';
         row.innerHTML = `
             <td>${globalRowNum}</td>
             <td class="model-cell" title="${model}">${modelDisplay}</td>
@@ -605,6 +598,9 @@ export function initProgressUI() {
     elements.huntStatus.querySelector('.status-dot').className = 'status-dot running';
     const runTurnLabel = (state.isMultiTurn || state.currentTurn > 1) ? ` — Turn ${state.currentTurn}` : '';
     elements.statusText.textContent = `Running...${runTurnLabel}`;
+    
+    // Ensure per-turn progress info is visible and up to date
+    updateTurnAwareUI();
 }
 
 export function updateTableRow(huntId, data) {
@@ -616,16 +612,26 @@ export function updateTableRow(huntId, data) {
     }
     
     if (data.model) {
+        row.dataset.modelId = data.model;
         row.querySelector('.model-cell').textContent = getModelDisplayName(data.model);
     }
     
     if (data.status === 'running') {
+        const modelId = row.dataset.modelId || '';
+        const isReasoning = isReasoningModel(modelId);
+        const statusText = isReasoning ? 'Model is reasoning, this may take 1–2 minutes' : 'Model is generating, usually under 30 seconds';
         row.querySelector('.status-cell').innerHTML = `
             <span class="score-badge pending">
-                <span class="spinner"></span> Model thinking
+                <span class="spinner"></span> ${statusText}
             </span>
         `;
     }
+}
+
+function isReasoningModel(modelId) {
+    if (!modelId) return false;
+    const m = String(modelId).toLowerCase();
+    return REASONING_MODEL_IDS.some(id => m === id.toLowerCase() || m.includes(id.toLowerCase()));
 }
 
 export function handleHuntProgress(data) {
@@ -635,16 +641,18 @@ export function handleHuntProgress(data) {
     const row = document.getElementById(`hunt-row-${hunt_id}`);
     if (!row) return;
     
-    // Map step to display text (no emojis except score column)
-    // "calling_model" deprecated - if received, show "Model thinking" instead
+    const modelId = row.dataset.modelId || '';
+    const isReasoning = isReasoningModel(modelId);
+    
+    // Map step to display text; for model_thinking show time expectation (human language, no hyphen)
     const stepDisplay = {
-        'calling_model': { text: 'Model thinking', color: 'var(--info)' },
-        'model_thinking': { text: 'Model thinking', color: 'var(--info)' },
+        'calling_model': { text: isReasoning ? 'Model is reasoning, this may take 1–2 minutes' : 'Model is generating, usually under 30 seconds', color: 'var(--info)' },
+        'model_thinking': { text: isReasoning ? 'Model is reasoning, this may take 1–2 minutes' : 'Model is generating, usually under 30 seconds', color: 'var(--info)' },
         'received_response': { text: 'Response received', color: 'var(--info)' },
         'judging': { text: 'Judging', color: 'var(--accent-primary)' }
     };
     
-    const display = stepDisplay[step] || { text: (step === 'running' ? 'Model thinking' : (step || 'Model thinking')), color: 'var(--text-muted)' };
+    const display = stepDisplay[step] || { text: (step === 'running' ? (isReasoning ? 'Model is reasoning, this may take 1–2 minutes' : 'Model is generating, usually under 30 seconds') : (step || 'Model thinking')), color: 'var(--text-muted)' };
     
     // Update status cell with detailed progress
     row.querySelector('.status-cell').innerHTML = `
@@ -653,7 +661,7 @@ export function handleHuntProgress(data) {
         </span>
     `;
     
-    console.log(`Hunt ${hunt_id} progress: ${step} - ${message}`);
+    debugLog(`Hunt ${hunt_id} progress: ${step} - ${message}`);
 }
 
 export function handleHuntResult(data) {
@@ -663,7 +671,7 @@ export function handleHuntResult(data) {
     const globalRowNum = hunt_id;
     
     // Debug log
-    console.log('Hunt Result:', { 
+    debugLog('Hunt Result:', { 
         hunt_id, 
         status, 
         score, 
@@ -723,15 +731,18 @@ export function handleHuntResult(data) {
             }
         }
         
-        // Result - SHOW IMMEDIATELY (no emojis)
+        // Result - SHOW criteria summary (C1: ✓ C2: ✗) for completed hunts
         const resultCell = row.querySelector('.result-cell') || row.querySelector('.issues-cell');
         if (resultCell) {
             if (error) {
                 resultCell.textContent = error.substring(0, 50) + '...';
-            } else if (is_breaking) {
-                resultCell.textContent = 'Breaking';
             } else {
-                resultCell.textContent = '-';
+                const criteria = data.judge_criteria || data.grading_basis || {};
+                const parts = Object.entries(criteria)
+                    .filter(([, v]) => v && String(v).toUpperCase() in { PASS: 1, FAIL: 1 })
+                    .map(([k, v]) => `${k}: ${String(v).toUpperCase() === 'PASS' ? '✓' : '✗'}`)
+                    .slice(0, 5);
+                resultCell.textContent = parts.length > 0 ? parts.join(' ') : (is_breaking ? 'Breaking' : '-');
             }
         }
         

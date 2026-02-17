@@ -11,6 +11,7 @@ import { state } from './state.js';
 import { showToast, showError } from './celebrations.js';
 import { validatePromptLength } from './editors.js';
 import { convertStructuredToJSON } from './editors.js';
+import { ensurePrettyPrintJSON } from './utils.js';
 import { updateOriginalNotebookWithCell } from './notebook.js';
 
 const DEBOUNCE_MS = 800;
@@ -115,8 +116,9 @@ async function performBatchSave() {
     try {
         convertStructuredToJSON();
         modelref = state.convertedModelRefJSON || (modelrefInput?.value ?? '');
+        modelref = ensurePrettyPrintJSON(modelref);
     } catch {
-        modelref = modelrefInput?.value ?? '';
+        modelref = ensurePrettyPrintJSON(modelrefInput?.value ?? '');
     }
     const judge = judgeInput?.value ?? '';
 

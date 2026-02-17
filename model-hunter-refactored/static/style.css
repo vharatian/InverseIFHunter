@@ -182,6 +182,19 @@ h3 { font-size: 1.05rem; }
     transition: all var(--transition-fast);
 }
 
+.header-link {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    text-decoration: none;
+    padding: 0.35rem 0.6rem;
+    border-radius: 6px;
+    transition: color 0.2s, background 0.2s;
+}
+.header-link:hover {
+    color: var(--accent-primary);
+    background: rgba(var(--accent-primary-rgb), 0.08);
+}
+
 .theme-toggle:hover {
     background: var(--bg-hover);
     border-color: var(--border-hover);
@@ -204,6 +217,46 @@ h3 { font-size: 1.05rem; }
 }
 .upload-toggle-chevron.collapsed {
     transform: rotate(-90deg);
+}
+
+/* Reference Judge Result — Collapsible Criteria & Explanation (notebook preview) */
+.reference-judge-collapsible {
+    margin-top: 0.75rem;
+}
+.reference-judge-collapsible-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: var(--text-primary);
+    transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+.reference-judge-collapsible-header:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-hover);
+}
+.reference-judge-collapsible-chevron {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    transition: transform 0.2s ease;
+}
+.reference-judge-collapsible-body {
+    overflow: hidden;
+    max-height: 800px;
+    transition: max-height 0.3s ease, padding 0.3s ease, opacity 0.3s ease;
+    padding: 0.75rem 0 0;
+}
+.reference-judge-collapsible-body.collapsed {
+    max-height: 0;
+    padding: 0;
+    overflow: hidden;
 }
 
 /* Cards — Minimal */
@@ -589,6 +642,14 @@ body {
     border-color: var(--border-hover);
     color: var(--text-primary);
     background: var(--bg-hover);
+}
+
+/* Criteria add buttons: dim when criterion ID already present */
+.add-criterion-btn.criteria-btn-used,
+.add-criterion-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    pointer-events: none;
 }
 
 .btn-success {
@@ -4137,6 +4198,41 @@ body.sidebar-visible .container.multi-turn-layout {
     margin-top: 0.75rem;
     line-height: 1.5;
     transition: opacity 0.3s ease, max-height 0.3s ease;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+.insight-tip .tip-content {
+    flex: 1;
+    min-width: 0;
+}
+.insight-tip .tip-controls {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+.insight-tip .tip-dismiss-btn,
+.insight-tip .tip-pause-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    padding: 0.15rem 0.35rem;
+    border-radius: 4px;
+    transition: color 0.2s, background 0.2s;
+}
+.insight-tip .tip-dismiss-btn:hover,
+.insight-tip .tip-pause-btn:hover {
+    color: var(--text-primary);
+    background: rgba(0,0,0,0.08);
+}
+.insight-tip .tip-dismiss-btn {
+    font-size: 1rem;
+    line-height: 1;
+    padding: 0 0.25rem;
 }
 .insight-tip .tip-icon {
     margin-right: 0.3rem;

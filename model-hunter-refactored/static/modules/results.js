@@ -17,7 +17,8 @@ import {
     getModelDisplayName,
     renderInsightTip,
     getIncompleteReviewIssues,
-    getIncompleteReviewsModalMessage 
+    getIncompleteReviewsModalMessage,
+    debugLog 
 } from './utils.js';
 import { showToast, showError, showNextBlindJudge } from './celebrations.js';
 import { hideModelLockedIndicator } from './editors.js';
@@ -58,7 +59,7 @@ export function setReviewModeButtonsDisabled(disabled) {
 // ============== Response Slide-out Panel ==============
 
 export function openResponseSlideout(rowNum) {
-    console.log('openResponseSlideout called with rowNum:', rowNum);
+    debugLog('openResponseSlideout called with rowNum:', rowNum);
     
     const data = state.huntResponseData[rowNum];
     if (!data) {
@@ -67,7 +68,7 @@ export function openResponseSlideout(rowNum) {
         return;
     }
     
-    console.log('Response data found:', data);
+    debugLog('Response data found:', data);
     
     // Get elements directly from DOM (backup in case elements object not updated)
     const slideout = document.getElementById('responseSlideout');
@@ -129,7 +130,7 @@ export function openResponseSlideout(rowNum) {
     // Prevent body scroll when panel is open
     document.body.style.overflow = 'hidden';
     
-    console.log('Slideout panel opened');
+    debugLog('Slideout panel opened');
 }
 
 export function closeResponseSlideout() {
@@ -152,7 +153,7 @@ export function closeResponseSlideout() {
 
 // Open slide-out for selection table details
 export function openSelectionDetailSlideout(rowNumber, result) {
-    console.log('Opening selection detail slideout for row:', rowNumber);
+    debugLog('Opening selection detail slideout for row:', rowNumber);
     
     const slideout = document.getElementById('responseSlideout');
     const backdrop = document.getElementById('responseSlideoutBackdrop');
@@ -253,7 +254,7 @@ export function openGradingSlideout(result, slotIndex, rowNumber) {
     const huntId = result.hunt_id;
     
     // DEBUG: Log hunt IDs to verify uniqueness across slots
-    console.log(`🔍 openGradingSlideout: huntId=${huntId}, slotIndex=${slotIndex}, rowNumber=${rowNumber}, existingReviewKeys=`, Object.keys(state.humanReviews || {}));
+    debugLog(`🔍 openGradingSlideout: huntId=${huntId}, slotIndex=${slotIndex}, rowNumber=${rowNumber}, existingReviewKeys=`, Object.keys(state.humanReviews || {}));
     
     // Get existing review data ONLY if it was previously submitted
     // Prevents cross-contamination between slots when huntId is shared or undefined
@@ -318,6 +319,7 @@ export function openGradingSlideout(result, slotIndex, rowNumber) {
             <div class="grading-split-right">
                 <div class="grading-section">
                     <div class="grading-section-title">✅ Grade Each Criterion ${isReadOnly ? '<span style="color: var(--warning); font-size: 0.8rem;">(Locked)</span>' : ''}</div>
+                    <div class="grading-shortcuts-hint" style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.5rem;">P = Pass | F = Fail | Tab = Next criterion</div>
                     <div class="grading-criteria-list" data-hunt-id="${huntId}">
                         ${(state.criteria || []).map(c => {
                             const existingGrade = existingGrades[c.id];
@@ -590,7 +592,7 @@ export function submitGradingReview(huntId, result, slotIndex, rowNumber) {
         submitted: true
     };
     
-    console.log(`📝 Review submitted: huntId=${huntId}, rowNumber=${rowNumber}, rowKey=${rowKey}`);
+    debugLog(`📝 Review submitted: huntId=${huntId}, rowNumber=${rowNumber}, rowKey=${rowKey}`);
     
     // Update status in slideout
     const statusEl = document.querySelector(`.grading-status[data-hunt-id="${huntId}"]`);
@@ -752,7 +754,7 @@ export async function fetchAllResponses(options = {}) {
             : rawResults.filter(r => !state.previousTurnHuntIds.has(r.hunt_id));
         
         if (options.replace && rawResults.length > 0) {
-            console.log('[fetchAllResponses] API returned', rawResults.length, 'results, using', newResponses.length);
+            debugLog('[fetchAllResponses] API returned', rawResults.length, 'results, using', newResponses.length);
         }
         
         if (options.replace) {
@@ -867,7 +869,7 @@ export async function fetchAllResponsesAndShowSelection(completedHunts, breaksFo
         });
         const criteriaMetDiversity = diverseCriteria.length >= 1;
         
-        console.log('Criteria diversity check:', { criteriaGrades, diverseCriteria, criteriaMetDiversity });
+        debugLog('Criteria diversity check:', { criteriaGrades, diverseCriteria, criteriaMetDiversity });
         
         // Only check breaks requirement, not diversity (diversity is checked for LLM judge only, not for selection)
         // In admin mode, allow proceeding even with 0 breaks
@@ -1053,7 +1055,7 @@ export function clearPreviousResults() {
     const dots = elements.breaksIndicator?.querySelectorAll('.break-dot');
     dots?.forEach(dot => dot.classList.remove('found'));
     
-    console.log('Previous results cleared');
+    debugLog('Previous results cleared');
 }
 
 /**
@@ -1283,11 +1285,11 @@ export async function warmupConnections() {
             headers: { 'Content-Type': 'application/json' }
         });
         if (response.ok) {
-            console.log('🔥 Connection warm-up initiated');
+            debugLog('🔥 Connection warm-up initiated');
         }
     } catch (error) {
         // Silent fail - warm-up is optional optimization
-        console.log('Connection warm-up skipped:', error.message);
+        debugLog('Connection warm-up skipped:', error.message);
     }
 }
 
@@ -1701,7 +1703,7 @@ export function updateSelectionCount() {
         elements.selectionCount.style.color = statusColor;
     }
     
-    console.log('🔍 updateSelectionCount:', {
+    debugLog('🔍 updateSelectionCount:', {
         selectedRowNumbers: state.selectedRowNumbers,
         selectedResultsCount: selectedResults.length,
         breakingCount,
@@ -1726,7 +1728,7 @@ export function updateSelectionCount() {
         }
     }
     
-    console.log('🔍 Button state:', {
+    debugLog('🔍 Button state:', {
         count,
         breakingCount,
         passingCount,
@@ -1782,12 +1784,12 @@ export async function confirmSelection() {
     // ===== DIVERSITY CHECK: Check for criterion diversity in LLM JUDGE ONLY =====
     const criteriaVotes = {};  // Track votes per criterion from LLM judges: { C1: { pass: 0, fail: 0 }, ... }
     
-    console.log('🔍 DIVERSITY CHECK - LLM Judge criteria from selected results:', selectedResults);
+    debugLog('🔍 DIVERSITY CHECK - LLM Judge criteria from selected results:', selectedResults);
     
     // Check LLM judge criteria (not human judge)
     for (const result of selectedResults) {
         const judgeCriteria = result.judge_criteria || {};
-        console.log('  LLM Judge criteria:', judgeCriteria);
+        debugLog('  LLM Judge criteria:', judgeCriteria);
         
         for (const [criterionId, vote] of Object.entries(judgeCriteria)) {
             if (!criteriaVotes[criterionId]) {
@@ -1802,15 +1804,15 @@ export async function confirmSelection() {
         }
     }
     
-    console.log('  LLM Criteria votes summary:', criteriaVotes);
+    debugLog('  LLM Criteria votes summary:', criteriaVotes);
     
     // Check if ANY criterion has both a pass AND a fail in LLM judge results
     const hasDiverseCriterion = Object.entries(criteriaVotes).some(
         ([id, votes]) => votes.pass > 0 && votes.fail > 0
     );
     
-    console.log('  Has diverse criterion in LLM judges?', hasDiverseCriterion);
-    console.log('  Total criteria checked:', Object.keys(criteriaVotes).length);
+    debugLog('  Has diverse criterion in LLM judges?', hasDiverseCriterion);
+    debugLog('  Total criteria checked:', Object.keys(criteriaVotes).length);
     
     // Require diversity only when we have mixed breaking+passing (3+1). For 4 breaking, allow. Bypass in admin mode.
     const is4Breaking = breakingCount === 4 && passingCount === 0;
@@ -1831,7 +1833,7 @@ export async function confirmSelection() {
         return;
     }
     
-    console.log('✅ LLM Judge diversity check passed');
+    debugLog('✅ LLM Judge diversity check passed');
     
     const n = selectedResults.length;
     const confirmed = await showAppModal({
@@ -1879,13 +1881,14 @@ export function displaySelectedForReview() {
     // Get selected results directly by row numbers - NO LOOKUP!
     const selectedResponses = state.selectedRowNumbers.map(rn => state.allResponses[rn]).filter(r => r !== undefined);
     
-    console.log('displaySelectedForReview called');
-    console.log('selectedRowNumbers:', state.selectedRowNumbers);
-    console.log('selectedResponses count:', selectedResponses.length);
+    debugLog('displaySelectedForReview called');
+    debugLog('selectedRowNumbers:', state.selectedRowNumbers);
+    debugLog('selectedResponses count:', selectedResponses.length);
     
     if (selectedResponses.length === 0) {
         elements.noBreaksMessage.classList.remove('hidden');
-        elements.noBreaksMessage.textContent = 'No hunts selected. Select hunts from the table above to review them.';
+        const msgEl = elements.noBreaksMessage.querySelector('p') || document.getElementById('noBreaksMessageText');
+        if (msgEl) msgEl.textContent = 'No hunts selected. Select hunts from the table above to review them.';
         return;
     }
     
@@ -1904,6 +1907,13 @@ export function displaySelectedForReview() {
         section.style.display = 'none';
     });
     
+    // Show Change selection button (hidden after Reveal LLM Judgments)
+    const changeBtn = document.getElementById('changeSelectionBtn') || elements.changeSelectionBtn;
+    if (changeBtn && !state.llmRevealed) {
+        changeBtn.style.display = 'inline-block';
+        changeBtn.disabled = false;
+    }
+    
     // Show save container but keep button disabled until reveal — enable in admin mode
     elements.saveDriveContainer.classList.remove('hidden');
     if (state.adminMode) {
@@ -1921,6 +1931,42 @@ export function displaySelectedForReview() {
             elements.revealLLMBtn.style.opacity = '0.5';
         }
     }
+}
+
+/**
+ * Change selection: go back to pick different 4 responses. Disabled after Reveal LLM Judgments.
+ */
+export function handleChangeSelection() {
+    if (state.llmRevealed) return;
+    
+    const oldSelected = state.selectedRowNumbers || [];
+    state.selectionConfirmed = false;
+    state.diversityCheckPassed = false;
+    state.selectedRowNumbers = [];
+    
+    // Clear human reviews for the old 4 slots
+    if (state.humanReviews) {
+        oldSelected.forEach(rn => delete state.humanReviews[`row_${rn}`]);
+    }
+    
+    enableSelectionCheckboxes();
+    setReviewModeButtonsDisabled(false);
+    
+    // Hide Change selection button
+    const changeBtn = document.getElementById('changeSelectionBtn') || elements.changeSelectionBtn;
+    if (changeBtn) {
+        changeBtn.style.display = 'none';
+    }
+    
+    // Clear the 4 review cards and show selection section
+    elements.breakingResults.innerHTML = '';
+    elements.saveDriveContainer.classList.add('hidden');
+    
+    elements.selectionSection?.classList.remove('hidden');
+    displaySelectionCards();
+    elements.selectionSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    
+    showToast('Selection cleared. Pick 4 responses again.', 'info');
 }
 
 // FIX 2: Helper function to disable all selection checkboxes
@@ -1953,8 +1999,8 @@ export function updateReviewProgress() {
     const reviewCount = reviewKeys.filter(key => state.humanReviews && state.humanReviews[key]).length;
     const selectedCount = selectedRowNumbers.length;
     
-    console.log(`📊 updateReviewProgress: ${reviewCount}/${selectedCount} reviews, keys:`, reviewKeys);
-    console.log(`📊 humanReviews keys:`, Object.keys(state.humanReviews || {}));
+    debugLog(`📊 updateReviewProgress: ${reviewCount}/${selectedCount} reviews, keys:`, reviewKeys);
+    debugLog(`📊 humanReviews keys:`, Object.keys(state.humanReviews || {}));
     
     if (elements.reviewProgressText) {
         elements.reviewProgressText.textContent = `${reviewCount} / ${selectedCount} completed`;
@@ -1973,10 +2019,10 @@ export function updateReviewProgress() {
             elements.revealLLMBtn.style.opacity = (!allComplete || state.llmRevealed) ? '0.5' : '1';
         }
         if (state.llmRevealed) {
-            elements.revealLLMBtn.textContent = '✅ LLM Judgments Revealed';
+            elements.revealLLMBtn.textContent = '✅ AI Evaluation Shown';
             elements.revealLLMBtn.disabled = true;
         } else if (allComplete || state.adminMode) {
-            elements.revealLLMBtn.textContent = '👁️ Reveal LLM Judgments';
+            elements.revealLLMBtn.textContent = '👁️ Show AI Evaluation';
             if (state.adminMode) elements.revealLLMBtn.disabled = false;
         }
     }
@@ -1988,7 +2034,7 @@ export function updateReviewProgress() {
             elements.saveDriveBtn.style.opacity = '1';
         } else if (allComplete && selectedCount === 4) {
             // Keep save disabled until reveal (handled in revealLLMJudgments)
-            console.log('✅ All 4 reviews complete! Ready to reveal LLM judgments.');
+            debugLog('✅ All 4 reviews complete! Ready to reveal LLM judgments.');
         }
     }
     
@@ -1998,10 +2044,10 @@ export function updateReviewProgress() {
             elements.reviewInstructions.textContent = '✅ Reviews locked. Scroll down to save.';
             elements.reviewInstructions.style.color = 'var(--success)';
         } else if (reviewCount >= 4) {
-            elements.reviewInstructions.textContent = '✅ All reviews complete! Scroll down to reveal LLM judgments.';
+            elements.reviewInstructions.textContent = '✅ All reviews complete! Scroll down to show AI evaluation.';
             elements.reviewInstructions.style.color = 'var(--success)';
         } else {
-            elements.reviewInstructions.textContent = `Complete all 4 human reviews, then scroll down to reveal LLM judgments and save.`;
+            elements.reviewInstructions.textContent = `Complete all 4 human reviews, then scroll down to show AI evaluation and save.`;
         }
     }
     
@@ -2011,10 +2057,10 @@ export function updateReviewProgress() {
             elements.bottomInstructions.textContent = '✅ LLM Judgments revealed. Reviews locked. Click Save to Colab Notebook.';
             elements.bottomInstructions.style.color = 'var(--success)';
         } else if (reviewCount >= 4) {
-            elements.bottomInstructions.textContent = '✅ All reviews complete! Click "Reveal LLM Judgments" → Save will be enabled.';
+            elements.bottomInstructions.textContent = '✅ All reviews complete! Click "Show AI Evaluation" → Save will be enabled.';
             elements.bottomInstructions.style.color = 'var(--success)';
         } else {
-            elements.bottomInstructions.textContent = `Complete all 4 human reviews → Click "Reveal LLM Judgments" → Save will be enabled`;
+            elements.bottomInstructions.textContent = `Complete all 4 human reviews → Click "Show AI Evaluation" → Save will be enabled`;
             elements.bottomInstructions.style.color = 'var(--text-muted)';
         }
     }
@@ -2055,7 +2101,7 @@ export async function revealLLMJudgments() {
     }
     
     const confirmed = await showAppModal({
-        title: 'Reveal LLM judgments?',
+        title: 'Show AI evaluation?',
         message: 'After revealing, you cannot edit or change your human reviews—everything will be locked. Continue to reveal and lock, or Cancel to edit your human reviews.',
         buttons: [
             { label: 'Cancel', primary: false, value: false },
@@ -2068,6 +2114,13 @@ export async function revealLLMJudgments() {
     }
     
     state.llmRevealed = true;
+    
+    // Hide Change selection button (disabled after Reveal)
+    const changeBtn = document.getElementById('changeSelectionBtn') || elements.changeSelectionBtn;
+    if (changeBtn) {
+        changeBtn.style.display = 'none';
+        changeBtn.disabled = true;
+    }
     
     // Show all LLM judge sections
     document.querySelectorAll('.llm-judge-section').forEach(section => {
@@ -2211,7 +2264,7 @@ export function createResultCardFull(result, slotIndex, rowNumber) {
     const traceClean = reasoningTrace.trim().toLowerCase();
     
     // Debug logging
-    console.log(`Slot ${slotNum} reasoning trace check:`, {
+    debugLog(`Slot ${slotNum} reasoning trace check:`, {
         hasTrace: !!reasoningTrace,
         traceLength: reasoningTrace.length,
         responseLength: responseText.length,
@@ -2227,13 +2280,13 @@ export function createResultCardFull(result, slotIndex, rowNumber) {
     if (reasoningTrace && traceClean.length > 0) {
         const isExactDuplicate = traceClean === responseClean;
         if (isExactDuplicate) {
-            console.log(`Slot ${slotNum}: Hiding exact duplicate trace in UI (export has full trace)`);
+            debugLog(`Slot ${slotNum}: Hiding exact duplicate trace in UI (export has full trace)`);
             reasoningTrace = ''; // Hide from UI only
         } else {
-            console.log(`Slot ${slotNum}: Showing reasoning trace (${reasoningTrace.length} chars)`);
+            debugLog(`Slot ${slotNum}: Showing reasoning trace (${reasoningTrace.length} chars)`);
         }
     } else if (!reasoningTrace) {
-        console.log(`Slot ${slotNum}: No reasoning trace found in result`);
+        debugLog(`Slot ${slotNum}: No reasoning trace found in result`);
     }
     
     // Store LLM judge data as JSON in data attribute
@@ -2512,7 +2565,7 @@ export function handleHumanReview(huntId, judgment, card, slotNum) {
     if (revealBtn) {
         revealBtn.disabled = false;
         revealBtn.style.opacity = '1';
-        revealBtn.textContent = '👁️ Reveal LLM Judge';
+        revealBtn.textContent = '👁️ Show AI Evaluation';
     } else {
         console.error('Could not find reveal button for hunt', huntId);
     }
@@ -2614,13 +2667,13 @@ export async function submitHumanReview(huntId, card, slotNum, rowNumber) {
         });
         
         if (!saveResponse.ok) {
-            console.warn(`Failed to auto-save review for hunt ${huntId}:`, await saveResponse.text());
+            debugLog(`Failed to auto-save review for hunt ${huntId}:`, await saveResponse.text());
             // Don't show error to user - it's auto-save, will be saved again on final save
         } else {
-            console.log(`✅ Auto-saved review for hunt ${huntId} to backend`);
+            debugLog(`✅ Auto-saved review for hunt ${huntId} to backend`);
         }
     } catch (error) {
-        console.warn(`Error auto-saving review for hunt ${huntId}:`, error);
+        debugLog(`Error auto-saving review for hunt ${huntId}:`, error);
         // Don't show error to user - it's auto-save, will be saved again on final save
     }
     
@@ -2657,7 +2710,7 @@ export function checkAllReviewsComplete() {
     const reviewCount = completedReviews.length;
     const totalSlots = selectedRowNumbers.length;
     
-    console.log('🔍 checkAllReviewsComplete:', {
+    debugLog('🔍 checkAllReviewsComplete:', {
         selectedRowNumbers,
         reviewKeys,
         completedReviews,

@@ -7,8 +7,62 @@ import {
     TURN_COLORS, 
     PROVIDER_MODELS, 
     INSIGHT_TIPS,
-    HUNT_COUNT_STORAGE_PREFIX
+    HUNT_COUNT_STORAGE_PREFIX,
+    TIPS_PAUSED_KEY,
+    DEBUG_MODE
 } from './config.js';
+
+const _tipIntervals = new Map();
+
+export function isTipsPaused() {
+    try {
+        return localStorage.getItem(TIPS_PAUSED_KEY) === 'true';
+    } catch { return false; }
+}
+
+export function setTipsPaused(paused) {
+    try {
+        localStorage.setItem(TIPS_PAUSED_KEY, paused ? 'true' : 'false');
+        if (paused) {
+            _tipIntervals.forEach((id) => clearInterval(id));
+            _tipIntervals.clear();
+        }
+    } catch (_) {}
+}
+
+export function toggleTipsPaused() {
+    const next = !isTipsPaused();
+    setTipsPaused(next);
+    return next;
+}
+
+/** Only logs when DEBUG_MODE is true. Prevents sensitive content (prompts, responses, reviews) from appearing in production console. */
+export function debugLog(...args) {
+    if (DEBUG_MODE) console.log(...args);
+}
+
+/**
+ * If content is valid JSON, re-serialize with indent=2 for human readability in Colab.
+ * Each criteria object on its own line, with space after commas, and a blank line
+ * between criteria for clear visual separation.
+ * Use for response_reference (criteria) before saving.
+ */
+export function ensurePrettyPrintJSON(content) {
+    if (!content || typeof content !== 'string') return content;
+    const trimmed = content.trim();
+    if (!trimmed || (trimmed[0] !== '[' && trimmed[0] !== '{')) return content;
+    try {
+        const parsed = JSON.parse(trimmed);
+        let pretty = JSON.stringify(parsed, null, 2);
+        // Add blank line between array elements for clearer separation in Colab
+        if (Array.isArray(parsed) && parsed.length > 1) {
+            pretty = pretty.replace(/},\n  \{/g, '},\n\n  {');
+        }
+        return pretty;
+    } catch {
+        return content;
+    }
+}
 
 export function escapeHtml(unsafe) {
     if (!unsafe) return '';
@@ -117,10 +171,13 @@ export function getRandomTip(category, model) {
 
 /**
  * Render a tip into a container element. Creates or updates an .insight-tip div.
+ * Adds Dismiss (×) and Pause tips controls. Respects tipsPaused (no new tips when paused).
  */
 export function renderInsightTip(containerId, category, options = {}) {
     const container = document.getElementById(containerId);
     if (!container) return;
+    
+    if (isTipsPaused()) return;  // Don't show new tips when paused
     
     const tip = getRandomTip(category, options.model);
     if (!tip) return;
@@ -142,26 +199,53 @@ export function renderInsightTip(containerId, category, options = {}) {
     if (tip.type) tipEl.classList.add(`tip-${tip.type}`);
     if (options.type) tipEl.classList.add(`tip-${options.type}`);
     
-    tipEl.innerHTML = `<span class="tip-icon">${tip.icon || '💡'}</span> ${tip.text}`;
+    tipEl.innerHTML = `
+        <span class="tip-content"><span class="tip-icon">${tip.icon || '💡'}</span> ${tip.text}</span>
+        <span class="tip-controls">
+            <button type="button" class="tip-dismiss-btn" title="Dismiss this tip" aria-label="Dismiss">×</button>
+            <button type="button" class="tip-pause-btn" title="Pause tips for this session">Pause tips</button>
+        </span>
+    `;
+    
+    tipEl.querySelector('.tip-dismiss-btn')?.addEventListener('click', () => {
+        tipEl.remove();
+    });
+    tipEl.querySelector('.tip-pause-btn')?.addEventListener('click', () => {
+        setTipsPaused(true);
+        tipEl.remove();
+    });
 }
 
 /**
- * Rotate the tip in a container every N seconds.
+ * Rotate the tip in a container every N seconds. Stops when tips are paused.
  */
 export function startTipRotation(containerId, category, intervalMs = 15000, options = {}) {
+    if (isTipsPaused()) return null;
+    
+    // Clear any existing interval for this container
+    const existing = _tipIntervals.get(containerId);
+    if (existing) clearInterval(existing);
+    
     // Render immediately
     renderInsightTip(containerId, category, options);
     
-    // Rotate periodically
+    // Rotate periodically (skip when paused)
     const intervalId = setInterval(() => {
+        if (isTipsPaused()) {
+            clearInterval(intervalId);
+            _tipIntervals.delete(containerId);
+            return;
+        }
         const container = document.getElementById(containerId);
         if (!container || container.closest('.hidden')) {
             clearInterval(intervalId);
+            _tipIntervals.delete(containerId);
             return;
         }
         renderInsightTip(containerId, category, options);
     }, intervalMs);
     
+    _tipIntervals.set(containerId, intervalId);
     return intervalId;
 }
 
@@ -274,4 +358,39 @@ export function getUserFriendlyError(error, context = {}) {
     }
 
     return { message: msg, canRetry: true };
+}
+
+/**
+ * Parse criteria text for present criterion IDs (C1–C10).
+ * Matches: C1: desc, C2 - desc, "id":"C1" in JSON, etc.
+ */
+function getPresentCriteriaIds(text) {
+    if (!text || typeof text !== 'string') return new Set();
+    const ids = new Set();
+    // Plain text: C1:, C2 -, C3 at line start or after newline
+    const lineMatch = text.matchAll(/(?:^|\n)\s*(C\d+)\s*[:-\s]/gi);
+    for (const m of lineMatch) ids.add(m[1].toUpperCase());
+    // Also: C1: or C2 - anywhere (handles multiple on one line)
+    const inlineMatch = text.matchAll(/\b(C\d+)\s*[:-\s]/gi);
+    for (const m of inlineMatch) ids.add(m[1].toUpperCase());
+    // JSON: "id":"C1" or "id": "C2"
+    const jsonMatch = text.matchAll(/"id"\s*:\s*"(C\d+)"/gi);
+    for (const m of jsonMatch) ids.add(m[1].toUpperCase());
+    return ids;
+}
+
+/**
+ * Update criteria add buttons: dim/disable those whose IDs are already in the textarea.
+ */
+export function updateCriteriaButtonsState(targetId) {
+    const textarea = document.getElementById(targetId);
+    if (!textarea) return;
+    const present = getPresentCriteriaIds(textarea.value);
+    document.querySelectorAll(`.add-criterion-btn[data-target="${targetId}"]`).forEach(btn => {
+        const prefix = (btn.dataset.prefix || 'C1').toUpperCase();
+        const used = present.has(prefix);
+        btn.disabled = used;
+        btn.classList.toggle('criteria-btn-used', used);
+        btn.title = used ? `${prefix} already added` : `Add ${prefix}`;
+    });
 }

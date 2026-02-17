@@ -7,7 +7,7 @@
  */
 
 import { VERSION_CHECK_INTERVAL } from './config.js';
-import { escapeHtml } from './utils.js';
+import { escapeHtml, debugLog } from './utils.js';
 
 // ============== Version Check & Update Prompt ==============
 let currentVersion = null;
@@ -22,11 +22,11 @@ export async function checkVersion() {
         if (currentVersion === null) {
             // First check - just store the version
             currentVersion = data.version;
-            console.log('📦 App version:', currentVersion);
+            debugLog('📦 App version:', currentVersion);
         } else if (data.version !== currentVersion) {
             // Version changed - show prompt immediately so user sees it without having to click Start Hunt
             pendingUpdateVersion = data.version;
-            console.warn('🔄 New version detected:', data.version);
+            debugLog('🔄 New version detected:', data.version);
             showUpdatePrompt();
         }
     } catch (e) {

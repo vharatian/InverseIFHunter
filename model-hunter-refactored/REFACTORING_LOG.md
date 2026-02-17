@@ -276,14 +276,30 @@
 - **Files:** `static/modules/results.js`, `static/index.html`, `static/style.css`
 - Status: DONE
 
+### UX Improvements, Code Audit & Cleanup — Feb 16, 2026 ✅
+
+- **UX (HCI/product best practices):** Grading shortcuts hint (P/F/Tab); status text by model type (reasoning vs non-reasoning); per-turn progress ("Turn X of Y"); criteria format hint + Colab URL validation; "Change selection" button; Pause/Dismiss for tips; criteria summary in results (C1: ✓ C2: ✗); Duolingo-style "No breaks" encouragement; How it works modal; term renames (Judge Reference → Check Ideal Response, Start Hunt → Find Breaking Responses, etc.); criteria buttons (+ C1, + C2); mobile message; i18n prep (`static/i18n/en.json`).
+- **Code audit:** No malicious code. Dead: `saveAndJudgeResponse` (notebook.js). Duplicate: `escapeHtml` (hunt.js). Backup files: app.js.bak, app.js.monolith, index.html.bak.
+- **Cleanup:** Removed `saveAndJudgeResponse` (~155 lines); hunt.js imports `escapeHtml` from utils.js; deleted 3 backup files. Risky items (innerHTML escaping, print→logger in dashboard) deferred.
+- Status: DONE
+
 ### Admin Mode — Feb 13, 2026 ✅
 
 - **Trigger:** 5 clicks on Task ID (metadata sidebar). Removed copy-on-click for Task ID.
-- **Password:** turinghuntmodel (ADMIN_MODE_PASSWORD in config.js).
+- **Password:** testmodel (ADMIN_MODE_PASSWORD in config.js).
 - **On success:** Green "Admin" badge in header; state.adminMode = true; all locks bypassed.
 - **Bypasses:** referenceValidated, hunt limit, model match, calibration, prompt word limit, review readiness (4 breaking / 3+1), diversity check, review-in-progress block.
 - **Reveal LLM Judgments & Save to Colab:** In admin mode, both buttons enabled regardless of review completion, 4 hunts, diversity, or llmRevealed. results.js: displaySelectedForReview, updateReviewProgress, revealLLMJudgments. notebook.js: saveToDrive.
 - **Disable:** Click the Admin badge to turn off.
 - **Files:** state.js, config.js, api.js (showPasswordPrompt), notebook.js, hunt.js, editors.js, multiturn.js, results.js, app.js, index.html, style.css
+- Status: DONE
+
+### Colab Save Structure — Feb 17, 2026 ✅
+
+- **Heading format:** All cells use `**[Turn N - prompt]**` style. For n=1 (single-turn), use `**[Turn 1 - prompt]**`.
+- **Single-turn:** `**[Turn 1 - prompt]**`, `**[Turn 1 - response]**`, `**[Turn 1 - response_reference]**`, `**[Turn 1 - judge_system_prompt]**`, `**[Turn 1 - {Model}_1]**`, `**[Turn 1 - llm_judge_1]**`, etc.
+- **Multi-turn:** Latest turn first (full structure), then previous turns newest-first with `**[Turn K - prompt]**`, `**[Turn K - selected_response]**`, `**[Turn K - response_reference]**`, `**[Turn K - selected_judge]**`.
+- **number_of_attempts_made:** Per-model markdown list with display names (e.g. `Nemotron-3-Nano (Fast): 12`, `Claude Opus 4.5: 6`). Same model variants use version names/numbers.
+- **Files:** `services/notebook_parser.py` (export_notebook, export_multi_turn_notebook, format_number_of_attempts_made, get_model_display_name), `services/snapshot_service.py` (per_model_hunts), `routes/notebook.py`, `static/modules/notebook.js` (per_model_hunts computation)
 - Status: DONE
 

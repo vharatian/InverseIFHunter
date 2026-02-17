@@ -94,6 +94,7 @@ export const elements = {
     reviewProgressText: document.getElementById('reviewProgressText'),
     reviewInstructions: document.getElementById('reviewInstructions'),
     reviewProgressContainer: document.getElementById('reviewProgressContainer'),
+    changeSelectionBtn: document.getElementById('changeSelectionBtn'),
     bottomInstructions: document.getElementById('bottomInstructions'),
     
     // Blind Judging Modal
