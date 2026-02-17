@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # Staging Deploy Script — does NOT touch production.
-# Deploys from staging branch to port 8080.
+# Deploys from staging branch to port 443.
 #
 # Usage:
 #   ./deploy-staging.sh              # Full deploy (pull staging + rebuild)
@@ -42,7 +42,7 @@ show_status() {
         fi
     done
     echo ""
-    echo -e "  Staging URL: ${BLUE}http://<vm-ip>:8080${NC}"
+    echo -e "  Staging URL: ${BLUE}http://<vm-ip>:443${NC}"
     echo ""
 }
 
@@ -110,7 +110,7 @@ deploy_full() {
     echo -e "${GREEN}║   Staging Deploy Complete             ║${NC}"
     echo -e "${GREEN}╚═══════════════════════════════════════╝${NC}"
     echo ""
-    echo -e "  Staging: ${BLUE}http://$(hostname -I 2>/dev/null | awk '{print $1}'):8080${NC}"
+    echo -e "  Staging: ${BLUE}http://$(hostname -I 2>/dev/null | awk '{print $1}'):443${NC}"
     echo ""
 }
 

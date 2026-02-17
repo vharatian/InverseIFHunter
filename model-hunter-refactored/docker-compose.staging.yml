@@ -1,8 +1,9 @@
 # Staging environment — same VM, different ports. Isolated from production.
 # Use: docker-compose -p model-hunter-staging -f docker-compose.staging.yml up -d
 #
-# Ports: nginx 8080, blue 8010, green 8012, dashboard 8011
+# Ports: nginx 443 (open in firewall), blue 8010, green 8012, dashboard 8011
 # Production stays on: 80, 8000, 8002, 8001
+# Staging URL: http://34.68.227.248:443 (shareable, no hosts file)
 
 version: '3.8'
 
@@ -118,7 +119,7 @@ services:
     container_name: model-hunter-staging-nginx
     restart: unless-stopped
     ports:
-      - "8080:80"
+      - "443:80"
     volumes:
       - ./nginx.staging.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
