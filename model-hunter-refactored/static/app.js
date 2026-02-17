@@ -223,12 +223,10 @@ function initEventListeners() {
             const prefix = btn.dataset.prefix || 'C1';
             const textarea = document.getElementById(targetId);
             if (!textarea || btn.disabled) return;
-            let current = textarea.value;
-            // Ensure content ends with newline so new criterion is on its own line
-            if (current.length > 0 && !current.endsWith('\n') && !current.endsWith('\r')) {
-                current = current + '\n';
-            }
-            const toInsert = current.length === 0 ? `${prefix}: ` : `\n${prefix}: `;
+            const current = textarea.value;
+            // Add on new line: one newline before criterion, no extra blank line
+            const endsWithNewline = current.endsWith('\n') || current.endsWith('\r');
+            const toInsert = current.length === 0 ? `${prefix}: ` : (endsWithNewline ? `${prefix}: ` : `\n${prefix}: `);
             textarea.value = current + toInsert;
             textarea.selectionStart = textarea.selectionEnd = textarea.value.length;
             textarea.focus();
