@@ -176,4 +176,7 @@ async def root(request: Request):
     if is_maintenance_mode():
         return FileResponse("static/maintenance.html")
     
-    return FileResponse("static/index.html")
+    return FileResponse(
+        "static/index.html",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"},
+    )
