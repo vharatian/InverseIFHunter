@@ -1,0 +1,137 @@
+# Staging environment — same VM, different ports. Isolated from production.
+# Use: docker-compose -p model-hunter-staging -f docker-compose.staging.yml up -d
+#
+# Ports: nginx 8080, blue 8010, green 8012, dashboard 8011
+# Production stays on: 80, 8000, 8002, 8001
+
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: model-hunter-staging-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy volatile-ttl
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - model-hunter-staging-network
+
+  model-hunter-blue:
+    build: .
+    image: model-hunter-staging_model-hunter-blue
+    container_name: model-hunter-staging-blue
+    restart: unless-stopped
+    ports:
+      - "8010:8010"
+    environment:
+      - PORT=8010
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - FIREWORKS_API_KEY=${FIREWORKS_API_KEY}
+      - REDIS_URL=redis://redis:6379/0
+      - OPENROUTER_CONCURRENCY=50
+      - FIREWORKS_CONCURRENCY=4
+      - OPENAI_CONCURRENCY=30
+    volumes:
+      - ./service_account.json:/app/service_account.json:ro
+      - ./.storage-staging:/app/.storage
+      - telemetry-data:/app/.telemetry
+      - ./static:/app/static:ro
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8010/api/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - model-hunter-staging-network
+
+  model-hunter-green:
+    build: .
+    image: model-hunter-staging_model-hunter-green
+    container_name: model-hunter-staging-green
+    restart: unless-stopped
+    ports:
+      - "8012:8012"
+    environment:
+      - PORT=8012
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - FIREWORKS_API_KEY=${FIREWORKS_API_KEY}
+      - REDIS_URL=redis://redis:6379/0
+      - OPENROUTER_CONCURRENCY=50
+      - FIREWORKS_CONCURRENCY=4
+      - OPENAI_CONCURRENCY=30
+    volumes:
+      - ./service_account.json:/app/service_account.json:ro
+      - ./.storage-staging:/app/.storage
+      - telemetry-data:/app/.telemetry
+      - ./static:/app/static:ro
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8012/api/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - model-hunter-staging-network
+
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    image: model-hunter-staging_dashboard
+    container_name: model-hunter-staging-dashboard
+    restart: unless-stopped
+    ports:
+      - "8011:8011"
+    environment:
+      - DASHBOARD_PORT=8011
+      - TELEMETRY_LOG_PATH=/app/.telemetry/events.jsonl
+      - SESSION_STORAGE_PATH=/app/.storage
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - ML_MODEL_PATH=/app/ml_models
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - telemetry-data:/app/.telemetry:ro
+      - ./.storage-staging:/app/.storage:ro
+      - ./ml_pipeline/models:/app/ml_models:ro
+    depends_on:
+      - model-hunter-blue
+    networks:
+      - model-hunter-staging-network
+
+  nginx:
+    image: nginx:alpine
+    container_name: model-hunter-staging-nginx
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx.staging.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - model-hunter-blue
+      - model-hunter-green
+      - dashboard
+    networks:
+      - model-hunter-staging-network
+
+volumes:
+  telemetry-data:
+  redis-data:
+
+networks:
+  model-hunter-staging-network:
+    driver: bridge
