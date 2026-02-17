@@ -24,6 +24,7 @@ import { showToast, showError, showNextBlindJudge } from './celebrations.js';
 import { hideModelLockedIndicator } from './editors.js';
 import { showMultiTurnDecision } from './multiturn.js';
 import { showAppModal } from './api.js';
+import { scheduleLiveExportUpdate } from './notebook.js';
 import { MIN_EXPLANATION_WORDS } from './config.js';
 
 // ============== Review Mode Button Lock ==============
@@ -790,6 +791,7 @@ export async function fetchAllResponses(options = {}) {
         if (summaryTotal) summaryTotal.textContent = cumul.totalHunts;
         if (summaryBreaks) summaryBreaks.textContent = cumul.totalBreaks;
         
+        scheduleLiveExportUpdate();
     } catch (error) {
         console.error('Error fetching results:', error);
         showError(error, { operation: 'Fetch results' });
@@ -2064,6 +2066,8 @@ export function updateReviewProgress() {
             elements.bottomInstructions.style.color = 'var(--text-muted)';
         }
     }
+    
+    scheduleLiveExportUpdate();
 }
 
 export async function revealLLMJudgments() {

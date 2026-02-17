@@ -176,8 +176,15 @@
 
 - **#3 Skip re-judge when model changes:** Marked Done. model-hunter-refactored does not call clearPreviousResults on model change; referenceValidated stays true.
 - **#4 Save model after first turn:** Marked Dropped. Decision to keep model selection flexible in all turns.
-- **Files:** SOURCE_OF_TRUTH.md, WORKLOG.md, REFACTORING_LOG.md
+- **Big 3 = three primary docs:** `SOURCE_OF_TRUTH.md`, `WORKLOG.md`, `model-hunter-refactored/REFACTORING_LOG.md` (this file). All three should be updated together for major changes.
 - Status: DONE
+
+### Big 3 — Recent Updates (Feb 17, 2026) — All Three Docs Updated ✅
+
+- **#1 Colab Save Structure:** All cells use `**[Turn N - prompt]**` format. Single-turn = Turn 1 headings. Multi-turn = latest turn first, then previous turns (newest first). `number_of_attempts_made` = per-model markdown list with display names (e.g. Nemotron-3-Nano (Fast): 12, Claude Opus 4.5: 6). Turn history and selected response saved per turn.
+- **#2 Calibration removed:** Turn 2+ now uses the same Test Prompt flow as Turn 1. No separate calibration step; trainers generate response, judge reference, then hunt.
+- **#3 Collapsible judge result:** Criteria Breakdown and Judge Explanation in the notebook preview are collapsible for cleaner UX.
+- **Big 3 updated:** SOURCE_OF_TRUTH.md, WORKLOG.md, REFACTORING_LOG.md
 
 ### Dashboard Refactor — Feb 13, 2026 ✅
 
@@ -294,6 +301,12 @@
 - **Files:** state.js, config.js, api.js (showPasswordPrompt), notebook.js, hunt.js, editors.js, multiturn.js, results.js, app.js, index.html, style.css
 - Status: DONE
 
+### Big 3 — Staging Server & Deployment — Feb 17, 2026 ✅
+
+- **SOURCE_OF_TRUTH:** Appendix "GitHub Repo, Branches & Servers" — repo https://github.com/vharatian/InverseIFHunter, branches (main, staging, feature/refactored), VM mandy@34.68.227.248. Production http://34.68.227.248 (port 80), Staging http://34.68.227.248:443 (port 443). Deploy: production via deploy.sh (main), staging via deploy-staging.sh (staging branch). Staging logs: docker logs model-hunter-staging-blue.
+- **WORKLOG:** Entry for Big 3 staging/deployment update.
+- Status: DONE
+
 ### Colab Save Structure — Feb 17, 2026 ✅
 
 - **Heading format:** All cells use `**[Turn N - prompt]**` style. For n=1 (single-turn), use `**[Turn 1 - prompt]**`.
@@ -301,5 +314,12 @@
 - **Multi-turn:** Latest turn first (full structure), then previous turns newest-first with `**[Turn K - prompt]**`, `**[Turn K - selected_response]**`, `**[Turn K - response_reference]**`, `**[Turn K - selected_judge]**`.
 - **number_of_attempts_made:** Per-model markdown list with display names (e.g. `Nemotron-3-Nano (Fast): 12`, `Claude Opus 4.5: 6`). Same model variants use version names/numbers.
 - **Files:** `services/notebook_parser.py` (export_notebook, export_multi_turn_notebook, format_number_of_attempts_made, get_model_display_name), `services/snapshot_service.py` (per_model_hunts), `routes/notebook.py`, `static/modules/notebook.js` (per_model_hunts computation)
+- Status: DONE
+
+### Live Export Preview — Feb 17, 2026 ✅
+
+- **Feature:** In-app Live Export tab in preview panel. Shows Colab export content as user edits, hunts, selects, and reviews.
+- **Updates on:** prompt/response edits (400ms debounce), hunt complete, selection confirm, human reviews.
+- **Files:** `static/index.html`, `static/modules/notebook.js`, `static/modules/autosave.js`, `static/modules/results.js`, `static/style.css`
 - Status: DONE
 

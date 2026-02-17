@@ -164,6 +164,7 @@
                         <button class="tab active" data-preview="promptAndResponse">Prompt & Response</button>
                         <button class="tab" data-preview="modelref">Model Reference</button>
                         <button class="tab" data-preview="judge">Judge System Prompt</button>
+                        <button class="tab" data-preview="liveExport">Live Export</button>
                     </div>
 
                     <div id="previewContent" class="preview-content">
@@ -401,6 +402,14 @@
                                 <textarea class="structured-input-editor" id="modelrefPreview"
                                     placeholder="C1: Does the response explicitly state that none of the provided options are correct?&#10;C2: Does the response identify the core flaw?&#10;C3: Does the response clarify the historical fact?&#10;C4: Does the response distinguish between real and fictional elements?"></textarea>
                             </div>
+                        </div>
+
+                        <!-- Live Export Preview Tab (what would be saved to Colab) -->
+                        <div id="previewLiveExport" class="preview-panel hidden">
+                            <div class="live-export-header" style="margin-bottom: 0.75rem; color: var(--text-muted); font-size: 0.9rem;">
+                                Updates live as you edit, hunt, select, and review. No Colab needed.
+                            </div>
+                            <div id="liveExportContent" class="live-export-content markdown-preview"></div>
                         </div>
 
                         <!-- Judge System Prompt Tab -->
