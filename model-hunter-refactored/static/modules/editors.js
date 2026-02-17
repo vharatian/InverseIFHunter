@@ -335,6 +335,26 @@ export function initStructuredInput() {
     if (elements.modelrefPreview.value) {
         convertStructuredToJSON();
     }
+    
+    // Criteria buttons (+ C1, + C2, ... + C10): always add on a new line
+    document.querySelectorAll('.criteria-add-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            const criterion = btn.dataset.criterion; // e.g. "C1", "C2"
+            if (!criterion) return;
+            const textarea = elements.modelrefPreview;
+            if (!textarea) return;
+            const current = textarea.value;
+            // Always add on a new line: append newline + "Cn: " (never at cursor/end-of-line/middle)
+            const prefix = current.length === 0 ? '' : (current.endsWith('\n') ? '' : '\n');
+            const toInsert = current.length === 0 ? `${criterion}: ` : `${prefix}\n${criterion}: `;
+            textarea.value = current + toInsert;
+            textarea.focus();
+            textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+            state.unsavedChanges.modelRef = true;
+            convertStructuredToJSON();
+        });
+    });
 }
 
 export function convertStructuredToJSON() {

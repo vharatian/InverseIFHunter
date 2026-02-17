@@ -3265,6 +3265,11 @@ input[type="range"]::-moz-range-thumb:hover {
     color: var(--accent-primary);
 }
 
+.criteria-add-btn {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.8rem;
+}
+
 .json-preview {
     margin-top: 1rem;
     padding: 1rem;
