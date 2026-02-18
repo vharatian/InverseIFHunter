@@ -35,7 +35,7 @@ import {
     closeResponseSlideout,
     closeGradingSlideout,
     initSlideoutResize,
-    initBreakingResultsCollapse,
+    initSelectionSectionCollapse,
     confirmSelection,
     revealLLMJudgments,
     handleChangeSelection
@@ -72,7 +72,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         initHuntNumberControls();
         initPreviewTabs();
         initSlideoutResize();
-        initBreakingResultsCollapse();
+        initSelectionSectionCollapse();
         
         // Notebook / Editor Inits (ensure they run if notebook.js doesn't auto-run them on import)
         // Check if notebook.js exports an init function? No, it exports specific inits.

@@ -723,14 +723,20 @@
 
             <!-- Response Selection Section (NEW) -->
             <section class="section hidden" id="selectionSection">
-                <div class="card">
-                    <div class="card-header">
+                <div class="card" id="selectionSectionCard">
+                    <div class="card-header collapsible-card-header" id="selectionSectionCardHeader">
                         <h2 class="card-title">
                             <span class="card-title-icon">✅</span>
                             Select Responses for Review
                         </h2>
+                        <button type="button" class="collapse-toggle-btn" id="selectionSectionCollapseBtn" title="Collapse/expand">
+                            <span class="collapse-toggle-icon">▼</span>
+                        </button>
                     </div>
-
+                    <div class="collapsible-summary" id="selectionSectionCollapsedSummary">
+                        4 slots selected – click to expand
+                    </div>
+                    <div class="collapsible-card-body" id="selectionSectionCardBody">
                     <div class="selection-instructions">
                         <p><strong>Instructions:</strong> Select exactly <strong>4 responses</strong> for human review.
                         </p>
@@ -749,25 +755,20 @@
                             ✅ Confirm & Start Review
                         </button>
                     </div>
+                    </div><!-- /.collapsible-card-body -->
                 </div>
             </section>
 
             <!-- Breaking Results Section -->
             <section class="section hidden" id="resultsSection">
-                <div class="card" id="breakingResultsCard">
-                    <div class="card-header collapsible-card-header" id="breakingResultsCardHeader">
+                <div class="card">
+                    <div class="card-header">
                         <h2 class="card-title">
                             <span class="card-title-icon">🔴</span>
                             Model Breaking Responses
                         </h2>
-                        <button type="button" class="collapse-toggle-btn" id="breakingResultsCollapseBtn" title="Collapse/expand">
-                            <span class="collapse-toggle-icon">▼</span>
-                        </button>
                     </div>
-                    <div class="collapsible-summary" id="breakingResultsCollapsedSummary">
-                        4 slots selected – click to expand
-                    </div>
-                    <div class="collapsible-card-body" id="breakingResultsCardBody">
+
                     <!-- Review Progress (top) -->
                     <div id="reviewProgressContainer"
                         style="margin-bottom: 1rem; padding: 1rem; background: var(--bg-tertiary); border-radius: 8px;">
@@ -816,7 +817,6 @@
                         <p id="noBreaksMessageText">No breaks this round. Try tightening one criterion or running more hunts.</p>
                     </div>
                     <div id="resultsTipContainer"></div>
-                    </div><!-- /.collapsible-card-body -->
                 </div>
             </section>
 

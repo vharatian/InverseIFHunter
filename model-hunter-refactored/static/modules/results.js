@@ -26,23 +26,23 @@ import { showMultiTurnDecision } from './multiturn.js';
 import { showAppModal } from './api.js';
 import { MIN_EXPLANATION_WORDS } from './config.js';
 
-// ============== Collapsible Breaking Results Card ==============
+// ============== Collapsible Selection Section ==============
 /**
- * Toggle the Model Breaking Responses card collapsed/expanded.
+ * Toggle the Select Responses for Review section collapsed/expanded.
  * Called when header or summary is clicked.
  */
-export function toggleBreakingResultsCard() {
-    state.slotsCardCollapsed = !state.slotsCardCollapsed;
-    applyBreakingResultsCardCollapse();
+export function toggleSelectionSectionCard() {
+    state.selectionSectionCollapsed = !state.selectionSectionCollapsed;
+    applySelectionSectionCollapse();
 }
 
 /**
- * Apply collapse state to the card DOM.
+ * Apply collapse state to the selection section DOM.
  */
-function applyBreakingResultsCardCollapse() {
-    const card = elements.breakingResultsCard;
+function applySelectionSectionCollapse() {
+    const card = elements.selectionSectionCard;
     if (!card) return;
-    if (state.slotsCardCollapsed) {
+    if (state.selectionSectionCollapsed) {
         card.classList.add('collapsed');
     } else {
         card.classList.remove('collapsed');
@@ -50,24 +50,32 @@ function applyBreakingResultsCardCollapse() {
 }
 
 /**
- * Collapse the card (e.g. when entering review mode). Updates summary text.
+ * Collapse the selection section (when selection is confirmed and moved to review).
  */
-export function collapseBreakingResultsCard(slotCount) {
-    state.slotsCardCollapsed = true;
-    const summary = elements.breakingResultsCollapsedSummary;
+export function collapseSelectionSectionCard(slotCount) {
+    state.selectionSectionCollapsed = true;
+    const summary = elements.selectionSectionCollapsedSummary;
     if (summary) {
         summary.textContent = `${slotCount || 4} slots selected – click to expand`;
     }
-    applyBreakingResultsCardCollapse();
+    applySelectionSectionCollapse();
 }
 
 /**
- * Initialize collapse toggle listeners for the Breaking Results card.
+ * Expand the selection section (e.g. when changing selection).
  */
-export function initBreakingResultsCollapse() {
-    const header = elements.breakingResultsCardHeader;
-    const summary = elements.breakingResultsCollapsedSummary;
-    const handler = () => toggleBreakingResultsCard();
+export function expandSelectionSectionCard() {
+    state.selectionSectionCollapsed = false;
+    applySelectionSectionCollapse();
+}
+
+/**
+ * Initialize collapse toggle listeners for the Selection section.
+ */
+export function initSelectionSectionCollapse() {
+    const header = elements.selectionSectionCardHeader;
+    const summary = elements.selectionSectionCollapsedSummary;
+    const handler = () => toggleSelectionSectionCard();
     if (header) header.addEventListener('click', handler);
     if (summary) summary.addEventListener('click', handler);
 }
@@ -934,6 +942,7 @@ export async function fetchAllResponsesAndShowSelection(completedHunts, breaksFo
         
         // Show selection section - criteria met!
         elements.selectionSection.classList.remove('hidden');
+        expandSelectionSectionCard();  // Ensure expanded so user can select
         
         // Show a selection tip
         renderInsightTip('selectionTipContainer', 'selection');
@@ -1977,8 +1986,8 @@ export function displaySelectedForReview() {
         }
     }
 
-    // Auto-collapse the card when entering review mode
-    collapseBreakingResultsCard(selectedResponses.length);
+    // Auto-collapse the selection section when moved to review
+    collapseSelectionSectionCard(selectedResponses.length);
 }
 
 /**
@@ -2011,6 +2020,7 @@ export function handleChangeSelection() {
     elements.saveDriveContainer.classList.add('hidden');
     
     elements.selectionSection?.classList.remove('hidden');
+    expandSelectionSectionCard();  // Expand so user can pick different 4
     displaySelectionCards();
     elements.selectionSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     

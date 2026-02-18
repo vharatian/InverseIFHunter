@@ -316,9 +316,9 @@
 - **Files:** `services/notebook_parser.py` (export_notebook, export_multi_turn_notebook, format_number_of_attempts_made, get_model_display_name), `services/snapshot_service.py` (per_model_hunts), `routes/notebook.py`, `static/modules/notebook.js` (per_model_hunts computation)
 - Status: DONE
 
-### Collapsible Breaking Results Card & View LLM Judgment — Feb 18, 2026 ✅
+### Collapsible Selection Section & View LLM Judgment — Feb 18, 2026 ✅
 
-- **Collapsible card:** Entire "Model Breaking Responses" card (header, progress, slots, save area) is collapsible. Auto-collapses when selection is confirmed and moved to review. Summary: "4 slots selected – click to expand". Click header or summary to toggle.
+- **Collapsible section:** "Select Responses for Review" section (not Model Breaking Responses) is collapsible. Auto-collapses when selection is confirmed and moved to review. Summary: "4 slots selected – click to expand". Click header or summary to toggle. Expands when changing selection.
 - **View LLM Judgment:** After reveal, slot button text changed from "View" to "View LLM Judgment" so trainer clearly understands they're viewing AI evaluation.
 - **Files:** index.html, style.css, state.js, dom.js, results.js, app.js
 - Status: DONE

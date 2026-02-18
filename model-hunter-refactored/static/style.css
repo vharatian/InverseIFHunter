@@ -626,7 +626,7 @@ body {
     transition: transform var(--transition-fast);
     font-size: 0.75rem;
 }
-#breakingResultsCard.collapsed .collapse-toggle-icon {
+#selectionSectionCard.collapsed .collapse-toggle-icon {
     transform: rotate(-90deg);
 }
 .collapsible-summary {
@@ -639,10 +639,10 @@ body {
     margin-top: 0.5rem;
     cursor: pointer;
 }
-#breakingResultsCard.collapsed .collapsible-summary {
+#selectionSectionCard.collapsed .collapsible-summary {
     display: block;
 }
-#breakingResultsCard.collapsed .collapsible-card-body {
+#selectionSectionCard.collapsed .collapsible-card-body {
     display: none;
 }
 

@@ -53,7 +53,7 @@ export const state = {
     },
     diversityCheckPassed: false,  // Flag to track if diversity check passed at confirmation
     selectionConfirmed: false,     // Flag to track if selection is confirmed and locked
-    slotsCardCollapsed: true,      // Model Breaking Responses card collapsed (auto-collapsed when entering review)
+    selectionSectionCollapsed: true,  // Select Responses for Review section collapsed (auto-collapsed when selection confirmed)
     
     // Metadata and editing state
     metadata: null,  // Parsed metadata from notebook
