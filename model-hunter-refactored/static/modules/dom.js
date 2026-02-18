@@ -73,6 +73,11 @@ export const elements = {
     // Results
     resultsSection: document.getElementById('resultsSection'),
     breakingResults: document.getElementById('breakingResults'),
+    breakingResultsCard: document.getElementById('breakingResultsCard'),
+    breakingResultsCardHeader: document.getElementById('breakingResultsCardHeader'),
+    breakingResultsCardBody: document.getElementById('breakingResultsCardBody'),
+    breakingResultsCollapsedSummary: document.getElementById('breakingResultsCollapsedSummary'),
+    breakingResultsCollapseBtn: document.getElementById('breakingResultsCollapseBtn'),
     noBreaksMessage: document.getElementById('noBreaksMessage'),
     saveDriveBtn: document.getElementById('saveDriveBtn'),
     saveDriveContainer: document.getElementById('saveDriveContainer'),

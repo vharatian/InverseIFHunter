@@ -26,6 +26,52 @@ import { showMultiTurnDecision } from './multiturn.js';
 import { showAppModal } from './api.js';
 import { MIN_EXPLANATION_WORDS } from './config.js';
 
+// ============== Collapsible Breaking Results Card ==============
+/**
+ * Toggle the Model Breaking Responses card collapsed/expanded.
+ * Called when header or summary is clicked.
+ */
+export function toggleBreakingResultsCard() {
+    state.slotsCardCollapsed = !state.slotsCardCollapsed;
+    applyBreakingResultsCardCollapse();
+}
+
+/**
+ * Apply collapse state to the card DOM.
+ */
+function applyBreakingResultsCardCollapse() {
+    const card = elements.breakingResultsCard;
+    if (!card) return;
+    if (state.slotsCardCollapsed) {
+        card.classList.add('collapsed');
+    } else {
+        card.classList.remove('collapsed');
+    }
+}
+
+/**
+ * Collapse the card (e.g. when entering review mode). Updates summary text.
+ */
+export function collapseBreakingResultsCard(slotCount) {
+    state.slotsCardCollapsed = true;
+    const summary = elements.breakingResultsCollapsedSummary;
+    if (summary) {
+        summary.textContent = `${slotCount || 4} slots selected – click to expand`;
+    }
+    applyBreakingResultsCardCollapse();
+}
+
+/**
+ * Initialize collapse toggle listeners for the Breaking Results card.
+ */
+export function initBreakingResultsCollapse() {
+    const header = elements.breakingResultsCardHeader;
+    const summary = elements.breakingResultsCollapsedSummary;
+    const handler = () => toggleBreakingResultsCard();
+    if (header) header.addEventListener('click', handler);
+    if (summary) summary.addEventListener('click', handler);
+}
+
 // ============== Review Mode Button Lock ==============
 /**
  * When selection is confirmed and reviews are in progress (or completed), disable all action buttons
@@ -1930,6 +1976,9 @@ export function displaySelectedForReview() {
             elements.revealLLMBtn.style.opacity = '0.5';
         }
     }
+
+    // Auto-collapse the card when entering review mode
+    collapseBreakingResultsCard(selectedResponses.length);
 }
 
 /**
@@ -2145,12 +2194,12 @@ export async function revealLLMJudgments() {
         section.appendChild(lockIndicator);
     });
     
-    // Update slot cards to show "View" instead of "Edit" (still clickable to view LLM judgment)
+    // Update slot cards to show "View LLM Judgment" (clearly indicates AI evaluation)
     document.querySelectorAll('.slot-compact-card').forEach(card => {
         card.classList.add('revealed');
         const btn = card.querySelector('.slot-open-btn');
         if (btn) {
-            btn.textContent = 'View';
+            btn.textContent = 'View LLM Judgment';
         }
     });
     

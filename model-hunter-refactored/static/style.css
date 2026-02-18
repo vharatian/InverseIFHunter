@@ -599,6 +599,53 @@ body {
     font-size: 1rem;
 }
 
+/* Collapsible Breaking Results Card */
+.collapsible-card-header {
+    cursor: pointer;
+    user-select: none;
+    margin-bottom: 0;
+}
+.collapsible-card-header:hover {
+    opacity: 0.9;
+}
+.collapse-toggle-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 0.35rem 0.6rem;
+    cursor: pointer;
+    color: var(--text-secondary);
+    transition: all var(--transition-fast);
+}
+.collapse-toggle-btn:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+.collapse-toggle-icon {
+    display: inline-block;
+    transition: transform var(--transition-fast);
+    font-size: 0.75rem;
+}
+#breakingResultsCard.collapsed .collapse-toggle-icon {
+    transform: rotate(-90deg);
+}
+.collapsible-summary {
+    display: none;
+    padding: 0.75rem 1rem;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    margin-top: 0.5rem;
+    cursor: pointer;
+}
+#breakingResultsCard.collapsed .collapsible-summary {
+    display: block;
+}
+#breakingResultsCard.collapsed .collapsible-card-body {
+    display: none;
+}
+
 /* Buttons — Minimal */
 .btn {
     display: inline-flex;
