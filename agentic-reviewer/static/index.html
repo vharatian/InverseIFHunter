@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agentic Reviewer</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Agentic Reviewer</h1>
+      <p class="subtitle">Quality gate for Model Hunter tasks. Paste session JSON and run preflight or final QA.</p>
+    </header>
+
+    <main>
+      <section class="input-section">
+        <div class="field-row">
+          <label for="checkpoint">Checkpoint</label>
+          <select id="checkpoint">
+            <option value="preflight">Pre-flight (before human review)</option>
+            <option value="final">Final QA (after human review)</option>
+          </select>
+        </div>
+
+        <div class="field-row" id="ids-row">
+          <label for="ids">Selected Hunt IDs (comma-separated)</label>
+          <input type="text" id="ids" placeholder="1, 2, 3, 4">
+        </div>
+
+        <div class="field-row">
+          <label for="session-json">Session JSON</label>
+          <div class="textarea-wrap">
+            <textarea id="session-json" rows="12" placeholder='Paste session JSON here, or click "Load sample"...'></textarea>
+            <button type="button" id="load-sample" class="btn-secondary">Load sample</button>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button type="button" id="run-btn" class="btn-primary">Run Review</button>
+        </div>
+      </section>
+
+      <section class="result-section" id="result-section" hidden>
+        <h2>Result</h2>
+        <div id="result-badge" class="badge"></div>
+        <div id="result-issues" class="issues-list"></div>
+        <div id="result-meta" class="meta"></div>
+      </section>
+
+      <section class="error-section" id="error-section" hidden>
+        <div class="error-box" id="error-message"></div>
+      </section>
+    </main>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

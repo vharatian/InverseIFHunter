@@ -1,0 +1,66 @@
+# Google Cloud SDK
+google-cloud-sdk/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.idea/
+.vscode/
+.cursor/
+*.swp
+*.swo
+.DS_Store
+
+# Credentials - NEVER COMMIT THESE
+.env
+.env.*
+.env.local
+service_account.json
+*.pem
+*.key
+credentials.json
+
+# Storage (session data)
+.storage/
+
+# Logs
+*.log
+*.tmp
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Markdown docs (except README) — keep local only, do not push
+*.md
+!README.md
+SOURCE_OF_TRUTH.md
+WORKLOG.md
+# Refactored branch: allow key docs
+!model-hunter-refactored/REFACTORING_LOG.md
+!model-hunter-refactored/REFACTORING_AUDIT.md
+!model-hunter-refactored/docs/*.md
+
+# Notebooks
+*.ipynb
+
+# Data files (too large for repo)
+Model_Hunter_ML_Analysis.xlsx
+model-hunter/.telemetry/
+model-hunter/ml_data/
+
+# VM utility scripts
+check_active_users.sh
+view_system_logs.sh
+

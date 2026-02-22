@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Favicon Design Options</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #0f0f0f; color: #e0e0e0; font-family: 'Segoe UI', system-ui, sans-serif; padding: 40px; }
+        h1 { text-align: center; margin-bottom: 10px; font-size: 28px; color: #fff; }
+        p.sub { text-align: center; margin-bottom: 40px; color: #888; font-size: 14px; }
+        .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 30px; max-width: 1000px; margin: 0 auto; }
+        .card { background: #1a1a1a; border-radius: 16px; padding: 24px; text-align: center; border: 1px solid #2a2a2a; transition: border-color 0.2s; }
+        .card:hover { border-color: #555; }
+        .card h3 { margin-top: 16px; font-size: 15px; color: #fff; }
+        .card p { margin-top: 6px; font-size: 12px; color: #777; line-height: 1.4; }
+        .preview { display: flex; justify-content: center; align-items: center; gap: 16px; margin-top: 12px; }
+        .preview .small { width: 16px; height: 16px; }
+        .preview .medium { width: 32px; height: 32px; }
+        .sizes { font-size: 10px; color: #555; margin-top: 8px; }
+        svg { display: block; }
+    </style>
+</head>
+<body>
+    <h1>Model Hunter - Favicon Options</h1>
+    <p class="sub">Each shown at 128px (preview), 32px (tab), and 16px (tiny). Pick your favorite!</p>
+
+    <div class="grid">
+
+        <!-- Option A: Glitching M -->
+        <div class="card">
+            <svg width="128" height="128" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+                <rect width="64" height="64" rx="12" fill="#0d0d0d"/>
+                <!-- Base M shape -->
+                <text x="32" y="46" font-family="monospace" font-weight="900" font-size="40" fill="#e0e0e0" text-anchor="middle">M</text>
+                <!-- Glitch slices -->
+                <rect x="12" y="20" width="40" height="4" fill="#0d0d0d"/>
+                <text x="34" y="24" font-family="monospace" font-weight="900" font-size="40" fill="#ff0040" text-anchor="middle" opacity="0.7">M</text>
+                <clipPath id="glitch1"><rect x="12" y="20" width="40" height="4"/></clipPath>
+                <text x="34" y="46" font-family="monospace" font-weight="900" font-size="40" fill="#ff0040" text-anchor="middle" clip-path="url(#glitch1)">M</text>
+                <text x="30" y="46" font-family="monospace" font-weight="900" font-size="40" fill="#00e5ff" text-anchor="middle" opacity="0.5">
+                    <clipPath id="glitch2"><rect x="10" y="34" width="44" height="5"/></clipPath>
+                </text>
+                <text x="30" y="46" font-family="monospace" font-weight="900" font-size="40" fill="#00e5ff" text-anchor="middle" clip-path="url(#glitch2)">M</text>
+                <!-- Scan line -->
+                <line x1="0" y1="38" x2="64" y2="38" stroke="#ff0040" stroke-width="0.5" opacity="0.4"/>
+                <line x1="0" y1="26" x2="64" y2="26" stroke="#00e5ff" stroke-width="0.5" opacity="0.3"/>
+            </svg>
+            <h3>A: Glitching M</h3>
+            <p>Cyberpunk RGB-split corruption</p>
+            <div class="preview">
+                <svg class="medium" width="32" height="32" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+                    <rect width="64" height="64" rx="12" fill="#0d0d0d"/>
+                    <text x="32" y="46" font-family="monospace" font-weight="900" font-size="40" fill="#e0e0e0" text-anchor="middle">M</text>
+                    <text x="34" y="46" font-family="monospace" font-weight="900" font-size="40" fill="#ff0040" text-anchor="middle" clip-path="url(#glitch1)">M</text>
+                    <text x="30" y="46" font-family="monospace" font-weight="900" font-size="40" fill="#00e5ff" text-anchor="middle" clip-path="url(#glitch2)">M</text>
+                </svg>
+                <svg class="small" width="16" height="16" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+                    <rect width="64" height="64" rx="12" fill="#0d0d0d"/>
+                    <text x="32" y="46" font-family="monospace" font-weight="900" font-size="40" fill="#e0e0e0" text-anchor="middle">M</text>
+                </svg>
+            </div>
+            <div class="sizes">32px / 16px</div>
+        </div>
+
+        <!-- Option B: Diamond with Flaw -->
+        <div class="card">
+            <svg width="128" height="128" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+                <rect width="64" height="64" rx="12" fill="#0d0d0d"/>
+                <!-- Diamond shape -->
+                <polygon points="32,8 54,28 32,56 10,28" fill="none" stroke="#4fc3f7" stroke-width="2.5" stroke-linejoin="round"/>
+                <!-- Top facets -->
+                <polyline points="10,28 32,20 54,28" fill="none" stroke="#4fc3f7" stroke-width="1.5" opacity="0.6"/>
+                <line x1="32" y1="8" x2="32" y2="20" stroke="#4fc3f7" stroke-width="1.5" opacity="0.6"/>
+                <!-- Crack -->
+                <polyline points="28,22 32,30 26,38 30,44 27,52" fill="none" stroke="#ff4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <!-- Glow on crack -->
+                <polyline points="28,22 32,30 26,38 30,44 27,52" fill="none" stroke="#ff4444" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" opacity="0.2"/>
+            </svg>
+            <h3>B: Cracked Diamond</h3>
+            <p>Perfect gem, fatal flaw</p>
+            <div class="preview">
+                <svg class="medium" width="32" height="32" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+                    <rect width="64" height="64" rx="12" fill="#0d0d0d"/>
+                    <polygon points="32,8 54,28 32,56 10,28" fill="none" stroke="#4fc3f7" stroke-width="3"/>
+                    <polyline points="28,22 32,30 26,38 30,44 27,52" fill="none" stroke="#ff4444" stroke-width="2.5" stroke-linecap="round"/>
+                </svg>
+                <svg class="small" width="16" height="16" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+                    <rect width="64" height="64" rx="12" fill="#0d0d0d"/>
+                    <polygon points="32,8 54,28 32,56 10,28" fill="none" stroke="#4fc3f7" stroke-width="4"/>
+                    <polyline points="28,22 32,30 26,38 30,44" fill="none" stroke="#ff4444" stroke-width="3" stroke-linecap="round"/>
+                </svg>
+            </div>
+            <div class="sizes">32px / 16px</div>
+        </div>
+
+        <!-- Option C: Predator Eye -->
+        <div class="card">
+            <svg width="128" height="128" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+                <rect width="64" height="64" rx="12" fill="#0d0d0d"/>
+                <!-- Eye outer -->
+                <ellipse cx="32" cy="32" rx="22" ry="14" fill="none" stroke="#ffab00" stroke-width="2.5"/>
+                <!-- Iris -->
+                <ellipse cx="32" cy="32" rx="11" ry="13" fill="#1a3a1a"/>
+                <ellipse cx="32" cy="32" rx="11" ry="13" fill="url(#eyeGrad)"/>
+                <defs>
+                    <radialGradient id="eyeGrad" cx="50%" cy="40%">
+                        <stop offset="0%" stop-color="#4caf50"/>
+                        <stop offset="60%" stop-color="#1b5e20"/>
+                        <stop offset="100%" stop-color="#0a2e0a"/>
+                    </radialGradient>
+                </defs>
+                <!-- Slit pupil -->
+                <ellipse cx="32" cy="32" rx="3" ry="12" fill="#000"/>
+                <!-- Light reflection -->
+                <circle cx="27" cy="27" r="2.5" fill="white" opacity="0.7"/>
+                <circle cx="36" cy="25" r="1" fill="white" opacity="0.4"/>
+            </svg>
+            <h3>C: Predator Eye</h3>
+            <p>Silent watcher, hunting flaws</p>
+            <div class="preview">
+                <svg class="medium" width="32" height="32" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+                    <rect width="64" height="64" rx="12" fill="#0d0d0d"/>
+                    <ellipse cx="32" cy="32" rx="22" ry="14" fill="none" stroke="#ffab00" stroke-width="3"/>
+                    <ellipse cx="32" cy="32" rx="11" ry="13" fill="#1b5e20"/>
+                    <ellipse cx="32" cy="32" rx="3" ry="12" fill="#000"/>
+                    <circle cx="27" cy="27" r="3" fill="white" opacity="0.7"/>
+                </svg>
+                <svg class="small" width="16" height="16" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+                    <rect width="64" height="64" rx="12" fill="#0d0d0d"/>
+                    <ellipse cx="32" cy="32" rx="20" ry="12" fill="none" stroke="#ffab00" stroke-width="4"/>
+                    <ellipse cx="32" cy="32" rx="8" ry="11" fill="#1b5e20"/>
+                    <ellipse cx="32" cy="32" rx="3" ry="10" fill="#000"/>
+                </svg>
+            </div>
+            <div class="sizes">32px / 16px</div>
+        </div>
+
+        <!-- Option D: Kawaii Angry Monster -->
+        <div class="card">
+            <svg width="128" height="128" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+                <rect width="64" height="64" rx="12" fill="#1a1025"/>
+                <!-- Body -->
+                <rect x="14" y="16" width="36" height="32" rx="8" fill="#7c4dff"/>
+                <!-- Angry eyes -->
+                <rect x="20" y="26" width="9" height="8" rx="1" fill="white"/>
+                <rect x="35" y="26" width="9" height="8" rx="1" fill="white"/>
+                <!-- Pupils -->
+                <rect x="25" y="28" width="4" height="5" rx="1" fill="#0d0d0d"/>
+                <rect x="36" y="28" width="4" height="5" rx="1" fill="#0d0d0d"/>
+                <!-- Angry eyebrows -->
+                <line x1="18" y1="24" x2="30" y2="22" stroke="#ff1744" stroke-width="3" stroke-linecap="round"/>
+                <line x1="46" y1="24" x2="34" y2="22" stroke="#ff1744" stroke-width="3" stroke-linecap="round"/>
+                <!-- Jagged mouth -->
+                <polyline points="20,40 24,37 28,42 32,36 36,42 40,37 44,40" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <!-- Small horns -->
+                <polygon points="20,16 24,16 22,8" fill="#ff1744"/>
+                <polygon points="40,16 44,16 42,8" fill="#ff1744"/>
+                <!-- Feet -->
+                <rect x="18" y="48" width="10" height="6" rx="3" fill="#7c4dff"/>
+                <rect x="36" y="48" width="10" height="6" rx="3" fill="#7c4dff"/>
+            </svg>
+            <h3>D: Angry Monster</h3>
+            <p>Cute but fierce, anime-inspired</p>
+            <div class="preview">
+                <svg class="medium" width="32" height="32" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+                    <rect width="64" height="64" rx="12" fill="#1a1025"/>
+                    <rect x="14" y="16" width="36" height="32" rx="8" fill="#7c4dff"/>
+                    <rect x="20" y="26" width="9" height="8" rx="1" fill="white"/>
+                    <rect x="35" y="26" width="9" height="8" rx="1" fill="white"/>
+                    <rect x="25" y="28" width="4" height="5" fill="#0d0d0d"/>
+                    <rect x="36" y="28" width="4" height="5" fill="#0d0d0d"/>
+                    <line x1="18" y1="24" x2="30" y2="22" stroke="#ff1744" stroke-width="3" stroke-linecap="round"/>
+                    <line x1="46" y1="24" x2="34" y2="22" stroke="#ff1744" stroke-width="3" stroke-linecap="round"/>
+                    <polygon points="20,16 24,16 22,8" fill="#ff1744"/>
+                    <polygon points="40,16 44,16 42,8" fill="#ff1744"/>
+                </svg>
+                <svg class="small" width="16" height="16" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+                    <rect width="64" height="64" rx="12" fill="#1a1025"/>
+                    <rect x="14" y="16" width="36" height="32" rx="8" fill="#7c4dff"/>
+                    <rect x="20" y="26" width="9" height="8" fill="white"/>
+                    <rect x="35" y="26" width="9" height="8" fill="white"/>
+                    <rect x="25" y="28" width="4" height="5" fill="#0d0d0d"/>
+                    <rect x="36" y="28" width="4" height="5" fill="#0d0d0d"/>
+                </svg>
+            </div>
+            <div class="sizes">32px / 16px</div>
+        </div>
+
+        <!-- Option E: Negative Space Brain -->
+        <div class="card">
+            <svg width="128" height="128" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+                <rect width="64" height="64" rx="12" fill="#0d0d0d"/>
+                <!-- Brain outline -->
+                <path d="M32,10 C22,10 14,16 14,26 C14,30 16,34 16,38 C16,44 20,50 28,52 L32,54 L36,52 C44,50 48,44 48,38 C48,34 50,30 50,26 C50,16 42,10 32,10Z" fill="none" stroke="#ce93d8" stroke-width="2"/>
+                <!-- Brain folds -->
+                <path d="M32,14 C32,14 24,22 32,28 C40,34 24,42 32,50" fill="none" stroke="#ce93d8" stroke-width="1.5" opacity="0.6"/>
+                <path d="M22,24 C26,26 28,22 32,24" fill="none" stroke="#ce93d8" stroke-width="1.5" opacity="0.5"/>
+                <path d="M32,24 C36,22 38,26 42,24" fill="none" stroke="#ce93d8" stroke-width="1.5" opacity="0.5"/>
+                <!-- Missing piece -->
+                <path d="M40,18 L46,14 L50,20 L44,24 Z" fill="#0d0d0d" stroke="#ff5252" stroke-width="1.5"/>
+                <!-- Floating piece (displaced) -->
+                <path d="M50,8 L56,4 L60,10 L54,14 Z" fill="none" stroke="#ff5252" stroke-width="1.5" stroke-dasharray="2,2" opacity="0.6"/>
+            </svg>
+            <h3>E: Missing Piece Brain</h3>
+            <p>Found what's missing in the AI</p>
+            <div class="preview">
+                <svg class="medium" width="32" height="32" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+                    <rect width="64" height="64" rx="12" fill="#0d0d0d"/>
+                    <path d="M32,10 C22,10 14,16 14,26 C14,30 16,34 16,38 C16,44 20,50 28,52 L32,54 L36,52 C44,50 48,44 48,38 C48,34 50,30 50,26 C50,16 42,10 32,10Z" fill="none" stroke="#ce93d8" stroke-width="2.5"/>
+                    <path d="M40,18 L46,14 L50,20 L44,24 Z" fill="#0d0d0d" stroke="#ff5252" stroke-width="2"/>
+                </svg>
+                <svg class="small" width="16" height="16" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+                    <rect width="64" height="64" rx="12" fill="#0d0d0d"/>
+                    <path d="M32,10 C22,10 14,16 14,26 C14,30 16,34 16,38 C16,44 20,50 28,52 L32,54 L36,52 C44,50 48,44 48,38 C48,34 50,30 50,26 C50,16 42,10 32,10Z" fill="none" stroke="#ce93d8" stroke-width="3.5"/>
+                </svg>
+            </div>
+            <div class="sizes">32px / 16px</div>
+        </div>
+
+        <!-- Option F: Shattered Circle -->
+        <div class="card">
+            <svg width="128" height="128" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+                <rect width="64" height="64" rx="12" fill="#0d0d0d"/>
+                <!-- Main circle arc (broken) -->
+                <path d="M32,8 A24,24 0 0,1 52,40" fill="none" stroke="#e0e0e0" stroke-width="3" stroke-linecap="round"/>
+                <path d="M48,44 A24,24 0 0,1 16,44" fill="none" stroke="#e0e0e0" stroke-width="3" stroke-linecap="round"/>
+                <path d="M14,40 A24,24 0 0,1 28,9" fill="none" stroke="#e0e0e0" stroke-width="3" stroke-linecap="round"/>
+                <!-- Flying fragments -->
+                <path d="M52,16 L58,12 L56,18" fill="none" stroke="#ff5252" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M56,28 L60,26 L58,30" fill="none" stroke="#ffab00" stroke-width="1.5" stroke-linecap="round"/>
+                <rect x="50" y="6" width="3" height="3" fill="#ff5252" opacity="0.6" transform="rotate(20,51,7)"/>
+                <rect x="58" y="20" width="2" height="2" fill="#ffab00" opacity="0.5" transform="rotate(35,59,21)"/>
+                <!-- Impact point -->
+                <circle cx="48" cy="12" r="2" fill="#ff5252" opacity="0.8"/>
+                <circle cx="48" cy="12" r="5" fill="none" stroke="#ff5252" stroke-width="0.5" opacity="0.3"/>
+            </svg>
+            <h3>F: Shattered Circle</h3>
+            <p>Mid-explosion impact moment</p>
+            <div class="preview">
+                <svg class="medium" width="32" height="32" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+                    <rect width="64" height="64" rx="12" fill="#0d0d0d"/>
+                    <path d="M32,8 A24,24 0 0,1 52,40" fill="none" stroke="#e0e0e0" stroke-width="3.5" stroke-linecap="round"/>
+                    <path d="M48,44 A24,24 0 0,1 16,44" fill="none" stroke="#e0e0e0" stroke-width="3.5" stroke-linecap="round"/>
+                    <path d="M14,40 A24,24 0 0,1 28,9" fill="none" stroke="#e0e0e0" stroke-width="3.5" stroke-linecap="round"/>
+                    <circle cx="48" cy="12" r="3" fill="#ff5252"/>
+                </svg>
+                <svg class="small" width="16" height="16" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+                    <rect width="64" height="64" rx="12" fill="#0d0d0d"/>
+                    <path d="M32,8 A24,24 0 0,1 52,40" fill="none" stroke="#e0e0e0" stroke-width="5" stroke-linecap="round"/>
+                    <path d="M48,44 A24,24 0 0,1 16,44" fill="none" stroke="#e0e0e0" stroke-width="5" stroke-linecap="round"/>
+                    <path d="M14,40 A24,24 0 0,1 28,9" fill="none" stroke="#e0e0e0" stroke-width="5" stroke-linecap="round"/>
+                </svg>
+            </div>
+            <div class="sizes">32px / 16px</div>
+        </div>
+
+        <!-- Option G: Upside Down Crown -->
+        <div class="card">
+            <svg width="128" height="128" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+                <rect width="64" height="64" rx="12" fill="#0d0d0d"/>
+                <!-- Upside-down crown -->
+                <path d="M14,20 L22,36 L32,22 L42,36 L50,20" fill="none" stroke="#ffd700" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                <!-- Crown base (now on top) -->
+                <line x1="14" y1="20" x2="50" y2="20" stroke="#ffd700" stroke-width="2.5" stroke-linecap="round"/>
+                <!-- Gems falling -->
+                <circle cx="22" cy="42" r="3" fill="#ff1744" opacity="0.8"/>
+                <circle cx="32" cy="48" r="2.5" fill="#448aff" opacity="0.7"/>
+                <circle cx="42" cy="44" r="2" fill="#69f0ae" opacity="0.6"/>
+                <!-- Fall lines -->
+                <line x1="22" y1="36" x2="22" y2="39" stroke="#ffd700" stroke-width="0.8" opacity="0.4" stroke-dasharray="1,2"/>
+                <line x1="32" y1="22" x2="32" y2="45" stroke="#ffd700" stroke-width="0.8" opacity="0.4" stroke-dasharray="1,2"/>
+                <line x1="42" y1="36" x2="42" y2="42" stroke="#ffd700" stroke-width="0.8" opacity="0.4" stroke-dasharray="1,2"/>
+            </svg>
+            <h3>G: Fallen Crown</h3>
+            <p>The model king, dethroned</p>
+            <div class="preview">
+                <svg class="medium" width="32" height="32" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+                    <rect width="64" height="64" rx="12" fill="#0d0d0d"/>
+                    <path d="M14,20 L22,36 L32,22 L42,36 L50,20" fill="none" stroke="#ffd700" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                    <line x1="14" y1="20" x2="50" y2="20" stroke="#ffd700" stroke-width="3" stroke-linecap="round"/>
+                    <circle cx="32" cy="46" r="3" fill="#ff1744" opacity="0.8"/>
+                </svg>
+                <svg class="small" width="16" height="16" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+                    <rect width="64" height="64" rx="12" fill="#0d0d0d"/>
+                    <path d="M14,20 L22,36 L32,22 L42,36 L50,20" fill="none" stroke="#ffd700" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+                    <line x1="14" y1="20" x2="50" y2="20" stroke="#ffd700" stroke-width="4" stroke-linecap="round"/>
+                </svg>
+            </div>
+            <div class="sizes">32px / 16px</div>
+        </div>
+
+        <!-- Option H: Red Pill -->
+        <div class="card">
+            <svg width="128" height="128" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+                <rect width="64" height="64" rx="12" fill="#0d0d0d"/>
+                <!-- Pill capsule -->
+                <rect x="22" y="12" width="20" height="40" rx="10" fill="none" stroke="#ef5350" stroke-width="2"/>
+                <!-- Top half (red) -->
+                <path d="M22,32 L22,22 A10,10 0 0,1 42,22 L42,32 Z" fill="#ef5350"/>
+                <!-- Bottom half (darker red) -->
+                <path d="M22,32 L22,42 A10,10 0 0,0 42,42 L42,32 Z" fill="#b71c1c"/>
+                <!-- Divider line -->
+                <line x1="22" y1="32" x2="42" y2="32" stroke="#0d0d0d" stroke-width="1.5"/>
+                <!-- Shine -->
+                <path d="M27,16 C27,16 26,28 27,30" stroke="white" stroke-width="2" stroke-linecap="round" opacity="0.3"/>
+                <!-- Glow -->
+                <rect x="22" y="12" width="20" height="40" rx="10" fill="none" stroke="#ff5252" stroke-width="1" opacity="0.3" transform="scale(1.1) translate(-1.5,-1.5)"/>
+            </svg>
+            <h3>H: Red Pill</h3>
+            <p>See through the model's facade</p>
+            <div class="preview">
+                <svg class="medium" width="32" height="32" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+                    <rect width="64" height="64" rx="12" fill="#0d0d0d"/>
+                    <rect x="22" y="12" width="20" height="40" rx="10" fill="none" stroke="#ef5350" stroke-width="2.5"/>
+                    <path d="M22,32 L22,22 A10,10 0 0,1 42,22 L42,32 Z" fill="#ef5350"/>
+                    <path d="M22,32 L22,42 A10,10 0 0,0 42,42 L42,32 Z" fill="#b71c1c"/>
+                </svg>
+                <svg class="small" width="16" height="16" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+                    <rect width="64" height="64" rx="12" fill="#0d0d0d"/>
+                    <path d="M22,32 L22,22 A10,10 0 0,1 42,22 L42,32 Z" fill="#ef5350"/>
+                    <path d="M22,32 L22,42 A10,10 0 0,0 42,42 L42,32 Z" fill="#b71c1c"/>
+                </svg>
+            </div>
+            <div class="sizes">32px / 16px</div>
+        </div>
+
+    </div>
+</body>
+</html>

@@ -1,0 +1,47 @@
+# config/team.yaml — Organization structure, roles, and pod assignments.
+#
+# Only super admins should edit this file.
+# Admins (quality leads/managers) can request changes to their pods.
+#
+# Role hierarchy:
+#   super_admin  — full access to everything, all pods, all sessions
+#   admin        — sees sessions in their assigned pods, manages pod membership
+#   reviewer     — sees submitted tasks from trainers in their pod
+#   trainer      — sees only their own tasks
+#
+# Trainers self-register freely; adding them here assigns them to a pod
+# so their work flows to the right reviewer.
+
+super_admins:
+  - email: maruthi@turing.com
+    name: Maruthi
+
+admins:
+  - email: lead1@turing.com
+    name: Quality Lead 1
+    pods: [alpha, beta]
+
+pods:
+  alpha:
+    name: "Team Alpha"
+    reviewer:
+      email: reviewer_a@turing.com
+      name: Reviewer A
+    trainers:
+      - trainer1@turing.com
+      - trainer2@turing.com
+      - trainer3@turing.com
+      - trainer4@turing.com
+      - trainer5@turing.com
+
+  beta:
+    name: "Team Beta"
+    reviewer:
+      email: reviewer_b@turing.com
+      name: Reviewer B
+    trainers:
+      - trainer6@turing.com
+      - trainer7@turing.com
+      - trainer8@turing.com
+      - trainer9@turing.com
+      - trainer10@turing.com

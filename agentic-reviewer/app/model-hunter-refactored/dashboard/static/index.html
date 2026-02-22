@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Model Hunter - Admin Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+</head>
+<body>
+    <!-- Sidebar -->
+    <nav class="sidebar">
+        <div class="sidebar-brand">
+            <h1><span>🎯</span> Model Hunter</h1>
+            <small>Admin Intelligence Dashboard</small>
+        </div>
+        <ul class="sidebar-nav" id="sidebarNav">
+            <li><a data-section="command-center" class="active"><span class="nav-icon">🏠</span> Command Center</a></li>
+            <li><a data-section="trainers"><span class="nav-icon">👥</span> Trainers</a></li>
+            <li><a data-section="intelligence"><span class="nav-icon">🧠</span> Intelligence</a></li>
+            <li><a data-section="sessions"><span class="nav-icon">📋</span> Sessions</a></li>
+            <li><a data-section="models"><span class="nav-icon">🤖</span> Models</a></li>
+            <li><a data-section="costs"><span class="nav-icon">💰</span> Costs</a></li>
+            <li><a data-section="datalab"><span class="nav-icon">📊</span> Data Lab</a></li>
+            <li><a data-section="system"><span class="nav-icon">⚙️</span> System</a></li>
+        </ul>
+        <div class="sidebar-footer">
+            <div id="cacheStatus">Cache: loading...</div>
+            <div style="font-size:0.68rem;color:var(--text-muted);margin-top:0.3rem;">1-8: sections, R: refresh</div>
+            <a href="/api/logout" style="color:var(--text-muted);font-size:0.72rem;margin-top:0.3rem;display:block;" onclick="event.preventDefault();fetch('/api/logout',{method:'POST'}).then(()=>location.reload())">Logout</a>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="main-content">
+
+        <!-- ===== Command Center ===== -->
+        <div class="section active" id="section-command-center">
+            <div class="section-header">
+                <h2>Command Center</h2>
+                <p>What's happening right now</p>
+            </div>
+            <div class="anomaly-banner" id="anomalyBanner">
+                <span>⚠️</span>
+                <span id="anomalyText"></span>
+            </div>
+            <div class="metrics-grid" id="overviewMetrics"></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+                <div class="card">
+                    <div class="card-header"><span class="card-title">Active Trainers</span></div>
+                    <div id="activeTrainersList"></div>
+                </div>
+                <div class="card">
+                    <div class="card-header"><span class="card-title">Live Activity Feed</span></div>
+                    <div class="live-feed" id="liveFeed"><div style="color:var(--text-muted);font-size:0.82rem;">Connecting...</div></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== Trainers ===== -->
+        <div class="section" id="section-trainers">
+            <div class="section-header">
+                <h2>Trainers</h2>
+                <p>Who is performing well, who needs help, and when do people work</p>
+            </div>
+            <div class="card">
+                <div class="card-header"><span class="card-title">Online Now</span></div>
+                <div id="onlineRoster"></div>
+            </div>
+            <div class="card">
+                <div class="card-header"><span class="card-title">Leaderboard</span></div>
+                <div class="table-scroll">
+                    <table class="data-table" id="trainerTable">
+                        <thead>
+                            <tr>
+                                <th>#</th><th>Name</th><th>Email</th><th>Status</th>
+                                <th>Active Hrs</th><th>Hunts</th><th>Breaks</th>
+                                <th>Breaks/Hr</th><th>Last Seen</th>
+                            </tr>
+                        </thead>
+                        <tbody id="trainerTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== Intelligence ===== -->
+        <div class="section" id="section-intelligence">
+            <div class="section-header">
+                <h2>Intelligence</h2>
+                <p>How do we find breaks more effectively</p>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+                <!-- What-If Simulator -->
+                <div class="card">
+                    <div class="card-header"><span class="card-title">What-If Simulator</span></div>
+                    <div class="whatif-controls">
+                        <div class="whatif-field">
+                            <label>Number of Criteria: <span id="whatifCriteriaVal">5</span></label>
+                            <input type="range" id="whatifCriteria" min="1" max="15" value="5">
+                        </div>
+                        <div class="whatif-field">
+                            <label>Model</label>
+                            <select id="whatifModel">
+                                <option value="0">Nemotron</option>
+                                <option value="1" selected>Qwen</option>
+                            </select>
+                        </div>
+                        <div class="whatif-field">
+                            <label>Formatting Criteria</label>
+                            <select id="whatifFormatting">
+                                <option value="0">No</option>
+                                <option value="1">Yes</option>
+                            </select>
+                        </div>
+                        <div class="whatif-field">
+                            <label>Reasoning Budget: <span id="whatifBudgetVal">90%</span></label>
+                            <input type="range" id="whatifBudget" min="0" max="100" value="90" step="10">
+                        </div>
+                    </div>
+                    <div class="whatif-result" id="whatifResult">
+                        <div class="whatif-probability" id="whatifProb">--%</div>
+                        <div class="whatif-delta" id="whatifDelta"></div>
+                        <div style="color:var(--text-muted);font-size:0.78rem;margin-top:0.5rem;" id="whatifStatus">ML model not loaded</div>
+                    </div>
+                </div>
+                <!-- Criteria Difficulty -->
+                <div class="card">
+                    <div class="card-header"><span class="card-title">Criteria Difficulty</span></div>
+                    <div class="table-scroll">
+                        <table class="data-table" id="criteriaTable">
+                            <thead><tr><th>Criteria</th><th>Type</th><th>Fail Rate</th><th>Evaluations</th></tr></thead>
+                            <tbody id="criteriaTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+                <!-- Judge Drift -->
+                <div class="card">
+                    <div class="card-header"><span class="card-title">Judge Drift (Weekly Pass Rate)</span></div>
+                    <div id="judgeDriftBars" class="list-scroll"></div>
+                </div>
+                <!-- Top Failure Reasons -->
+                <div class="card">
+                    <div class="card-header"><span class="card-title">Top Failure Reasons</span></div>
+                    <div id="failureReasonsList" class="list-scroll"></div>
+                </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+                <!-- Prompt Clusters -->
+                <div class="card">
+                    <div class="card-header"><span class="card-title">Prompt Clusters</span></div>
+                    <div class="table-scroll">
+                        <table class="data-table" id="promptClusterTable">
+                            <thead><tr><th>Cluster</th><th>Top Terms</th><th>Sessions</th></tr></thead>
+                            <tbody id="promptClusterBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <!-- Domain Coverage -->
+                <div class="card">
+                    <div class="card-header"><span class="card-title">Domain Coverage</span></div>
+                    <div id="domainList" class="list-scroll"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== Sessions ===== -->
+        <div class="section" id="section-sessions">
+            <div class="section-header">
+                <h2>Sessions</h2>
+                <p>Session explorer and replay</p>
+            </div>
+            <div class="card">
+                <div class="card-header"><span class="card-title">Recent Sessions</span></div>
+                <div class="table-scroll">
+                    <table class="data-table" id="sessionsTable">
+                        <thead><tr><th>Session</th><th>Notebook</th><th>Trainer</th><th>Created</th><th>Last Active</th></tr></thead>
+                        <tbody id="sessionsTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="card" id="sessionReplayCard" style="display:none;">
+                <div class="card-header">
+                    <span class="card-title">Session Replay: <span id="replaySessionId"></span></span>
+                    <button class="btn btn-secondary" onclick="document.getElementById('sessionReplayCard').style.display='none'">Close</button>
+                </div>
+                <div class="replay-timeline list-scroll" id="replayTimeline"></div>
+            </div>
+        </div>
+
+        <!-- ===== Models ===== -->
+        <div class="section" id="section-models">
+            <div class="section-header">
+                <h2>Models</h2>
+                <p>Which model should we use, and what are its weaknesses</p>
+            </div>
+            <div class="card">
+                <div class="card-header"><span class="card-title">Model Comparison</span></div>
+                <div class="table-scroll">
+                    <table class="data-table" id="modelsTable">
+                        <thead><tr><th>Model</th><th>Hunts</th><th>Breaks</th><th>Break Rate</th><th>p50 Latency</th><th>p95 Latency</th></tr></thead>
+                        <tbody id="modelsTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header"><span class="card-title">Vulnerability by Criteria Type</span></div>
+                <div id="vulnerabilityChart" style="height:220px;"></div>
+            </div>
+        </div>
+
+        <!-- ===== Costs ===== -->
+        <div class="section" id="section-costs">
+            <div class="section-header">
+                <h2>Costs</h2>
+                <p>Are we spending money wisely</p>
+            </div>
+            <div class="metrics-grid" id="costMetrics"></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+                <div class="card">
+                    <div class="card-header"><span class="card-title">Cost by Model</span></div>
+                    <div id="costByModel" class="list-scroll"></div>
+                </div>
+                <div class="card">
+                    <div class="card-header"><span class="card-title">Cost by Trainer (Top 8)</span></div>
+                    <div id="costByTrainer" class="list-scroll"></div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header"><span class="card-title">Daily Burn Rate</span></div>
+                <div id="burnRateBars" class="list-scroll"></div>
+            </div>
+        </div>
+
+        <!-- ===== Data Lab ===== -->
+        <div class="section" id="section-datalab">
+            <div class="section-header">
+                <h2>Data Lab</h2>
+                <p>ML-ready export profiles</p>
+            </div>
+            <div class="export-grid" id="exportGrid"></div>
+            <div class="card" id="exportPreviewCard" style="display:none;margin-top:1rem;">
+                <div class="card-header">
+                    <span class="card-title">Preview: <span id="exportPreviewName"></span> (<span id="exportPreviewRows">0</span> rows)</span>
+                    <div style="display:flex;gap:0.5rem;">
+                        <select id="exportFormat" class="whatif-field" style="width:auto;padding:0.4rem;">
+                            <option value="csv">CSV</option>
+                            <option value="json">JSON</option>
+                            <option value="parquet">Parquet</option>
+                        </select>
+                        <button class="btn btn-primary" id="exportDownloadBtn">Download</button>
+                    </div>
+                </div>
+                <div class="table-scroll" style="font-size:0.78rem;">
+                    <table class="data-table" id="exportPreviewTable">
+                        <thead id="exportPreviewHead"></thead>
+                        <tbody id="exportPreviewBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== System ===== -->
+        <div class="section" id="section-system">
+            <div class="section-header">
+                <h2>System Health</h2>
+                <p>Is the platform healthy</p>
+            </div>
+            <!-- Admin Management (super admin only) -->
+            <div class="card" id="adminManagementCard" style="display:none;">
+                <div class="card-header"><span class="card-title">Dashboard Admin Access</span></div>
+                <p style="font-size:0.82rem;color:var(--text-muted);margin-bottom:1rem;">Add or remove people who can access this dashboard. They sign in once with their Turing email.</p>
+                <div style="display:flex;gap:0.5rem;margin-bottom:1rem;">
+                    <input type="text" id="newAdminName" placeholder="Name (optional)" style="flex:1;padding:0.5rem 0.7rem;font-size:0.85rem;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;font-family:inherit;">
+                    <input type="email" id="newAdminEmail" placeholder="Please enter Turing email" style="flex:2;padding:0.5rem 0.7rem;font-size:0.85rem;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;font-family:inherit;">
+                    <button class="btn btn-primary" id="addAdminBtn">Add</button>
+                </div>
+                <div id="adminList" class="list-scroll"></div>
+            </div>
+            <!-- Test Account Exclusion (super admin only) -->
+            <div class="card" id="testAccountCard" style="display:none;">
+                <div class="card-header"><span class="card-title">Test Accounts</span></div>
+                <p style="font-size:0.82rem;color:var(--text-muted);margin-bottom:1rem;">Activity from these accounts is excluded from all analytics, leaderboards, and ML data exports. Data is still stored for debugging.</p>
+                <div style="display:flex;gap:0.5rem;margin-bottom:1rem;">
+                    <input type="text" id="newTestName" placeholder="Name (optional)" style="flex:1;padding:0.5rem 0.7rem;font-size:0.85rem;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;font-family:inherit;">
+                    <input type="email" id="newTestEmail" placeholder="Please enter Turing email" style="flex:2;padding:0.5rem 0.7rem;font-size:0.85rem;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;font-family:inherit;">
+                    <button class="btn btn-primary" id="addTestBtn">Add</button>
+                </div>
+                <div id="testAccountList" class="list-scroll"></div>
+            </div>
+            <div class="card">
+                <div class="card-header"><span class="card-title">Provider Health</span></div>
+                <div class="table-scroll">
+                    <table class="data-table" id="providerTable">
+                        <thead><tr><th>Provider</th><th>Status</th><th>Calls (1h)</th><th>Error Rate</th><th>p50 Latency</th><th>p95 Latency</th></tr></thead>
+                        <tbody id="providerTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header"><span class="card-title">Active Anomalies</span></div>
+                <div id="anomaliesList" class="list-scroll"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Trainer Drill-down Panel -->
+    <div class="drilldown-backdrop" id="drilldownBackdrop"></div>
+    <div class="drilldown-overlay" id="drilldownPanel">
+        <button class="drilldown-close" id="drilldownClose">&times;</button>
+        <div id="drilldownContent"></div>
+    </div>
+
+    <script type="module" src="/static/main.js"></script>
+</body>
+</html>

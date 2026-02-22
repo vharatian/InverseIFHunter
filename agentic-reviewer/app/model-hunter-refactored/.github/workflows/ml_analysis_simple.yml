@@ -1,0 +1,196 @@
+# Model Hunter ML Analysis - Simple Version
+#
+# This is a simpler workflow that analyzes pre-uploaded data
+# 
+# How to use:
+# 1. Download data from VM manually: scp -r mandy@VM:/tmp/ml_export ./ml_data/
+# 2. Commit ml_data/ folder to repo (or upload as release asset)
+# 3. Run this workflow manually
+#
+# Or: Use the upload artifact approach
+
+name: ML Analysis (Simple)
+
+on:
+  workflow_dispatch:
+    inputs:
+      data_source:
+        description: 'Data source'
+        required: true
+        default: 'artifact'
+        type: choice
+        options:
+          - artifact
+          - repository
+      artifact_name:
+        description: 'Artifact name (if using artifact source)'
+        required: false
+        default: 'ml-data-export'
+
+jobs:
+  analyze:
+    name: Run ML Analysis
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Download from artifact
+        if: inputs.data_source == 'artifact'
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: ml_data/
+        continue-on-error: true
+      
+      - name: Use repository data
+        if: inputs.data_source == 'repository'
+        run: |
+          if [ -d "ml_data" ]; then
+            echo "Using ml_data from repository"
+            ls -la ml_data/
+          else
+            echo "No ml_data folder found in repository"
+            exit 1
+          fi
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          pip install pandas numpy scikit-learn matplotlib seaborn plotly kaleido
+      
+      - name: Generate analysis report
+        run: |
+          python << 'PYTHON'
+          import pandas as pd
+          import numpy as np
+          import json
+          import gzip
+          from datetime import datetime
+          import matplotlib.pyplot as plt
+          import seaborn as sns
+          
+          # Set style
+          plt.style.use('seaborn-v0_8-whitegrid')
+          
+          print("Loading data...")
+          
+          # Load datasets
+          trainer_df = pd.read_csv('ml_data/trainer_leaderboard.csv')
+          criteria_df = pd.read_csv('ml_data/criteria_difficulty.csv')
+          model_df = pd.read_csv('ml_data/model_performance.csv')
+          
+          # Load main dataset
+          records = []
+          with gzip.open('ml_data/ml_dataset.jsonl.gz', 'rt') as f:
+              for line in f:
+                  records.append(json.loads(line))
+          df = pd.DataFrame(records)
+          
+          print(f"Loaded {len(df)} sessions, {len(trainer_df)} trainers")
+          
+          # Create visualizations
+          fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+          
+          # 1. Top trainers
+          top_trainers = trainer_df.nlargest(15, 'total_breaks')
+          axes[0, 0].barh(top_trainers['trainer_id'], top_trainers['total_breaks'], color='coral')
+          axes[0, 0].set_title('Top 15 Trainers by Breaks Found')
+          axes[0, 0].set_xlabel('Total Breaks')
+          axes[0, 0].invert_yaxis()
+          
+          # 2. Criteria difficulty
+          top_criteria = criteria_df.nlargest(15, 'fail_rate')
+          axes[0, 1].barh(top_criteria['criteria_id'], top_criteria['fail_rate'], color='indianred')
+          axes[0, 1].set_title('Hardest Criteria (Fail Rate)')
+          axes[0, 1].set_xlabel('Fail Rate')
+          axes[0, 1].invert_yaxis()
+          
+          # 3. Break rate distribution
+          axes[1, 0].hist(df['break_rate'], bins=20, color='steelblue', edgecolor='white')
+          axes[1, 0].set_title('Break Rate Distribution')
+          axes[1, 0].set_xlabel('Break Rate')
+          axes[1, 0].set_ylabel('Count')
+          
+          # 4. Model comparison
+          model_df_sorted = model_df.sort_values('break_rate', ascending=False)
+          model_names = [m.split('/')[-1][:20] for m in model_df_sorted['model']]
+          axes[1, 1].bar(model_names, model_df_sorted['break_rate'], color='mediumseagreen')
+          axes[1, 1].set_title('Model Break Rates')
+          axes[1, 1].set_ylabel('Break Rate')
+          axes[1, 1].tick_params(axis='x', rotation=45)
+          
+          plt.tight_layout()
+          plt.savefig('ml_data/analysis_charts.png', dpi=150, bbox_inches='tight')
+          print("Charts saved to analysis_charts.png")
+          
+          # Generate report
+          report = f"""
+          # Model Hunter ML Analysis Report
+          
+          **Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+          
+          ## Summary
+          
+          | Metric | Value |
+          |--------|-------|
+          | Total Sessions | {len(df):,} |
+          | Total Hunts | {df['total_hunts'].sum():,} |
+          | Total Breaks | {df['breaks_found'].sum():,} |
+          | Overall Break Rate | {df['breaks_found'].sum() / df['total_hunts'].sum():.1%} |
+          | Unique Trainers | {df['trainer_id'].nunique()} |
+          
+          ## Top 10 Trainers
+          
+          | Rank | Trainer | Breaks | Rate |
+          |------|---------|--------|------|
+          """
+          
+          for i, row in trainer_df.nlargest(10, 'total_breaks').iterrows():
+              report += f"| {trainer_df.index.get_loc(i)+1} | {row['trainer_id']} | {row['total_breaks']} | {row['overall_break_rate']:.1%} |\n"
+          
+          report += """
+          ## Hardest Criteria
+          
+          | Criteria | Fail Rate | Evaluations |
+          |----------|-----------|-------------|
+          """
+          
+          for i, row in criteria_df.nlargest(10, 'fail_rate').iterrows():
+              report += f"| {row['criteria_id']} | {row['fail_rate']:.1%} | {row['total_evaluations']:,} |\n"
+          
+          report += """
+          ## Model Performance
+          
+          | Model | Break Rate | Total Hunts |
+          |-------|------------|-------------|
+          """
+          
+          for i, row in model_df.iterrows():
+              model_name = row['model'].split('/')[-1]
+              report += f"| {model_name} | {row['break_rate']:.1%} | {row['total_hunts']:,} |\n"
+          
+          with open('ml_data/analysis_report.md', 'w') as f:
+              f.write(report)
+          
+          print("Report saved to analysis_report.md")
+          PYTHON
+      
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: ml-analysis-report-${{ github.run_number }}
+          path: |
+            ml_data/analysis_report.md
+            ml_data/analysis_charts.png
+            ml_data/analysis_summary.json
+          retention-days: 90
+      
+      - name: Display summary
+        run: |
+          cat ml_data/analysis_report.md >> $GITHUB_STEP_SUMMARY

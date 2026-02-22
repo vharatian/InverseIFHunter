@@ -1,0 +1,1 @@
+{"session_id":"fail-demo","current_turn":1,"notebook":{"prompt":"Test","response_reference":"C1: Must have content"},"config":{},"all_results":[{"hunt_id":1,"model":"model-a","response":"r1"},{"hunt_id":2,"model":"model-b","response":"r2"},{"hunt_id":3,"model":"model-a","response":"r3"},{"hunt_id":4,"model":"model-b","response":"r4"}],"human_reviews":{}}
