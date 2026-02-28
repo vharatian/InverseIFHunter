@@ -31,7 +31,7 @@ services:
     environment:
       - PORT=8010
       - AGENTIC_REVIEWER_ROOT=/workspace
-      - GOOGLE_SERVICE_ACCOUNT_JSON_PATH=/workspace/InverseIFHunter/service_account.json
+      - GOOGLE_SERVICE_ACCOUNT_JSON_PATH=/workspace/service_account.json
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - FIREWORKS_API_KEY=${FIREWORKS_API_KEY}
@@ -40,7 +40,7 @@ services:
       - FIREWORKS_CONCURRENCY=4
       - OPENAI_CONCURRENCY=30
     volumes:
-      - ../../:/workspace:ro
+      - .:/workspace:ro
       - ./.storage-staging:/app/.storage
       - telemetry-data-staging:/app/.telemetry
       - ./static:/app/static:ro
@@ -67,7 +67,7 @@ services:
     environment:
       - PORT=8012
       - AGENTIC_REVIEWER_ROOT=/workspace
-      - GOOGLE_SERVICE_ACCOUNT_JSON_PATH=/workspace/InverseIFHunter/service_account.json
+      - GOOGLE_SERVICE_ACCOUNT_JSON_PATH=/workspace/service_account.json
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - FIREWORKS_API_KEY=${FIREWORKS_API_KEY}
@@ -76,7 +76,7 @@ services:
       - FIREWORKS_CONCURRENCY=4
       - OPENAI_CONCURRENCY=30
     volumes:
-      - ../../:/workspace:ro
+      - .:/workspace:ro
       - ./.storage-staging:/app/.storage
       - telemetry-data-staging:/app/.telemetry
       - ./static:/app/static:ro
