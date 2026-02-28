@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Model Hunter — Architecture Graph</title>
+    <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            background: #0d1117;
+            color: #c9d1d9;
+            min-height: 100vh;
+        }
+        header {
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid #30363d;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+        h1 {
+            margin: 0;
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+        .legend {
+            display: flex;
+            gap: 1.5rem;
+            flex-wrap: wrap;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.8rem;
+        }
+        .legend-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+        .legend-dot.frontend { background: #58a6ff; }
+        .legend-dot.routes { background: #3fb950; }
+        .legend-dot.services { background: #d29922; }
+        .legend-dot.storage { background: #a371f7; }
+        .legend-dot.helpers { background: #79c0ff; }
+        #graph-container {
+            width: 100%;
+            height: calc(100vh - 60px);
+            background: #0d1117;
+        }
+        .info-panel {
+            position: fixed;
+            bottom: 1rem;
+            left: 1rem;
+            right: 1rem;
+            max-width: 600px;
+            padding: 1rem 1.25rem;
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            line-height: 1.5;
+            z-index: 100;
+            display: none;
+        }
+        .info-panel.visible { display: block; }
+        .info-panel h3 { margin: 0 0 0.5rem 0; font-size: 1rem; color: #58a6ff; }
+        .info-panel .hint { color: #8b949e; font-size: 0.8rem; margin-top: 0.5rem; }
+        .edge-type { font-size: 0.75rem; color: #8b949e; margin-top: 0.25rem; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Model Hunter — Modular Architecture Graph</h1>
+        <div class="legend">
+            <span class="legend-item"><span class="legend-dot frontend"></span> Frontend</span>
+            <span class="legend-item"><span class="legend-dot routes"></span> API Routes</span>
+            <span class="legend-item"><span class="legend-dot services"></span> Services</span>
+            <span class="legend-item"><span class="legend-dot storage"></span> Storage</span>
+            <span class="legend-item"><span class="legend-dot helpers"></span> Helpers</span>
+        </div>
+    </header>
+    <div id="graph-container"></div>
+    <div class="info-panel" id="info-panel">
+        <h3 id="info-title">Node</h3>
+        <p id="info-desc"></p>
+        <p class="edge-type" id="info-edges"></p>
+        <p class="hint">Click a node to highlight its connections. Click empty space to reset.</p>
+    </div>
+
+    <script>
+        const GRAPH_DATA = {
+            nodes: new vis.DataSet([
+                // Frontend
+                { id: 'app', label: 'app.js', group: 'frontend', title: 'Entry point, init, event wiring' },
+                { id: 'config', label: 'config.js', group: 'frontend', title: 'Constants, models, tips' },
+                { id: 'api', label: 'api.js', group: 'frontend', title: 'Version check, modals' },
+                { id: 'auth', label: 'auth.js', group: 'frontend', title: 'Trainer registration, heartbeat' },
+                { id: 'dom', label: 'dom.js', group: 'frontend', title: 'DOM element references' },
+                { id: 'theme', label: 'theme.js', group: 'frontend', title: 'Theme toggle, tabs' },
+                { id: 'state', label: 'state.js', group: 'frontend', title: 'Reactive state, turn state' },
+                { id: 'utils', label: 'utils.js', group: 'frontend', title: 'escapeHtml, getModelDisplayName, errors' },
+                { id: 'types', label: 'types.js', group: 'frontend', title: 'JSDoc type definitions' },
+                { id: 'notebook', label: 'notebook.js', group: 'frontend', title: 'Upload, fetch, save, judge, criteria' },
+                { id: 'editors', label: 'editors.js', group: 'frontend', title: 'Markdown editors, validation' },
+                { id: 'hunt', label: 'hunt.js', group: 'frontend', title: 'Hunt limits, SSE, start hunt' },
+                { id: 'results', label: 'results.js', group: 'frontend', title: 'Slideouts, selection, review, grading' },
+                { id: 'multiturn', label: 'multiturn.js', group: 'frontend', title: 'Turn bar, calibration, advance' },
+                { id: 'celebrations', label: 'celebrations.js', group: 'frontend', title: 'Toast, confetti, errors' },
+                // Routes
+                { id: 'route-trainer', label: 'trainer', group: 'routes', title: 'register-trainer, heartbeat' },
+                { id: 'route-session', label: 'session', group: 'routes', title: 'session, update-config' },
+                { id: 'route-notebook', label: 'notebook', group: 'routes', title: 'upload, fetch, save, judge, reviews' },
+                { id: 'route-hunt', label: 'hunt', group: 'routes', title: 'start-hunt, hunt-stream, results' },
+                { id: 'route-calibration', label: 'calibration', group: 'routes', title: 'judge-reference, generate-single, judge-calibration' },
+                { id: 'route-multiturn', label: 'multiturn', group: 'routes', title: 'advance-turn, mark-breaking, turn-status' },
+                { id: 'route-system', label: 'system', group: 'routes', title: 'health, version, maintenance' },
+                // Services
+                { id: 'svc-hunt-engine', label: 'hunt_engine', group: 'services', title: 'Orchestrates hunts, model calls' },
+                { id: 'svc-redis', label: 'redis_session', group: 'services', title: 'Session store, granular keys' },
+                { id: 'svc-event-stream', label: 'event_stream', group: 'services', title: 'Redis Streams for SSE' },
+                { id: 'svc-notebook-parser', label: 'notebook_parser', group: 'services', title: 'Parse .ipynb, extract cells' },
+                { id: 'svc-openrouter', label: 'openrouter_client', group: 'services', title: 'OpenRouter API (Nemotron, Qwen, Claude)' },
+                { id: 'svc-openai', label: 'openai_client', group: 'services', title: 'GPT-5 judge, criteria evaluation' },
+                { id: 'svc-snapshot', label: 'snapshot_service', group: 'services', title: 'WYSIWYG notebook validation' },
+                { id: 'svc-google-drive', label: 'google_drive_client', group: 'services', title: 'Drive read/write' },
+                { id: 'svc-telemetry', label: 'telemetry_logger', group: 'services', title: 'JSONL event logging' },
+                // Storage
+                { id: 'stor-session', label: 'session_storage', group: 'storage', title: 'Disk backup .storage/' },
+                { id: 'stor-trainer', label: 'trainer_registry', group: 'storage', title: 'trainers.json' },
+                // Helpers
+                { id: 'hlp-shared', label: 'shared', group: 'helpers', title: 'get_validated_session, Drive writes' },
+                { id: 'hlp-notebook', label: 'notebook_helpers', group: 'helpers', title: 'HEADING_MAP, cell updates' },
+                { id: 'models-schemas', label: 'schemas', group: 'helpers', title: 'Pydantic models' },
+            ]),
+            edges: new vis.DataSet([
+                // Frontend imports
+                { from: 'app', to: 'dom', title: 'import' },
+                { from: 'app', to: 'theme' },
+                { from: 'app', to: 'state' },
+                { from: 'app', to: 'auth' },
+                { from: 'app', to: 'api' },
+                { from: 'app', to: 'hunt' },
+                { from: 'app', to: 'notebook' },
+                { from: 'app', to: 'results' },
+                { from: 'app', to: 'multiturn' },
+                { from: 'app', to: 'editors' },
+                { from: 'app', to: 'celebrations' },
+                { from: 'notebook', to: 'dom' },
+                { from: 'notebook', to: 'state' },
+                { from: 'notebook', to: 'config' },
+                { from: 'notebook', to: 'editors' },
+                { from: 'notebook', to: 'hunt' },
+                { from: 'notebook', to: 'results' },
+                { from: 'notebook', to: 'multiturn' },
+                { from: 'notebook', to: 'celebrations' },
+                { from: 'notebook', to: 'api' },
+                { from: 'notebook', to: 'auth' },
+                { from: 'results', to: 'dom' },
+                { from: 'results', to: 'state' },
+                { from: 'results', to: 'config' },
+                { from: 'results', to: 'editors' },
+                { from: 'results', to: 'celebrations' },
+                { from: 'results', to: 'multiturn' },
+                { from: 'results', to: 'api' },
+                { from: 'editors', to: 'dom' },
+                { from: 'editors', to: 'state' },
+                { from: 'editors', to: 'utils' },
+                { from: 'editors', to: 'celebrations' },
+                { from: 'editors', to: 'config' },
+                { from: 'editors', to: 'notebook' },
+                { from: 'multiturn', to: 'dom' },
+                { from: 'multiturn', to: 'state' },
+                { from: 'multiturn', to: 'config' },
+                { from: 'multiturn', to: 'editors' },
+                { from: 'multiturn', to: 'celebrations' },
+                { from: 'multiturn', to: 'results' },
+                { from: 'multiturn', to: 'notebook' },
+                { from: 'multiturn', to: 'hunt' },
+                { from: 'hunt', to: 'dom' },
+                { from: 'hunt', to: 'config' },
+                { from: 'hunt', to: 'state' },
+                { from: 'hunt', to: 'notebook' },
+                { from: 'hunt', to: 'results' },
+                { from: 'hunt', to: 'multiturn' },
+                { from: 'hunt', to: 'api' },
+                { from: 'hunt', to: 'theme' },
+                { from: 'hunt', to: 'editors' },
+                { from: 'api', to: 'config' },
+                { from: 'api', to: 'utils' },
+                { from: 'celebrations', to: 'dom' },
+                { from: 'celebrations', to: 'state' },
+                { from: 'celebrations', to: 'results' },
+                { from: 'celebrations', to: 'utils' },
+                { from: 'auth', to: 'state' },
+                { from: 'auth', to: 'celebrations' },
+                { from: 'theme', to: 'dom' },
+                { from: 'utils', to: 'config' },
+                // API calls: Frontend -> Routes
+                { from: 'auth', to: 'route-trainer', title: 'API', dashes: true },
+                { from: 'api', to: 'route-system', title: 'API', dashes: true },
+                { from: 'app', to: 'route-session', title: 'API', dashes: true },
+                { from: 'notebook', to: 'route-multiturn', title: 'API', dashes: true },
+                { from: 'notebook', to: 'route-notebook', title: 'API', dashes: true },
+                { from: 'notebook', to: 'route-calibration', title: 'API', dashes: true },
+                { from: 'results', to: 'route-hunt', title: 'API', dashes: true },
+                { from: 'results', to: 'route-notebook', title: 'API', dashes: true },
+                { from: 'multiturn', to: 'route-multiturn', title: 'API', dashes: true },
+                { from: 'multiturn', to: 'route-calibration', title: 'API', dashes: true },
+                { from: 'hunt', to: 'route-session', title: 'API', dashes: true },
+                { from: 'hunt', to: 'route-hunt', title: 'API', dashes: true },
+                // Route -> Services/Storage/Helpers
+                { from: 'route-trainer', to: 'stor-trainer' },
+                { from: 'route-session', to: 'stor-session' },
+                { from: 'route-session', to: 'hlp-shared' },
+                { from: 'route-session', to: 'svc-redis' },
+                { from: 'route-notebook', to: 'svc-notebook-parser' },
+                { from: 'route-notebook', to: 'svc-hunt-engine' },
+                { from: 'route-notebook', to: 'svc-snapshot' },
+                { from: 'route-notebook', to: 'stor-session' },
+                { from: 'route-notebook', to: 'stor-trainer' },
+                { from: 'route-notebook', to: 'hlp-notebook' },
+                { from: 'route-notebook', to: 'hlp-shared' },
+                { from: 'route-notebook', to: 'svc-redis' },
+                { from: 'route-hunt', to: 'svc-hunt-engine' },
+                { from: 'route-hunt', to: 'hlp-shared' },
+                { from: 'route-hunt', to: 'svc-redis' },
+                { from: 'route-calibration', to: 'svc-notebook-parser' },
+                { from: 'route-calibration', to: 'stor-session' },
+                { from: 'route-calibration', to: 'hlp-shared' },
+                { from: 'route-calibration', to: 'svc-redis' },
+                { from: 'route-multiturn', to: 'models-schemas' },
+                { from: 'route-multiturn', to: 'stor-session' },
+                { from: 'route-multiturn', to: 'hlp-shared' },
+                { from: 'route-multiturn', to: 'svc-redis' },
+                { from: 'route-system', to: 'models-schemas' },
+                { from: 'route-system', to: 'svc-redis' },
+                // Service dependencies
+                { from: 'svc-hunt-engine', to: 'svc-openrouter' },
+                { from: 'svc-hunt-engine', to: 'svc-openai' },
+                { from: 'svc-hunt-engine', to: 'svc-redis' },
+                { from: 'svc-hunt-engine', to: 'svc-event-stream' },
+                { from: 'svc-event-stream', to: 'svc-redis' },
+                { from: 'hlp-shared', to: 'svc-redis' },
+                { from: 'hlp-shared', to: 'stor-session' },
+                { from: 'hlp-shared', to: 'svc-hunt-engine' },
+            ])
+        };
+
+        const groups = {
+            frontend: { color: { background: '#58a6ff', border: '#388bfd' }, font: { color: '#0d1117' } },
+            routes: { color: { background: '#3fb950', border: '#2ea043' }, font: { color: '#0d1117' } },
+            services: { color: { background: '#d29922', border: '#9e6a03' }, font: { color: '#0d1117' } },
+            storage: { color: { background: '#a371f7', border: '#8957e5' }, font: { color: '#0d1117' } },
+            helpers: { color: { background: '#79c0ff', border: '#58a6ff' }, font: { color: '#0d1117' } },
+        };
+
+        const options = {
+            nodes: {
+                shape: 'box',
+                margin: 10,
+                font: { size: 12, face: 'SF Mono, Fira Code, monospace' },
+                borderWidth: 2,
+                shadow: true,
+            },
+            groups: groups,
+            edges: {
+                arrows: 'to',
+                smooth: { type: 'curvedCW', roundness: 0.5 },
+                color: { color: '#484f58' },
+                width: 1.5,
+            },
+            physics: {
+                enabled: true,
+                solver: 'forceAtlas2Based',
+                forceAtlas2Based: {
+                    gravitationalConstant: -50,
+                    centralGravity: 0.01,
+                    springLength: 120,
+                    springConstant: 0.08,
+                    damping: 0.4,
+                    avoidOverlap: 0.5,
+                },
+                maxVelocity: 50,
+                minVelocity: 0.1,
+                stabilization: { iterations: 150, updateInterval: 25 },
+            },
+            interaction: {
+                hover: true,
+                tooltipDelay: 100,
+                multiselect: false,
+            },
+        };
+
+        const container = document.getElementById('graph-container');
+        const data = { nodes: GRAPH_DATA.nodes, edges: GRAPH_DATA.edges };
+        const network = new vis.Network(container, data, options);
+
+        // Freeze layout after stabilization — stops rotation/drift
+        network.on('stabilizationIterationsDone', function() {
+            network.setOptions({ physics: false });
+        });
+
+        // Build adjacency for highlight
+        const nodeToNeighbors = new Map();
+        GRAPH_DATA.edges.get().forEach(e => {
+            if (!nodeToNeighbors.has(e.from)) nodeToNeighbors.set(e.from, new Set());
+            nodeToNeighbors.get(e.from).add(e.to);
+            if (!nodeToNeighbors.has(e.to)) nodeToNeighbors.set(e.to, new Set());
+            nodeToNeighbors.get(e.to).add(e.from);
+        });
+
+        function getConnectedIds(nodeId) {
+            const connected = new Set([nodeId]);
+            const neighbors = nodeToNeighbors.get(nodeId);
+            if (neighbors) neighbors.forEach(n => connected.add(n));
+            return Array.from(connected);
+        }
+
+        network.on('click', function(params) {
+            if (params.nodes.length === 0) {
+                // Reset
+                GRAPH_DATA.nodes.forEach(n => {
+                    GRAPH_DATA.nodes.update({ id: n.id, opacity: 1, font: { color: '#0d1117' } });
+                });
+                GRAPH_DATA.edges.forEach(e => {
+                    GRAPH_DATA.edges.update({ id: e.id, color: { color: '#484f58' }, width: 1.5 });
+                });
+                document.getElementById('info-panel').classList.remove('visible');
+                return;
+            }
+            const nodeId = params.nodes[0];
+            const connected = getConnectedIds(nodeId);
+            const node = GRAPH_DATA.nodes.get(nodeId);
+
+            // Dim non-connected
+            GRAPH_DATA.nodes.get().forEach(n => {
+                const highlight = connected.includes(n.id);
+                GRAPH_DATA.nodes.update({
+                    id: n.id,
+                    opacity: highlight ? 1 : 0.2,
+                    font: { color: highlight ? '#0d1117' : '#484f58' },
+                });
+            });
+            const edgeIds = GRAPH_DATA.edges.getIds();
+            GRAPH_DATA.edges.get().forEach((e, i) => {
+                const edgeHighlight = connected.includes(e.from) && connected.includes(e.to);
+                GRAPH_DATA.edges.update({
+                    id: edgeIds[i],
+                    color: { color: edgeHighlight ? '#58a6ff' : '#21262d' },
+                    width: edgeHighlight ? 2.5 : 0.8,
+                });
+            });
+
+            // Info panel
+            const panel = document.getElementById('info-panel');
+            document.getElementById('info-title').textContent = node.label;
+            document.getElementById('info-desc').textContent = node.title || '';
+            const neighborLabels = connected
+                .filter(id => id !== nodeId)
+                .map(id => GRAPH_DATA.nodes.get(id)?.label || id)
+                .slice(0, 12);
+            document.getElementById('info-edges').textContent =
+                'Connected: ' + (neighborLabels.length ? neighborLabels.join(', ') : 'none');
+            panel.classList.add('visible');
+        });
+
+        network.on('doubleClick', function(params) {
+            if (params.nodes.length > 0) {
+                network.focus(params.nodes[0], { scale: 1.2, animation: { duration: 300 } });
+            }
+        });
+    </script>
+</body>
+</html>

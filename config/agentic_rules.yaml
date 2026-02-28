@@ -1,0 +1,78 @@
+# Agentic Reviewer — Rule Config
+# Add rules here. Toggle enabled to turn on/off. No code change needed.
+#
+# Rule types: deterministic (code) | llm (model call)
+# Checkpoints: preflight (before grading) | final (after grading)
+# LLM rules: use_council: true = multiple models, consensus; false = single judge
+
+council:
+  models:
+    - id: "openai/gpt-5.2"
+      enabled: true
+    - id: "anthropic/claude-sonnet-4.6"
+      enabled: true
+    - id: "google/gemini-3-pro-preview"
+      enabled: true
+    - id: "x-ai/grok-4"
+      enabled: true
+  consensus: "majority"   # or "unanimity"
+
+rules:
+
+  # Dropped: diversity (wrong), criteria_present (redundant), selection_count (redundant)
+
+  - id: model_consistency
+    enabled: true
+    type: deterministic
+    checkpoints: [preflight, final]
+    description: "All 4 selected responses from the same model"
+    params: {}
+
+  - id: human_llm_grade_alignment
+    enabled: true
+    type: llm
+    use_council: true
+    checkpoints: [final]
+    description: "Human grading vs LLM judge — flag large disagreements"
+    params: {}
+
+  - id: metadata_prompt_alignment
+    enabled: true
+    type: llm
+    use_council: true
+    checkpoints: [final]
+    description: "Prompt content matches claimed Domain/Use Case (context-aware)"
+    params: {}
+
+  - id: metadata_taxonomy_alignment
+    enabled: true
+    type: llm
+    use_council: true
+    checkpoints: [final]
+    description: "L1 Taxonomy consistent with Domain/Use Case (context-aware)"
+    params: {}
+
+  - id: human_explanation_justifies_grade
+    enabled: true
+    type: llm
+    use_council: true
+    checkpoints: [final]
+    description: "Human explanation is substantive, not generic"
+    params: {}
+
+  - id: safety_context_aware
+    enabled: true
+    type: llm
+    use_council: true
+    checkpoints: [final]
+    description: "Prohibited content — context-aware (requesting vs discussing/avoiding)"
+    params: {}
+
+  - id: qc_cfa_criteria_valid
+    enabled: true
+    type: llm
+    use_council: true
+    checkpoints: [final]
+    description: "For QC/CFA: criteria can reference what's not in prompt; no invented golden answers"
+    params:
+      taxonomies: [QC, CFA]

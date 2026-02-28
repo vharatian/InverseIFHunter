@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+
+# Testing
+.pytest_cache/
+
+# Secrets
+.env
+service_account.json
+
+# Data & storage
+.storage/
+.telemetry/
+debug.log
+
+# IDE / AI metadata
+.gitnexus/
+.gitnexus-web/
+.claude/
+.orchids/
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Node (if ever needed)
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db

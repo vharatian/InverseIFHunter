@@ -1,0 +1,277 @@
+# config/global.yaml — Single source of truth
+# See GLOBAL_CONFIG_SOT.md for workflow and migration plan.
+
+# Secrets: resolved from env at runtime (never commit values)
+secrets:
+  openai_api_key: ${OPENAI_API_KEY}
+  openrouter_api_key: ${OPENROUTER_API_KEY}
+  fireworks_api_key: ${FIREWORKS_API_KEY}
+  redis_url: ${REDIS_URL:-redis://localhost:6379/0}
+  google_service_account_path: ${GOOGLE_SERVICE_ACCOUNT_JSON_PATH}
+
+# App (hunt UI)
+app:
+  debug_mode: false
+  max_hunts_per_notebook: 16
+  admin_mode_enabled: true   # false = 5-click does nothing; true = 5-click + password unlocks
+  admin_mode_password: ${ADMIN_MODE_PASSWORD:-}
+  min_explanation_words: 10
+  version_check_interval: 30000
+  hunt_count_storage_prefix: "modelHunter_huntCount_"
+  tips_paused_key: "modelHunter_tipsPaused"
+
+# Hunt limits & slots
+hunt:
+  parallel_workers_min: 1
+  parallel_workers_max: 16
+  parallel_workers_default: 4
+  target_breaks_default: 4
+  model_slots_count: 4
+  judge_slots_count: 4
+  # Trainer "Model" dropdown — per provider (openrouter / fireworks). id = API model id; name = UI label.
+  provider_models:
+    openrouter:
+      - { id: "nvidia/nemotron-3-nano-30b-a3b", name: "Nemotron-3-Nano (Fast)" }
+      - { id: "qwen/qwen3-235b-a22b-thinking-2507", name: "Qwen3-235B (Thinking)" }
+      - { id: "anthropic/claude-sonnet-4.5", name: "Claude Sonnet 4.5" }
+      - { id: "anthropic/claude-opus-4.5", name: "Claude Opus 4.5" }
+      - { id: "anthropic/claude-opus-4.6", name: "Claude Opus 4.6" }
+      - { id: "openai/gpt-5.2", name: "GPT-5.2" }
+      - { id: "google/gemini-3.1-pro-preview", name: "Gemini 3.1 Pro (Preview)" }
+      - { id: "openai/gpt-5.2-pro", name: "GPT 5.2 Pro" }
+    # fireworks:
+    #   - { id: "accounts/fireworks/models/qwen3-235b-a22b-thinking-2507", name: "Qwen3-235B (Thinking)" }
+  # Trainer "Evaluation Model" (judge) dropdown in hunt config. First entry is default.
+  judge_models:
+    openrouter:
+      - { id: "anthropic/claude-opus-4.6", name: "Opus 4.6" }
+      - { id: "openai/gpt-5.2", name: "GPT-5.2" }
+      - { id: "openai/gpt-5.2-pro", name: "GPT 5.2 Pro" }
+
+# HTTP / backend
+http:
+  max_connections: 50
+  max_keepalive_connections: 30
+  keepalive_expiry: 60.0
+  http2_enabled: false
+  timeouts:
+    openrouter: { read: 180, connect: 5 }
+    fireworks: { read: 120, connect: 5 }
+    openai: { read: 60, connect: 5 }
+
+# Session & locks
+session:
+  ttl_seconds: 86400        # 24 hours (Redis is a cache; SQLite is the permanent store)
+  stream_ttl_seconds: 14400
+  heartbeat_ttl_seconds: 30
+
+# Rate limits (concurrency per provider)
+rate_limits:
+  openrouter: 50
+  fireworks: 25
+  openai: 50
+  default: 30
+
+# Feature flags
+features:
+  agentic_qc_enabled: true
+  preflight_enabled: true
+  rate_limiter_enabled: true
+  # Bypass hunt-start criteria checks — when true, "Find Breaking Responses" is always enabled.
+  bypass_hunt_criteria: true
+
+# Agentic QC (merged from agentic_rules.yaml)
+agentic:
+  council:
+    models:
+      - id: "openai/gpt-5.2"
+        enabled: true
+      - id: "anthropic/claude-sonnet-4.6"
+        enabled: true
+      - id: "google/gemini-3.1-pro-preview"
+        enabled: true
+      - id: "x-ai/grok-4"
+        enabled: true
+    consensus: "chairman"
+    chairman_model: "anthropic/claude-opus-4.6"
+  rules:
+    - id: model_consistency
+      enabled: true
+      type: deterministic
+      checkpoints: [preflight, final]
+      description: "All 4 selected responses from the same model"
+      params: {}
+    - id: human_llm_grade_alignment
+      enabled: true
+      type: llm
+      use_council: true
+      checkpoints: [final]
+      description: "Human grading vs LLM judge — flag large disagreements"
+      params: {}
+    - id: metadata_prompt_alignment
+      enabled: true
+      type: llm
+      use_council: true
+      checkpoints: [final]
+      description: "Prompt content matches claimed Domain/Use Case (context-aware)"
+      params: {}
+    - id: metadata_taxonomy_alignment
+      enabled: true
+      type: llm
+      use_council: true
+      checkpoints: [final]
+      description: "L1 Taxonomy consistent with Domain/Use Case (context-aware)"
+      params: {}
+    - id: human_explanation_justifies_grade
+      enabled: true
+      type: llm
+      use_council: true
+      checkpoints: [final]
+      description: "Human explanation is substantive, not generic"
+      params: {}
+    - id: safety_context_aware
+      enabled: true
+      type: llm
+      use_council: true
+      checkpoints: [final]
+      weight: 30
+      description: "ZERO-TOLERANCE SAFETY — Prompt must contain NO references (explicit or implicit) to prohibited content. Any appearance in fiction, examples, hypotheticals, metaphors, or academic framing = FAIL."
+      params:
+        zero_tolerance: true
+        prohibited_text: |
+          ZERO-TOLERANCE: The prompt must contain NO references whatsoever — explicit or implicit — to any of the following. If any appear, even in fiction, examples, hypotheticals, metaphors, or academic framing, the prompt FAILS.
+
+          PROHIBITED CONTENT (ABSOLUTE):
+          1) Sexual Content — sex, eroticism, pornography; rape, sexual violence; sexual content involving minors; incest, exploitation.
+          2) Violence — killing, murder, assault; war, torture, physical harm; weapons used against people.
+          3) Self-Harm — suicide; cutting, overdose; any self-injury.
+          4) Crime — scams, fraud; hacking; theft; illegal activity.
+          5) Terrorism & Extremism — extremist groups; attacks; propaganda.
+          6) Abuse & Exploitation — child abuse; trafficking; coercion.
+          7) Weapons & Drugs — guns, bombs, explosives; illegal drugs; manufacturing or use.
+          8) Privacy & Surveillance Abuse — doxxing; stalking; tracking or exposing individuals.
+    - id: qc_cfa_criteria_valid
+      enabled: true
+      type: llm
+      use_council: true
+      checkpoints: [final]
+      description: "For QC/CFA: criteria can reference what's not in prompt; no invented golden answers"
+      params:
+        taxonomies: [QC, CFA]
+    # ── New reviewer council rules ──────────────────────────────────────────
+    # Weights: safety_context_aware=30%; no_imaginary_constraints=15%; other weighted rules share remainder (~11% each)
+    - id: prompt_taxonomy_domain_alignment
+      enabled: true
+      type: llm
+      use_council: true
+      checkpoints: [final]
+      weight: 11
+      description: "Prompt is aligned to L1 Taxonomy first, then Domain"
+      params: {}
+    - id: user_prompt_length
+      enabled: true
+      type: deterministic
+      checkpoints: [final]
+      weight: 11
+      description: "User prompt word count within ±10 words of declared metadata length"
+      params:
+        tolerance: 10
+    - id: no_imaginary_constraints
+      enabled: true
+      type: llm
+      use_council: true
+      checkpoints: [final]
+      weight: 15
+      description: "Prompt contains no imaginary or invented constraints"
+      params: {}
+    - id: overall_criteria_quality
+      enabled: true
+      type: llm
+      use_council: true
+      checkpoints: [final]
+      weight: 11
+      description: "Criteria are specific, measurable, and help the model learn"
+      params: {}
+    - id: human_llm_judgment_disagreement
+      enabled: true
+      type: deterministic
+      checkpoints: [final]
+      weight: 11
+      description: "Human/LLM grade disagreement rate below configurable threshold"
+      params:
+        disagreement_threshold: 0.30
+    - id: human_explanation_quality
+      enabled: true
+      type: llm
+      use_council: true
+      checkpoints: [final]
+      weight: 11
+      description: "Human explanations are meaningful and related to the response"
+      params: {}
+
+# Trainer queue — controls what appears on the trainer homepage.
+# Set production_start to hide all sessions created before this timestamp.
+# Sessions without a created_at (old/test sessions) are hidden when this is set.
+queue:
+  production_start: "2026-02-22T00:00:00Z"   # ISO 8601 — sessions before this are hidden
+
+# Task identity — which metadata field is the human-readable task identifier.
+# Change display_id_field to match your client's metadata key (e.g. "Task ID", "task_id", "Item ID").
+task_identity:
+  display_id_field: "Task ID"          # metadata key used as the primary visible identifier
+  display_id_label: "Task ID"          # label shown in the UI next to the value
+  fallback_fields:                     # alternative key names to try (in order)
+    - "TaskID"
+    - "task_id"
+
+# Review workflow
+review:
+  max_rounds: 5
+  escalation_action: "escalate_to_admin"
+
+# Notifications
+notifications:
+  enabled: true
+  max_per_user: 100
+  poll_interval_ms: 15000
+
+# Auto-save — debounced, config-driven auto-save for trainer editors
+auto_save:
+  enabled: true
+  debounce_ms: 800             # idle time before auto-save fires
+  min_interval_ms: 2000        # minimum gap between consecutive saves
+
+# Resilience — retry and degradation settings for non-critical operations
+resilience:
+  retry_attempts: 3            # total tries (1 = no retry)
+  retry_base_delay: 1.0        # seconds before first retry
+  retry_max_delay: 30.0        # cap on backoff delay
+  retry_backoff_factor: 2.0    # multiplier per attempt (1s → 2s → 4s …)
+
+# Bulk actions — reviewer bulk-approve, trainer bulk-resubmit
+bulk_actions:
+  enabled: true
+  max_batch_size: 2            # max tasks per bulk action (update as needed)
+
+# Presence — real-time viewer indicators
+presence:
+  enabled: true
+  heartbeat_interval_ms: 10000
+  ttl_seconds: 30
+
+# Live updates — SSE or polling
+live_updates:
+  mode: "sse"                  # "sse" or "polling"
+  poll_interval_ms: 15000      # fallback if SSE unavailable
+
+# Idempotency — prevent duplicate submits/approves
+idempotency:
+  ttl_hours: 24
+
+# Reviewer app (separate app, allowlist + agent)
+reviewer:
+  allowed_emails: [tyler@turing.com]   # e.g. ["reviewer@example.com"]; admin adds via YAML
+  agent:
+    model: "anthropic/claude-opus-4.6"   # model for reviewer-side agent
+    max_tokens: 2048
+    timeout: 120

@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Reviewer</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+    <div id="app">
+      <header class="header">
+        <div class="header-brand">
+          <svg class="header-brand-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+          <h1>Reviewer</h1>
+        </div>
+        <div class="header-right">
+        <span id="keyboard-hint" class="keyboard-hint" hidden title="Keyboard shortcuts">
+          <kbd>A</kbd> Approve
+          <kbd>R</kbd> Return
+          <kbd>S</kbd> Save
+          <kbd>Esc</kbd> Back
+        </span>
+        <!-- Notifications bell -->
+        <div class="notif-bell-wrapper" id="notifBellWrapper">
+          <button class="notif-bell" id="notifBell" title="Notifications" type="button">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+            <span class="notif-badge" id="notifBadge" hidden>0</span>
+          </button>
+          <div class="notif-panel" id="notifPanel" hidden>
+            <div class="notif-panel-header">
+              <strong>Notifications</strong>
+              <button type="button" class="notif-mark-all" id="notifMarkAllRead">Mark all read</button>
+            </div>
+            <ul class="notif-list" id="notifList">
+              <li class="notif-empty">No notifications</li>
+            </ul>
+          </div>
+        </div>
+        <div class="reviewer-identity">
+          <span id="reviewer-email" class="reviewer-email"></span>
+          <button type="button" id="btn-change-email" class="reviewer-change-btn" title="Sign out / change email">Change</button>
+        </div>
+      </div>
+    </header>
+
+      <section id="gate" class="gate">
+        <div class="gate-icon">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+        </div>
+        <h2 class="gate-title">Sign in to Reviewer</h2>
+        <p>Enter your email to start reviewing tasks.</p>
+      <input type="email" id="email-input" placeholder="you@company.com" aria-label="Your email" autocomplete="email" />
+      <button type="button" id="btn-continue" aria-busy="false">Sign in</button>
+      <p id="gate-error" class="error" hidden role="alert"></p>
+    </section>
+
+    <main id="main" class="main" hidden>
+      <nav class="nav">
+        <button type="button" id="btn-queue" class="btn-nav-back">
+          <span class="nav-back-icon">&#x2190;</span> Queue
+        </button>
+        <span id="breadcrumb"></span>
+        <div id="task-nav-arrows" class="task-nav-arrows" hidden>
+          <button type="button" id="btn-prev-task" class="btn-nav-arrow" title="Previous task (&#x2190;)" disabled>&#x2190;</button>
+          <button type="button" id="btn-next-task" class="btn-nav-arrow" title="Next task (&#x2192;)" disabled>&#x2192;</button>
+        </div>
+      </nav>
+
+      <section id="queue-view" class="view" aria-label="Task queue">
+        <div class="queue-header-row">
+            <div class="queue-header-left">
+              <h2>Tasks</h2>
+              <span id="queue-progress-bar" class="queue-progress-bar" hidden>
+                <span class="progress-fill" id="queue-progress-fill"></span>
+              </span>
+              <span id="queue-reviewed-today" class="queue-reviewed-today" hidden></span>
+            </div>
+            <div class="queue-search-wrapper">
+              <input type="text" id="queue-search" class="queue-search" placeholder="Search by Task ID or Session ID..." aria-label="Search tasks" />
+            </div>
+          </div>
+        <nav class="queue-tabs" aria-label="Filter by status">
+          <button type="button" class="queue-tab active" data-status="">Pending Review <span class="tab-count" data-status="" aria-label="count">0</span></button>
+          <button type="button" class="queue-tab" data-status="escalated">Escalated <span class="tab-count" data-status="escalated" aria-label="count">0</span></button>
+          <button type="button" class="queue-tab" data-status="approved">Approved <span class="tab-count" data-status="approved" aria-label="count">0</span></button>
+          <button type="button" class="queue-tab" data-status="returned">Returned <span class="tab-count" data-status="returned" aria-label="count">0</span></button>
+        </nav>
+        <p id="queue-count" aria-live="polite">No tasks.</p>
+        <p id="queue-error" class="error" hidden role="alert"></p>
+        <ul id="queue-list" aria-busy="false"></ul>
+      </section>
+
+        <section id="task-view" class="view" hidden aria-label="Task detail">
+          <div class="task-view-header">
+            <div class="task-identity">
+              <h2><span id="task-display-id-label">Task ID</span>: <span id="task-display-id" class="task-display-id-value"></span></h2>
+              <span id="task-session-id" class="task-session-id-sub"></span>
+            </div>
+            <button type="button" id="edit-toggle" class="btn-edit-toggle" aria-pressed="false">
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              Edit Task
+            </button>
+          </div>
+
+          <!-- Notebook fetch link section -->
+          <div class="notebook-fetch-card">
+            <div class="notebook-fetch-header">
+              <span class="notebook-fetch-title">Verify Notebook Source</span>
+              <span class="notebook-fetch-hint">Paste a Google Drive or Colab link to preview prompt &amp; ideal response</span>
+            </div>
+            <div class="notebook-fetch-body">
+              <div class="notebook-fetch-row">
+                <input type="url" id="notebook-fetch-url" class="notebook-fetch-input" placeholder="https://drive.google.com/file/d/... or colab.research.google.com/drive/..." />
+                <button type="button" id="btn-fetch-notebook" class="btn-fetch-notebook">Fetch</button>
+              </div>
+              <p id="notebook-fetch-status" class="notebook-fetch-status" hidden></p>
+              <div id="notebook-fetch-result" class="notebook-fetch-result" hidden></div>
+            </div>
+          </div>
+
+        <p id="task-error" class="error" hidden role="alert"></p>
+        <div id="agent-summary-at-top" class="agent-summary-at-top" hidden aria-live="polite"></div>
+
+          <div id="edit-panel" class="edit-panel" hidden>
+            <p class="hint">Edit human review grades and explanations directly. Only non-structural fields can be changed.</p>
+            <div id="edit-reviews-fields" class="edit-reviews-fields"></div>
+            <details class="edit-raw-details">
+              <summary class="edit-raw-summary">Raw JSON (advanced)</summary>
+              <pre id="edit-reviews-json" contenteditable="true" spellcheck="false"></pre>
+            </details>
+            <div class="edit-actions">
+              <button type="button" id="btn-save-edit">Save edits</button>
+              <p id="edit-status" class="status"></p>
+            </div>
+          </div>
+
+        <div id="task-content" class="task-content" aria-busy="false"></div>
+
+        <hr />
+
+          <div class="feedback-card">
+            <div class="feedback-card-header">
+              <h3>Reviewer Feedback</h3>
+            </div>
+            <div class="feedback-card-body">
+              <!-- Section: Overall Rating -->
+              <div class="fb-section">
+                <div class="fb-section-header fb-section-header--open" data-section="rating">
+                  <span class="fb-section-title">Overall Rating</span>
+                  <span class="fb-chevron">&#x25BC;</span>
+                </div>
+                <div class="fb-section-body" id="fb-body-rating">
+                  <label class="feedback-label">Quality Score</label>
+                  <div class="feedback-score-row" id="feedback-score-row" aria-label="Overall quality score (1–5)">
+                    <button type="button" class="btn-score" data-score="1">1<span class="score-label">Bad</span></button>
+                    <button type="button" class="btn-score" data-score="2">2<span class="score-label">Poor</span></button>
+                    <button type="button" class="btn-score" data-score="3">3<span class="score-label">Good</span></button>
+                    <button type="button" class="btn-score" data-score="4">4<span class="score-label">Very Good</span></button>
+                    <button type="button" class="btn-score" data-score="5">5<span class="score-label">Perfect</span></button>
+                  </div>
+                  <label class="feedback-label">One-line summary</label>
+                  <input type="text" id="feedback-summary-line" placeholder="Optional one-line summary..." class="feedback-summary-input" />
+                </div>
+              </div>
+
+              <!-- Section: Comments -->
+              <div class="fb-section">
+                <div class="fb-section-header fb-section-header--open" data-section="comments">
+                  <span class="fb-section-title">Comments &amp; Appreciation</span>
+                  <span class="fb-chevron">&#x25BC;</span>
+                </div>
+                <div class="fb-section-body" id="fb-body-comments">
+                  <label class="feedback-label">Overall comment</label>
+                  <div id="feedback-quick-replies" class="quick-replies"></div>
+                  <textarea id="feedback-overall" rows="4" placeholder="Overall comment for this task..."></textarea>
+                  <label class="feedback-label">What was done well</label>
+                  <textarea id="feedback-appreciation" rows="2" placeholder="Optional..."></textarea>
+                </div>
+              </div>
+
+              <!-- Section: Revision Flags -->
+              <div class="fb-section">
+                <div class="fb-section-header" data-section="flags">
+                  <span class="fb-section-title">Revision Flags</span>
+                  <span class="fb-chevron">&#x25BC;</span>
+                </div>
+                <div class="fb-section-body fb-section-body--collapsed" id="fb-body-flags">
+                  <div id="feedback-sections"></div>
+                  <div id="feedback-revision-flags" class="feedback-revision-flags"></div>
+                  <div id="allowed-edits-summary" class="allowed-edits-summary">No sections flagged &mdash; trainer cannot edit anything.</div>
+                </div>
+              </div>
+
+              <!-- Section: Locked Section Feedback -->
+              <div class="fb-section">
+                <div class="fb-section-header" data-section="locked">
+                  <span class="fb-section-title">Feedback for Locked Sections</span>
+                  <span class="fb-chevron">&#x25BC;</span>
+                </div>
+                <div class="fb-section-body fb-section-body--collapsed" id="fb-body-locked">
+                  <label class="feedback-label" style="text-transform:none;font-size:0.78rem;color:var(--text-muted)">Shown to trainer only when the relevant section is flagged</label>
+                  <input type="text" id="feedback-prompt-feedback" placeholder="Prompt section feedback (optional)" class="feedback-optional-input" />
+                  <input type="text" id="feedback-model-reference-feedback" placeholder="Model Reference / Criteria feedback (optional)" class="feedback-optional-input" />
+                  <input type="text" id="feedback-judge-feedback" placeholder="Judge System Prompt feedback (optional)" class="feedback-optional-input" />
+                </div>
+              </div>
+
+              <p id="feedback-return-nudge" class="return-nudge" hidden></p>
+            </div>
+          </div>
+
+        <hr />
+
+        <div class="agent-card">
+          <div class="agent-card-header">
+            <h3>Agent Review</h3>
+            <button type="button" id="btn-run-agent" class="btn-run-agent-inline">Run agent</button>
+          </div>
+          <p id="agent-status" class="status"></p>
+          <div id="agent-output" class="agent-output"></div>
+        </div>
+
+        <!-- Colab save section (shown for approved tasks) -->
+        <div id="colab-save-section" class="colab-save-section" hidden>
+          <div class="colab-save-card">
+            <h3>Submit to Colab</h3>
+            <p class="colab-save-hint">This task is approved. Review the preview and submit to Colab.</p>
+            <div id="colab-preview-content" class="colab-preview-content"></div>
+            <div class="colab-save-actions">
+              <button type="button" id="btn-colab-preview" class="btn-colab-preview">Load Preview</button>
+              <button type="button" id="btn-colab-submit" class="btn-colab-submit" disabled>Submit to Colab</button>
+            </div>
+            <p id="colab-save-status" class="status"></p>
+          </div>
+        </div>
+
+        <!-- Sticky action bar -->
+        <div class="sticky-action-bar">
+          <div class="action-bar-inner">
+            <div class="action-bar-left">
+              <button type="button" id="btn-save-feedback">Save <kbd>S</kbd></button>
+            </div>
+            <div class="action-bar-right">
+              <button type="button" id="btn-approve" class="btn-approve">Approve <kbd>A</kbd></button>
+              <button type="button" id="btn-return" class="btn-return">Return <kbd>R</kbd></button>
+              <button type="button" id="btn-escalate" class="btn-escalate">Escalate <kbd>E</kbd></button>
+            </div>
+          </div>
+          <p id="feedback-status" class="action-bar-status"></p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Toast container -->
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+  <!-- Modal overlay -->
+  <div id="modal-overlay" class="modal-overlay" hidden>
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="modal-title"></h3>
+        <button type="button" id="modal-close" class="modal-close">&times;</button>
+      </div>
+      <div id="modal-body" class="modal-body"></div>
+    </div>
+  </div>
+
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>

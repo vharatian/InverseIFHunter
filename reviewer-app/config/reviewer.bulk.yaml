@@ -1,0 +1,46 @@
+# reviewer-app/config/reviewer.bulk.yaml — Full config (portfolio / future use).
+# Keep this file safe; do not strip. Use for demos or when you want all features.
+config_profile: bulk
+
+# Allowlist — who can use the reviewer app
+reviewer:
+  allowed_emails: [tyler@turing.com]
+  agent:
+    model: "anthropic/claude-opus-4.6"
+    max_tokens: 2048
+    timeout: 120
+
+# Task identity (what shows as "Task ID" in queue/task view)
+task_identity:
+  display_id_field: "Task ID"
+  display_id_label: "Task ID"
+  fallback_fields:
+    - "TaskID"
+    - "task_id"
+
+# Reviewer-only feature flags — all on for portfolio
+features:
+  notifications: true
+  bulk_actions: true
+  presence: true
+  agent_run: true
+  version_history: true
+  colab_submit: true
+  audit: true
+
+# Notifications (reviewer UI)
+notifications:
+  enabled: true
+  max_per_user: 100
+  poll_interval_ms: 15000
+
+# Bulk actions (reviewer)
+bulk_actions:
+  enabled: true
+  max_batch_size: 4
+
+# Presence (reviewer)
+presence:
+  enabled: true
+  heartbeat_interval_ms: 10000
+  ttl_seconds: 30

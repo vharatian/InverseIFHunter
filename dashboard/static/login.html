@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Model Hunter - Admin Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        :root {
+            --bg: #0f1117;
+            --bg-card: #1a1b26;
+            --border: #2a2d3a;
+            --text: #e1e4eb;
+            --text-muted: #6b7280;
+            --accent: #6366f1;
+            --accent-hover: #818cf8;
+            --error: #ef4444;
+        }
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .login-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 2.5rem;
+            max-width: 400px;
+            width: 90%;
+            text-align: center;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+        }
+        
+        .login-title {
+            font-size: 1.4rem;
+            font-weight: 700;
+            margin-bottom: 0.4rem;
+        }
+        
+        .login-subtitle {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-bottom: 1.5rem;
+        }
+        
+        .login-field {
+            text-align: left;
+            margin-bottom: 1rem;
+        }
+        
+        .login-field label {
+            display: block;
+            font-size: 0.82rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            margin-bottom: 0.3rem;
+        }
+        
+        .login-input {
+            width: 100%;
+            padding: 0.7rem 0.85rem;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--bg);
+            color: var(--text);
+            font-size: 0.95rem;
+            font-family: inherit;
+            transition: border-color 0.2s;
+        }
+        
+        .login-input:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+        }
+        
+        .login-btn {
+            width: 100%;
+            padding: 0.75rem;
+            border: none;
+            border-radius: 8px;
+            background: var(--accent);
+            color: white;
+            font-size: 0.95rem;
+            font-weight: 600;
+            font-family: inherit;
+            cursor: pointer;
+            transition: background 0.2s;
+            margin-top: 0.5rem;
+        }
+        
+        .login-btn:hover { background: var(--accent-hover); }
+        .login-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+        
+        .login-error {
+            color: var(--error);
+            font-size: 0.82rem;
+            margin-top: 0.75rem;
+            display: none;
+        }
+        
+        .login-error.visible { display: block; }
+
+        .login-divider {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin: 1.25rem 0;
+            color: var(--text-muted);
+            font-size: 0.78rem;
+        }
+        .login-divider::before, .login-divider::after {
+            content: '';
+            flex: 1;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .login-toggle {
+            background: none;
+            border: none;
+            color: var(--accent);
+            font-size: 0.82rem;
+            cursor: pointer;
+            font-family: inherit;
+            margin-top: 0.75rem;
+        }
+        .login-toggle:hover { text-decoration: underline; }
+
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+    <div class="login-card">
+        <h1 class="login-title">Admin Dashboard</h1>
+        <p class="login-subtitle">Model Hunter Analytics</p>
+
+        <!-- Email login (for invited admins) -->
+        <form id="emailLoginForm">
+            <div class="login-field">
+                <label for="emailInput">Please enter your Turing email</label>
+                <input type="email" id="emailInput" class="login-input" 
+                       placeholder="e.g. tyler@turing.com" required autofocus
+                       autocomplete="email">
+            </div>
+            <button type="submit" class="login-btn" id="emailLoginBtn">Sign In</button>
+            <p class="login-error" id="emailLoginError">Access not granted. Please contact your admin.</p>
+        </form>
+
+        <div class="login-divider">or</div>
+
+        <!-- Password login (for super admin) -->
+        <button class="login-toggle" id="showPasswordToggle">Sign in with admin password</button>
+        <form id="passwordLoginForm" class="hidden">
+            <div class="login-field">
+                <label for="passwordInput">Please enter admin password</label>
+                <input type="password" id="passwordInput" class="login-input" 
+                       placeholder="Admin password" required
+                       autocomplete="current-password">
+            </div>
+            <button type="submit" class="login-btn" id="passwordLoginBtn">Sign In</button>
+            <p class="login-error" id="passwordLoginError">Invalid password. Please try again.</p>
+        </form>
+    </div>
+
+    <script>
+        // Toggle between email and password login
+        document.getElementById('showPasswordToggle').addEventListener('click', () => {
+            document.getElementById('passwordLoginForm').classList.toggle('hidden');
+        });
+
+        // Email login (invited admins)
+        document.getElementById('emailLoginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const errorEl = document.getElementById('emailLoginError');
+            const btn = document.getElementById('emailLoginBtn');
+            errorEl.classList.remove('visible');
+            btn.disabled = true;
+            btn.textContent = 'Signing in...';
+
+            const email = document.getElementById('emailInput').value.trim();
+            try {
+                const res = await fetch('/api/login-email', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email })
+                });
+                if (res.ok) {
+                    window.location.href = '/';
+                } else {
+                    errorEl.classList.add('visible');
+                }
+            } catch (err) {
+                errorEl.textContent = 'Connection error. Please try again.';
+                errorEl.classList.add('visible');
+            }
+            btn.disabled = false;
+            btn.textContent = 'Sign In';
+        });
+
+        // Password login (super admin)
+        document.getElementById('passwordLoginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const errorEl = document.getElementById('passwordLoginError');
+            const btn = document.getElementById('passwordLoginBtn');
+            errorEl.classList.remove('visible');
+            btn.disabled = true;
+            btn.textContent = 'Signing in...';
+
+            const password = document.getElementById('passwordInput').value;
+            try {
+                const res = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password })
+                });
+                if (res.ok) {
+                    window.location.href = '/';
+                } else {
+                    errorEl.classList.add('visible');
+                }
+            } catch (err) {
+                errorEl.textContent = 'Connection error. Please try again.';
+                errorEl.classList.add('visible');
+            }
+            btn.disabled = false;
+            btn.textContent = 'Sign In';
+        });
+    </script>
+</body>
+</html>

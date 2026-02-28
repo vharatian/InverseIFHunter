@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quality Check Evaluation — Model Hunter</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css?v=24">
+    <style>
+        .eval-page { max-width: 960px; margin: 0 auto; padding: 2rem; }
+        .eval-header { margin-bottom: 2rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; }
+        .eval-title { font-size: 1.5rem; font-weight: 700; color: var(--text-primary); }
+        .eval-back { background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border); padding: 0.5rem 1rem; border-radius: 8px; text-decoration: none; font-size: 0.9rem; }
+        .eval-back:hover { background: var(--bg-hover); }
+        .eval-summary { padding: 1rem 1.25rem; border-radius: 12px; margin-bottom: 2rem; background: var(--danger-bg); border-left: 4px solid var(--danger); }
+        .eval-summary.passed { background: var(--success-bg); border-left-color: var(--success); }
+        .eval-section { margin-bottom: 2rem; }
+        .eval-section-title { font-size: 1.1rem; font-weight: 600; color: var(--text-primary); margin-bottom: 0.75rem; }
+        .eval-slot { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; padding: 1.25rem; margin-bottom: 1rem; }
+        .eval-slot.has-disagreement { border-color: var(--danger); background: rgba(235, 87, 87, 0.06); }
+        .eval-slot-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem; }
+        .eval-slot-badge { font-weight: 600; color: var(--accent-primary); }
+        .eval-slot-disagreement { color: var(--danger); font-size: 0.85rem; font-weight: 500; }
+        .eval-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+        @media (max-width: 640px) { .eval-grid { grid-template-columns: 1fr; } }
+        .eval-col { background: var(--bg-tertiary); padding: 1rem; border-radius: 8px; }
+        .eval-col-title { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 0.5rem; }
+        .eval-criteria { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+        .eval-crit { padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.8rem; }
+        .eval-crit.pass { background: var(--success-bg); color: var(--success); }
+        .eval-crit.fail { background: var(--danger-bg); color: var(--danger); }
+        .eval-crit.mismatch { background: rgba(232, 164, 65, 0.2); color: var(--warning); border: 1px dashed var(--warning); }
+        .eval-explanation { font-size: 0.85rem; color: var(--text-secondary); margin-top: 0.5rem; line-height: 1.5; white-space: pre-wrap; }
+        .eval-council { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1rem; }
+        .eval-vote { padding: 0.35rem 0.65rem; border-radius: 6px; font-size: 0.8rem; font-weight: 500; }
+        .eval-vote.pass { background: var(--success-bg); color: var(--success); }
+        .eval-vote.fail { background: var(--danger-bg); color: var(--danger); }
+        .eval-vote.unclear { background: var(--bg-tertiary); color: var(--text-muted); }
+        .eval-prompt { background: var(--bg-tertiary); padding: 1rem; border-radius: 8px; font-size: 0.9rem; color: var(--text-secondary); white-space: pre-wrap; max-height: 200px; overflow-y: auto; }
+        .eval-empty { color: var(--text-muted); font-style: italic; }
+    </style>
+</head>
+<body>
+    <div class="eval-page">
+        <div class="eval-header">
+            <h1 class="eval-title">Quality Check Evaluation</h1>
+            <a href="/" class="eval-back">← Back to Model Hunter</a>
+        </div>
+        <div id="evalContent">
+            <p class="eval-empty">Loading evaluation data...</p>
+        </div>
+    </div>
+    <script type="module">
+        (function() {
+            const params = new URLSearchParams(window.location.search);
+            const sessionId = params.get('session_id');
+            const storageKey = sessionId ? `quality_check_evaluation_${sessionId}` : null;
+            const data = storageKey ? sessionStorage.getItem(storageKey) : null;
+
+            const escape = (s) => {
+                if (s == null) return '';
+                const d = document.createElement('div');
+                d.textContent = String(s);
+                return d.innerHTML;
+            };
+
+            const renderCriteria = (grades, llmCriteria, disagreements) => {
+                const allKeys = new Set([...(grades || {}), ...(llmCriteria || {})]);
+                if (allKeys.size === 0) return '<span class="eval-empty">No criteria</span>';
+                return [...allKeys].map(cid => {
+                    const h = (grades || {})[cid] ? String((grades || {})[cid]).toLowerCase() : null;
+                    const l = (llmCriteria || {})[cid] ? String((llmCriteria || {})[cid]).toLowerCase() : null;
+                    const isMismatch = h && l && h !== l;
+                    const val = h || l || '—';
+                    const cls = isMismatch ? 'eval-crit mismatch' : (val === 'pass' ? 'eval-crit pass' : 'eval-crit fail');
+                    const label = isMismatch ? `${cid}: Human=${h} vs LLM=${l}` : `${cid}: ${val}`;
+                    return `<span class="${cls}" title="${escape(label)}">${escape(cid)}: ${escape(val)}</span>`;
+                }).join('');
+            };
+
+            const render = () => {
+                const root = document.getElementById('evalContent');
+                if (!data) {
+                    root.innerHTML = '<div class="eval-summary"><p>No evaluation data found. Run a quality check from Model Hunter first, or the data may have expired.</p><a href="/" class="eval-back">← Back to Model Hunter</a></div>';
+                    return;
+                }
+                let evalData;
+                try {
+                    evalData = JSON.parse(data);
+                } catch (e) {
+                    root.innerHTML = '<div class="eval-summary"><p>Invalid evaluation data.</p></div>';
+                    return;
+                }
+
+                const issues = evalData.issues || [];
+                const humanIssue = issues.find(i => i.rule_id === 'human_llm_grade_alignment');
+                const issueDetails = humanIssue?.details || {};
+                const topLevelEval = evalData.evaluation || {};
+                const slots = issueDetails.slots || topLevelEval.slots || [];
+                const councilVotes = issueDetails.council_votes || [];
+                const prompt = issueDetails.prompt || topLevelEval.prompt || '';
+                const criteria = issueDetails.criteria || topLevelEval.criteria || [];
+
+                let html = '';
+                html += `<div class="eval-summary ${evalData.passed ? 'passed' : ''}">`;
+                html += `<strong>${evalData.passed ? '✓ All checks passed' : '❌ Quality check did not pass'}</strong>`;
+                if (issues.length) {
+                    html += '<ul style="margin: 0.5rem 0 0 1rem;">';
+                    issues.forEach(i => {
+                        html += `<li>${escape(i.rule_id)}: ${escape(i.message)}</li>`;
+                    });
+                    html += '</ul>';
+                }
+                html += '</div>';
+
+                if (councilVotes.length) {
+                    html += '<div class="eval-section">';
+                    html += '<div class="eval-section-title">LLM Council Votes</div>';
+                    html += '<div class="eval-council">';
+                    councilVotes.forEach(v => {
+                        html += `<span class="eval-vote ${(v.vote || '').toLowerCase()}">${escape(v.model)}: ${escape(v.vote)}</span>`;
+                    });
+                    html += '</div></div>';
+                }
+
+                if (prompt) {
+                    html += '<div class="eval-section">';
+                    html += '<div class="eval-section-title">Task Prompt</div>';
+                    html += `<div class="eval-prompt">${escape(prompt)}</div></div>`;
+                }
+
+                if (criteria.length) {
+                    html += '<div class="eval-section">';
+                    html += '<div class="eval-section-title">Criteria</div>';
+                    html += '<ul style="margin: 0; padding-left: 1.25rem; color: var(--text-secondary); font-size: 0.9rem;">';
+                    criteria.forEach(c => {
+                        html += `<li><strong>${escape(c.id)}</strong>: ${escape(c.description)}</li>`;
+                    });
+                    html += '</ul></div>';
+                }
+
+                if (slots.length) {
+                    html += '<div class="eval-section">';
+                    html += '<div class="eval-section-title">Slot-by-Slot: Human vs LLM Comparison</div>';
+                    html += '<p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 1rem;">Compare your grades with the LLM judge. Highlighted mismatches show where human and LLM disagree.</p>';
+                    slots.forEach(slot => {
+                        const hasDisagreement = (slot.disagreements || []).length > 0;
+                        html += `<div class="eval-slot ${hasDisagreement ? 'has-disagreement' : ''}">`;
+                        html += '<div class="eval-slot-header">';
+                        html += `<span class="eval-slot-badge">Slot ${slot.slot} — Hunt #${slot.hunt_id}</span>`;
+                        if (hasDisagreement) {
+                            html += `<span class="eval-slot-disagreement">⚠ ${slot.disagreements.length} disagreement(s)</span>`;
+                        }
+                        html += '</div>';
+                        html += '<div class="eval-grid">';
+                        html += '<div class="eval-col">';
+                        html += '<div class="eval-col-title">Human Grades</div>';
+                        html += `<div class="eval-criteria">${renderCriteria(slot.human_grades, slot.llm_judge_criteria, slot.disagreements)}</div>`;
+                        if (slot.human_explanation) {
+                            html += `<div class="eval-explanation">${escape(slot.human_explanation)}</div>`;
+                        }
+                        html += '</div>';
+                        html += '<div class="eval-col">';
+                        html += '<div class="eval-col-title">LLM Judge (Score: ' + (slot.llm_judge_score ?? '—') + ')</div>';
+                        html += `<div class="eval-criteria">${renderCriteria(slot.human_grades, slot.llm_judge_criteria, slot.disagreements)}</div>`;
+                        if (slot.llm_judge_explanation) {
+                            html += `<div class="eval-explanation">${escape(slot.llm_judge_explanation)}</div>`;
+                        }
+                        html += '</div></div>';
+                        if (hasDisagreement && slot.disagreements.length) {
+                            html += '<div style="margin-top: 0.75rem; padding: 0.5rem; background: rgba(232,164,65,0.1); border-radius: 6px; font-size: 0.85rem;">';
+                            html += '<strong>Disagreements:</strong> ';
+                            html += slot.disagreements.map(d => `${d.criterion}: Human=${d.human}, LLM=${d.llm}`).join('; ');
+                            html += '</div>';
+                        }
+                        html += '</div>';
+                    });
+                    html += '</div>';
+                }
+
+                html += '<div style="margin-top: 2rem;"><a href="/" class="eval-back">← Back to Model Hunter</a></div>';
+                root.innerHTML = html;
+            };
+
+            render();
+        })();
+    </script>
+</body>
+</html>

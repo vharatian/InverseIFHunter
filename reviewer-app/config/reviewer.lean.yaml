@@ -1,0 +1,47 @@
+# reviewer-app/config/reviewer.lean.yaml — Production config (lean).
+# Use this for the reviewer app in production. Strip features here as needed.
+# Load with: REVIEWER_CONFIG=reviewer.lean.yaml (to be wired in reviewer app).
+config_profile: lean
+
+# Allowlist — who can use the reviewer app
+reviewer:
+  allowed_emails: [tyler@turing.com]
+  agent:
+    model: "anthropic/claude-opus-4.6"
+    max_tokens: 2048
+    timeout: 120
+
+# Task identity (what shows as "Task ID" in queue/task view)
+task_identity:
+  display_id_field: "Task ID"
+  display_id_label: "Task ID"
+  fallback_fields:
+    - "TaskID"
+    - "task_id"
+
+# Reviewer-only feature flags — set to false to strip from production UI/API
+features:
+  notifications: true
+  bulk_actions: true
+  presence: true
+  agent_run: true
+  version_history: true
+  colab_submit: true
+  audit: true
+
+# Notifications (reviewer UI)
+notifications:
+  enabled: true
+  max_per_user: 100
+  poll_interval_ms: 15000
+
+# Bulk actions (reviewer)
+bulk_actions:
+  enabled: true
+  max_batch_size: 4
+
+# Presence (reviewer)
+presence:
+  enabled: true
+  heartbeat_interval_ms: 10000
+  ttl_seconds: 30
