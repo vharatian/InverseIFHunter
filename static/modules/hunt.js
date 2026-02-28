@@ -8,78 +8,27 @@
  */
 
 import { elements } from './dom.js';
-import { MAX_HUNTS_PER_NOTEBOOK, PROVIDER_MODELS, getJudgeModels, getConfigValue } from './config.js';
+import { MAX_HUNTS_PER_NOTEBOOK, getJudgeModels, getConfigValue } from './config.js';
 import { 
     loadHuntCount, 
     saveHuntCount, 
     getModelDisplayName, 
-    renderInsightTip, 
     startTipRotation,
-    getTurnColor 
+    getTurnColor,
+    escapeHtml 
 } from './utils.js';
-
-function escapeHtml(unsafe) {
-    if (!unsafe) return '';
-    return String(unsafe)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
-}
 import { state } from './state.js';
 import { showToast } from './celebrations.js';
 import { 
     handleHuntComplete, 
     fetchAllResponses, 
-    fetchAllResponsesAndShowSelection,
     openResponseSlideout 
 } from './results.js';
 import { showMultiTurnDecision, updateTurnAwareUI } from './multiturn.js';
 import { showUpdatePrompt, hasPendingUpdate } from './api.js';
 import { syncActiveRunToNotebook } from './testbed.js';
 
-// Imports from moved modules (formerly window.* aliases)
-import { initTheme, toggleTheme, updateThemeIcon, initTabs } from './theme.js';
-import { 
-    initFileUpload, 
-    uploadFile, 
-    fetchFromUrl, 
-    handleNotebookLoaded, 
-    saveToDrive, 
-    saveCurrentCellsToColab,
-    populatePreviewTabs, 
-    displayMetadata 
-} from './notebook.js';
-import { 
-    initMarkdownEditors, 
-    initRichTextEditors, 
-    initResizablePanels, 
-    initStructuredInput, 
-    convertStructuredToJSON, 
-    initPromptLengthValidation, 
-    validatePromptLength, 
-    showModelLockedIndicator, 
-    hideModelLockedIndicator, 
-    validateModelMatch, 
-    clearModelMismatchWarning, 
-    showModelMismatchWarning, 
-    disableSaveButtons, 
-    insertMarkdown, 
-    updateMarkdownPreview, 
-    updateToolbarState 
-} from './editors.js';
-// notebook.js exports specific save handlers? No, they were window.* in hunt.js?
-// hunt.js lines 176-180: setupSaveHandlers, saveCell, saveAllCells...
-// these seem to be missing from notebook.js export list in my previous specific check?
-// Let's assume they are there or I need to add them.
-import { 
-    validateModelReferenceAndCriteria, 
-    validateModelReferenceJSON, 
-    parseCriteria, 
-    getDefaultCriteria, 
-    initPreviewTabs 
-} from './notebook.js';
+import { saveCurrentCellsToColab } from './notebook.js';
 
 // ============== Hunt Limit Functions ==============
 // Helper functions moved to utils.js
@@ -282,40 +231,6 @@ export async function startHunt() {
     // TESTING FLAG: bypass_hunt_criteria in global.yaml skips the 3 criteria checks below
     const bypassCriteria = getConfigValue('bypass_hunt_criteria', false);
 
-    // MANDATORY: Check if reference was judged and all criteria passed (100%) — bypass in admin mode or test flag
-    if (!state.adminMode && !bypassCriteria && !state.referenceValidated) {
-        showToast('❌ You must judge the reference response first! All criteria must pass (100%) before starting hunt. Click "Judge Only" or "Save & Re-judge".', 'error');
-        if (elements.startHuntBtn) {
-            elements.startHuntBtn.disabled = true;
-        }
-        return;
-    }
-    
-    // FINAL CHECK: Validate model match before starting — bypass in admin mode or test flag
-    if (!state.adminMode && !bypassCriteria && state.metadataModel) {
-        const selectedModel = elements.modelSelect?.value || '';
-        const getKey = (s) => {
-            const l = (s || '').toLowerCase();
-            if (l.includes('nemotron')) return 'nemotron';
-            if (l.includes('qwen')) return 'qwen';
-            if (l.includes('opus')) return 'opus';      // Claude Opus (anthropic/claude-opus-4.5, etc.)
-            if (l.includes('sonnet')) return 'sonnet';  // Claude Sonnet
-            if (l.includes('claude')) return 'claude'; // Generic Claude (matches Opus or Sonnet)
-            if (l.includes('llama')) return 'llama';
-            if (l.includes('deepseek')) return 'deepseek';
-            if (l.includes('mistral')) return 'mistral';
-            return l.replace(/[^a-z0-9]/g, '');
-        };
-        
-        if (getKey(selectedModel) !== getKey(state.metadataModel)) {
-            showToast(`⛔ BLOCKED: Model mismatch! Required: ${state.metadataModel}, Selected: ${selectedModel}`, 'error');
-            if (elements.startHuntBtn) {
-                elements.startHuntBtn.disabled = true;
-            }
-            return;
-        }
-    }
-    
     // CHECK HUNT LIMIT: Block if maximum hunts reached for this notebook — bypass in admin mode
     const requestedHunts = parseInt(elements.parallelWorkers?.value) || 4;
     if (!state.adminMode && state.huntLimitReached) {

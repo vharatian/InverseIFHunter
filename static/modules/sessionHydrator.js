@@ -6,8 +6,9 @@
  */
 import { state } from './state.js';
 import { elements } from './dom.js';
+import { escapeHtml } from './utils.js';
 import { refreshReviewSync } from './reviewSync.js';
-import { populatePreviewTabs, parseCriteria } from './notebook.js';
+import { populatePreviewTabs, parseCriteria, validateModelReferenceAndCriteria } from './notebook.js';
 import {
     displaySelectionCards,
     displaySelectedForReview,
@@ -36,7 +37,8 @@ export async function hydrateSession(sessionId) {
 
     // Populate state
     state.sessionId = sessionId;
-    state.notebook = data.notebook || null;
+    state.notebook = data.notebook || {};
+    if (data.colab_url) state.notebook.url = data.colab_url;
     state.originalNotebookJson = data.notebook ? JSON.stringify(data.notebook) : null;
     state.config = _mergeConfig(data.config);
     state.humanReviews = data.human_reviews || {};
@@ -59,6 +61,16 @@ export async function hydrateSession(sessionId) {
     // Restore section visibility based on hydrated state
     _restoreSectionVisibility();
 
+    // Sync "Find Breaking Responses" button: if session has hunt results, treat reference as already validated
+    const hasResults = (data.results && data.results.length > 0) || (data.all_results && data.all_results.length > 0);
+    if (hasResults && state.modelRefValid) {
+        state.referenceValidated = true;
+    }
+    const responseRef = typeof data.notebook?.response_reference === 'string'
+        ? data.notebook.response_reference
+        : (data.notebook?.response_reference ? JSON.stringify(data.notebook.response_reference) : '');
+    validateModelReferenceAndCriteria(responseRef);
+
     // Reviewer feedback for review sync block and per-slot display
     state.reviewFeedback = data.feedback || null;
 
@@ -77,23 +89,6 @@ export async function hydrateSession(sessionId) {
         reviewStatus: data.review_status || 'draft',
         revisionFlags,
     };
-}
-
-
-/**
- * Get revision flags from the current feedback, if any.
- * @param {string} sessionId
- * @returns {Promise<string[]>}
- */
-export async function getRevisionFlags(sessionId) {
-    try {
-        const res = await fetch(`/api/session/${sessionId}`, { cache: 'no-store' });
-        if (!res.ok) return [];
-        const data = await res.json();
-        return data.review_feedback?.revision_flags || [];
-    } catch {
-        return [];
-    }
 }
 
 
@@ -374,7 +369,7 @@ function _lockConfigSectionsAndShowFeedback(feedback) {
         if (text) {
             box = document.createElement('div');
             box.className = 'config-section-reviewer-feedback';
-            box.innerHTML = `<div class="config-section-reviewer-feedback-label">📋 Reviewer feedback (${label})</div><div class="config-section-reviewer-feedback-text">${_escapeHtml(text)}</div>`;
+            box.innerHTML = `<div class="config-section-reviewer-feedback-label">📋 Reviewer feedback (${label})</div><div class="config-section-reviewer-feedback-text">${escapeHtml(text)}</div>`;
             panel.prepend(box);
         }
     });
@@ -390,13 +385,6 @@ function _unlockConfigSections() {
         if (box) box.remove();
     });
 }
-
-function _escapeHtml(s) {
-    const div = document.createElement('div');
-    div.textContent = s;
-    return div.innerHTML;
-}
-
 
 function _setLocked(element, locked) {
     if (!element) return;

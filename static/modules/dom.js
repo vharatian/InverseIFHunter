@@ -23,8 +23,7 @@ export const elements = {
     uploadTab: document.getElementById('uploadTab'),
     
     // Config
-    huntSection: document.getElementById('configSection'),
-    configSection: document.getElementById('configSection'), // Keep both for safety
+    configSection: document.getElementById('configSection'),
     parallelWorkers: document.getElementById('parallelWorkers'),
     providerSelect: document.getElementById('providerSelect'),  // NEW
     modelSelect: document.getElementById('modelSelect'),
@@ -43,7 +42,7 @@ export const elements = {
     responseMarkdown: document.getElementById('responseMarkdown'),
     judgeMarkdown: document.getElementById('judgeMarkdown'),
     judgeReferenceBtn: document.getElementById('judgeReferenceBtn'),
-    saveResponseBtn: document.getElementById('saveReponseBtn'),  // Save Response button
+    saveResponseBtn: document.getElementById('saveResponseBtn'),
     judgeBeforeHuntBtn: document.getElementById('judgeBeforeHuntBtn'),  // Judge button next to Start Hunt
     referenceJudgeResult: document.getElementById('referenceJudgeResult'),
     metadataToggleBtn: document.getElementById('metadataToggleBtn'),

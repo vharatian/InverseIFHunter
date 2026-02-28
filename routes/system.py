@@ -1,13 +1,12 @@
 """
 System Routes
 
-GET  /api/health                  — health check
-GET  /api/version                 — app version
-GET  /api/admin/status            — admin dashboard
-GET  /api/admin/active-hunts      — active hunts count
-GET  /maintenance                 — maintenance page
-POST /api/toggle-maintenance      — toggle maintenance mode
-GET  /                            — serve frontend
+GET  /api/health             — health check
+GET  /api/config             — safe config for frontend
+GET  /api/version            — app version
+GET  /maintenance            — maintenance page
+POST /api/toggle-maintenance — toggle maintenance mode
+GET  /                       — serve frontend
 """
 import json
 import logging
@@ -19,12 +18,10 @@ from pathlib import Path
 _STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 _INDEX_HTML = _STATIC_DIR / "index.html"
 _MAINTENANCE_HTML = _STATIC_DIR / "maintenance.html"
-_EVAL_HTML = _STATIC_DIR / "evaluation-results.html"
 
 from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 
-from models.schemas import HuntStatus
 import services.redis_session as redis_store
 
 # Rate limiter - from config.features
@@ -103,65 +100,6 @@ async def get_version():
     )
 
 
-# ============== Admin ==============
-
-@router.get("/api/admin/status")
-async def admin_status():
-    """Detailed admin status endpoint with all system metrics."""
-    status = {
-        "timestamp": datetime.utcnow().isoformat() + "Z",
-        "sessions": {}
-    }
-
-    try:
-        stats = await redis_store.get_stats()
-        redis_sessions = await redis_store.list_sessions()
-        status["sessions"] = {
-            **stats,
-            "session_count": len(redis_sessions),
-            "session_ids": redis_sessions[:10]
-        }
-    except Exception as e:
-        status["sessions"] = {"error": str(e)}
-    
-    if _rate_limiter_enabled:
-        try:
-            limiter = get_rate_limiter()
-            status["rate_limiter"] = limiter.get_stats()
-        except Exception as e:
-            status["rate_limiter"] = {"error": str(e)}
-    
-    return status
-
-
-@router.get("/api/admin/active-hunts")
-async def get_active_hunts():
-    """
-    Return count of sessions with status RUNNING.
-    Used by deploy script to wait for active hunts to finish.
-    """
-    active_count = 0
-    active_sessions = []
-
-    all_session_ids = await redis_store.list_sessions()
-    for sid in all_session_ids:
-        status = await redis_store.get_status(sid)
-        if status == HuntStatus.RUNNING:
-            meta = await redis_store.get_meta(sid)
-            active_count += 1
-            active_sessions.append({
-                "session_id": sid,
-                "current_turn": int(meta.get("current_turn", 1)),
-                "completed_hunts": int(meta.get("completed_hunts", 0)),
-                "total_hunts": int(meta.get("total_hunts", 0)),
-            })
-    
-    return {
-        "count": active_count,
-        "sessions": active_sessions,
-    }
-
-
 # ============== Maintenance / Frontend ==============
 
 @router.get("/maintenance")
@@ -183,12 +121,6 @@ async def toggle_maintenance():
         with open(_maintenance_file, 'w') as f:
             f.write("maintenance")
         return {"maintenance_mode": True, "message": "Maintenance mode enabled. Door is closed!"}
-
-
-@router.get("/evaluation-results")
-async def evaluation_results_page():
-    """Serve the quality check evaluation results page (full slot-by-slot comparison)."""
-    return FileResponse(str(_EVAL_HTML))
 
 
 @router.get("/")

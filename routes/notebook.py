@@ -23,12 +23,12 @@ from fastapi import APIRouter, File, UploadFile, HTTPException, Request, Backgro
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from models.schemas import HuntConfig, HuntSession, HuntStatus, ParsedNotebook
+from models.schemas import HuntConfig, ParsedNotebook
 from services.notebook_parser import notebook_parser
 from services.hunt_engine import hunt_engine
 from services.snapshot_service import snapshot_service, NotebookSnapshot
 from storage.session_storage import save_session_storage, get_session_storage
-from storage.sqlite_store import save_session as sqlite_save, update_field as sqlite_update
+from storage.sqlite_store import save_session as sqlite_save, load_session as sqlite_load, update_field as sqlite_update
 from storage.trainer_registry import register_or_update_trainer
 from helpers.notebook_helpers import HEADING_MAP, _update_session_notebook_field
 import services.redis_session as redis_store
@@ -37,13 +37,11 @@ from helpers.shared import (
     _get_storage_with_url,
     _persist_session,
     _save_turn_cells_to_drive,
-    _format_judge_result,
+    _save_cells_to_drive_via_url,
     _extract_trainer_info_from_request,
     _log_telemetry_safe,
     count_valid_responses,
-    _telemetry_enabled,
 )
-import services.redis_session as redis_store
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +81,7 @@ class UpdateNotebookCellRequest(BaseModel):
 class UpdateNotebookCellsRequest(BaseModel):
     cells: List[UpdateNotebookCellRequest]
     session_only: Optional[bool] = False  # If True, skip Colab sync (auto-save)
+    colab_url: Optional[str] = None  # Colab/Drive URL when session storage has none (e.g. after resume)
 
 
 # ============== Upload / Fetch ==============
@@ -273,7 +272,8 @@ async def fetch_notebook(http_request: Request, request: NotebookURLRequest):
                 "has_judge_prompt": bool(parsed.judge_system_prompt),
                 "model_slots": list(parsed.model_slots.keys()),
                 "model_prefix": model_prefix,
-                "attempts_made": parsed.attempts_made
+                "attempts_made": parsed.attempts_made,
+                "url": request.url,
             },
             "original_notebook_json": content_str
         }
@@ -464,7 +464,26 @@ async def update_notebook_cells(session_id: str, request: UpdateNotebookCellsReq
         
         saved_to_colab = False
         if not getattr(request, 'session_only', False):
-            saved_to_colab = _save_turn_cells_to_drive(session, storage, has_url, cells)
+            # Prefer saving via URL so we fetch current notebook from Drive and overwrite
+            # (fixes loaded notebooks not updating when user edits and clicks Save to Colab)
+            colab_url = None
+            if has_url and storage and storage.get("url"):
+                colab_url = (storage["url"] or "").strip() or None
+            if not colab_url:
+                colab_url = (request.colab_url or "").strip() or None
+            if not colab_url:
+                try:
+                    db_data = sqlite_load(session_id)
+                    if db_data:
+                        colab_url = (db_data.get("colab_url") or "").strip() or None
+                except Exception:
+                    pass
+            if colab_url:
+                saved_to_colab = await _save_cells_to_drive_via_url(
+                    session_id, session, colab_url, cells
+                )
+            if not saved_to_colab and has_url and storage:
+                saved_to_colab = _save_turn_cells_to_drive(session, storage, has_url, cells)
         await _persist_session(session_id, session, storage)
         
         cell_names = [c[0] for c in cells]
@@ -514,7 +533,7 @@ async def export_notebook(session_id: str, include_reasoning: bool = True):
         if not original_content:
             raise HTTPException(400, "Original notebook content not stored (URL fetch)")
         
-        results = hunt_engine.export_results(session_id)
+        results = await hunt_engine.export_results_async(session_id)
         human_reviews = getattr(session, 'human_reviews', {})
         total_hunts_ran = len(results)
         
@@ -864,7 +883,7 @@ async def save_to_drive(session_id: str, request: Request):
         
         # If all_results is empty but session exists, try export_results fallback (shouldn't be needed with _get_validated_session)
         if not all_results:
-             all_results = hunt_engine.export_results(session_id)
+             all_results = await hunt_engine.export_results_async(session_id)
         
         logger.debug(f" Total results from export_results: {len(all_results)}")
         logger.debug(f" All result hunt_ids: {[r.get('hunt_id') for r in all_results]}")

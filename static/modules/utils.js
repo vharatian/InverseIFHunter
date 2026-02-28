@@ -29,12 +29,6 @@ export function setTipsPaused(paused) {
     } catch (_) {}
 }
 
-export function toggleTipsPaused() {
-    const next = !isTipsPaused();
-    setTipsPaused(next);
-    return next;
-}
-
 export function escapeHtml(unsafe) {
     if (!unsafe) return '';
     return unsafe
@@ -94,7 +88,7 @@ export function getTurnColorClass(turnNumber) {
     return `turn-color-${idx}`;
 }
 
-export function getModelKey(modelStr) {
+function getModelKey(modelStr) {
     if (!modelStr) return null;
     const lower = modelStr.toLowerCase();
     if (lower.includes('nemotron')) return 'nemotron';
@@ -116,15 +110,6 @@ export function getModelDisplayName(modelId) {
         return 'Claude ' + rest.split('-').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' ');
     }
     return lastPart;
-}
-
-export function getJudgeScore(result) {
-    return result.judge_score ?? result.score ?? null;
-}
-
-export function isBreakingResult(result) {
-    const score = getJudgeScore(result);
-    return result.is_breaking || score === 0;
 }
 
 export function getRandomTip(category, model) {

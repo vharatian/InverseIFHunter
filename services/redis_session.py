@@ -174,21 +174,6 @@ async def save_full_session(session: HuntSession) -> None:
     logger.info(f"Full session {session.session_id} restored to Redis")
 
 
-async def delete_session(session_id: str) -> None:
-    """Delete all keys for a session."""
-    r = await get_redis()
-    keys = _session_keys(session_id)
-    if keys:
-        await r.delete(*keys)
-    logger.info(f"Session {session_id} deleted from Redis")
-
-
-async def session_exists(session_id: str) -> bool:
-    """Check if a session exists (checks status key)."""
-    r = await get_redis()
-    return await r.exists(_key(session_id, "status")) > 0
-
-
 # ============================================================
 # Full Session Reconstruction
 # ============================================================
@@ -367,17 +352,6 @@ async def get_review_status(session_id: str) -> str:
     return "draft"
 
 
-async def set_review_status(session_id: str, status: str) -> None:
-    """Set review_status. Session must exist. Refreshes TTL on review_status key."""
-    if status not in REVIEW_STATUS_VALUES:
-        raise ValueError(f"Invalid review_status: {status}")
-    r = await get_redis()
-    if await r.get(_key(session_id, "status")) is None:
-        raise ValueError(f"Session {session_id} not found")
-    await r.set(_key(session_id, "review_status"), status)
-    await r.expire(_key(session_id, "review_status"), SESSION_TTL)
-
-
 _CAS_LUA = """
 local exists = redis.call('GET', KEYS[2])
 if not exists then return -1 end
@@ -472,12 +446,6 @@ async def set_resubmitted_at(session_id: str) -> None:
     ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     await r.set(_key(session_id, "resubmitted_at"), ts)
     await r.expire(_key(session_id, "resubmitted_at"), SESSION_TTL)
-
-
-async def get_resubmitted_at(session_id: str) -> Optional[str]:
-    """Return resubmit timestamp or None."""
-    r = await get_redis()
-    return await r.get(_key(session_id, "resubmitted_at"))
 
 
 async def incr_review_round(session_id: str) -> int:
@@ -685,6 +653,34 @@ def _extract_task_display_id(notebook_json: str | None) -> str:
     return ""
 
 
+def count_submitted_reviews(human_reviews: dict) -> int:
+    """
+    Count completed reviews from a parsed human_reviews dict.
+    Prefers row_N keys (canonical submitted reviews with grading_basis).
+    Falls back to counting any key with judgment/submitted to handle legacy data.
+    """
+    if not isinstance(human_reviews, dict):
+        return 0
+    row_count = 0
+    other_count = 0
+    row_hunt_ids: set[str] = set()
+    for key, val in human_reviews.items():
+        if not isinstance(val, dict):
+            continue
+        has_review = (
+            val.get("judgment") is not None
+            or bool(val.get("grading_basis"))
+            or val.get("submitted")
+        )
+        if str(key).startswith("row_") and has_review:
+            row_count += 1
+            if val.get("hunt_id"):
+                row_hunt_ids.add(str(val["hunt_id"]))
+        elif has_review and str(key) not in row_hunt_ids:
+            other_count += 1
+    return row_count if row_count > 0 else other_count
+
+
 def _count_reviews_from_json(reviews_json: str | None) -> int:
     """Count completed human reviews from raw JSON string."""
     if not reviews_json:
@@ -693,21 +689,7 @@ def _count_reviews_from_json(reviews_json: str | None) -> int:
         reviews = json.loads(reviews_json)
     except (json.JSONDecodeError, TypeError):
         return 0
-    if not isinstance(reviews, dict):
-        return 0
-    row_count = 0
-    other_count = 0
-    row_hunt_ids = set()
-    for key, val in reviews.items():
-        if not isinstance(val, dict):
-            continue
-        if str(key).startswith("row_") and (val.get("judgment") or val.get("grading_basis")):
-            row_count += 1
-            if val.get("hunt_id"):
-                row_hunt_ids.add(str(val["hunt_id"]))
-        elif (val.get("submitted") or val.get("judgment")) and str(key) not in row_hunt_ids:
-            other_count += 1
-    return row_count if row_count > 0 else other_count
+    return count_submitted_reviews(reviews)
 
 
 def _extract_prompt_preview(notebook_json: str | None, max_len: int = 120) -> str:

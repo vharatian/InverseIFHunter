@@ -3,6 +3,7 @@
  * Bell icon with unread badge, dropdown panel, polling.
  */
 import { createPoller } from './poll.js';
+import { escapeHtml } from './utils.js';
 
 const POLL_INTERVAL = 15000;
 let _poller = null;
@@ -27,10 +28,6 @@ export function initNotifications({ onNavigateToTask } = {}) {
 
     _poller = createPoller(_fetchAndRender, POLL_INTERVAL);
     _fetchAndRender();
-}
-
-export function stopNotifications() {
-    if (_poller) { _poller(); _poller = null; }
 }
 
 function _getEmail() {
@@ -78,11 +75,11 @@ function _renderPanel(notifications) {
         const icon = _iconForType(n.type);
         const time = _relativeTime(n.created_at);
         const readCls = n.read ? 'notif-read' : 'notif-unread';
-        const taskLabel = n.task_display_id ? `<span class="notif-task-id">${_esc(n.task_display_id)}</span>` : '';
-        return `<li class="notif-item ${readCls}" data-id="${_esc(n.id)}" data-session="${_esc(n.session_id)}">
+        const taskLabel = n.task_display_id ? `<span class="notif-task-id">${escapeHtml(n.task_display_id)}</span>` : '';
+        return `<li class="notif-item ${readCls}" data-id="${escapeHtml(n.id)}" data-session="${escapeHtml(n.session_id)}">
             <span class="notif-icon">${icon}</span>
             <div class="notif-body">
-                <div class="notif-message">${taskLabel} ${_esc(n.message)}</div>
+                <div class="notif-message">${taskLabel} ${escapeHtml(n.message)}</div>
                 <div class="notif-time">${time}</div>
             </div>
         </li>`;
@@ -146,8 +143,3 @@ function _relativeTime(iso) {
     return `${days}d ago`;
 }
 
-function _esc(s) {
-    const d = document.createElement('div');
-    d.textContent = s || '';
-    return d.innerHTML;
-}

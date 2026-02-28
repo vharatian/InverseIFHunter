@@ -1,9 +1,15 @@
 """
 Session Routes
 
-GET  /api/session/{session_id}      — get session details
-GET  /api/trainer-inbox              — list returned/rejected tasks (trainer inbox)
-POST /api/update-config/{session_id} — update hunt configuration
+GET  /api/session/{session_id}           — get session details
+GET  /api/session/{session_id}/full-state — full UI hydration
+GET  /api/trainer-queue                  — trainer queue (role-scoped)
+GET  /api/trainer-inbox                  — list returned/rejected tasks
+POST /api/update-config/{session_id}     — update hunt configuration
+POST /api/session/{session_id}/submit-for-review
+POST /api/session/{session_id}/mark-qc-done
+POST /api/session/{session_id}/resubmit
+POST /api/session/{session_id}/acknowledge
 """
 import logging
 from typing import Optional
@@ -11,9 +17,9 @@ from typing import Optional
 from fastapi import APIRouter, Header, HTTPException, Query  # noqa: F401 - HTTPException used in handlers
 from typing import Annotated
 
-from models.schemas import HuntConfig, HuntSession, HuntStatus
+from models.schemas import HuntConfig
 from storage.session_storage import get_session_storage, save_session_storage
-from storage.sqlite_store import update_field as sqlite_update
+from storage.sqlite_store import update_field as sqlite_update, load_session as sqlite_load
 from helpers.shared import _get_validated_session
 import services.redis_session as redis_store
 from agentic_reviewer.team_config import get_role, get_allowed_trainer_emails_for_role
@@ -24,10 +30,7 @@ from agentic_reviewer.notifications import (
 )
 from agentic_reviewer.resilience import safe_notify
 from agentic_reviewer.versioning import (
-    incr_version,
     get_version,
-    check_idempotency,
-    store_idempotency,
     snapshot_for_history,
     set_acknowledged,
     get_acknowledged_at,
@@ -39,32 +42,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["session"])
 
 
-def _count_submitted_reviews(human_reviews: dict) -> int:
-    """
-    Count completed reviews. Prefers row_N keys (canonical submitted reviews with grading_basis).
-    Falls back to counting any key with judgment/submitted to handle legacy data.
-    """
-    if not isinstance(human_reviews, dict):
-        return 0
-    row_count = 0
-    other_count = 0
-    row_hunt_ids = set()
-    for key, val in human_reviews.items():
-        if not isinstance(val, dict):
-            continue
-        has_review = (
-            val.get("judgment") is not None
-            or bool(val.get("grading_basis"))
-            or val.get("submitted")
-        )
-        if str(key).startswith("row_") and has_review:
-            row_count += 1
-            if val.get("hunt_id"):
-                row_hunt_ids.add(str(val["hunt_id"]))
-        elif has_review and str(key) not in row_hunt_ids:
-            other_count += 1
-    return row_count if row_count > 0 else other_count
-
 
 @router.get("/session/{session_id}")
 async def get_session(session_id: str):
@@ -73,7 +50,7 @@ async def get_session(session_id: str):
     review_status = await redis_store.get_review_status(session_id)
     review_feedback = await redis_store.get_review_feedback(session_id)
     human_reviews = getattr(session, "human_reviews", None) or {}
-    review_count = _count_submitted_reviews(human_reviews)
+    review_count = redis_store.count_submitted_reviews(human_reviews)
     qc_done = await redis_store.get_qc_done(session_id)
     # QC itself requires 4 reviews to run, so qc_done implies reviews are complete
     can_submit = qc_done and review_status == "draft"
@@ -112,6 +89,13 @@ async def get_session_full_state(session_id: str):
     data = await redis_store.get_full_session_state(session_id)
     if data is None:
         raise HTTPException(status_code=404, detail="Session not found")
+    # Add colab_url from SQLite so Save to Colab has the URL when resuming from queue
+    try:
+        db = sqlite_load(session_id)
+        if db and db.get("colab_url"):
+            data["colab_url"] = db["colab_url"]
+    except Exception:
+        pass
     return data
 
 
@@ -355,41 +339,3 @@ async def acknowledge_feedback(session_id: str):
     return {"ok": True, "acknowledged_at": ts}
 
 
-@router.get("/session/{session_id}/versions")
-async def get_versions(session_id: str):
-    """Return version history (snapshots of reviews at each submit/resubmit)."""
-    from agentic_reviewer.versioning import get_version_history
-    r = await redis_store.get_redis()
-    versions = await get_version_history(r, session_id)
-    return {"session_id": session_id, "versions": versions}
-
-
-@router.get("/session/{session_id}/diff")
-async def get_diff(session_id: str, v1: int = Query(...), v2: int = Query(...)):
-    """Compute diff between two version snapshots."""
-    from agentic_reviewer.versioning import get_version_history, compute_diff
-    r = await redis_store.get_redis()
-    versions = await get_version_history(r, session_id)
-    if v1 < 1 or v1 > len(versions) or v2 < 1 or v2 > len(versions):
-        raise HTTPException(status_code=400, detail=f"Version out of range. Available: 1-{len(versions)}")
-    r1 = versions[v1 - 1].get("reviews", {})
-    r2 = versions[v2 - 1].get("reviews", {})
-    changes = compute_diff(r1, r2)
-    return {"v1": v1, "v2": v2, "changes": changes, "changed_count": len(changes)}
-
-
-@router.get("/session/{session_id}/preview")
-async def preview_submission(session_id: str):
-    """Preview what the reviewer will see — read-only snapshot of current state."""
-    data = await redis_store.get_full_session_state(session_id)
-    if data is None:
-        raise HTTPException(status_code=404, detail="Session not found")
-    return {
-        "session_id": session_id,
-        "review_status": data.get("review_status", "draft"),
-        "notebook": data.get("notebook", {}),
-        "human_reviews": data.get("human_reviews", {}),
-        "all_results": data.get("all_results", []),
-        "meta": data.get("meta", {}),
-        "qc_done": data.get("qc_done", False),
-    }

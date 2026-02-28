@@ -212,17 +212,6 @@ class SnapshotService:
                 logger.error(f"❌ {error_msg}", exc_info=True)
                 return {"success": False, "error": error_msg}
     
-    def get_queue_status(self, file_id: str) -> Dict[str, Any]:
-        """Get queue status for a file_id."""
-        if file_id not in self.write_queues:
-            return {"exists": False, "size": 0}
-        
-        queue = self.write_queues[file_id]
-        return {
-            "exists": True,
-            "size": queue.qsize(),
-            "max_size": self.max_queue_size
-        }
 
 
 # Singleton instance

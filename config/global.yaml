@@ -11,14 +11,11 @@ secrets:
 
 # App (hunt UI)
 app:
-  debug_mode: false
   max_hunts_per_notebook: 16
   admin_mode_enabled: true   # false = 5-click does nothing; true = 5-click + password unlocks
   admin_mode_password: ${ADMIN_MODE_PASSWORD:-}
   min_explanation_words: 10
   version_check_interval: 30000
-  hunt_count_storage_prefix: "modelHunter_huntCount_"
-  tips_paused_key: "modelHunter_tipsPaused"
 
 # Hunt limits & slots
 hunt:
@@ -53,7 +50,6 @@ http:
   max_connections: 50
   max_keepalive_connections: 30
   keepalive_expiry: 60.0
-  http2_enabled: false
   timeouts:
     openrouter: { read: 180, connect: 5 }
     fireworks: { read: 120, connect: 5 }
@@ -78,7 +74,7 @@ features:
   preflight_enabled: true
   rate_limiter_enabled: true
   # Bypass hunt-start criteria checks — when true, "Find Breaking Responses" is always enabled.
-  bypass_hunt_criteria: true
+  bypass_hunt_criteria: false
 
 # Agentic QC (merged from agentic_rules.yaml)
 agentic:
@@ -227,7 +223,6 @@ task_identity:
 # Review workflow
 review:
   max_rounds: 5
-  escalation_action: "escalate_to_admin"
 
 # Notifications
 notifications:
@@ -258,11 +253,6 @@ presence:
   enabled: true
   heartbeat_interval_ms: 10000
   ttl_seconds: 30
-
-# Live updates — SSE or polling
-live_updates:
-  mode: "sse"                  # "sse" or "polling"
-  poll_interval_ms: 15000      # fallback if SSE unavailable
 
 # Idempotency — prevent duplicate submits/approves
 idempotency:

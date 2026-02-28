@@ -34,7 +34,7 @@ const _celeb = {
     get flash() { return document.getElementById('celebrationFlash'); }
 };
 
-export function _celebResize() {
+function _celebResize() {
     const c = _celeb.canvas;
     if (c) { c.width = window.innerWidth; c.height = window.innerHeight; }
 }
@@ -81,7 +81,7 @@ class _CelebParticle {
     }
 }
 
-export function _celebAnimate() {
+function _celebAnimate() {
     const ctx = _celeb.ctx;
     if (!ctx || _celeb.particles.length === 0) {
         _celeb.running = false;
@@ -94,11 +94,11 @@ export function _celebAnimate() {
     requestAnimationFrame(_celebAnimate);
 }
 
-export function _celebStart() {
+function _celebStart() {
     if (!_celeb.running) { _celeb.running = true; _celebAnimate(); }
 }
 
-export function _celebFlash(color, opacity, duration) {
+function _celebFlash(color, opacity, duration) {
     const f = _celeb.flash;
     if (!f) return;
     f.style.background = color;
@@ -107,7 +107,7 @@ export function _celebFlash(color, opacity, duration) {
 }
 
 // ── Effect 1: Classic Confetti (side cannons) ──
-export function _celebConfettiClassic() {
+function _celebConfettiClassic() {
     if (typeof confetti !== 'function') return;
     const colors = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4'];
     function burst() {
@@ -121,7 +121,7 @@ export function _celebConfettiClassic() {
 }
 
 // ── Effect: Firework Rockets (canvas sparks) ──
-export function _celebFireworkRockets() {
+function _celebFireworkRockets() {
     _celebResize();
     const ctx = _celeb.ctx;
     if (!ctx) { _celebConfettiClassic(); return; } // fallback

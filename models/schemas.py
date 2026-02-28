@@ -1,10 +1,17 @@
 """Pydantic models for request/response schemas."""
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 from enum import Enum
 
 
+# Proceed policy: optional patterns for (breaking, passing) counts; proceed if any matches and errors==0
+class ProceedPattern(BaseModel):
+    breaking: int = 0
+    passing: int = 0
 
+
+class ProceedPolicy(BaseModel):
+    patterns: List[ProceedPattern] = []
 
 
 class ModelProvider(str, Enum):
@@ -17,6 +24,8 @@ class HuntStatus(str, Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    STOPPED_BUDGET = "stopped_budget"   # max batches/samples/wall time reached
+    NEEDS_ATTENTION = "needs_attention"  # persistent errors after max_error_batches
 
 
 class NotebookCell(BaseModel):
@@ -77,6 +86,18 @@ class HuntConfig(BaseModel):
     pass_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
     # Passing mode: hunt for passes (success = all pass), not breaks
     passing_mode: bool = Field(default=False)
+    # InverseIF episode: batch and proceed policy
+    batch_size: int = Field(default=4, ge=1, le=16)
+    break_mode: Literal["ratio", "any_break", "no_break"] = "ratio"
+    proceed_policy: Optional[ProceedPolicy] = None
+    max_batches_per_turn: int = Field(default=4, ge=1)
+    max_total_samples: int = Field(default=64, ge=1)
+    max_wall_time_seconds: int = Field(default=900, ge=1)
+    max_error_batches: int = Field(default=2, ge=0)  # rehunt on errors up to this many batches
+
+
+# Sample label for aggregation: PASS, BREAK, or ERROR (e.g. any criterion MISSING)
+SampleLabel = Literal["PASS", "BREAK", "ERROR"]
 
 
 class HuntResult(BaseModel):
@@ -92,6 +113,12 @@ class HuntResult(BaseModel):
     judge_explanation: str = ""
     error: Optional[str] = None
     is_breaking: bool = False
+    # InverseIF aggregation
+    sample_label: Optional[SampleLabel] = None  # PASS | BREAK | ERROR
+    pass_rate: Optional[float] = None
+    pass_count: Optional[int] = None
+    fail_count: Optional[int] = None
+    missing_count: Optional[int] = None
 
 
 class HuntSession(BaseModel):

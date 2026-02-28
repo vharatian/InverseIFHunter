@@ -69,6 +69,16 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_sessions_review_status ON sessions(review_status);
         CREATE INDEX IF NOT EXISTS idx_sessions_trainer ON sessions(trainer_email);
         CREATE INDEX IF NOT EXISTS idx_sessions_updated ON sessions(updated_at);
+
+        CREATE TABLE IF NOT EXISTS hunt_events (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id      TEXT NOT NULL,
+            ts              TEXT NOT NULL,
+            event_type      TEXT NOT NULL,
+            payload_json    TEXT DEFAULT '{}'
+        );
+        CREATE INDEX IF NOT EXISTS idx_hunt_events_session ON hunt_events(session_id);
+        CREATE INDEX IF NOT EXISTS idx_hunt_events_ts ON hunt_events(session_id, ts);
     """)
     conn.commit()
     logger.info(f"SQLite database initialized at {_DB_PATH}")
@@ -246,6 +256,20 @@ def delete_session(session_id: str) -> None:
         conn.commit()
     except Exception:
         logger.exception(f"Failed to delete session {session_id} from SQLite")
+
+
+def append_event(session_id: str, event_type: str, payload: Dict[str, Any]) -> None:
+    """Append a hunt event (e.g. SSE event) to SQLite for audit/replay. Call after every SSE publish."""
+    conn = _get_conn()
+    now = _now_iso()
+    try:
+        conn.execute(
+            "INSERT INTO hunt_events (session_id, ts, event_type, payload_json) VALUES (?, ?, ?, ?)",
+            (session_id, now, event_type, _json_dumps(payload)),
+        )
+        conn.commit()
+    except Exception:
+        logger.exception(f"Failed to append_event for session {session_id}")
 
 
 def list_sessions(review_status: Optional[str] = None, limit: int = 100) -> list:

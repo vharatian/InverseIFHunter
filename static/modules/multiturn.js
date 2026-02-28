@@ -800,16 +800,10 @@ export async function selectGoodResponse(response) {
         // Enable testbed button — prompt is ready from Turn 1 validation
         enableNavTestbedButton();
 
-        // Reset hunt button state for new turn
         state.referenceValidated = false;
         if (elements.startHuntBtn) {
-            if (state.adminMode || getConfigValue('bypass_hunt_criteria', false)) {
-                elements.startHuntBtn.disabled = false;
-                elements.startHuntBtn.title = state.adminMode ? 'Admin mode' : 'Bypass enabled (testing)';
-            } else {
-                elements.startHuntBtn.disabled = true;
-                elements.startHuntBtn.title = 'Save & Check your criteria first';
-            }
+            elements.startHuntBtn.disabled = false;
+            elements.startHuntBtn.title = '';
         }
         
         // Clear previous judge results
@@ -1113,7 +1107,7 @@ export async function startNextTurn() {
         state.notebook.prompt = nextPrompt;
         state.notebook.response_reference = nextCriteria;
         // CRITICAL: Update response to the selected good response from this turn
-        // This is what gets judged when "Judge Reference" is clicked in the new turn
+        // This is what gets judged when "Check Ideal Response" is clicked in the new turn
         if (state._selectedGoodResponse?.response) {
             state.notebook.response = state._selectedGoodResponse.response;
         }
@@ -1149,10 +1143,9 @@ export async function startNextTurn() {
         populatePreviewTabs(state.notebook);
         validatePromptLength(); // Turn 2+: clear word limit/range in prompt section
         
-        // Re-enable the reference judge (trainer needs to validate new criteria) — bypass in admin mode or bypass_hunt_criteria
         state.referenceValidated = false;
         if (elements.startHuntBtn) {
-            elements.startHuntBtn.disabled = !(state.adminMode || getConfigValue('bypass_hunt_criteria', false));
+            elements.startHuntBtn.disabled = false;
         }
         
         // Clear previous judge results display so old criteria grades don't persist

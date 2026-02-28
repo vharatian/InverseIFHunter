@@ -153,19 +153,6 @@ class TelemetryLogger:
             "session_id": session_id
         })
     
-    def log_session_created(
-        self,
-        session_id: str,
-        notebook: str,
-        source: str = "upload"
-    ) -> None:
-        """Log session creation."""
-        self.log_event("session_created", {
-            "session_id": session_id,
-            "notebook": notebook,
-            "source": source
-        })
-    
     def log_hunt_start(
         self,
         session_id: str,
@@ -283,9 +270,6 @@ class TelemetryLogger:
             # Silent fail
             pass
     
-    def get_log_path(self) -> str:
-        """Return the path to the log file (for dashboard)."""
-        return str(self.log_file)
 
 
 # Singleton instance

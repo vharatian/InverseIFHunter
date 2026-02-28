@@ -110,11 +110,13 @@ class OpenRouterClient(BaseAPIClient):
         is_reasoning_model = not is_nemotron and (not is_claude or is_opus)
         
         if messages:
-            # Multi-turn: conversation history + current prompt
-            messages = list(messages) + [{"role": "user", "content": prompt}]
+            # Multi-turn or full messages: append prompt only if provided (avoid empty user message)
+            messages = list(messages)
+            if prompt:
+                messages = messages + [{"role": "user", "content": prompt}]
         else:
             # Single-turn: just user prompt
-            messages = [{"role": "user", "content": prompt}]
+            messages = [{"role": "user", "content": prompt or ""}]
         
         # temperature: default 1 for generation; judge passes 0 explicitly
         temp = temperature if temperature is not None else 1.0
@@ -332,9 +334,6 @@ class OpenRouterClient(BaseAPIClient):
     # Note: Uses BaseAPIClient.call_with_retry which passes **kwargs to call_model
     # This allows reasoning_budget_percent to be passed through
     
-    def get_available_models(self) -> Dict[str, str]:
-        """Return available models."""
-        return self.MODELS.copy()
 
 
 # Singleton instance

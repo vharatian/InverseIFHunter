@@ -42,7 +42,7 @@ import { showAppModal, showPasswordPrompt } from './api.js';
 import { runQualityCheckOverlay } from './qualityCheckOverlay.js';
 import { renderQCPersistentSection } from './qcPersistentSection.js';
 import { runQualityCheckInline } from './qcInline.js';
-import { enableNavTestbedButton } from './testbed.js';
+import { enableNavTestbedButton, validateJudgeOutputFormat } from './testbed.js';
 
 /**
  * Enable/disable the Colab save button based on review_status.
@@ -647,7 +647,7 @@ export function handleNotebookLoaded(data, isUrl = false, overrideUrl = null) {
     
     // Toggle UI sections
     // Keep URL section visible (don't hide uploadSection)
-    elements.huntSection.classList.remove('hidden');
+    elements.configSection.classList.remove('hidden');
     
     // Handle Save to Drive visibility (Container)
     if (elements.saveDriveContainer) {
@@ -657,8 +657,6 @@ export function handleNotebookLoaded(data, isUrl = false, overrideUrl = null) {
             elements.saveDriveContainer.classList.add('hidden');
         }
     }
-    
-    showToast('Notebook loaded! Configure hunt settings.', 'success');
     
     // Auto-collapse the upload section (notebook is loaded, no need to show it)
     const uploadBody = document.getElementById('uploadBody');
@@ -793,50 +791,17 @@ export function handleNotebookLoaded(data, isUrl = false, overrideUrl = null) {
         }
     }
     
-    // Reset Start Hunt button state (must validate new notebook first) — keep enabled in admin mode or bypass
+    // Find Breaking Responses: always enabled when notebook is loaded
     if (elements.startHuntBtn) {
-        if (state.adminMode) {
-            elements.startHuntBtn.disabled = false;
-            elements.startHuntBtn.title = 'Admin mode';
-        } else if (getConfigValue('bypass_hunt_criteria', false)) {
-            elements.startHuntBtn.disabled = false;
-            elements.startHuntBtn.title = 'Bypass enabled (testing)';
-        } else {
-            elements.startHuntBtn.disabled = true;
-            elements.startHuntBtn.title = 'Judge the reference response first (click "Judge Reference Response")';
-        }
+        elements.startHuntBtn.disabled = false;
+        elements.startHuntBtn.title = '';
     }
     
     // Populate preview tabs
     populatePreviewTabs(data.notebook);
     
-    // Check for validation warnings
-    if (data.notebook.validation_warnings && data.notebook.validation_warnings.length > 0) {
-        const warnings = data.notebook.validation_warnings;
-        console.warn('Notebook validation warnings:', warnings);
-        
-        // Show warning toast for each issue
-        warnings.forEach(warning => {
-            showToast(`⚠️ ${warning}`, 'error');
-        });
-        
-        // Also display in the reference preview tab
-        if (elements.referencePreview) {
-            elements.referencePreview.innerHTML = `
-                <div style="color: var(--danger); margin-bottom: 1rem; padding: 0.75rem; background: var(--danger-bg); border-radius: 8px;">
-                    <strong>⚠️ JSON Validation Issues:</strong>
-                    <ul style="margin: 0.5rem 0 0 1.5rem;">
-                        ${warnings.map(w => `<li>${w}</li>`).join('')}
-                    </ul>
-                </div>
-                <pre style="white-space: pre-wrap; word-break: break-word;">${data.notebook.response_reference || 'No reference found'}</pre>
-            `;
-        }
-        
-        showToast('Notebook loaded with validation warnings', 'warning');
-    } else {
-        showToast('Notebook loaded successfully!', 'success');
-    }
+    // Always show success notification (load silently, no warning toasts)
+    showToast('Notebook loaded successfully', 'success');
 }
 
 // ============== Lightweight pre-hunt save ==============
@@ -876,10 +841,11 @@ export async function saveCurrentCellsToColab() {
     if (cells.length === 0) return { success: false, message: 'Nothing to save' };
 
     try {
+        const colab_url = (state.notebook?.url || notebookUrl || '').trim() || undefined;
         const res = await fetch(`/api/update-notebook-cells/${state.sessionId}`, {
             method:  'POST',
             headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify({ cells, session_only: false }),
+            body:    JSON.stringify({ cells, session_only: false, colab_url: colab_url || undefined }),
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
@@ -1548,29 +1514,9 @@ export function populatePreviewTabs(notebook) {
     state.modelRefValid = modelRefValidation.valid;
     
     if (!modelRefValidation.valid) {
-        // Only show the toast when there IS content but it's malformed — not when it's simply empty
-        // (e.g. on turn 2+ the user hasn't filled in criteria yet, which is expected)
+        // Log for debugging only — do not show error toasts during notebook load
         if ((notebook.response_reference || '').trim()) {
-            showToast('⚠️ Model Reference is not valid JSON format!', 'error');
-        }
-        if (elements.modelrefPreview) {
-            elements.modelrefPreview.innerHTML = `
-                <div style="color: var(--danger); margin-bottom: 1rem; padding: 0.75rem; background: var(--danger-bg); border-radius: 8px;">
-                    <strong>❌ Invalid JSON Format</strong><br>
-                    ${escapeHtml(modelRefValidation.error)}
-                </div>
-                <pre style="white-space: pre-wrap; word-break: break-word;">${escapeHtml(notebook.response_reference || 'No content')}</pre>
-            `;
-        }
-        // Disable Start Hunt if Model Reference is invalid — bypass in admin mode
-        if (elements.startHuntBtn) {
-            if (state.adminMode || getConfigValue('bypass_hunt_criteria', false)) {
-                elements.startHuntBtn.disabled = false;
-                elements.startHuntBtn.title = state.adminMode ? 'Admin mode' : 'Bypass enabled (testing)';
-            } else {
-                elements.startHuntBtn.disabled = true;
-                elements.startHuntBtn.title = 'Model Reference must be valid JSON before hunting';
-            }
+            console.warn('Model Reference not valid JSON at load time — user can edit in testbed');
         }
     }
     
@@ -1591,13 +1537,8 @@ export function populatePreviewTabs(notebook) {
         state.criteria = null;
         // Disable hunt button — bypass in admin mode or bypass_hunt_criteria
         if (elements.startHuntBtn) {
-            if (state.adminMode || getConfigValue('bypass_hunt_criteria', false)) {
-                elements.startHuntBtn.disabled = false;
-                elements.startHuntBtn.title = state.adminMode ? 'Admin mode' : 'Bypass enabled (testing)';
-            } else {
-                elements.startHuntBtn.disabled = true;
-                elements.startHuntBtn.title = `Criteria Parse Error: ${error.message}`;
-            }
+            elements.startHuntBtn.disabled = false;
+            elements.startHuntBtn.title = '';
         }
         // Don't return early - continue to initialize other features
         // Metadata is already displayed above
@@ -2266,13 +2207,8 @@ export function validateModelReferenceAndCriteria(responseReference) {
             `;
         }
         if (elements.startHuntBtn) {
-            if (getConfigValue('bypass_hunt_criteria', false)) {
-                elements.startHuntBtn.disabled = false;
-                elements.startHuntBtn.title = 'Bypass enabled (testing)';
-            } else {
-                elements.startHuntBtn.disabled = true;
-                elements.startHuntBtn.title = `Model Reference JSON Error: ${jsonValidation.error}`;
-            }
+            elements.startHuntBtn.disabled = false;
+            elements.startHuntBtn.title = '';
         }
         return;
     }
@@ -2285,13 +2221,8 @@ export function validateModelReferenceAndCriteria(responseReference) {
         console.error('Failed to parse criteria:', error);
         showError(error, { operation: 'Parse criteria' });
         if (elements.startHuntBtn) {
-            if (getConfigValue('bypass_hunt_criteria', false)) {
-                elements.startHuntBtn.disabled = false;
-                elements.startHuntBtn.title = 'Bypass enabled (testing)';
-            } else {
-                elements.startHuntBtn.disabled = true;
-                elements.startHuntBtn.title = `Criteria Parse Error: ${error.message}`;
-            }
+            elements.startHuntBtn.disabled = false;
+            elements.startHuntBtn.title = '';
         }
         return;
     }
@@ -2317,13 +2248,8 @@ export function validateModelReferenceAndCriteria(responseReference) {
             `;
         }
         if (elements.startHuntBtn) {
-            if (getConfigValue('bypass_hunt_criteria', false)) {
-                elements.startHuntBtn.disabled = false;
-                elements.startHuntBtn.title = 'Bypass enabled (testing)';
-            } else {
-                elements.startHuntBtn.disabled = true;
-                elements.startHuntBtn.title = `Missing criteria: ${missingCriteriaIds.join(', ')}. Please add them back to Model Reference.`;
-            }
+            elements.startHuntBtn.disabled = false;
+            elements.startHuntBtn.title = '';
         }
         showToast(`⚠️ Missing criteria: ${missingCriteriaIds.join(', ')}`, 'warning');
         return;
@@ -2336,19 +2262,8 @@ export function validateModelReferenceAndCriteria(responseReference) {
         elements.modelrefPreview.textContent = responseReference || 'No model reference criteria found';
     }
     if (elements.startHuntBtn) {
-        if (state.selectionConfirmed && !state.adminMode && !getConfigValue('bypass_hunt_criteria', false)) {
-            elements.startHuntBtn.disabled = true;
-            elements.startHuntBtn.title = 'Complete reviews or refresh page to unlock';
-        } else if (state.adminMode || getConfigValue('bypass_hunt_criteria', false)) {
-            elements.startHuntBtn.disabled = false;
-            elements.startHuntBtn.title = state.adminMode ? 'Admin mode' : 'Bypass enabled (testing)';
-        } else if (state.referenceValidated && state.modelRefValid) {
-            elements.startHuntBtn.disabled = false;
-            elements.startHuntBtn.title = '';
-        } else {
-            elements.startHuntBtn.disabled = true;
-            elements.startHuntBtn.title = 'Model Reference is valid. Click "Judge Reference Response" to validate.';
-        }
+        elements.startHuntBtn.disabled = false;
+        elements.startHuntBtn.title = '';
     }
 }
 
@@ -2787,29 +2702,9 @@ export async function saveAndJudgeResponse() {
         // Update reference validated state
         state.referenceValidated = isPassing;
         
-        // Enable/disable Start Hunt based on result — admin mode or bypass: always enable; review mode: always disable
         if (elements.startHuntBtn) {
-            const bypass = getConfigValue('bypass_hunt_criteria', false);
-            if (state.selectionConfirmed && !state.adminMode && !bypass) {
-                elements.startHuntBtn.disabled = true;
-                elements.startHuntBtn.title = 'Complete reviews or refresh page to unlock';
-            } else if (state.adminMode || bypass) {
-                elements.startHuntBtn.disabled = false;
-                elements.startHuntBtn.title = state.adminMode ? 'Admin mode' : 'Bypass enabled (testing)';
-            } else if (!state.modelRefValid) {
-                elements.startHuntBtn.disabled = true;
-                elements.startHuntBtn.title = 'Model Reference must be valid JSON before hunting';
-            } else if (hasMissingCriteria) {
-                const missingIds = missingCriteria.map(([id]) => id).join(', ');
-                elements.startHuntBtn.disabled = true;
-                elements.startHuntBtn.title = `Missing criteria: ${missingIds}. Please add them back to response_reference and re-judge.`;
-            } else if (isPassing && !hasMissingCriteria) {
-                elements.startHuntBtn.disabled = false;
-                elements.startHuntBtn.title = '';
-            } else {
-                elements.startHuntBtn.disabled = true;
-                elements.startHuntBtn.title = 'All criteria must pass before starting hunt';
-            }
+            elements.startHuntBtn.disabled = false;
+            elements.startHuntBtn.title = '';
         }
         
         // Show toasts
@@ -2838,13 +2733,7 @@ export async function saveAndJudgeResponse() {
     } catch (error) {
         showError(error, { operation: 'Operation' });
         state.referenceValidated = false;
-        if (elements.startHuntBtn) {
-            if (state.adminMode || getConfigValue('bypass_hunt_criteria', false)) {
-                elements.startHuntBtn.disabled = false;
-            } else {
-                elements.startHuntBtn.disabled = true;
-            }
-        }
+        if (elements.startHuntBtn) elements.startHuntBtn.disabled = false;
     } finally {
         btn.disabled = false;
         btn.textContent = '💾 Save & Verify';
@@ -2857,16 +2746,17 @@ export async function judgeReferenceResponse() {
         return;
     }
 
-    // Block judging if judge system prompt is empty
+    // Block judging if judge system prompt is empty or missing required output format
     const judgePromptValue = document.getElementById('judgeMarkdown')?.value?.trim()
         || state.notebook?.judge_system_prompt?.trim()
         || '';
-    if (!judgePromptValue) {
-        showToast('⚠️ Judge System Prompt is required before judging. Please fill in the judge prompt first.', 'error');
+    const formatCheck = validateJudgeOutputFormat(judgePromptValue);
+    if (!formatCheck.valid) {
+        showToast(formatCheck.message, 'error');
         document.getElementById('judgeMarkdown')?.focus();
         return;
     }
-    
+
     // Check for missing criteria before judging
     let currentRefText = '';
     if (state.convertedModelRefJSON) {
@@ -3003,17 +2893,8 @@ export async function judgeReferenceResponse() {
         state.referenceValidated = isPassing;
         
         if (elements.startHuntBtn) {
-            const bypass = getConfigValue('bypass_hunt_criteria', false);
-            if (state.selectionConfirmed && !state.adminMode && !bypass) {
-                elements.startHuntBtn.disabled = true;
-                elements.startHuntBtn.title = 'Complete reviews or refresh page to unlock';
-            } else if (state.adminMode || bypass) {
-                elements.startHuntBtn.disabled = false;
-                elements.startHuntBtn.title = state.adminMode ? 'Admin mode' : 'Bypass enabled (testing)';
-            } else if (!state.modelRefValid) elements.startHuntBtn.disabled = true;
-            else if (missing.length > 0) elements.startHuntBtn.disabled = true;
-            else if (isPassing) elements.startHuntBtn.disabled = false;
-            else elements.startHuntBtn.disabled = true;
+            elements.startHuntBtn.disabled = false;
+            elements.startHuntBtn.title = '';
         }
         
         const criteriaHtml = formatJudgeCriteriaDisplay(criteria);
@@ -3049,16 +2930,11 @@ export async function judgeReferenceResponse() {
             resultDiv.classList.remove('hidden');
         }
         state.referenceValidated = false;
-        if (elements.startHuntBtn) {
-            if (state.adminMode || getConfigValue('bypass_hunt_criteria', false)) {
-                elements.startHuntBtn.disabled = false;
-                elements.startHuntBtn.title = state.adminMode ? 'Admin mode' : 'Bypass enabled (testing)';
-            }
-        }
+        if (elements.startHuntBtn) { elements.startHuntBtn.disabled = false; elements.startHuntBtn.title = ''; }
     } finally {
         if (btn) {
             btn.disabled = false;
-            if (btn.id === 'judgeBeforeHuntBtn') btn.textContent = '⚖️ Judge Reference';
+            if (btn.id === 'judgeBeforeHuntBtn') btn.textContent = '⚖️ Check Ideal Response';
             else if (btn.id === 'judgeReferenceBtn') btn.textContent = '⚖️ Judge Only';
         }
     }

@@ -54,6 +54,7 @@ def _stream_key(session_id: str) -> str:
 async def publish(session_id: str, event: HuntEvent) -> str:
     """
     Publish a hunt event to the session's Redis Stream.
+    Also appends to SQLite hunt_events for audit/replay.
     Returns the stream entry ID (used as SSE event id).
     """
     r = await get_redis()
@@ -70,6 +71,16 @@ async def publish(session_id: str, event: HuntEvent) -> str:
 
     # Set TTL on first event (refresh on subsequent)
     await r.expire(key, STREAM_TTL)
+
+    # Persist to SQLite for audit
+    try:
+        from storage.sqlite_store import append_event
+        payload = dict(event.data)
+        if event.hunt_id is not None:
+            payload["hunt_id"] = event.hunt_id
+        append_event(session_id, event.event_type, payload)
+    except Exception as e:
+        logger.debug("append_event failed (non-fatal): %s", e)
 
     return entry_id
 
@@ -154,18 +165,6 @@ async def replay(
             events.append((entry_id, event))
 
     return events
-
-
-async def delete_stream(session_id: str) -> None:
-    """Delete the event stream for a session (cleanup)."""
-    r = await get_redis()
-    await r.delete(_stream_key(session_id))
-
-
-async def stream_length(session_id: str) -> int:
-    """Get the number of events in a session's stream."""
-    r = await get_redis()
-    return await r.xlen(_stream_key(session_id))
 
 
 def _parse_event(fields: Dict[str, str]) -> Optional[HuntEvent]:

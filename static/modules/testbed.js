@@ -12,6 +12,7 @@
 
 import { state } from './state.js';
 import { PROVIDER_MODELS, getJudgeModels, getConfigValue } from './config.js';
+import { escapeHtml } from './utils.js';
 import { showToast } from './celebrations.js';
 import { updateMarkdownPreview } from './editors.js';
 import { populatePreviewTabs, parseCriteria, validateModelReferenceAndCriteria } from './notebook.js';
@@ -124,13 +125,50 @@ let runCounter  = 0;
  * @property {number|null}  maxScore
  */
 
+/** Required output format for judge: JSON with "result" and "explanation" keys. */
+const REQUIRED_JUDGE_FORMAT = {
+    result: '"result"',
+    explanation: '"explanation"',
+    pass: 'PASS',
+    fail: 'FAIL',
+};
+
+/**
+ * Check if judge system prompt contains the required output format:
+ * JSON with "result" (PASS/FAIL) and "explanation" keys.
+ * @param {string} prompt - Judge system prompt text
+ * @returns {{ valid: boolean, message?: string }}
+ */
+export function validateJudgeOutputFormat(prompt) {
+    if (!prompt || !prompt.trim()) {
+        return { valid: false, message: 'Judge System Prompt is required.' };
+    }
+    const p = prompt.trim();
+    if (!p.includes(REQUIRED_JUDGE_FORMAT.result)) {
+        return { valid: false, message: 'Your judge system prompt must include the required output format: JSON with "result" (PASS/FAIL) and "explanation" keys. Please add this format before judging.' };
+    }
+    if (!p.includes(REQUIRED_JUDGE_FORMAT.explanation)) {
+        return { valid: false, message: 'Your judge system prompt must include the required output format: JSON with "result" (PASS/FAIL) and "explanation" keys. Please add this format before judging.' };
+    }
+    if (!p.includes(REQUIRED_JUDGE_FORMAT.pass) || !p.includes(REQUIRED_JUDGE_FORMAT.fail)) {
+        return { valid: false, message: 'Your judge system prompt must specify PASS and FAIL as possible values for "result". Please add this format before judging.' };
+    }
+    return { valid: true };
+}
+
+/** Parse raw criteria string into array of description strings (for chip UI). Uses parseCriteria when possible. */
 function criteriaStringToChips(raw) {
     if (!raw || !raw.trim()) return [];
-    return raw.split('\n')
-        .map(l => l.trim())
-        .filter(Boolean)
-        .map(l => l.replace(/^C\d+:\s*/i, '').trim())
-        .filter(Boolean);
+    try {
+        const criteria = parseCriteria(raw);
+        return criteria.map(c => (c.criteria != null ? String(c.criteria).trim() : ''));
+    } catch {
+        return raw.split('\n')
+            .map(l => l.trim())
+            .filter(Boolean)
+            .map(l => l.replace(/^C\d+:\s*/i, '').trim())
+            .filter(Boolean);
+    }
 }
 
 function chipsToString(chips) {
@@ -315,7 +353,7 @@ function showSavePreviewModal(opts) {
                     <span style="font-weight: 700;">${icon} ${id}</span>
                     <span style="color: ${statusColor}; font-weight: 600;">${status}</span>
                 </div>
-                ${expl ? `<div style="font-size: 0.9rem; color: var(--text-secondary); margin-top: 0.35rem; line-height: 1.5;">${escHtml(expl)}</div>` : ''}
+                ${expl ? `<div style="font-size: 0.9rem; color: var(--text-secondary); margin-top: 0.35rem; line-height: 1.5;">${escapeHtml(expl)}</div>` : ''}
             </div>`;
     }).join('');
 
@@ -331,7 +369,7 @@ function showSavePreviewModal(opts) {
             <div style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 1rem;">
                 <div>
                     <label style="font-weight: 600; font-size: 0.9rem; display: block; margin-bottom: 0.5rem;">Ideal Response</label>
-                    <div style="max-height: 400px; overflow-y: auto; padding: 0.75rem; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border); font-size: 0.9rem; line-height: 1.6; white-space: pre-wrap;">${escHtml(idealResponse || '(empty)')}</div>
+                    <div style="max-height: 400px; overflow-y: auto; padding: 0.75rem; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border); font-size: 0.9rem; line-height: 1.6; white-space: pre-wrap;">${escapeHtml(idealResponse || '(empty)')}</div>
                 </div>
                 <div>
                     <label style="font-weight: 600; font-size: 0.9rem; display: block; margin-bottom: 0.5rem;">Judge Results</label>
@@ -376,10 +414,10 @@ function showSaveValidationModal(opts) {
     overlay.innerHTML = `
         <div class="tb-confirm-box" style="max-width: 480px;">
             <div class="tb-confirm-icon">${icon}</div>
-            <div class="tb-confirm-title" id="tb-validation-title">${escHtml(opts.title)}</div>
+            <div class="tb-confirm-title" id="tb-validation-title">${escapeHtml(opts.title)}</div>
             <div class="tb-confirm-msg" style="text-align: left;">
                 ${opts.message}
-                ${opts.details ? `<div style="margin-top: 1rem; padding: 0.75rem; background: var(--bg-primary); border-radius: 8px; font-size: 0.85rem; white-space: pre-wrap;">${escHtml(opts.details)}</div>` : ''}
+                ${opts.details ? `<div style="margin-top: 1rem; padding: 0.75rem; background: var(--bg-primary); border-radius: 8px; font-size: 0.85rem; white-space: pre-wrap;">${escapeHtml(opts.details)}</div>` : ''}
             </div>
             <div class="tb-confirm-actions">
                 <button class="tb-confirm-cancel tb-validation-ok">OK</button>
@@ -511,7 +549,7 @@ function renderCriteriaChips(disabled) {
             <input
                 class="tb-chip-input"
                 type="text"
-                value="${escHtml(text)}"
+                value="${escapeHtml(text)}"
                 placeholder="Criterion ${i + 1} description…"
                 data-chip-idx="${i}"
                 ${disabled ? 'disabled' : ''}
@@ -589,12 +627,6 @@ function wireChipEvents() {
 // Render — Active Tab Content
 // ─────────────────────────────────────────────────────────────────────────────
 
-function escHtml(str) {
-    return String(str ?? '')
-        .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-        .replace(/"/g,'&quot;');
-}
-
 function renderJudgeResult(run) {
     const jr = run.judgeResult;
     if (!jr) return '';
@@ -615,9 +647,9 @@ function renderJudgeResult(run) {
         const desc   = typeof crit === 'object' ? (crit.explanation || crit.description || '') : '';
         return `<div class="tb-crit-row ${rowCls}">
             <span class="tb-crit-icon">${icon}</span>
-            <span class="tb-crit-id">${escHtml(key)}</span>
-            <span class="tb-crit-val">${escHtml(String(val))}</span>
-            ${desc ? `<span class="tb-crit-desc">${escHtml(desc)}</span>` : ''}
+            <span class="tb-crit-id">${escapeHtml(key)}</span>
+            <span class="tb-crit-val">${escapeHtml(String(val))}</span>
+            ${desc ? `<span class="tb-crit-desc">${escapeHtml(desc)}</span>` : ''}
         </div>`;
     }).join('');
 
@@ -630,14 +662,14 @@ function renderJudgeResult(run) {
             ${overallScore !== null ? `<span class="tb-overall-score">Score: ${overallScore}</span>` : ''}
         </div>
         ${rows ? `<div class="tb-crit-list">${rows}</div>` : ''}
-        ${explanation ? `<div class="tb-judge-explanation">${escHtml(explanation)}</div>` : ''}
+        ${explanation ? `<div class="tb-judge-explanation">${escapeHtml(explanation)}</div>` : ''}
     </div>`;
 }
 
 function buildJudgeModelOptions(selectedModel) {
     return getJudgeModels().map(m => {
         const sel = m.id === selectedModel ? 'selected' : '';
-        return `<option value="${escHtml(m.id)}" ${sel}>${escHtml(m.name)}</option>`;
+        return `<option value="${escapeHtml(m.id)}" ${sel}>${escapeHtml(m.name)}</option>`;
     }).join('');
 }
 
@@ -657,7 +689,7 @@ function renderStatusBanner(run) {
     }
     if (run.status === 'error') {
         return `<div class="tb-status-banner tb-banner-error">
-            <strong>Something went wrong:</strong> ${escHtml(run.errorMessage || 'Unknown error. Please try again.')}
+            <strong>Something went wrong:</strong> ${escapeHtml(run.errorMessage || 'Unknown error. Please try again.')}
         </div>`;
     }
     return '';
@@ -672,7 +704,7 @@ function buildModelOptions(selectedModel) {
             seen.add(m.name);
             const sel = m.id === selectedModel ? 'selected' : '';
             const label = provider === 'openrouter' ? m.name : `${m.name} (${provider})`;
-            options.push(`<option value="${escHtml(m.id)}" data-provider="${provider}" ${sel}>${escHtml(label)}</option>`);
+            options.push(`<option value="${escapeHtml(m.id)}" data-provider="${provider}" ${sel}>${escapeHtml(label)}</option>`);
         }
     }
     return options.join('');
@@ -701,10 +733,10 @@ function renderActiveTab() {
                 class="tb-response-edit-ta"
                 id="tbResponseEdit-${run.id}"
                 spellcheck="false"
-              >${escHtml(run.response)}</textarea>`
+              >${escapeHtml(run.response)}</textarea>`
             : (typeof marked !== 'undefined'
                 ? `<div class="tb-response-markdown">${marked.parse(run.response)}</div>`
-                : `<pre class="tb-response-pre">${escHtml(run.response)}</pre>`)
+                : `<pre class="tb-response-pre">${escapeHtml(run.response)}</pre>`)
           )
         : `<div class="tb-response-placeholder">
                <div class="tb-placeholder-icon">◎</div>
@@ -732,7 +764,7 @@ function renderActiveTab() {
                         id="tbSharedPrompt"
                         placeholder="Enter your prompt here…"
                         rows="4"
-                    >${escHtml(left.prompt)}</textarea>
+                    >${escapeHtml(left.prompt)}</textarea>
                 </div>
 
                 <!-- Ideal Response (collapsible) -->
@@ -748,7 +780,7 @@ function renderActiveTab() {
                             id="tbSharedIdeal"
                             placeholder="Enter the ideal / standard response here…"
                             rows="8"
-                        >${escHtml(left.idealResponse)}</textarea>
+                        >${escapeHtml(left.idealResponse)}</textarea>
                     </div>
                 </div>
 
@@ -770,7 +802,7 @@ function renderActiveTab() {
                             class="tb-textarea tb-textarea-judge"
                             id="tbSharedJudge"
                             rows="12"
-                        >${escHtml(left.judgePrompt)}</textarea>
+                        >${escapeHtml(left.judgePrompt)}</textarea>
                     </div>
                 </div>
 
@@ -1046,12 +1078,19 @@ function initResizer(runId) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function triggerGenerate(run) {
+    persistTabEdits();
+    const left = getSharedLeft();
+
     if (!state.sessionId) {
         showToast('Please load a notebook first', 'error');
         return;
     }
-    if (!getSharedLeft().prompt.trim()) {
-        showToast('Please enter a prompt before generating', 'error');
+    const missing = [];
+    if (!(left.prompt || '').trim()) missing.push('Prompt');
+    if (!left.criteriaChips || left.criteriaChips.length === 0) missing.push('Criteria');
+    if (!(left.judgePrompt || '').trim()) missing.push('Judge System Prompt');
+    if (missing.length > 0) {
+        showToast(`Missing required field(s): ${missing.join(', ')}. Please fill in all fields before generating.`, 'error');
         return;
     }
 
@@ -1108,6 +1147,9 @@ async function triggerGenerate(run) {
 }
 
 async function triggerJudge(run) {
+    persistTabEdits();
+    const left = getSharedLeft();
+
     if (!state.sessionId) {
         showToast('Please load a notebook first', 'error');
         return;
@@ -1116,9 +1158,15 @@ async function triggerJudge(run) {
         showToast('Generate a response first', 'error');
         return;
     }
-    const left = getSharedLeft();
     if (!left.criteriaChips || left.criteriaChips.length === 0) {
         showToast('Add at least one criterion before judging', 'error');
+        return;
+    }
+    const formatCheck = validateJudgeOutputFormat(left.judgePrompt);
+    if (!formatCheck.valid) {
+        showToast(formatCheck.message, 'error');
+        document.getElementById('tbSharedJudgeBody')?.classList.remove('tb-collapsed');
+        document.getElementById('tbSharedJudge')?.focus();
         return;
     }
 
@@ -1211,7 +1259,7 @@ export function showNotebookPreview(run) {
 
     const md = typeof marked !== 'undefined'
         ? (s) => marked.parse(s)
-        : (s) => `<pre>${escHtml(s)}</pre>`;
+        : (s) => `<pre>${escapeHtml(s)}</pre>`;
 
     // Score pill
     const scorePill = run?.score != null
@@ -1223,17 +1271,17 @@ export function showNotebookPreview(run) {
         ? criterias.map((c, i) => `
             <div class="nbp-criteria-item">
                 <span class="nbp-criteria-num">C${i + 1}</span>
-                <span class="nbp-criteria-text">${escHtml(c)}</span>
+                <span class="nbp-criteria-text">${escapeHtml(c)}</span>
             </div>`).join('')
         : '<span class="nbp-empty">No criteria defined</span>';
 
     // Metadata tags
     const metaTags = [
-        nb.category   && `<span class="nbp-tag">${escHtml(nb.category)}</span>`,
-        nb.difficulty && `<span class="nbp-tag nbp-tag-diff">${escHtml(nb.difficulty)}</span>`,
-        nb.domain     && `<span class="nbp-tag">${escHtml(nb.domain)}</span>`,
-        nb.language   && `<span class="nbp-tag">${escHtml(nb.language)}</span>`,
-        nb.task_type  && `<span class="nbp-tag">${escHtml(nb.task_type)}</span>`,
+        nb.category   && `<span class="nbp-tag">${escapeHtml(nb.category)}</span>`,
+        nb.difficulty && `<span class="nbp-tag nbp-tag-diff">${escapeHtml(nb.difficulty)}</span>`,
+        nb.domain     && `<span class="nbp-tag">${escapeHtml(nb.domain)}</span>`,
+        nb.language   && `<span class="nbp-tag">${escapeHtml(nb.language)}</span>`,
+        nb.task_type  && `<span class="nbp-tag">${escapeHtml(nb.task_type)}</span>`,
     ].filter(Boolean).join('');
 
     const overlay = document.createElement('div');
@@ -1246,7 +1294,7 @@ export function showNotebookPreview(run) {
                 <span class="nbp-nav-icon">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
                 </span>
-                <span class="nbp-nav-title">${escHtml(nb.title || 'Notebook')}</span>
+                <span class="nbp-nav-title">${escapeHtml(nb.title || 'Notebook')}</span>
                 <span class="nbp-nav-badge">Preview</span>
             </div>
             <div class="nbp-nav-actions">
@@ -1261,7 +1309,7 @@ export function showNotebookPreview(run) {
 
                   <!-- Title + meta tags -->
                   <header class="nbp-doc-header">
-                      ${nb.title ? `<h1 class="nbp-doc-title">${escHtml(nb.title)}</h1>` : ''}
+                      ${nb.title ? `<h1 class="nbp-doc-title">${escapeHtml(nb.title)}</h1>` : ''}
                       ${metaTags ? `<div class="nbp-tags-row">${metaTags}</div>` : ''}
                       <p class="nbp-doc-hint">Ideal response committed — read only. Happy with it? Continue to set up the hunt.</p>
                   </header>
@@ -1302,7 +1350,7 @@ export function showNotebookPreview(run) {
                         <span class="nbp-section-dot nbp-dot-judge"></span>
                         Judge System Prompt
                     </div>
-                    <pre class="nbp-judge-pre">${escHtml(judgePrompt)}</pre>
+                    <pre class="nbp-judge-pre">${escapeHtml(judgePrompt)}</pre>
                 </section>` : ''}
 
 
@@ -1572,6 +1620,16 @@ async function saveRunToTurn() {
             return;
         }
 
+        const formatCheck = validateJudgeOutputFormat(left.judgePrompt);
+        if (!formatCheck.valid) {
+            showSaveValidationModal({
+                type: 'missing',
+                title: 'Judge Output Format Required',
+                message: formatCheck.message,
+            });
+            return;
+        }
+
         if (!state.sessionId) {
             showSaveValidationModal({
                 type: 'error',
@@ -1581,24 +1639,31 @@ async function saveRunToTurn() {
             return;
         }
 
-        if (saveBtn) saveBtn.textContent = 'Verifying...';
+        if (saveBtn) saveBtn.textContent = 'Saving to Colab...';
 
-        // 2. Save to backend so judge-reference uses latest data (criteria as JSON)
+        // 2. Save to Colab first (then judge). Send colab_url so backend can write to Drive.
         const cells = [];
         if (left.prompt) cells.push({ cell_type: 'prompt', content: left.prompt });
         if (left.idealResponse) cells.push({ cell_type: 'response', content: left.idealResponse });
         if (criteriaJson) cells.push({ cell_type: 'response_reference', content: criteriaJson });
         if (left.judgePrompt) cells.push({ cell_type: 'judge_system_prompt', content: left.judgePrompt });
 
+        const colabUrl = (state.notebook?.url || document.getElementById('colabUrlInput')?.value || '').trim() || undefined;
         const saveRes = await fetch(`/api/update-notebook-cells/${state.sessionId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ cells, session_only: false }),  // Save to Colab when URL available
+            body: JSON.stringify({ cells, session_only: false, colab_url: colabUrl }),
         });
         if (!saveRes.ok) {
             const err = await saveRes.json().catch(() => ({}));
             throw new Error(err.detail || err.message || `Save failed: ${saveRes.status}`);
         }
+        const saveData = await saveRes.json().catch(() => ({}));
+        if (saveData.message && saveData.message.includes('Colab')) {
+            showToast(saveData.message, 'success');
+        }
+
+        if (saveBtn) saveBtn.textContent = 'Judging...';
 
         // 3. Judge ideal response (always run for modal display; bypass only affects hunt gate)
         const bypass = getConfigValue('bypass_hunt_criteria', false);
@@ -1700,7 +1765,7 @@ export function renderPriorConversationBanner() {
     }
 
     const isCollapsed = localStorage.getItem(BANNER_COLLAPSE_KEY) === 'true';
-    const md = typeof marked !== 'undefined' ? (s) => marked.parse(s) : (s) => `<pre>${escHtml(s)}</pre>`;
+    const md = typeof marked !== 'undefined' ? (s) => marked.parse(s) : (s) => `<pre>${escapeHtml(s)}</pre>`;
 
     const turnsHtml = turns.map((t, idx) => {
         const n          = t.turnNumber ?? t.turn_number ?? idx + 1;

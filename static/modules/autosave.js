@@ -310,26 +310,6 @@ export async function initAutosave() {
 }
 
 /**
- * Restore draft from localStorage (call when appropriate, e.g. after session load if recovering from crash).
- */
-export function restoreDraftFromStorage() {
-    if (!state.sessionId) return;
-    try {
-        const raw = localStorage.getItem(DRAFT_KEY());
-        if (!raw) return;
-        const draft = JSON.parse(raw);
-        const promptInput = document.getElementById('promptMarkdown');
-        const responseInput = document.getElementById('responseMarkdown');
-        const modelrefInput = document.getElementById('modelrefPreview');
-        const judgeInput = document.getElementById('judgeMarkdown');
-        if (promptInput && draft.prompt != null) promptInput.value = draft.prompt;
-        if (responseInput && draft.response != null) responseInput.value = draft.response;
-        if (modelrefInput && draft.response_reference != null) modelrefInput.value = draft.response_reference;
-        if (judgeInput && draft.judge_system_prompt != null) judgeInput.value = draft.judge_system_prompt;
-    } catch (_) {}
-}
-
-/**
  * Wire auto-save for next turn editor (Turn 2+).
  * Saves draft to session via advance-turn draft endpoint or localStorage.
  * For now we use localStorage - no backend draft endpoint.
@@ -372,15 +352,6 @@ export function initNextTurnAutosave() {
         if (nextCriteria && draft.criteria) nextCriteria.value = draft.criteria;
         if (nextJudge && draft.judge) nextJudge.value = draft.judge;
     } catch (_) {}
-}
-
-/**
- * Clear next turn draft when hunt starts.
- */
-export function clearNextTurnDraft() {
-    if (state.sessionId) {
-        localStorage.removeItem(`modelhunter_next_turn_draft_${state.sessionId}`);
-    }
 }
 
 /**

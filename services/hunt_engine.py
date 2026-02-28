@@ -43,6 +43,7 @@ from models.schemas import (
 )
 from services.openrouter_client import get_openrouter_client
 from services.openai_client import get_openai_judge_client
+from services.aggregation import classify_sample, aggregate_batch
 import services.redis_session as store
 import services.event_stream as events
 
@@ -267,6 +268,326 @@ class HuntEngine:
                 except Exception:
                     pass
 
+    # ------------------------------------------------------------------
+    # InverseIF episode: run batches until proceed or budget
+    # ------------------------------------------------------------------
+
+    async def _run_single_hunt_for_batch(
+        self,
+        session_id: str,
+        hunt_id: int,
+        model: str,
+        config: HuntConfig,
+        notebook: ParsedNotebook,
+    ) -> HuntResult:
+        """Run one sample: model + judge + classify. No Redis append or counter update (caller does)."""
+        result = HuntResult(
+            hunt_id=hunt_id,
+            model=model,
+            status=HuntStatus.RUNNING
+        )
+        await events.publish(session_id, HuntEvent(
+            event_type="hunt_start",
+            hunt_id=hunt_id,
+            data={"model": model}
+        ))
+        rate_limiter = get_rate_limiter() if _rate_limiter_enabled else None
+        provider = getattr(config, 'provider', 'openrouter')
+        conversation_history = config.conversation_history or []
+        messages_kwarg = {"messages": conversation_history} if conversation_history else {}
+        pass_threshold = 1.0 if getattr(config, "passing_mode", False) else getattr(config, "pass_threshold", 0.5)
+        break_mode = getattr(config, "break_mode", "ratio")
+
+        try:
+            await events.publish(session_id, HuntEvent(
+                event_type="hunt_progress",
+                hunt_id=hunt_id,
+                data={"step": "model_thinking", "message": "Model thinking"}
+            ))
+            if provider == 'fireworks':
+                from services.fireworks_client import get_fireworks_client
+                client = get_fireworks_client()
+                if rate_limiter:
+                    async with rate_limiter.acquire("fireworks"):
+                        response, reasoning, error = await client.call_with_retry(
+                            prompt=notebook.prompt, model=model,
+                            max_retries=config.max_retries, **messages_kwarg
+                        )
+                else:
+                    response, reasoning, error = await client.call_with_retry(
+                        prompt=notebook.prompt, model=model,
+                        max_retries=config.max_retries, **messages_kwarg
+                    )
+            else:
+                client = get_openrouter_client()
+                if rate_limiter:
+                    async with rate_limiter.acquire("openrouter"):
+                        response, reasoning, error = await client.call_with_retry(
+                            prompt=notebook.prompt, model=model,
+                            max_retries=config.max_retries,
+                            reasoning_budget_percent=config.reasoning_budget_percent,
+                            **messages_kwarg
+                        )
+                else:
+                    response, reasoning, error = await client.call_with_retry(
+                        prompt=notebook.prompt, model=model,
+                        max_retries=config.max_retries,
+                        reasoning_budget_percent=config.reasoning_budget_percent,
+                        **messages_kwarg
+                    )
+
+            if error:
+                result.status = HuntStatus.FAILED
+                result.judge_score = None
+                result.is_breaking = False
+                result.sample_label = "ERROR"
+                result.error = f"⚠️ Model failed: {error}"
+                result.response = ""
+                result.reasoning_trace = reasoning or ""
+                return result
+            if not response or not response.strip():
+                result.status = HuntStatus.FAILED
+                result.judge_score = None
+                result.is_breaking = False
+                result.sample_label = "ERROR"
+                result.error = "⚠️ Model returned empty response"
+                result.response = ""
+                result.reasoning_trace = reasoning or ""
+                return result
+
+            result.response = response
+            result.reasoning_trace = reasoning or ""
+            await events.publish(session_id, HuntEvent(
+                event_type="hunt_progress",
+                hunt_id=hunt_id,
+                data={"step": "judging", "message": "Judging"}
+            ))
+            await self._judge_response(config, notebook, result)
+
+            # Classify for aggregation: set sample_label, pass_rate, counts; is_breaking from label
+            classified = classify_sample(
+                result.judge_criteria,
+                break_mode,
+                pass_threshold,
+            )
+            result.sample_label = classified["label"]
+            result.pass_rate = classified["pass_rate"]
+            result.pass_count = classified.get("pass_count")
+            result.fail_count = classified.get("fail_count")
+            result.missing_count = classified.get("missing_count")
+            result.is_breaking = result.sample_label == "BREAK"
+            result.status = HuntStatus.COMPLETED
+        except Exception as e:
+            result.status = HuntStatus.FAILED
+            result.error = f"⚠️ Error: {str(e)}"
+            result.sample_label = "ERROR"
+            result.is_breaking = False
+        return result
+
+    async def _run_batch(
+        self,
+        session_id: str,
+        batch_index: int,
+        config: HuntConfig,
+        notebook: ParsedNotebook,
+    ) -> List[HuntResult]:
+        """Run exactly config.batch_size samples in parallel; hunt_id = hunt_offset + batch_index*batch_size + sample_index + 1."""
+        batch_size = getattr(config, "batch_size", 4)
+        tasks = []
+        for sample_index in range(batch_size):
+            hunt_id = config.hunt_offset + batch_index * batch_size + sample_index + 1
+            model = config.models[(batch_index * batch_size + sample_index) % len(config.models)]
+            tasks.append(self._run_single_hunt_for_batch(session_id, hunt_id, model, config, notebook))
+        results = await asyncio.gather(*tasks)
+        results_sorted = sorted(results, key=lambda r: r.hunt_id)
+        for result in results_sorted:
+            await store.append_result(session_id, result)
+            completed = await store.incr_completed_hunts(session_id)
+            if result.sample_label == "BREAK":
+                await store.incr_breaks_found(session_id)
+            elif result.sample_label == "PASS" and getattr(config, "passing_mode", False):
+                await store.incr_passes_found(session_id)
+            meta = await store.get_meta(session_id)
+            total = int(meta.get("total_hunts", 0))
+            breaks = int(meta.get("breaks_found", 0))
+            passes = int(meta.get("passes_found", 0))
+            await events.publish(session_id, HuntEvent(
+                event_type="hunt_result",
+                hunt_id=result.hunt_id,
+                data={
+                    "status": result.status.value,
+                    "score": result.judge_score,
+                    "is_breaking": result.is_breaking,
+                    "sample_label": result.sample_label,
+                    "error": result.error,
+                    "response": result.response,
+                    "reasoning_trace": result.reasoning_trace,
+                    "model": result.model,
+                    "completed": completed,
+                    "total": total,
+                    "breaks": breaks,
+                    "passes": passes,
+                }
+            ))
+        return results_sorted
+
+    async def run_episode_until_proceed(self, session_id: str) -> HuntSession:
+        """
+        Run batches until aggregate_batch says should_proceed, or budgets (batches, samples, wall time) exceeded.
+        On error_samples > 0: rehunt up to max_error_batches; if still errors set NEEDS_ATTENTION.
+        """
+        config = await store.get_config(session_id)
+        notebook = await store.get_notebook(session_id)
+        if not config or not notebook:
+            raise ValueError(f"Session {session_id} not found or missing config/notebook")
+
+        batch_size = getattr(config, "batch_size", 4)
+        max_batches = getattr(config, "max_batches_per_turn", 4)
+        max_samples = getattr(config, "max_total_samples", 64)
+        max_wall = getattr(config, "max_wall_time_seconds", 900)
+        max_error_batches = getattr(config, "max_error_batches", 2)
+        run_start_id = config.hunt_offset
+
+        await store.clear_results(session_id)
+        await store.set_hunt_counters(
+            session_id,
+            total_hunts=batch_size * max_batches,
+            completed_hunts=0,
+            breaks_found=0,
+            passes_found=0,
+        )
+        await store.set_status(session_id, HuntStatus.RUNNING)
+
+        await events.publish(session_id, HuntEvent(
+            event_type="start",
+            data={
+                "session_id": session_id,
+                "total_hunts": batch_size * max_batches,
+                "target_breaks": config.target_breaks,
+                "run_start_id": run_start_id,
+            }
+        ))
+
+        episode_start = datetime.utcnow()
+        batch_index = 0
+        error_batches_run = 0
+
+        try:
+            while True:
+                if batch_index >= max_batches:
+                    await store.set_status(session_id, HuntStatus.STOPPED_BUDGET)
+                    await events.publish(session_id, HuntEvent(
+                        event_type="complete",
+                        data={
+                            "session_id": session_id,
+                            "reason": "max_batches_per_turn",
+                            "status": HuntStatus.STOPPED_BUDGET.value,
+                        }
+                    ))
+                    break
+
+                total_so_far = batch_index * batch_size
+                if total_so_far + batch_size > max_samples:
+                    await store.set_status(session_id, HuntStatus.STOPPED_BUDGET)
+                    await events.publish(session_id, HuntEvent(
+                        event_type="complete",
+                        data={
+                            "session_id": session_id,
+                            "reason": "max_total_samples",
+                            "status": HuntStatus.STOPPED_BUDGET.value,
+                        }
+                    ))
+                    break
+
+                elapsed = (datetime.utcnow() - episode_start).total_seconds()
+                if elapsed >= max_wall:
+                    await store.set_status(session_id, HuntStatus.STOPPED_BUDGET)
+                    await events.publish(session_id, HuntEvent(
+                        event_type="complete",
+                        data={
+                            "session_id": session_id,
+                            "reason": "max_wall_time_seconds",
+                            "status": HuntStatus.STOPPED_BUDGET.value,
+                        }
+                    ))
+                    break
+
+                batch_results = await self._run_batch(session_id, batch_index, config, notebook)
+                labels = [r.sample_label or "ERROR" for r in batch_results]
+                agg = aggregate_batch(labels, config)
+
+                await events.publish(session_id, HuntEvent(
+                    event_type="batch_aggregated",
+                    data={
+                        "batch_index": batch_index,
+                        "breaking": agg["breaking"],
+                        "passing": agg["passing"],
+                        "errors": agg["errors"],
+                        "should_proceed": agg["should_proceed"],
+                        "reason": agg["reason"],
+                    }
+                ))
+
+                if agg["errors"] > 0:
+                    missing_info = [
+                        {"hunt_id": r.hunt_id, "reason": r.error or "MISSING criteria"}
+                        for r in batch_results if r.sample_label == "ERROR"
+                    ]
+                    await events.publish(session_id, HuntEvent(
+                        event_type="batch_warning",
+                        data={"missing_ids": [x["hunt_id"] for x in missing_info], "reasons": missing_info}
+                    ))
+                    error_batches_run += 1
+                    if error_batches_run > max_error_batches:
+                        await store.set_status(session_id, HuntStatus.NEEDS_ATTENTION)
+                        await events.publish(session_id, HuntEvent(
+                            event_type="complete",
+                            data={
+                                "session_id": session_id,
+                                "reason": "persistent_errors",
+                                "status": HuntStatus.NEEDS_ATTENTION.value,
+                            }
+                        ))
+                        break
+                    batch_index += 1
+                    continue
+
+                if agg["should_proceed"]:
+                    await store.set_status(session_id, HuntStatus.COMPLETED)
+                    break
+
+                batch_index += 1
+
+        except Exception as e:
+            await store.set_status(session_id, HuntStatus.FAILED)
+            await events.publish(session_id, HuntEvent(event_type="error", data={"error": str(e)}))
+
+        # Accumulate and final event
+        current_results = await store.get_results(session_id)
+        for result in current_results:
+            if result.status == HuntStatus.COMPLETED:
+                await store.append_all_result(session_id, result)
+        new_count = config.hunt_offset + (batch_index + 1) * batch_size
+        await store.set_accumulated_hunt_count(session_id, new_count)
+        meta = await store.get_meta(session_id)
+        all_results = await store.get_all_results(session_id)
+        final_status = await store.get_status(session_id)
+
+        await events.publish(session_id, HuntEvent(
+            event_type="complete",
+            data={
+                "session_id": session_id,
+                "completed_hunts": int(meta.get("completed_hunts", 0)),
+                "breaks_found": int(meta.get("breaks_found", 0)),
+                "passes_found": int(meta.get("passes_found", 0)),
+                "passing_mode": getattr(config, "passing_mode", False),
+                "success": True,
+                "total_accumulated": len(all_results),
+                "status": final_status.value,
+            }
+        ))
+        return await store.get_full_session(session_id)
+
     async def _run_single_hunt(
         self,
         session_id: str,
@@ -452,7 +773,6 @@ class HuntEngine:
                     judge_system_prompt=judge_system,
                     judge_prompt_template=notebook.judge_prompt_template,
                     model=config.judge_model,
-                    independent_judging=True,
                     standard_response=notebook.response,
                     pass_threshold=1.0 if getattr(config, "passing_mode", False) else getattr(config, "pass_threshold", 0.5),
                 )

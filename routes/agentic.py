@@ -26,166 +26,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["agentic"])
 
 
-class PreflightRequest(BaseModel):
-    selected_hunt_ids: list[int]
-
-
 class FinalReviewRequest(BaseModel):
     selected_hunt_ids: list[int]
     human_reviews: dict  # { "hunt_id": { "grades": {...}, "explanation": str, "submitted": bool } }
-
-
-@router.post("/review-preflight/{session_id}")
-async def review_preflight(session_id: str, req: PreflightRequest):
-    """
-    Run agentic pre-flight check before human review.
-    Returns { passed, issues, checkpoint, timestamp }.
-    """
-    if not req.selected_hunt_ids or len(req.selected_hunt_ids) != 4:
-        raise HTTPException(
-            status_code=400,
-            detail="Preflight requires selected_hunt_ids with exactly 4 IDs",
-        )
-
-    try:
-        from agentic_reviewer import build_snapshot, run_review
-    except ImportError as e:
-        logger.exception("Failed to import agentic_reviewer")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Agentic reviewer not available: {e}",
-        )
-
-    session = await _get_validated_session(session_id)
-    all_results = await hunt_engine.export_results_async(session_id)
-
-    # Build session dict for agentic_reviewer (export_results_async returns list of dicts)
-    session_dict = {
-        "session_id": session.session_id,
-        "notebook": session.notebook.model_dump() if session.notebook else {},
-        "config": session.config.model_dump() if session.config else {},
-        "all_results": all_results,
-        "current_turn": getattr(session, "current_turn", 1),
-        "human_reviews": getattr(session, "human_reviews", {}) or {},
-    }
-
-    snapshot = build_snapshot(
-        session_dict,
-        "preflight",
-        selected_hunt_ids=req.selected_hunt_ids,
-    )
-    result = run_review(snapshot)
-
-    return {
-        "passed": result.passed,
-        "issues": [i.model_dump() for i in result.issues],
-        "checkpoint": result.checkpoint,
-        "timestamp": result.timestamp,
-    }
-
-
-@router.post("/review-final/{session_id}")
-async def review_final(session_id: str, req: FinalReviewRequest):
-    """
-    Run agentic final QA check before saving to Colab.
-    Requires human reviews. Returns { passed, issues, checkpoint, timestamp }.
-    """
-    if not req.selected_hunt_ids or len(req.selected_hunt_ids) != 4:
-        raise HTTPException(
-            status_code=400,
-            detail="Final review requires selected_hunt_ids with exactly 4 IDs",
-        )
-    if not req.human_reviews or len(req.human_reviews) < 4:
-        raise HTTPException(
-            status_code=400,
-            detail="Final review requires human_reviews for all 4 selected hunts",
-        )
-
-    try:
-        from agentic_reviewer import build_snapshot, run_review
-    except ImportError as e:
-        logger.exception("Failed to import agentic_reviewer")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Agentic reviewer not available: {e}",
-        )
-
-    session = await _get_validated_session(session_id)
-    all_results = await hunt_engine.export_results_async(session_id)
-
-    # Build human_reviews in agentic format: { "hunt_id": { grades, explanation, submitted } }
-    human_reviews_for_agentic = {}
-    for hid in req.selected_hunt_ids:
-        key = str(hid)
-        if key in req.human_reviews:
-            r = req.human_reviews[key]
-            grading_basis = r.get("grading_basis") or r.get("grades") or {}
-            grades = {k: str(v).lower() for k, v in grading_basis.items()}
-            human_reviews_for_agentic[key] = {
-                "grades": grades,
-                "explanation": str(r.get("explanation", "")),
-                "submitted": True,
-            }
-
-    session_dict = {
-        "session_id": session.session_id,
-        "notebook": session.notebook.model_dump() if session.notebook else {},
-        "config": session.config.model_dump() if session.config else {},
-        "all_results": all_results,
-        "current_turn": getattr(session, "current_turn", 1),
-        "human_reviews": human_reviews_for_agentic,
-    }
-
-    snapshot = build_snapshot(session_dict, "final")
-    result = run_review(snapshot)
-
-    # Build evaluation data for UI (slot-by-slot comparison) — always include for trainer learning
-    human_by_id = {r.hunt_id: r for r in snapshot.human_reviews}
-    eval_slots = []
-    for i, hunt in enumerate(snapshot.selected_hunts[:4], 1):
-        human = human_by_id.get(hunt.hunt_id)
-        llm_criteria = hunt.judge_criteria or {}
-        human_grades = human.grades if human else {}
-        disagreements = []
-        for cid in set(llm_criteria.keys()) | set(human_grades.keys()):
-            h_val = str(human_grades.get(cid, "")).lower() if human_grades.get(cid) else None
-            l_val = str(llm_criteria.get(cid, "")).lower() if llm_criteria.get(cid) else None
-            if h_val and l_val and h_val != l_val:
-                disagreements.append({"criterion": cid, "human": h_val, "llm": l_val})
-        eval_slots.append({
-            "slot": i,
-            "hunt_id": hunt.hunt_id,
-            "model": hunt.model,
-            "response_preview": (hunt.response or "")[:300],
-            "human_grades": human_grades if human else {},
-            "human_explanation": (human.explanation or "")[:500] if human else "",
-            "llm_judge_score": hunt.judge_score,
-            "llm_judge_criteria": llm_criteria,
-            "llm_judge_explanation": (hunt.judge_explanation or "")[:500],
-            "disagreements": disagreements,
-        })
-    evaluation = {
-        "slots": eval_slots,
-        "prompt": (snapshot.prompt or "")[:1000],
-        "criteria": [{"id": c.get("id"), "description": (c.get("description") or "")[:200]} for c in snapshot.criteria],
-    }
-
-    # Ensure human_llm_grade_alignment issue has full details (slots, etc.) for evaluation page
-    issues_out = []
-    for i in result.issues:
-        d = i.model_dump()
-        if i.rule_id == "human_llm_grade_alignment":
-            existing = d.get("details") or {}
-            d["details"] = {**evaluation, "council_votes": existing.get("council_votes", []), **existing}
-        issues_out.append(d)
-
-    return {
-        "passed": result.passed,
-        "issues": issues_out,
-        "checkpoint": result.checkpoint,
-        "timestamp": result.timestamp,
-        "evaluation": evaluation,
-    }
 
 
 def _get_council_prompt(rule_id, snapshot, params):
@@ -205,6 +48,32 @@ def _get_council_prompt(rule_id, snapshot, params):
     return fn(snapshot)
 
 
+def _build_eval_slots(snapshot):
+    """Build eval slot dicts from snapshot.selected_hunts[:4] with human review data."""
+    human_by_id = {r.hunt_id: r for r in snapshot.human_reviews}
+    slots = []
+    for i, hunt in enumerate(snapshot.selected_hunts[:4], 1):
+        human = human_by_id.get(hunt.hunt_id)
+        llm_criteria = hunt.judge_criteria or {}
+        human_grades = human.grades if human else {}
+        disagreements = []
+        for cid in set(llm_criteria.keys()) | set(human_grades.keys()):
+            h_val = str(human_grades.get(cid, "")).lower() if human_grades.get(cid) else None
+            l_val = str(llm_criteria.get(cid, "")).lower() if llm_criteria.get(cid) else None
+            if h_val and l_val and h_val != l_val:
+                disagreements.append({"criterion": cid, "human": h_val, "llm": l_val})
+        slots.append({
+            "slot": i, "hunt_id": hunt.hunt_id, "model": hunt.model,
+            "response_preview": (hunt.response or "")[:300],
+            "human_grades": human_grades if human else {},
+            "human_explanation": (human.explanation or "")[:500] if human else "",
+            "llm_judge_score": hunt.judge_score, "llm_judge_criteria": llm_criteria,
+            "llm_judge_explanation": (hunt.judge_explanation or "")[:500],
+            "disagreements": disagreements,
+        })
+    return slots
+
+
 def _build_council_issue(rule_id, snapshot, votes, params):
     """Build ReviewIssue for a council rule that failed."""
     from agentic_reviewer.schemas import ReviewIssue, IssueSeverity
@@ -213,27 +82,7 @@ def _build_council_issue(rule_id, snapshot, votes, params):
     task_meta = (getattr(snapshot, "metadata", {}) or {}).get("task_metadata") or {}
 
     if rule_id == "human_llm_grade_alignment":
-        human_by_id = {r.hunt_id: r for r in snapshot.human_reviews}
-        slots = []
-        for i, hunt in enumerate(snapshot.selected_hunts[:4], 1):
-            human = human_by_id.get(hunt.hunt_id)
-            llm_criteria = hunt.judge_criteria or {}
-            human_grades = human.grades if human else {}
-            disagreements = []
-            for cid in set(llm_criteria.keys()) | set(human_grades.keys()):
-                h_val = str(human_grades.get(cid, "")).lower() if human_grades.get(cid) else None
-                l_val = str(llm_criteria.get(cid, "")).lower() if llm_criteria.get(cid) else None
-                if h_val and l_val and h_val != l_val:
-                    disagreements.append({"criterion": cid, "human": h_val, "llm": l_val})
-            slots.append({
-                "slot": i, "hunt_id": hunt.hunt_id, "model": hunt.model,
-                "response_preview": (hunt.response or "")[:300],
-                "human_grades": human_grades if human else {},
-                "human_explanation": (human.explanation or "")[:500] if human else "",
-                "llm_judge_score": hunt.judge_score, "llm_judge_criteria": llm_criteria,
-                "llm_judge_explanation": (hunt.judge_explanation or "")[:500],
-                "disagreements": disagreements,
-            })
+        slots = _build_eval_slots(snapshot)
         return ReviewIssue(rule_id=rule_id, severity=IssueSeverity.ERROR,
             message=f"Council detected a significant disagreement between human and LLM grading. Votes: {vote_summary}",
             hint="Review your grades and explanations. Ensure they align with the LLM judge criteria.",
@@ -373,31 +222,7 @@ def _stream_review_events(snapshot):
                 rule_done_payload["council_responses"] = council_responses
         yield f"data: {json.dumps(rule_done_payload)}\n\n"
 
-    # Build evaluation (same as review_final)
-    human_by_id = {r.hunt_id: r for r in snapshot.human_reviews}
-    eval_slots = []
-    for i, hunt in enumerate(snapshot.selected_hunts[:4], 1):
-        human = human_by_id.get(hunt.hunt_id)
-        llm_criteria = hunt.judge_criteria or {}
-        human_grades = human.grades if human else {}
-        disagreements = []
-        for cid in set(llm_criteria.keys()) | set(human_grades.keys()):
-            h_val = str(human_grades.get(cid, "")).lower() if human_grades.get(cid) else None
-            l_val = str(llm_criteria.get(cid, "")).lower() if llm_criteria.get(cid) else None
-            if h_val and l_val and h_val != l_val:
-                disagreements.append({"criterion": cid, "human": h_val, "llm": l_val})
-        eval_slots.append({
-            "slot": i,
-            "hunt_id": hunt.hunt_id,
-            "model": hunt.model,
-            "response_preview": (hunt.response or "")[:300],
-            "human_grades": human_grades if human else {},
-            "human_explanation": (human.explanation or "")[:500] if human else "",
-            "llm_judge_score": hunt.judge_score,
-            "llm_judge_criteria": llm_criteria,
-            "llm_judge_explanation": (hunt.judge_explanation or "")[:500],
-            "disagreements": disagreements,
-        })
+    eval_slots = _build_eval_slots(snapshot)
     evaluation = {
         "slots": eval_slots,
         "prompt": (snapshot.prompt or "")[:1000],

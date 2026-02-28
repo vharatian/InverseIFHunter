@@ -8,7 +8,7 @@
 
 import { elements } from './dom.js';
 import { state } from './state.js';
-import { renderInsightTip } from './utils.js';
+import { renderInsightTip, parseCriteriaToJSON } from './utils.js';
 import { showToast } from './celebrations.js';
 import { getProviderModels, getJudgeModels, getConfigValue } from './config.js';
 import { validateModelReferenceAndCriteria, invalidateReferenceJudge } from './notebook.js';
@@ -251,10 +251,6 @@ export function initRichTextEditors() {
     initMarkdownEditors();
 }
 
-export function updateToolbarState(toolbar, editor) {
-    // No-op for Markdown editors (kept for backward compatibility)
-}
-
 // Initialize resizable split view panels
 export function initResizablePanels() {
     document.querySelectorAll('.resize-handle').forEach(handle => {
@@ -363,9 +359,9 @@ export function initStructuredInput() {
 
 export function convertStructuredToJSON() {
     if (!elements.modelrefPreview) return;
-    
+
     const inputText = elements.modelrefPreview.value.trim();
-    
+
     if (!inputText) {
         if (elements.jsonPreviewContent) {
             elements.jsonPreviewContent.textContent = 'Enter criteria above to see JSON preview...';
@@ -377,92 +373,31 @@ export function convertStructuredToJSON() {
         state.convertedModelRefJSON = null;
         return;
     }
-    
+
     try {
-        // First, try to parse as JSON directly (user might paste JSON)
-        let criteria = null;
-        let jsonString = null;
-        
-        try {
-            const parsed = JSON.parse(inputText);
-            
-            // Check if it's already a valid criteria array
-            if (Array.isArray(parsed) && parsed.length > 0) {
-                // Validate structure: should have id and criteria fields
-                const isValid = parsed.every(item => 
-                    item && 
-                    typeof item === 'object' && 
-                    item.id && 
-                    Object.keys(item).some(key => key.startsWith('criteria'))
-                );
-                
-                if (isValid) {
-                    // It's already valid JSON criteria format - use it directly
-                    criteria = parsed;
-                    jsonString = JSON.stringify(criteria, null, 2);
-                } else {
-                    // Invalid structure, fall through to structured text parsing
-                    throw new Error('Invalid JSON structure');
-                }
-            } else {
-                // Not an array, fall through to structured text parsing
-                throw new Error('Not a valid criteria array');
-            }
-        } catch (jsonError) {
-            // Not valid JSON or not in expected format, try structured text format
-            
-            // Parse structured text format: C1: description, C2: description, etc.
-            const lines = inputText.split('\n').filter(line => line.trim());
-            criteria = [];
-            
-            lines.forEach((line, index) => {
-                line = line.trim();
-                if (!line) return;
-                
-                // Match pattern: C1: description or C1 description
-                const match = line.match(/^C(\d+)[:\s]+(.+)$/i);
-                if (match) {
-                    const id = `C${match[1]}`;
-                    const description = match[2].trim();
-                    criteria.push({
-                        id: id,
-                        [`criteria${match[1]}`]: description
-                    });
-                } else {
-                    // If no match, try to infer from line number
-                    const inferredId = `C${index + 1}`;
-                    criteria.push({
-                        id: inferredId,
-                        [`criteria${index + 1}`]: line
-                    });
-                }
-            });
-            
-            if (criteria.length === 0) {
-                throw new Error('No valid criteria found. Use format: C1: description, or paste valid JSON array');
-            }
-            
-            // Convert to JSON string
-            jsonString = JSON.stringify(criteria, null, 2);
+        const jsonString = parseCriteriaToJSON(inputText);
+        const parsed = JSON.parse(jsonString);
+        const isValid = Array.isArray(parsed) && parsed.length > 0 &&
+            parsed.every(item =>
+                item && typeof item === 'object' && item.id &&
+                Object.keys(item).some(key => key.startsWith('criteria'))
+            );
+
+        if (!isValid) {
+            throw new Error('No valid criteria found. Use format: C1: description, or paste valid JSON array');
         }
-        
-        // Store the JSON (display removed from UI)
+
         if (elements.jsonPreviewContent) {
             elements.jsonPreviewContent.textContent = jsonString;
             elements.jsonPreviewContent.className = 'json-preview-content valid';
         }
         if (elements.jsonPreviewStatus) {
-            elements.jsonPreviewStatus.textContent = `✅ Valid (${criteria.length} criteria)`;
+            elements.jsonPreviewStatus.textContent = `✅ Valid (${parsed.length} criteria)`;
             elements.jsonPreviewStatus.style.color = 'var(--success)';
         }
-        
-        // Store converted JSON in state for saving
+
         state.convertedModelRefJSON = jsonString;
-        
-        // Validate the JSON and update button state
-        // Use the converted JSON for validation
         validateModelReferenceAndCriteria(jsonString);
-        
     } catch (error) {
         if (elements.jsonPreviewContent) {
             elements.jsonPreviewContent.textContent = `Error: ${error.message}`;
@@ -475,16 +410,10 @@ export function convertStructuredToJSON() {
         
         state.convertedModelRefJSON = null;
         
-        // Mark JSON as invalid and disable hunt button — bypass in admin mode or bypass_hunt_criteria
         state.modelRefValid = false;
         if (elements.startHuntBtn) {
-            if (state.adminMode || getConfigValue('bypass_hunt_criteria', false)) {
-                elements.startHuntBtn.disabled = false;
-                elements.startHuntBtn.title = state.adminMode ? 'Admin mode' : 'Bypass enabled (testing)';
-            } else {
-                elements.startHuntBtn.disabled = true;
-                elements.startHuntBtn.title = `Model Reference JSON Error: ${error.message}`;
-            }
+            elements.startHuntBtn.disabled = false;
+            elements.startHuntBtn.title = '';
         }
     }
 }
@@ -660,19 +589,11 @@ export function showModelMismatchWarning(selectedModel, metadataModel) {
         modelGroup.appendChild(warning);
     }
     
-    // FORCE disable start hunt button — bypass in admin mode or bypass_hunt_criteria
     if (elements.startHuntBtn) {
-        if (state.adminMode || getConfigValue('bypass_hunt_criteria', false)) {
-            elements.startHuntBtn.disabled = false;
-            elements.startHuntBtn.title = state.adminMode ? 'Admin mode' : 'Bypass enabled (testing)';
-            elements.startHuntBtn.style.opacity = '';
-            elements.startHuntBtn.style.cursor = '';
-        } else {
-            elements.startHuntBtn.disabled = true;
-            elements.startHuntBtn.title = 'MODEL MISMATCH: Select the correct model from metadata to hunt.';
-            elements.startHuntBtn.style.opacity = '0.5';
-            elements.startHuntBtn.style.cursor = 'not-allowed';
-        }
+        elements.startHuntBtn.disabled = false;
+        elements.startHuntBtn.title = '';
+        elements.startHuntBtn.style.opacity = '';
+        elements.startHuntBtn.style.cursor = '';
     }
     
     // Disable save buttons too — bypass in admin mode

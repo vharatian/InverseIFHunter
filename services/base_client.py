@@ -257,25 +257,3 @@ class BaseAPIClient(ABC):
                 pass
         
         return "", accumulated_reasoning.strip(), last_error or "Empty response"
-
-
-# ============== Singleton Helper ==============
-
-def create_singleton_getter(client_class, env_var_name: str):
-    """
-    Factory to create a singleton getter function for API clients.
-    
-    Usage:
-        get_my_client = create_singleton_getter(MyClient, "MY_API_KEY")
-    
-    Returns a function that returns a singleton instance of the client.
-    """
-    _instance = None
-    
-    def getter(api_key: Optional[str] = None):
-        nonlocal _instance
-        if _instance is None or api_key:
-            _instance = client_class(api_key)
-        return _instance
-    
-    return getter

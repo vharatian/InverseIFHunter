@@ -3,6 +3,7 @@ Notebook Cell Helpers
 
 Constants and utility functions for manipulating Jupyter notebook cell structures.
 """
+import re
 from typing import List
 from models.schemas import HuntSession
 
@@ -37,35 +38,71 @@ def _get_turn_heading(cell_type: str, turn: int) -> str:
     return f"**[Turn {turn} - {inner}]**"
 
 
+def _normalize_heading_line(line: str) -> str:
+    """Normalize a heading line for comparison: strip markdown and punctuation, lowercase."""
+    if not line:
+        return ""
+    return re.sub(r"[\s_\W]+", "", line.lower())
+
+
+def _cell_first_line_matches_type(source: str, cell_type: str, turn: int) -> bool:
+    """
+    Return True if the cell's first line looks like the given cell type heading.
+    Handles variants like "## Prompt", "[prompt]", "**[prompt]**", "### response reference".
+    """
+    first_line = (source.split("\n")[0] or "").strip()
+    normalized = _normalize_heading_line(first_line)
+    # Turn 1: match canonical key e.g. "prompt", "responsereference"
+    key = cell_type.replace("_", "")
+    if turn <= 1:
+        return normalized == key
+    # Turn 2+: match "turn2prompt" or "turn 2 prompt" style
+    turn_prefix = f"turn{turn}"
+    return normalized.startswith(turn_prefix) and key in normalized
+
+
 def _find_or_create_turn_cell(notebook_data: dict, cell_type: str, content: str, turn: int) -> bool:
     """
     Find an existing turn-specific cell and update it, or create a new one.
     For Turn 1, updates the original cell. For Turn 2+, creates/updates turn-specific cells.
+    Matches both canonical headings (e.g. **[prompt]**) and variants (e.g. ## Prompt, [prompt]).
     Returns True if the notebook_data was modified.
     """
     heading = _get_turn_heading(cell_type, turn)
     heading_lower = heading.lower()
-    
-    # Try to find existing cell with this heading
+
     for cell in notebook_data.get("cells", []):
-        if cell.get("cell_type") == "markdown":
-            source = "".join(cell.get("source", []))
-            if heading_lower in source.lower():
-                # Update existing cell
-                heading_line = source.split("\n")[0]
-                full_content = heading_line + "\n\n" + content
-                content_lines = full_content.split("\n")
-                cell["source"] = [line + "\n" for line in content_lines[:-1]] + [content_lines[-1]] if content_lines else [""]
-                return True
-    
+        if cell.get("cell_type") != "markdown":
+            continue
+        source = "".join(cell.get("source", []))
+        source_lower = source.lower()
+        # Match canonical heading first
+        if heading_lower in source_lower:
+            _update_cell_source(cell, source, heading, content)
+            return True
+        # Turn 1 only: match alternative heading formats so we overwrite in place
+        if turn <= 1 and _cell_first_line_matches_type(source, cell_type, turn):
+            heading_line = source.split("\n")[0]
+            _update_cell_source(cell, source, heading_line, content)
+            return True
+
     # Cell not found — create it
     if "cells" not in notebook_data:
         notebook_data["cells"] = []
-    
-    # For Turn 2+, insert after all existing cells (at the end, before any trailing cells)
     new_cell = _create_notebook_cell(heading, content)
     notebook_data["cells"].append(new_cell)
     return True
+
+
+def _update_cell_source(cell: dict, source: str, heading_line: str, content: str) -> None:
+    """Set cell source to heading_line + content, preserving notebook line format."""
+    full_content = heading_line + "\n\n" + content
+    content_lines = full_content.split("\n")
+    cell["source"] = (
+        [line + "\n" for line in content_lines[:-1]] + [content_lines[-1]]
+        if content_lines
+        else [""]
+    )
 
 
 # ============== Notebook Cell Helpers ==============

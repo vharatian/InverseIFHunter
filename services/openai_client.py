@@ -106,58 +106,69 @@ Evaluate ONLY whether the Student Answer meets the specific requirement stated i
 Output valid JSON only:
 {{"status": "PASS" or "FAIL", "reason": "Brief explanation focusing on this criterion"}}
 """
-        messages = [{"role": "system", "content": judge_system_prompt or "You are a precise evaluator. Output only valid JSON."}, {"role": "user", "content": eval_prompt}]
-        try:
-            # OpenRouter: pass messages as full list; prompt is appended by client, so we pass empty and put all in messages
-            response_text, _ = await client.call_model(
-                prompt=eval_prompt,
-                model=model,
-                max_tokens=2048,
-                stream=False,
-                messages=[{"role": "system", "content": judge_system_prompt or "You are a precise evaluator. Output only valid JSON."}],
-                reasoning_budget_percent=0,
-                temperature=0,
-            )
-            data = {}
-            if response_text:
-                text = response_text.strip()
-                # Strip markdown code fences if present
-                import re as _re
-                fence_match = _re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, _re.DOTALL)
-                if fence_match:
-                    text = fence_match.group(1)
-                try:
-                    data = json.loads(text)
-                except json.JSONDecodeError:
-                    # Extract first {...} from response
-                    brace = text.find("{")
-                    if brace != -1:
-                        depth = 0
-                        for i in range(brace, len(text)):
-                            if text[i] == "{": depth += 1
-                            elif text[i] == "}": depth -= 1
-                            if depth == 0:
-                                try:
-                                    data = json.loads(text[brace : i + 1])
-                                except json.JSONDecodeError:
-                                    pass
-                                break
-            # Accept both "status"/"reason" (backend format) and "result"/"explanation" (default judge system prompt)
-            raw_status = (data.get("status") or data.get("result") or "").strip()
-            if not raw_status:
-                logger.warning(
-                    "Judge JSON missing status/result key for criterion %s. Expected {'status'|'result': 'PASS'|'FAIL'}. "
-                    "Raw keys: %s", c_id, list(data.keys()) if data else "empty"
+        # Pass messages as system + user (eval_prompt) for format stability; prompt="" so client does not append
+        judge_system = judge_system_prompt or "You are a precise evaluator. Output only valid JSON."
+        messages = [{"role": "system", "content": judge_system}, {"role": "user", "content": eval_prompt}]
+        status = "MISSING"
+        reason = "after retries"
+        for attempt in range(3):
+            try:
+                response_text, _ = await client.call_model(
+                    prompt="",
+                    model=model,
+                    max_tokens=2048,
+                    stream=False,
+                    messages=messages,
+                    reasoning_budget_percent=0,
+                    temperature=0,
                 )
-                status = "MISSING"
-                raw_reason = (data.get("reason") or data.get("explanation") or data.get("message") or "").strip()
-                reason = f"⚠️ JSON structure missing: expected 'status' or 'result' key" + (f". Judge said: {raw_reason}" if raw_reason else "")
-            else:
-                status = raw_status.upper()
+                data = {}
+                if response_text:
+                    text = response_text.strip()
+                    import re as _re
+                    fence_match = _re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, _re.DOTALL)
+                    if fence_match:
+                        text = fence_match.group(1)
+                    try:
+                        data = json.loads(text)
+                    except json.JSONDecodeError:
+                        brace = text.find("{")
+                        if brace != -1:
+                            depth = 0
+                            for i in range(brace, len(text)):
+                                if text[i] == "{": depth += 1
+                                elif text[i] == "}": depth -= 1
+                                if depth == 0:
+                                    try:
+                                        data = json.loads(text[brace : i + 1])
+                                    except json.JSONDecodeError:
+                                        pass
+                                    break
+                raw_status = (data.get("status") or data.get("result") or "").strip()
+                if not raw_status:
+                    logger.warning(
+                        "Judge JSON missing status/result for criterion %s (attempt %s). Keys: %s",
+                        c_id, attempt + 1, list(data.keys()) if data else "empty"
+                    )
+                    reason = "JSON missing 'status' or 'result'" + (f" (attempt {attempt + 1}/3)" if attempt < 2 else " after retries")
+                    continue
+                raw_status_upper = raw_status.upper()
+                if raw_status_upper not in ("PASS", "FAIL"):
+                    logger.warning(
+                        "Judge status not PASS/FAIL for criterion %s: %r (attempt %s)",
+                        c_id, raw_status, attempt + 1
+                    )
+                    reason = f"status value '{raw_status}' not in {{PASS, FAIL}}" + (f" (attempt {attempt + 1}/3)" if attempt < 2 else " after retries")
+                    continue
+                status = raw_status_upper
                 reason = data.get("reason") or data.get("explanation") or data.get("message") or "No reason"
-            results.append({"id": c_id, "status": status, "reason": reason})
-        except Exception as e:
-            results.append({"id": c_id, "status": "FAIL", "reason": f"Eval Error: {str(e)}"})
+                break
+            except Exception as e:
+                logger.warning("Judge criterion %s attempt %s failed: %s", c_id, attempt + 1, e)
+                reason = f"Eval error: {str(e)}" + (f" (attempt {attempt + 1}/3)" if attempt < 2 else " after retries")
+        if status == "MISSING":
+            reason = f"⚠️ {reason}"
+        results.append({"id": c_id, "status": status, "reason": reason})
     final_criteria = {r["id"]: r["status"] for r in results}
     pass_count = sum(1 for r in results if r["status"] == "PASS")
     total = len(criteria_list) or 1
@@ -233,7 +244,6 @@ class OpenAIJudgeClient:
         model: str = DEFAULT_MODEL,
         max_tokens: int = 32768,  # GPT-5 max: 32k tokens for reasoning + response
         temperature: float = 0.1,
-        independent_judging: bool = True,  # Always use independent judging
         standard_response: Optional[str] = None,  # Standard/expected response from [response] cell
         pass_threshold: float = 0.5,  # 0.5 = 50% rule, 1.0 = all criteria must pass
     ) -> Dict[str, Any]:
@@ -378,480 +388,18 @@ class OpenAIJudgeClient:
 ---
 """
         
-        # Always use independent judging (each criterion evaluated separately)
-        if independent_judging:
-            return await self._judge_independently(
-                prompt, student_response, response_reference,
-                judge_system_prompt, model, standard_response=standard_resp,
-                pass_threshold=pass_threshold
-            )
+        return await self._judge_independently(
+            prompt, student_response, response_reference,
+            judge_system_prompt, model, standard_response=standard_resp,
+            pass_threshold=pass_threshold
+        )
+    
 
-        # Retry logic for connection errors (broken pipe, timeouts, etc.)
-        max_retries = 3
-        retry_delay = 2  # seconds
-        
-        for attempt in range(max_retries):
-            try:
-                # GPT-5 and newer models use 'max_completion_tokens' instead of 'max_tokens'
-                # GPT-5 also only supports default temperature (1), so we don't pass it
-                response = await self.client.chat.completions.create(
-                    model=model,
-                    messages=[
-                        {"role": "system", "content": judge_system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    max_completion_tokens=max_tokens,
-                    timeout=180.0  # 3 minute timeout
-                    # Note: temperature not supported by GPT-5, using default (1)
-                )
-                break  # Success, exit retry loop
-            except (BrokenPipeError, ConnectionError, OSError, IOError) as e:
-                if attempt < max_retries - 1:
-                    wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
-                    logger.warning(f"Connection error (attempt {attempt + 1}/{max_retries}): {str(e)}")
-                    logger.info(f"Retrying in {wait_time} seconds...")
-                    await asyncio.sleep(wait_time)
-                else:
-                    # Last attempt failed
-                    raise
-            except Exception as e:
-                # Check if it's a connection-related error by error message
-                error_str = str(e).lower()
-                if any(keyword in error_str for keyword in ['broken pipe', 'connection', 'timeout', 'network', 'reset', 'errno 32']):
-                    if attempt < max_retries - 1:
-                        wait_time = retry_delay * (2 ** attempt)
-                        logger.warning(f"Connection-related error detected (attempt {attempt + 1}/{max_retries}): {str(e)}")
-                        logger.info(f"Retrying in {wait_time} seconds...")
-                        await asyncio.sleep(wait_time)
-                    else:
-                        raise
-                else:
-                    # For other errors, don't retry
-                    raise
-        
-        # Process the response
-        try:
-            # Debug: Print response structure
-            if not response.choices or len(response.choices) == 0:
-                logger.warning("No choices in response!")
-                return {
-                    "score": None,
-                    "criteria": {},
-                    "explanation": "No choices returned from GPT-5",
-                    "raw_output": f"Response object: {response}",
-                    "error": "No choices"
-                }
-            
-            choice = response.choices[0]
-            raw_output = choice.message.content
-            if raw_output is None:
-                # Check if there's a refusal
-                if hasattr(choice.message, 'refusal') and choice.message.refusal:
-                    logger.warning(f"GPT-5 refused: {choice.message.refusal}")
-                    return {
-                        "score": None,
-                        "criteria": {},
-                        "explanation": f"GPT-5 refused: {choice.message.refusal}",
-                        "raw_output": f"REFUSAL: {choice.message.refusal}",
-                        "error": "Refusal"
-                    }
-                logger.warning(f"Judge returned None content! Choice: {choice}")
-                return {
-                    "score": None,
-                    "criteria": {},
-                    "explanation": f"GPT-5 returned None. Finish reason: {choice.finish_reason}",
-                    "raw_output": f"Finish: {choice.finish_reason}, Message: {choice.message}",
-                    "error": "None content"
-                }
-            return self._parse_judge_output(raw_output, response_reference)
-            
-        except (BrokenPipeError, ConnectionError, OSError, IOError) as e:
-            error_msg = f"Connection Error: {str(e)}"
-            logger.error(f"Judge API connection failed: {error_msg}")
-            return {
-                "score": None,
-                "criteria": {},
-                "explanation": f"Judge connection failed: {error_msg}. Please try again.",
-                "raw_output": error_msg,
-                "error": error_msg
-            }
-        except Exception as e:
-            # Check if it's a connection-related error by error message
-            error_str = str(e).lower()
-            if any(keyword in error_str for keyword in ['broken pipe', 'connection', 'timeout', 'network', 'reset', 'errno 32']):
-                error_msg = f"Connection Error: {str(e)}"
-                logger.error(f"Judge API connection failed (detected from message): {error_msg}")
-                return {
-                    "score": None,
-                    "criteria": {},
-                    "explanation": f"Judge connection failed: {error_msg}. Please try again.",
-                    "raw_output": error_msg,
-                    "error": error_msg
-                }
-            error_msg = f"API Error: {str(e)}"
-            logger.error(f"Judge API failed: {error_msg}")
-            return {
-                "score": None,
-                "criteria": {},
-                "explanation": f"Judge failed: {error_msg}",
-                "raw_output": error_msg,
-                "error": error_msg
-            }
-    
-    def _parse_judge_output(self, text: str, response_reference: str = None) -> Dict[str, Any]:
-        """
-        Parse structured judge output.
-        
-        Expected format:
-            [Grading Basis]:
-            {"C1": "PASS or FAIL", ...}
-            [Score]: X point(s)
-            [JSON]: {"answer_score": X}
-            [Explanation]: ...
-        """
-        result = {
-            "score": None,
-            "criteria": {},
-            "explanation": "",
-            "raw_output": text,
-            "error": None
-        }
-        
-        try:
-            # Log raw output for debugging
-            # First, check if the entire output is a JSON object (new format)
-            # The output might have prefixes like "Output:" or be wrapped in markdown code blocks
-            text_stripped = text.strip()
-            json_data = None
-            
-            # Try 1: Remove common prefixes
-            # Handle "Output:" prefix
-            if text_stripped.startswith("Output:"):
-                text_stripped = text_stripped[7:].strip()  # Remove "Output:" prefix
-            # Handle markdown code blocks
-            if text_stripped.startswith("```"):
-                # Remove code block markers
-                lines = text_stripped.split('\n')
-                if lines[0].startswith("```"):
-                    lines = lines[1:]
-                if lines and lines[-1].strip() == "```":
-                    lines = lines[:-1]
-                text_stripped = '\n'.join(lines).strip()
-            
-            # Try 2: Parse entire text as JSON (after cleaning)
-            if text_stripped.startswith('{'):
-                try:
-                    json_data = json.loads(text_stripped)
-                except json.JSONDecodeError as e:
-                    pass
-            
-            # Try 3: Find JSON object in text using a more robust pattern
-            if not json_data:
-                # Look for JSON object that contains "result" field - use a simpler, more reliable pattern
-                # Find the first { and last } that contain "result"
-                start_idx = text.find('{')
-                if start_idx != -1:
-                    # Find matching closing brace
-                    brace_count = 0
-                    end_idx = start_idx
-                    for i in range(start_idx, len(text)):
-                        if text[i] == '{':
-                            brace_count += 1
-                        elif text[i] == '}':
-                            brace_count -= 1
-                            if brace_count == 0:
-                                end_idx = i + 1
-                                break
-                    
-                    if end_idx > start_idx:
-                        json_str = text[start_idx:end_idx]
-                        try:
-                            json_data = json.loads(json_str)
-                        except json.JSONDecodeError as e:
-                            pass
-            
-            if json_data and "result" in json_data:
-                    # Extract score from "result" field
-                    if "result" in json_data:
-                        result_str = str(json_data["result"]).upper()
-                        if result_str == "PASS":
-                            result["score"] = 1
-                        elif result_str == "FAIL":
-                            result["score"] = 0
-                    # Extract explanation
-                    if "explanation" in json_data:
-                        result["explanation"] = str(json_data["explanation"]).strip()
-                    # Try to extract criteria from explanation text
-                    # First, try to get expected criteria from response_reference if available
-                    # (We'll need to pass this through, but for now extract from explanation)
-                    explanation_text = result.get("explanation", "")
-                    
-                    # Look for all criterion IDs mentioned in explanation (C1, C2, etc.)
-                    criteria_pattern = re.findall(r'(C\d+)', explanation_text, re.IGNORECASE)
-                    # Also check if there's a "criteria" field in the JSON
-                    if "criteria" in json_data:
-                        criteria_data = json_data["criteria"]
-                        if isinstance(criteria_data, dict):
-                            result["criteria"] = {k.upper(): str(v).upper() for k, v in criteria_data.items()}
-                        elif isinstance(criteria_data, list):
-                            # List format, convert to dict
-                            for item in criteria_data:
-                                if isinstance(item, dict) and "id" in item:
-                                    c_id = item["id"].upper()
-                                    status = str(item.get("status", item.get("result", "PASS"))).upper()
-                                    result["criteria"][c_id] = status
-                    # If no criteria field, extract from explanation
-                    if not result["criteria"] and criteria_pattern:
-                        # Check if explanation mentions PASS/FAIL for each criterion
-                        for c_id in set(criteria_pattern):
-                            c_id_upper = c_id.upper()
-                            # Look for context around this criterion ID in explanation
-                            # Pattern: "C1" followed by something that suggests PASS or the explanation is positive
-                            # Since result is PASS, assume all mentioned criteria passed
-                            if result["score"] == 1:
-                                result["criteria"][c_id_upper] = "PASS"
-                            else:
-                                # For FAIL, check if explanation says it failed
-                                # Look for negative words near the criterion
-                                c_context = re.search(
-                                    rf'{c_id}[^.]*?({"|".join(["failed", "does not", "did not", "lacks", "missing"])})',
-                                    explanation_text,
-                                    re.IGNORECASE
-                                )
-                                if c_context:
-                                    result["criteria"][c_id_upper] = "FAIL"
-                                else:
-                                    # If result is PASS overall, assume mentioned criteria passed
-                                    result["criteria"][c_id_upper] = "PASS" if result["score"] == 1 else "FAIL"
-                    # Check if explanation suggests all criteria passed
-                    explanation_lower = explanation_text.lower()
-                    all_passed_indicators = [
-                        "all criteria", "all criterion", "all satisfied", "all met",
-                        "criteria were satisfied", "criteria satisfied", "all passed"
-                    ]
-                    all_passed = any(indicator in explanation_lower for indicator in all_passed_indicators)
-                    
-                    # If we still don't have criteria but have a PASS result, infer from response_reference
-                    # This handles cases where the judge says "all criteria satisfied" but doesn't list them
-                    # IMPORTANT: Only mark criteria that are ACTUALLY in the response_reference as PASS
-                    if not result["criteria"] and result["score"] == 1 and response_reference and all_passed:
-                        try:
-                            # Extract expected criteria IDs from response_reference (only what's actually there)
-                            array_match = re.search(r'\[.*?\]', response_reference, re.DOTALL)
-                            if array_match:
-                                criteria_list = json.loads(array_match.group(0))
-                                if isinstance(criteria_list, list):
-                                    for item in criteria_list:
-                                        c_id = item.get('id', '').upper() if isinstance(item, dict) else ''
-                                        if c_id:
-                                            result["criteria"][c_id] = "PASS"
-                        except Exception:
-                            pass
-                    # Check for missing criteria by comparing with expected criteria from response_reference
-                    # IMPORTANT: Only mark criteria in response_reference as PASS, not missing ones
-                    if response_reference:
-                        try:
-                            # Extract expected criteria IDs from response_reference (only what's actually there)
-                            array_match = re.search(r'\[.*?\]', response_reference, re.DOTALL)
-                            if array_match:
-                                criteria_list = json.loads(array_match.group(0))
-                                if isinstance(criteria_list, list):
-                                    expected_ids = {item.get('id', f'C{i+1}').upper() if isinstance(item, dict) else f'C{i+1}'.upper() 
-                                                   for i, item in enumerate(criteria_list)}
-                                    extracted_ids = set(result["criteria"].keys())
-                                    missing_ids = expected_ids - extracted_ids
-                                    
-                                    if missing_ids:
-                                        if all_passed and result["score"] == 1:
-                                            # If judge says all criteria passed, mark missing ones from response_reference as PASS
-                                            # (These are criteria in response_reference but not extracted from explanation)
-                                            for c_id in missing_ids:
-                                                result["criteria"][c_id] = "PASS"
-                                        else:
-                                            # Otherwise mark as MISSING (shouldn't happen if all_passed, but just in case)
-                                            for c_id in missing_ids:
-                                                result["criteria"][c_id] = "MISSING"
-                                    elif all_passed and result["score"] == 1:
-                                        # Ensure all criteria in response_reference are marked as PASS
-                                        for c_id in expected_ids:
-                                            if c_id not in result["criteria"]:
-                                                result["criteria"][c_id] = "PASS"
-                        except Exception:
-                            pass
-                    # If we got score and explanation, we're done
-                    if result["score"] is not None:
-                        return result
-            
-            # Extract grading basis (criteria) - try multiple patterns
-            criteria_parsed = False
-            
-            # Pattern 1: [Grading Basis]: {JSON} - handle multi-line JSON
-            grading_match = re.search(
-                r'\[Grading Basis\]:\s*(\{.*?\})',
-                text,
-                re.IGNORECASE | re.DOTALL
-            )
-            if grading_match:
-                try:
-                    criteria_str = grading_match.group(1)
-                    # Try parsing as-is first (handles multi-line)
-                    result["criteria"] = json.loads(criteria_str)
-                    criteria_parsed = True
-                except json.JSONDecodeError:
-                    # Fallback: try normalizing whitespace
-                    try:
-                        criteria_str = re.sub(r'\s+', ' ', criteria_str)
-                        result["criteria"] = json.loads(criteria_str)
-                        criteria_parsed = True
-                    except json.JSONDecodeError:
-                        result["criteria"] = self._parse_criteria_fallback(grading_match.group(1))
-                        criteria_parsed = len(result["criteria"]) > 0
-            # Pattern 2: Look for "C1": "PASS" or "C1: PASS" anywhere
-            if not criteria_parsed:
-                c_pattern = re.findall(r'["\']?(C\d+)["\']?\s*[:=]\s*["\']?(PASS|FAIL)["\']?', text, re.IGNORECASE)
-                if c_pattern:
-                    result["criteria"] = {k: v.upper() for k, v in c_pattern}
-                    criteria_parsed = True
-            # Pattern 3: Look for criterion names like "Correctness: PASS"
-            if not criteria_parsed:
-                named_pattern = re.findall(r'([A-Za-z_]+)\s*[:=]\s*(PASS|FAIL)', text, re.IGNORECASE)
-                if named_pattern:
-                    # Filter out common non-criteria words
-                    exclude = {'score', 'answer', 'answer_score', 'result', 'verdict', 'status'}
-                    result["criteria"] = {k: v.upper() for k, v in named_pattern if k.lower() not in exclude}
-                    if result["criteria"]:
-                        criteria_parsed = True
-            if not criteria_parsed:
-                pass
-            # Extract score from [Score]: X point(s)
-            score_match = re.search(r'\[Score\]:\s*(\d+)\s*point', text, re.IGNORECASE)
-            if score_match:
-                result["score"] = int(score_match.group(1))
-            
-            # Extract score from [JSON]: {"answer_score": X} - handle multi-line JSON
-            json_match = re.search(r'\[JSON\]:\s*(\{.*?\})', text, re.IGNORECASE | re.DOTALL)
-            if json_match:
-                try:
-                    json_str = json_match.group(1)
-                    json_data = json.loads(json_str)
-                    if "answer_score" in json_data:
-                        result["score"] = json_data["answer_score"]
-                except json.JSONDecodeError:
-                    # Try normalizing whitespace
-                    try:
-                        json_str = re.sub(r'\s+', ' ', json_str)
-                        json_data = json.loads(json_str)
-                        if "answer_score" in json_data:
-                            result["score"] = json_data["answer_score"]
-                    except json.JSONDecodeError:
-                        pass
-            
-            # Extract explanation - try multiple patterns
-            explanation_match = re.search(
-                r'\[Explanation\]:\s*(.+?)(?=\[|$)',
-                text,
-                re.IGNORECASE | re.DOTALL
-            )
-            if explanation_match:
-                result["explanation"] = explanation_match.group(1).strip()
-            else:
-                # Try alternative pattern: [Explanation]: followed by text until next section or end
-                explanation_match2 = re.search(
-                    r'\[Explanation\][:\s]*(.+?)(?=\n\n\[|\n\[|$)',
-                    text,
-                    re.IGNORECASE | re.DOTALL
-                )
-                if explanation_match2:
-                    result["explanation"] = explanation_match2.group(1).strip()
-            # Fallback: if no score found, count PASS/FAIL
-            if result["score"] is None and result["criteria"]:
-                pass_count = sum(1 for v in result["criteria"].values() if str(v).upper() == "PASS")
-                total = len(result["criteria"])
-                result["score"] = 1 if pass_count > total / 2 else 0
-            
-            # Final fallback: look for any score pattern like "score: 0" or "Score: 1"
-            if result["score"] is None:
-                any_score = re.search(r'(?:score|answer_score)[:\s]+(\d+)', text, re.IGNORECASE)
-                if any_score:
-                    result["score"] = int(any_score.group(1))
-            
-            # Very final fallback: Check the last 100 chars for a verdict
-            if result["score"] is None:
-                text_len = len(text)
-                end_slice = text[max(0, text_len - 200):].upper()
-                
-                # Check for explicit verdict statements at the end
-                if "FAIL" in end_slice or "BREAK" in end_slice or "BROKEN" in end_slice:
-                    result["score"] = 0
-                elif "PASS" in end_slice or "SAFE" in end_slice:
-                    result["score"] = 1
-                    
-            # Absolute final fallback if we still have ?
-            if result["score"] is None:
-                # If we have criteria but no score, assume FAIL if any criteria failed
-                if result["criteria"]:
-                    # Already handled above, but double check logic
-                    pass
-                else:
-                    # If completely unparseable, we might default to 0 (Fail) if it looks negative?
-                    # For now, let's look for ANY occurrence of "Fail" as a strong signal
-                    if "FAIL" in text.upper():
-                        result["score"] = 0
-                    elif "PASS" in text.upper():
-                        result["score"] = 1
-            
-        except Exception as e:
-            result["error"] = f"Parse error: {str(e)}"
-        
-        # Final check: Compare extracted criteria with expected criteria from response_reference
-        # IMPORTANT: Only mark criteria that are in response_reference
-        # Missing criteria (not in response_reference) should be handled by frontend comparing with initial criteria
-        if response_reference and result.get("score") is not None:
-            try:
-                # Extract expected criteria IDs from response_reference (only what's actually there)
-                array_match = re.search(r'\[.*?\]', response_reference, re.DOTALL)
-                if array_match:
-                    criteria_list = json.loads(array_match.group(0))
-                    if isinstance(criteria_list, list):
-                        expected_ids = {item.get('id', f'C{i+1}').upper() if isinstance(item, dict) else f'C{i+1}'.upper() 
-                                       for i, item in enumerate(criteria_list)}
-                        extracted_ids = set(result["criteria"].keys())
-                        missing_ids = expected_ids - extracted_ids
-                        
-                        if missing_ids:
-                            # Check if "all criteria satisfied" was detected earlier
-                            explanation_lower = result.get("explanation", "").lower()
-                            all_passed_indicators = [
-                                "all criteria", "all criterion", "all satisfied", "all met",
-                                "criteria were satisfied", "criteria satisfied", "all passed"
-                            ]
-                            all_passed = any(indicator in explanation_lower for indicator in all_passed_indicators)
-                            
-                            if all_passed and result.get("score") == 1:
-                                # If judge says all criteria passed, mark missing ones from response_reference as PASS
-                                for c_id in missing_ids:
-                                    result["criteria"][c_id] = "PASS"
-                            else:
-                                # Otherwise mark as MISSING (shouldn't happen if all_passed, but just in case)
-                                for c_id in missing_ids:
-                                    result["criteria"][c_id] = "MISSING"
-            except Exception:
-                pass
-        return result
-    
-    def _parse_criteria_fallback(self, text: str) -> Dict[str, str]:
-        """Fallback parser for criteria when JSON parsing fails."""
-        criteria = {}
-        matches = re.findall(r'"?(C\d+)"?\s*:\s*"?(PASS|FAIL)"?', text, re.IGNORECASE)
-        for key, value in matches:
-            criteria[key.upper()] = value.upper()
-        return criteria
-    
     async def test_connection(self) -> bool:
         """Test API connection."""
         try:
             response = await self.client.chat.completions.create(
-                model="gpt-4o",  # Use gpt-4o for testing
+                model="gpt-4o",
                 messages=[{"role": "user", "content": "test"}],
                 max_completion_tokens=5
             )
@@ -982,80 +530,19 @@ class OpenAIJudgeClient:
     async def _extract_criteria(self, reference: str, model: str) -> List[Dict[str, str]]:
         """
         Extract criteria list from reference text.
-        Supports multiple formats:
-        1. JSON array: [{"id": "C1", "criteria1": "..."}, ...]
-        2. Plain text: "C1: description\nC2: description\n..."
+        Delegates to module-level _extract_criteria_list() and raises ValueError
+        when no criteria can be parsed (strict mode for direct OpenAI judging).
         """
-        
-        # First, try to extract JSON array between [ and ]
-        array_match = re.search(r'\[.*?\]', reference, re.DOTALL)
-        
-        if not array_match:
-            # No JSON array found - try plain text format (C1: ..., C2: ...)
-            plain_text_pattern = re.compile(r'^(C\d+)\s*[:：]\s*(.+)$', re.MULTILINE | re.IGNORECASE)
-            matches = plain_text_pattern.findall(reference)
-            
-            if matches:
-                normalized = []
-                for match in matches:
-                    c_id = match[0].upper()
-                    description = match[1].strip()
-                    normalized.append({"id": c_id, "description": description})
-                
-                if normalized:
-                    criteria_ids = [c.get('id') for c in normalized]
-                    return normalized
-            
-            # No format matched
-            error_msg = "CRITICAL: Reference Answer must contain either a JSON array between [ and ] brackets, or plain text criteria in format 'C1: description'"
+        result = _extract_criteria_list(reference)
+        if not result:
+            error_msg = (
+                "CRITICAL: Reference Answer must contain either a JSON array "
+                "between [ and ] brackets, or plain text criteria in format "
+                "'C1: description'"
+            )
             logger.error(error_msg)
             raise ValueError(error_msg)
-        
-        json_array_str = array_match.group(0)
-        
-        # Try to parse as JSON
-        try:
-            parsed = json.loads(json_array_str)
-            
-            if not isinstance(parsed, list):
-                raise ValueError(f"Reference JSON must be a JSON array (list), got {type(parsed).__name__}")
-                
-            if len(parsed) == 0:
-                raise ValueError("Reference JSON array cannot be empty")
-                
-            normalized = []
-            for idx, item in enumerate(parsed):
-                # Handle [{"id": "C1", "criteria1": "..."}] format
-                if isinstance(item, dict):
-                    c_id = item.get("id", f"C{idx+1}")
-                    # Look for criteria1, criteria2, etc. fields
-                    criteria_text = None
-                    for key in item.keys():
-                        if key.startswith("criteria") and key != "id":
-                            criteria_text = item[key]
-                            break
-                    
-                    # Fallback to description or other fields
-                    if not criteria_text:
-                        criteria_text = item.get("description", item.get("criteria", str(item)))
-                    
-                    normalized.append({"id": c_id, "description": criteria_text})
-                # Handle ["Criterion 1", "Criterion 2"] setup
-                elif isinstance(item, str):
-                    normalized.append({"id": f"C{idx+1}", "description": item})
-            
-            if normalized:
-                return normalized
-            else:
-                raise ValueError("Reference JSON array must contain at least one valid criterion")
-
-        except json.JSONDecodeError as e:
-            # STRICT MODE ENACTED: Do not fallback. Warn the user.
-            error_msg = f"CRITICAL: Reference Answer must be VALID JSON. Parse Error: {e}"
-            logger.error(error_msg)
-            raise ValueError(error_msg)
-        except Exception as e:
-             raise ValueError(f"CRITICAL: Failed to process Reference JSON: {e}")
+        return result
 
     async def _evaluate_single_criterion(
         self, 

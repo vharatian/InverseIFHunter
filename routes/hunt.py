@@ -1,24 +1,18 @@
 """
 Hunt Routes
 
-POST /api/start-hunt                   — start hunt (non-streaming)
 GET  /api/hunt-stream/{session_id}     — SSE hunt progress stream
 GET  /api/results/{session_id}         — get all accumulated results
-GET  /api/breaking-results/{session_id} — get breaking (score 0) results
 GET  /api/review-results/{session_id}  — get 4 results for human review
-GET  /api/models                       — available models list
 """
 import asyncio
 import json
 import logging
-from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
-from models.schemas import HuntConfig, HuntStatus
 from services.hunt_engine import hunt_engine
 from helpers.shared import _get_validated_session, _log_telemetry_safe, _telemetry_enabled
 import services.redis_session as redis_store
@@ -26,35 +20,6 @@ import services.redis_session as redis_store
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["hunt"])
-
-
-class StartHuntRequest(BaseModel):
-    session_id: str
-    config: Optional[HuntConfig] = None
-
-
-@router.post("/start-hunt")
-async def start_hunt(request: StartHuntRequest):
-    """Start a hunt (non-streaming, returns when complete)."""
-    session = await _get_validated_session(request.session_id)
-    
-    if request.config:
-        session.config = request.config
-        session.total_hunts = request.config.parallel_workers
-        await redis_store.set_config(request.session_id, request.config)
-        await redis_store.set_meta_field(request.session_id, "total_hunts", request.config.parallel_workers)
-    
-    result_session = await hunt_engine.run_hunt(request.session_id)
-    
-    return {
-        "success": True,
-        "session_id": result_session.session_id,
-        "status": result_session.status.value,
-        "completed_hunts": result_session.completed_hunts,
-        "breaks_found": result_session.breaks_found,
-        "passes_found": getattr(result_session, "passes_found", 0),
-        "results": [r.model_dump() for r in result_session.results]
-    }
 
 
 @router.get("/hunt-stream/{session_id}")
@@ -154,16 +119,6 @@ async def get_all_results(session_id: str):
     )
 
 
-@router.get("/breaking-results/{session_id}")
-async def get_breaking_results(session_id: str):
-    """Get only the breaking (score 0) results."""
-    results = await hunt_engine.get_breaking_results_async(session_id)
-    return {
-        "count": len(results),
-        "results": [r.model_dump() for r in results]
-    }
-
-
 @router.get("/review-results/{session_id}")
 async def get_review_results(session_id: str):
     """
@@ -178,28 +133,4 @@ async def get_review_results(session_id: str):
             "failed_count": len([r for r in results if r.judge_score == 0]),
             "passed_count": len([r for r in results if r.judge_score >= 1])
         }
-    }
-
-
-@router.get("/models")
-async def get_available_models():
-    """Get available models for hunting. Uses global.yaml hunt.provider_models and hunt.judge_models when set."""
-    from services.openrouter_client import OpenRouterClient
-    try:
-        from agentic_reviewer.config_loader import get_config_value
-        hunt = get_config_value("hunt") or {}
-        provider_models = hunt.get("provider_models")
-        judge_models = hunt.get("judge_models")
-    except Exception:
-        provider_models = None
-        judge_models = None
-    # Fallback: legacy shape (OpenRouterClient.MODELS is short_name -> full_id)
-    if not provider_models:
-        or_models = OpenRouterClient.MODELS or {}
-        provider_models = {"openrouter": [{"id": v, "name": k} for k, v in or_models.items()]}
-    if not judge_models:
-        judge_models = [{"id": "gpt-4o", "name": "GPT-5"}, {"id": "gpt-4o", "name": "GPT-4o"}, {"id": "gpt-4-turbo", "name": "GPT-4 Turbo"}]
-    return {
-        "provider_models": provider_models,
-        "judge_models": judge_models,
     }

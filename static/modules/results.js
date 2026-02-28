@@ -74,12 +74,12 @@ export function setReviewModeButtonsDisabled(disabled) {
     if (disabled && (state.adminMode || getConfigValue('bypass_hunt_criteria', false))) return; // Admin/bypass: keep buttons enabled for testing
     const title = disabled ? 'Complete reviews or refresh page to unlock' : '';
     if (elements.startHuntBtn) {
-        elements.startHuntBtn.disabled = disabled;
-        elements.startHuntBtn.title = disabled ? 'Cannot start new hunt while reviews are in progress. Complete reviews or refresh page.' : (elements.startHuntBtn.title || '');
+        elements.startHuntBtn.disabled = false;
+        elements.startHuntBtn.title = elements.startHuntBtn.title || '';
     }
     if (elements.judgeBeforeHuntBtn) {
         elements.judgeBeforeHuntBtn.disabled = disabled;
-        elements.judgeBeforeHuntBtn.title = disabled ? title : (elements.judgeBeforeHuntBtn.title || 'Judge the reference response before starting hunt');
+        elements.judgeBeforeHuntBtn.title = disabled ? title : (elements.judgeBeforeHuntBtn.title || 'Validate the ideal response before starting hunt');
     }
     if (elements.judgeReferenceBtn) {
         elements.judgeReferenceBtn.disabled = disabled;
@@ -717,21 +717,9 @@ export function handleHuntComplete(data) {
     // Remove loading state from button
     elements.startHuntBtn.classList.remove('loading');
     
-    // FIX 1: Don't enable Start Hunt button if reviews section is visible — bypass in admin mode or bypass_hunt_criteria
-    const isInReviewMode = !elements.resultsSection.classList.contains('hidden') && state.selectionConfirmed;
-    if (state.adminMode || getConfigValue('bypass_hunt_criteria', false)) {
-        elements.startHuntBtn.disabled = false;
-        elements.startHuntBtn.title = state.adminMode ? 'Admin mode' : 'Bypass enabled (testing)';
-    } else if (isInReviewMode) {
-        elements.startHuntBtn.disabled = true;
-        elements.startHuntBtn.title = 'Cannot start new hunt while reviews are in progress. Complete reviews or refresh page.';
-    } else if (state.referenceValidated && state.modelRefValid) {
-        elements.startHuntBtn.disabled = false;
-        elements.startHuntBtn.title = '';
-    } else {
-        elements.startHuntBtn.disabled = true;
-        elements.startHuntBtn.title = 'All criteria must pass before starting hunt. Click "Judge Reference" or "Save & Check".';
-    }
+    // Find Breaking Responses: always enabled after hunt completes (except when hunt limit reached, see updateHuntLimitUI)
+    elements.startHuntBtn.disabled = false;
+    elements.startHuntBtn.title = '';
     
     // Show upload and config sections again
     document.querySelector('.section')?.classList.remove('hidden');

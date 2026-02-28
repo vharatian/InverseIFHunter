@@ -1,10 +1,9 @@
 """
 Notification routes for the trainer app.
 
-GET  /api/notifications         — list notifications for current trainer
+GET  /api/notifications             — list notifications for current trainer
 POST /api/notifications/{id}/read   — mark one notification as read
 POST /api/notifications/read-all    — mark all as read
-GET  /api/notifications/unread-count — just the count (lightweight poll)
 """
 import logging
 from typing import Annotated
@@ -36,18 +35,6 @@ async def list_notifications(
     items = await get_notifications(r, email, unread_only=unread_only)
     unread = await get_unread_count(r, email)
     return {"notifications": items, "unread_count": unread}
-
-
-@router.get("/notifications/unread-count")
-async def unread_count(
-    x_trainer_email: Annotated[str | None, Header(alias="X-Trainer-Email")] = None,
-):
-    email = (x_trainer_email or "").strip().lower()
-    if not email:
-        return {"unread_count": 0}
-    r = await redis_store.get_redis()
-    count = await get_unread_count(r, email)
-    return {"unread_count": count}
 
 
 @router.post("/notifications/{notif_id}/read")

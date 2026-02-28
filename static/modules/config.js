@@ -4,8 +4,6 @@
  * Static values are defaults. Call fetchConfigFromAPI() to merge with server config.
  */
 
-export const DEBUG_MODE = false;
-
 export const VERSION_CHECK_INTERVAL = 30000;
 
 /** Cached config from /api/config (null until fetched) */
@@ -85,14 +83,6 @@ export const ADMIN_MODE_PASSWORD = '';
 export const HUNT_COUNT_STORAGE_PREFIX = 'modelHunter_huntCount_';
 export const TIPS_PAUSED_KEY = 'modelHunter_tipsPaused';
 export const MIN_EXPLANATION_WORDS = 10;
-
-/** Keys that can be overridden by /api/config */
-export const CONFIG_KEYS = {
-    max_hunts_per_notebook: 'max_hunts_per_notebook',
-    admin_mode_enabled: 'admin_mode_enabled',
-    admin_mode_password: 'admin_mode_password',
-    min_explanation_words: 'min_explanation_words',
-};
 
 export const TURN_COLORS = [
     '#2383e2',  // Turn 1: Blue (Notion)

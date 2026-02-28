@@ -193,6 +193,50 @@ def _save_turn_cells_to_drive(session: HuntSession, storage: Optional[dict],
         return False
 
 
+async def _save_cells_to_drive_via_url(
+    session_id: str,
+    session: HuntSession,
+    colab_url: str,
+    cells: List[tuple],
+) -> bool:
+    """
+    Save cells to Colab when session storage has no URL/original_content
+    (e.g. after resuming from queue). Fetches notebook from Drive, applies
+    cell updates, writes back, and optionally updates session storage.
+    Returns True if saved to Colab, False otherwise.
+    """
+    from services.google_drive_client import drive_client
+    from services.notebook_parser import notebook_parser
+    from helpers.notebook_helpers import _find_or_create_turn_cell
+
+    if not colab_url or not colab_url.strip():
+        return False
+    try:
+        _, content_str = await notebook_parser.load_from_url(colab_url.strip())
+        notebook_data = json.loads(content_str)
+        current_turn = session.current_turn if session.current_turn else 1
+        for cell_type, content in cells:
+            _find_or_create_turn_cell(notebook_data, cell_type, content, current_turn)
+        updated_content = json.dumps(notebook_data, indent=2)
+        file_id = drive_client.get_file_id_from_url(colab_url)
+        if not file_id:
+            logger.warning("Could not extract file_id from colab_url")
+            return False
+        success = drive_client.update_file_content(file_id, updated_content)
+        if success:
+            # Populate session storage so next Save to Colab uses fast path
+            storage = get_session_storage(session_id) or {}
+            storage["url"] = colab_url.strip()
+            storage["original_content"] = updated_content
+            if "session_data" not in storage:
+                storage["session_data"] = session.model_dump()
+            save_session_storage(session_id, storage)
+        return success
+    except Exception as e:
+        logger.error(f"Error saving cells to Drive via URL: {e}")
+        return False
+
+
 # ============== Formatting / Utility Helpers ==============
 
 def _format_judge_result(judge_result: dict, notebook) -> dict:

@@ -216,12 +216,21 @@ function initEventListeners() {
     // Save to Colab (in testbed footer — sync testbed edits first if visible)
     if (elements.saveToColabBtn) {
         elements.saveToColabBtn.addEventListener('click', async () => {
-            syncActiveRunToNotebook();  // pull testbed edits into state.notebook when in testbed
-            const result = await saveCurrentCellsToColab();
-            if (result.success) {
-                showToast(result.message || 'Saved to Colab notebook', 'success');
-            } else {
-                showToast(result.message || 'Could not save to Colab', 'error');
+            const btn = elements.saveToColabBtn;
+            const originalHtml = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="tb-btn-spinner"></span> Saving...';
+            try {
+                syncActiveRunToNotebook();  // pull testbed edits into state.notebook when in testbed
+                const result = await saveCurrentCellsToColab();
+                if (result.success) {
+                    showToast(result.message || 'Saved to Colab successfully', 'success');
+                } else {
+                    showToast(result.message || 'Could not save to Colab', 'error');
+                }
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalHtml;
             }
         });
     }
