@@ -372,7 +372,35 @@ class NotebookParser:
                 logger.debug("Metadata cell detected but parsing returned empty dict. Content preview: %s", cell.content[:200])
             return
         
-        # Standard fields
+        # Colab "Save to Colab" format: [Turn-1: Prompt], [Turn-1: Ideal Response], [Turn-1: Criteria], [Turn-1: Judge System Prompt]
+        # heading is already lowercased, e.g. "turn-1: prompt", "turn-1: ideal response"
+        turn_heading_match = re.match(r'^turn-\d+:\s*(.+)$', heading)
+        if turn_heading_match:
+            section = turn_heading_match.group(1).strip().lower()
+            section = re.sub(r'[\s_]+', ' ', section)
+            if section == 'prompt' and not result.prompt:
+                result.prompt = content
+                logger.debug("Parsed Turn-N: Prompt -> prompt")
+                return
+            if section == 'ideal response' and not result.response:
+                result.response = content
+                logger.debug("Parsed Turn-N: Ideal Response -> response")
+                return
+            if section == 'criteria' and not result.response_reference:
+                result.response_reference = content
+                logger.debug("Parsed Turn-N: Criteria -> response_reference")
+                return
+            if section == 'judge system prompt' and not result.judge_system_prompt:
+                result.judge_system_prompt = content
+                logger.debug("Parsed Turn-N: Judge System Prompt -> judge_system_prompt")
+                return
+            if section == 'judge_prompt_template' or section == 'judge prompt template':
+                result.judge_prompt_template = content
+                logger.debug("Parsed Turn-N: judge_prompt_template")
+                return
+            # Other Turn-N sections (e.g. Number of Attempts Made, Selected Response) are not testbed fields; fall through
+        
+        # Standard fields (**[prompt]**, **[response_reference]**, etc.)
         # Use first occurrence only (don't overwrite if already set)
         # This ensures we get the original content, not later edits
         if heading == 'prompt':

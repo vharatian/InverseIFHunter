@@ -66,10 +66,10 @@ deploy_full() {
     # Ensure staging storage dir exists
     mkdir -p .storage-staging
 
-    # Step 1: Pull multiturn-hunter (from repo root)
-    echo "[1/5] Pulling multiturn-hunter branch..."
+    # Step 1: Pull mth branch (from repo root)
+    echo "[1/5] Pulling mth branch..."
     if [ -d "$SCRIPT_DIR/.git" ]; then GIT_ROOT="$SCRIPT_DIR"; else GIT_ROOT="$SCRIPT_DIR/.."; fi
-    (cd "$GIT_ROOT" && git pull origin multiturn-hunter)
+    (cd "$GIT_ROOT" && git pull origin mth)
     cd "$SCRIPT_DIR"
     echo "  Code updated."
     echo ""

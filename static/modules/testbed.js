@@ -93,12 +93,12 @@ function getSharedLeft() {
         const criteriaEl = document.getElementById('modelrefPreview');
         const judgeEl    = document.getElementById('judgeMarkdown');
         const responseEl = document.getElementById('responseMarkdown');
-        const criteriaRaw = criteriaEl?.value?.trim() ?? '';
+        const criteriaRaw = criteriaEl?.value?.trim() ?? state.notebook?.response_reference ?? '';
         sharedLeft = {
             prompt:        promptEl?.value?.trim()   ?? state.notebook?.prompt ?? '',
             idealResponse: responseEl?.value?.trim() ?? state.notebook?.response ?? '',
             criteriaChips: criteriaStringToChips(criteriaRaw),
-            judgePrompt:   judgeEl?.value?.trim()    || DEFAULT_JUDGE_SYSTEM_PROMPT,
+            judgePrompt:   judgeEl?.value?.trim()    || state.notebook?.judge_system_prompt || DEFAULT_JUDGE_SYSTEM_PROMPT,
         };
     }
     return sharedLeft;
