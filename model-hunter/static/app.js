@@ -6247,62 +6247,6 @@ function confirmSelection() {
         return;
     }
     
-    // ===== DIVERSITY CHECK: Check for criterion diversity in LLM JUDGE ONLY =====
-    const criteriaVotes = {};  // Track votes per criterion from LLM judges: { C1: { pass: 0, fail: 0 }, ... }
-    
-    console.log('🔍 DIVERSITY CHECK - LLM Judge criteria from selected results:', selectedResults);
-    
-    // Check LLM judge criteria (not human judge)
-    for (const result of selectedResults) {
-        const judgeCriteria = result.judge_criteria || {};
-        console.log('  LLM Judge criteria:', judgeCriteria);
-        
-        for (const [criterionId, vote] of Object.entries(judgeCriteria)) {
-            if (!criteriaVotes[criterionId]) {
-                criteriaVotes[criterionId] = { pass: 0, fail: 0 };
-            }
-            const voteUpper = String(vote || '').toUpperCase();
-            if (voteUpper === 'PASS') {
-                criteriaVotes[criterionId].pass++;
-            } else if (voteUpper === 'FAIL') {
-                criteriaVotes[criterionId].fail++;
-            }
-        }
-    }
-    
-    console.log('  LLM Criteria votes summary:', criteriaVotes);
-    
-    // Check if ANY criterion has both a pass AND a fail in LLM judge results
-    const hasDiverseCriterion = Object.entries(criteriaVotes).some(
-        ([id, votes]) => votes.pass > 0 && votes.fail > 0
-    );
-    
-    console.log('  Has diverse criterion in LLM judges?', hasDiverseCriterion);
-    console.log('  Total criteria checked:', Object.keys(criteriaVotes).length);
-    
-    // CRITICAL: Must have at least one criterion with both PASS and FAIL in LLM judge results
-    if (!hasDiverseCriterion && Object.keys(criteriaVotes).length > 0) {
-        // Build a summary of votes for the error message
-        const votesSummary = Object.entries(criteriaVotes)
-            .map(([id, v]) => `${id}: ${v.pass} pass, ${v.fail} fail`)
-            .join('\n  ');
-        
-        console.error('❌ LLM JUDGE DIVERSITY CHECK FAILED:', votesSummary);
-        
-        showToast('LLM Judge criterion diversity required: At least one criterion must have both PASS and FAIL in LLM judge results. Run more hunts to get diverse LLM judgments.', 'error');
-        alert(
-            `Cannot confirm selection: Missing LLM Judge criterion diversity!\n\n` +
-            `Requirement: At least one criterion (C1, C2, etc.) must receive both a PASS and a FAIL from LLM judges across the selected responses.\n\n` +
-            `Current LLM judge votes:\n  ${votesSummary}\n\n` +
-            `⚠️ NOTE: This checks LLM judge diversity, not human judge diversity.\n` +
-            `Run more hunts until LLM judges give diverse results, then try selecting again.`
-        );
-        // CRITICAL: Return here to prevent confirmation
-        return;
-    }
-    
-    console.log('✅ LLM Judge diversity check passed');
-    
     // ===== CONFIRMATION DIALOG =====
     const confirmed = confirm(
         `🎯 Moving to Human Review Stage 🎯\n\n` +
