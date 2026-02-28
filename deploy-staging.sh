@@ -14,9 +14,8 @@
 
 set -e
 
-# ---- STAGING-ONLY: explicit file and project (never use docker-compose.yml or production project) ----
+# ---- STAGING-ONLY: explicit file (never use docker-compose.yml) ----
 COMPOSE_FILE="docker-compose.staging.yml"
-COMPOSE_PROJECT="model-hunter-staging"
 BLUE_PORT=8010
 GREEN_PORT=8012
 
@@ -32,8 +31,9 @@ if [ ! -f "$COMPOSE_FILE" ]; then
     exit 1
 fi
 
-# Use project name so we get model-hunter-staging-* containers only (never model-hunter-*)
-export COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT"
+# Use default compose project (directory name), e.g. staging-server, so we attach to existing
+# staging containers. Do NOT set COMPOSE_PROJECT_NAME so "docker-compose -p model-hunter-staging"
+# does not create a second set of containers and conflict on container names.
 
 # ---- Status ----
 show_status() {
@@ -96,7 +96,7 @@ deploy_full() {
 
     # Step 2: Rebuild green
     echo "[2/5] Rebuilding staging-green..."
-    docker-compose -f $COMPOSE_FILE -p $COMPOSE_PROJECT up -d --build --no-deps model-hunter-green
+    docker-compose -f $COMPOSE_FILE up -d --build --no-deps model-hunter-green
     echo ""
 
     # Step 3: Wait for green healthy
@@ -109,7 +109,7 @@ deploy_full() {
 
     # Step 4: Rebuild blue
     echo "[4/5] Rebuilding staging-blue..."
-    docker-compose -f $COMPOSE_FILE -p $COMPOSE_PROJECT up -d --build --no-deps model-hunter-blue
+    docker-compose -f $COMPOSE_FILE up -d --build --no-deps model-hunter-blue
     echo ""
 
     # Step 5: Wait for blue healthy
@@ -121,7 +121,7 @@ deploy_full() {
     echo ""
 
     # Reload staging nginx
-    docker-compose -f $COMPOSE_FILE -p $COMPOSE_PROJECT exec -T nginx nginx -s reload 2>/dev/null || true
+    docker-compose -f $COMPOSE_FILE exec -T nginx nginx -s reload 2>/dev/null || true
 
     echo "=== Staging deploy complete ==="
     echo ""
