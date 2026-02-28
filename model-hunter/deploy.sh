@@ -22,11 +22,12 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-COMPOSE_FILE="docker-compose.yml"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.yml"
 BLUE_PORT=8000
 GREEN_PORT=8002
 
-cd "$(dirname "$0")"
+cd "$SCRIPT_DIR"
 
 # ---- Status ----
 show_status() {
@@ -85,15 +86,16 @@ deploy_full() {
     echo -e "${BLUE}╚═══════════════════════════════════════╝${NC}"
     echo ""
 
-    # Step 1: Pull latest code
+    # Step 1: Pull latest code (optional; if pull fails we continue from current code)
     echo -e "${YELLOW}[1/5] Pulling latest code...${NC}"
-    cd .. && git pull origin main && cd model-hunter
+    (cd .. && git pull origin main) 2>/dev/null || true
+    cd "$SCRIPT_DIR"
     echo -e "${GREEN}  Code updated.${NC}"
     echo ""
 
     # Step 2: Rebuild and restart GREEN (blue stays up, serves all traffic)
     echo -e "${YELLOW}[2/5] Rebuilding green...${NC}"
-    docker-compose -f $COMPOSE_FILE up -d --build --no-deps model-hunter-green
+    docker-compose -f "$COMPOSE_FILE" up -d --build --no-deps model-hunter-green
     echo ""
 
     # Step 3: Wait for green to be healthy
@@ -106,7 +108,7 @@ deploy_full() {
 
     # Step 4: Rebuild and restart BLUE (green is now up, serves traffic)
     echo -e "${YELLOW}[4/5] Rebuilding blue...${NC}"
-    docker-compose -f $COMPOSE_FILE up -d --build --no-deps model-hunter-blue
+    docker-compose -f "$COMPOSE_FILE" up -d --build --no-deps model-hunter-blue
     echo ""
 
     # Step 5: Wait for blue to be healthy
@@ -118,7 +120,7 @@ deploy_full() {
     echo ""
 
     # Reload nginx to pick up fresh container IPs
-    docker-compose -f $COMPOSE_FILE exec -T nginx nginx -s reload 2>/dev/null || true
+    docker-compose -f "$COMPOSE_FILE" exec -T nginx nginx -s reload 2>/dev/null || true
 
     echo -e "${GREEN}╔═══════════════════════════════════════╗${NC}"
     echo -e "${GREEN}║   Deploy Complete — Zero Downtime     ║${NC}"

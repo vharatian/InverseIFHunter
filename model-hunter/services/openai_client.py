@@ -65,7 +65,7 @@ class OpenAIJudgeClient:
         judge_prompt_template: Optional[str] = None,
         model: str = DEFAULT_MODEL,
         max_tokens: int = 32768,  # GPT-5 max: 32k tokens for reasoning + response
-        temperature: float = 0.1,
+        temperature: float = 0,
         independent_judging: bool = True,  # Always use independent judging
         standard_response: Optional[str] = None  # Standard/expected response from [response] cell
     ) -> Dict[str, Any]:
@@ -199,8 +199,6 @@ class OpenAIJudgeClient:
         
         for attempt in range(max_retries):
             try:
-                # GPT-5 and newer models use 'max_completion_tokens' instead of 'max_tokens'
-                # GPT-5 also only supports default temperature (1), so we don't pass it
                 client, resolved_model = self._get_client_for_model(model)
                 print(f"DEBUG: Calling judge model '{resolved_model}' with prompt length {len(user_prompt)}... (attempt {attempt + 1}/{max_retries})")
                 print(f"DEBUG: System prompt length: {len(judge_system_prompt)}")
@@ -212,6 +210,7 @@ class OpenAIJudgeClient:
                         {"role": "user", "content": user_prompt}
                     ],
                     max_completion_tokens=max_tokens,
+                    temperature=0,
                     timeout=180.0
                 )
                 break  # Success, exit retry loop
@@ -999,6 +998,7 @@ class OpenAIJudgeClient:
                     model=resolved_model,
                     messages=[{"role": "user", "content": eval_prompt}],
                     response_format={"type": "json_object"},
+                    temperature=0,
                     timeout=120.0
                 )
                 content = response.choices[0].message.content
