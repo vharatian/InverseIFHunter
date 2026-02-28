@@ -138,7 +138,10 @@ const PROVIDER_MODELS = {
         { id: 'qwen/qwen3-235b-a22b-thinking-2507', name: 'Qwen3-235B (Thinking)' },
         { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5' },
         { id: 'anthropic/claude-opus-4.5', name: 'Claude Opus 4.5' },
-        { id: 'anthropic/claude-opus-4.6', name: 'Claude Opus 4.6' }
+        { id: 'anthropic/claude-opus-4.6', name: 'Claude Opus 4.6' },
+        { id: 'openai/gpt-5.2', name: 'GPT-5.2' },
+        { id: 'google/gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro (Preview)' },
+        { id: 'openai/gpt-5.2-pro', name: 'GPT 5.2 Pro' }
     ],
     'fireworks': [
         // Only Qwen3 for Fireworks (Nemotron not available on serverless)
@@ -391,7 +394,7 @@ const elements = {
     parallelWorkers: document.getElementById('parallelWorkers'),
     providerSelect: document.getElementById('providerSelect'),  // NEW
     modelSelect: document.getElementById('modelSelect'),
-    // independentJudge removed (now mandatory)
+    judgeModelSelect: document.getElementById('judgeModel'),
     startHuntBtn: document.getElementById('startHuntBtn'),
     
     // Preview
@@ -554,6 +557,8 @@ function getModelKey(modelStr) {
     if (lower.includes('qwen')) return 'qwen';
     if (lower.includes('sonnet')) return 'sonnet';
     if (lower.includes('opus')) return 'opus';
+    if (lower.includes('gpt')) return 'gpt';
+    if (lower.includes('gemini')) return 'gemini';
     return null;
 }
 
@@ -1354,6 +1359,14 @@ function handleNotebookLoaded(data, isUrl = false) {
             modelId = 'anthropic/claude-opus-4.5';
             provider = 'openrouter';
             console.log(`  → Mapped to Claude Opus 4.5`);
+        } else if (modelPrefixLower === 'gpt' || modelPrefixLower.includes('gpt')) {
+            modelId = 'openai/gpt-5.2';
+            provider = 'openrouter';
+            console.log(`  → Mapped to GPT-5.2`);
+        } else if (modelPrefixLower === 'gemini' || modelPrefixLower.includes('gemini')) {
+            modelId = 'google/gemini-3.1-pro-preview';
+            provider = 'openrouter';
+            console.log(`  → Mapped to Gemini 3.1 Pro (Preview)`);
         } else {
             console.warn(`⚠️ Unknown model prefix: "${modelPrefix}". Will use default (Qwen).`);
             // Default to Qwen if unknown
@@ -3427,7 +3440,7 @@ function getConfig() {
         provider: elements.providerSelect ? elements.providerSelect.value : 'openrouter', // NEW
         reasoning_budget_percent: 0.9,
         max_retries: 3, // Hardcoded to 3 retries
-        judge_model: 'gpt-5', // Always GPT-5
+        judge_model: document.getElementById('judgeModel')?.value || 'gpt-5',
         independent_judging: true, // Mandatory per user request
         custom_judge_system_prompt: null
     };
@@ -3463,27 +3476,6 @@ async function startHunt() {
         return;
     }
     
-    // FINAL CHECK: Validate model match before starting
-    if (state.metadataModel) {
-        const selectedModel = elements.modelSelect?.value || '';
-        const getKey = (s) => {
-            const l = (s || '').toLowerCase();
-            if (l.includes('nemotron')) return 'nemotron';
-            if (l.includes('qwen')) return 'qwen';
-            if (l.includes('llama')) return 'llama';
-            if (l.includes('deepseek')) return 'deepseek';
-            if (l.includes('mistral')) return 'mistral';
-            return l.replace(/[^a-z0-9]/g, '');
-        };
-        
-        if (getKey(selectedModel) !== getKey(state.metadataModel)) {
-            showToast(`⛔ BLOCKED: Model mismatch! Required: ${state.metadataModel}, Selected: ${selectedModel}`, 'error');
-            if (elements.startHuntBtn) {
-                elements.startHuntBtn.disabled = true;
-            }
-            return;
-        }
-    }
     
     // CHECK HUNT LIMIT: Block if maximum hunts reached for this notebook
     const requestedHunts = parseInt(elements.parallelWorkers?.value) || 4;
@@ -5529,7 +5521,7 @@ async function calibrationJudge() {
         const res = await fetch(`/api/judge-calibration/${state.sessionId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ response_text: _calibrationResponse })
+            body: JSON.stringify({ response_text: _calibrationResponse, judge_model: document.getElementById('judgeModel')?.value || 'gpt-5' })
         });
 
         if (!res.ok) {
@@ -7804,10 +7796,7 @@ function initEventListeners() {
                 return;
             }
             
-            // Clear previous results when model changes
-            clearPreviousResults();
             state.modelMismatchWarning = false;
-            showToast('Model changed. Previous results cleared.', 'info');
         });
     }
     
@@ -8132,9 +8121,11 @@ async function judgeReferenceResponse() {
         }
         
         const response = await fetch(`/api/judge-reference/${state.sessionId}`, {
-            method: 'POST'
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ judge_model: document.getElementById('judgeModel')?.value || 'gpt-5' })
         });
-        
+
         if (!response.ok) {
             if (response.status === 404) {
                 // Session not found - likely expired or invalid
@@ -8567,7 +8558,9 @@ async function saveAndJudgeResponse() {
         
         // Step 2: Judge
         const judgeResponse = await fetch(`/api/judge-reference/${state.sessionId}`, {
-            method: 'POST'
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ judge_model: document.getElementById('judgeModel')?.value || 'gpt-5' })
         });
         
         if (!judgeResponse.ok) {
@@ -8765,7 +8758,9 @@ async function saveAndRejudge() {
         
         // Step 2: Re-judge
         const judgeResponse = await fetch(`/api/judge-reference/${state.sessionId}`, {
-            method: 'POST'
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ judge_model: document.getElementById('judgeModel')?.value || 'gpt-5' })
         });
         
         if (!judgeResponse.ok) {

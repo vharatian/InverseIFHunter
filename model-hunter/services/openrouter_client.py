@@ -47,6 +47,9 @@ class OpenRouterClient(BaseAPIClient):
         "anthropic/claude-opus-4.5": 32768,
         "anthropic/claude-opus-4.6": 32768,
         "anthropic/claude-sonnet-4.5": 16384,
+        "openai/gpt-5.2": 131072,
+        "openai/gpt-5.2-pro": 131072,
+        "google/gemini-3.1-pro-preview": 65536,
     }
     
     def __init__(self, api_key: Optional[str] = None):
@@ -105,8 +108,10 @@ class OpenRouterClient(BaseAPIClient):
         is_nemotron = 'nemotron' in model_lower
         is_claude = 'claude' in model_lower or 'anthropic' in model_lower
         is_opus = 'opus' in model_lower
-        # Reasoning param: Qwen and Opus models need it. Nemotron and Sonnet don't.
-        is_reasoning_model = not is_nemotron and (not is_claude or is_opus)
+        is_gpt = 'gpt' in model_lower
+        is_gemini = 'gemini' in model_lower
+        # Reasoning: enabled for Qwen, Opus, GPT-5.2+, and Gemini. Disabled for Nemotron and Sonnet.
+        is_reasoning_model = not is_nemotron and (not is_claude or is_opus) or is_gpt or is_gemini
         
         if messages:
             # Multi-turn: conversation history + current prompt
@@ -120,7 +125,7 @@ class OpenRouterClient(BaseAPIClient):
             "messages": messages,
             "max_tokens": max_tokens,
             "stream": stream,
-            "temperature": 0.7 if is_claude else (0.6 if is_nemotron else 0.8)
+            "temperature": 0.7 if (is_claude or is_gpt) else (0.6 if is_nemotron else 0.8)
         }
         
         # Provider routing per Opus version:

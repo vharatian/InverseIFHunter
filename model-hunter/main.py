@@ -1055,8 +1055,13 @@ async def update_notebook_cells(session_id: str, request: UpdateNotebookCellsReq
         raise HTTPException(500, f"Error saving cells: {str(e)}")
 
 
+class JudgeReferenceRequest(BaseModel):
+    """Optional request body for judge-reference to specify judge model."""
+    judge_model: Optional[str] = None
+
+
 @app.post("/api/judge-reference/{session_id}")
-async def judge_reference(session_id: str):
+async def judge_reference(session_id: str, body: Optional[JudgeReferenceRequest] = None):
     """Judge the original reference response to verify it's correct."""
     session = await _get_validated_session(session_id)
     
@@ -1140,14 +1145,15 @@ async def judge_reference(session_id: str):
             except Exception as e:
                 logger.debug(f" judge_reference - Could not parse criteria from response_reference: {e}")
         
+        selected_judge = (body.judge_model if body and body.judge_model else None) or "gpt-5"
         judge_result = await judge.judge_response(
             prompt=notebook.prompt,
-            student_response=notebook.response,  # Judge the expected response
-            response_reference=notebook.response_reference,  # Against the criteria (now fresh from Colab)
+            student_response=notebook.response,
+            response_reference=notebook.response_reference,
             judge_system_prompt=notebook.judge_system_prompt,
             judge_prompt_template=notebook.judge_prompt_template,
-            model="gpt-5",
-            standard_response=notebook.response  # Standard response from [response] cell
+            model=selected_judge,
+            standard_response=notebook.response
         )
         
         logger.debug(f" judge_reference - Judge returned criteria: {list(judge_result.get('criteria', {}).keys())}")
@@ -1172,6 +1178,7 @@ async def judge_reference(session_id: str):
 class JudgeCalibrateRequest(BaseModel):
     """Request to judge a specific response text for calibration."""
     response_text: str
+    judge_model: Optional[str] = None
 
 
 @app.post("/api/generate-single/{session_id}")
@@ -1245,13 +1252,14 @@ async def judge_calibration(session_id: str, request: JudgeCalibrateRequest):
         from services.openai_client import get_openai_judge_client
         judge = get_openai_judge_client()
 
+        selected_judge = request.judge_model or "gpt-5"
         judge_result = await judge.judge_response(
             prompt=notebook.prompt,
             student_response=request.response_text,
             response_reference=notebook.response_reference,
             judge_system_prompt=notebook.judge_system_prompt,
             judge_prompt_template=notebook.judge_prompt_template,
-            model="gpt-5",
+            model=selected_judge,
             standard_response=request.response_text
         )
 
@@ -1807,7 +1815,7 @@ async def get_available_models():
     from services.openrouter_client import OpenRouterClient
     return {
         "models": OpenRouterClient.MODELS,
-        "judge_models": ["gpt-5", "gpt-4o", "gpt-4-turbo"]
+        "judge_models": ["gpt-5", "anthropic/claude-opus-4.6", "openai/gpt-5.2", "openai/gpt-5.2-pro"]
     }
 
 

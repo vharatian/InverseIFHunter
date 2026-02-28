@@ -28,16 +28,33 @@ load_dotenv()
 
 
 class OpenAIJudgeClient:
-    """Client for OpenAI GPT-5 judge with structured output parsing."""
+    """Judge client that routes ALL models through OpenRouter (OpenAI-compatible API)."""
     
     DEFAULT_MODEL = "gpt-5"
     
+    OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+    
+    # Map short/legacy names to OpenRouter model IDs
+    MODEL_ALIASES = {
+        "gpt-5": "openai/gpt-5",
+        "gpt-4o": "openai/gpt-4o",
+        "gpt-4-turbo": "openai/gpt-4-turbo",
+    }
+    
     def __init__(self, api_key: Optional[str] = None):
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
-        if not self.api_key:
-            raise ValueError("OpenAI API key not found. Set OPENAI_API_KEY in .env")
+        openrouter_key = api_key or os.getenv("OPENROUTER_API_KEY")
+        if not openrouter_key:
+            raise ValueError("OpenRouter API key not found. Set OPENROUTER_API_KEY in .env")
         
-        self.client = AsyncOpenAI(api_key=self.api_key)
+        self.client = AsyncOpenAI(
+            api_key=openrouter_key,
+            base_url=self.OPENROUTER_BASE_URL,
+        )
+    
+    def _get_client_for_model(self, model: str):
+        """Return (client, resolved_model). Resolves legacy aliases to OpenRouter IDs."""
+        resolved = self.MODEL_ALIASES.get(model, model)
+        return self.client, resolved
     
     async def judge_response(
         self,
@@ -184,18 +201,18 @@ class OpenAIJudgeClient:
             try:
                 # GPT-5 and newer models use 'max_completion_tokens' instead of 'max_tokens'
                 # GPT-5 also only supports default temperature (1), so we don't pass it
-                print(f"DEBUG: Calling judge model '{model}' with prompt length {len(user_prompt)}... (attempt {attempt + 1}/{max_retries})")
+                client, resolved_model = self._get_client_for_model(model)
+                print(f"DEBUG: Calling judge model '{resolved_model}' with prompt length {len(user_prompt)}... (attempt {attempt + 1}/{max_retries})")
                 print(f"DEBUG: System prompt length: {len(judge_system_prompt)}")
                 
-                response = await self.client.chat.completions.create(
-                    model=model,
+                response = await client.chat.completions.create(
+                    model=resolved_model,
                     messages=[
                         {"role": "system", "content": judge_system_prompt},
                         {"role": "user", "content": user_prompt}
                     ],
                     max_completion_tokens=max_tokens,
-                    timeout=180.0  # 3 minute timeout
-                    # Note: temperature not supported by GPT-5, using default (1)
+                    timeout=180.0
                 )
                 break  # Success, exit retry loop
             except (BrokenPipeError, ConnectionError, OSError, IOError) as e:
@@ -701,10 +718,10 @@ class OpenAIJudgeClient:
         return criteria
     
     async def test_connection(self) -> bool:
-        """Test API connection."""
+        """Test API connection via OpenRouter."""
         try:
             response = await self.client.chat.completions.create(
-                model="gpt-4o",  # Use gpt-4o for testing
+                model="openai/gpt-4o",
                 messages=[{"role": "user", "content": "test"}],
                 max_completion_tokens=5
             )
@@ -977,12 +994,12 @@ class OpenAIJudgeClient:
         
         for attempt in range(max_retries):
             try:
-                # print(f"DEBUG: Evaluating criterion {c_id}... (attempt {attempt + 1}/{max_retries})")
-                response = await self.client.chat.completions.create(
-                    model=model,
+                client, resolved_model = self._get_client_for_model(model)
+                response = await client.chat.completions.create(
+                    model=resolved_model,
                     messages=[{"role": "user", "content": eval_prompt}],
                     response_format={"type": "json_object"},
-                    timeout=120.0  # 2 minute timeout per criterion
+                    timeout=120.0
                 )
                 content = response.choices[0].message.content
                 data = json.loads(content)
