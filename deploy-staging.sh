@@ -68,7 +68,9 @@ deploy_full() {
 
     # Step 1: Pull multiturn-hunter (from repo root)
     echo "[1/5] Pulling multiturn-hunter branch..."
-    cd "$SCRIPT_DIR/.." && git pull origin multiturn-hunter && cd "$SCRIPT_DIR"
+    if [ -d "$SCRIPT_DIR/.git" ]; then GIT_ROOT="$SCRIPT_DIR"; else GIT_ROOT="$SCRIPT_DIR/.."; fi
+    (cd "$GIT_ROOT" && git pull origin multiturn-hunter)
+    cd "$SCRIPT_DIR"
     echo "  Code updated."
     echo ""
 
