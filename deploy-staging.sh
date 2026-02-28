@@ -1,7 +1,11 @@
 #!/bin/bash
 #
-# Deploy multiturn-hunter branch to STAGING only (port 443).
-# Does NOT touch production (port 80).
+# STAGING ONLY — Do NOT use for production.
+# Deploy mth branch to STAGING (port 443). Does NOT touch production (port 80).
+#
+# Port reference (DO NOT MIX):
+#   PRODUCTION (do not touch): port 80, app 8000/8002, dashboard 8001, compose: docker-compose.yml
+#   STAGING (this script):    port 443, app 8010/8012, dashboard 8011, compose: docker-compose.staging.yml
 #
 # Usage:
 #   ./deploy-staging.sh              # Full deploy to staging
@@ -10,15 +14,25 @@
 
 set -e
 
+# ---- STAGING-ONLY: explicit file and project (never use docker-compose.yml or production project) ----
 COMPOSE_FILE="docker-compose.staging.yml"
 COMPOSE_PROJECT="model-hunter-staging"
 BLUE_PORT=8010
 GREEN_PORT=8012
 
+# Production ports (for reference only — this script must NEVER use these)
+# PROD_APP_PORTS=8000,8002  PROD_DASHBOARD=8001  PROD_NGINX=80
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# Use project name so we get model-hunter-staging-* containers
+# Safeguard: must have staging compose file; we never use docker-compose.yml in this script
+if [ ! -f "$COMPOSE_FILE" ]; then
+    echo "ERROR: $COMPOSE_FILE not found. This script is for STAGING only. Aborting."
+    exit 1
+fi
+
+# Use project name so we get model-hunter-staging-* containers only (never model-hunter-*)
 export COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT"
 
 # ---- Status ----
@@ -60,7 +74,13 @@ wait_healthy() {
 
 # ---- Full deploy to staging ----
 deploy_full() {
-    echo "=== Deploy multiturn-hunter to STAGING (port 443) ==="
+    echo "=============================================="
+    echo "  STAGING ONLY — NOT PRODUCTION"
+    echo "  Ports: 443 (nginx), 8010/8012 (app), 8011 (dashboard)"
+    echo "  Production (unchanged): 80, 8000/8002, 8001"
+    echo "=============================================="
+    echo ""
+    echo "=== Deploy mth to STAGING (port 443) ==="
     echo ""
 
     # Ensure staging storage dir exists
