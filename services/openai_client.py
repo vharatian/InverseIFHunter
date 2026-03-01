@@ -78,34 +78,23 @@ async def _judge_via_openrouter(
     if not criteria_list:
         raise ValueError("CRITICAL: Could not extract criteria for judging. Reference must contain a valid JSON array or C1: ... format.")
     client = get_openrouter_client()
-    standard_section = ""
-    if standard_response and standard_response.strip():
-        standard_section = f"""
-Standard/Expected Answer (for reference context):
-{standard_response}
-
-Note: Use the standard answer as context to understand the expected format, but evaluate the student answer strictly against the criterion below."""
     results = []
     for criterion in criteria_list:
         c_id = criterion.get("id", "?")
         desc = criterion.get("description", "")
-        eval_prompt = f"""
-TASK: Evaluate if the Student Answer meets this SINGLE criterion.
+        eval_prompt = f"""Criterion ({c_id}): {desc}
 
-IMPORTANT: You are evaluating ONLY this one criterion. Do NOT consider other criteria.
-
-Criterion ({c_id}): {desc}
-
-Original Question:
+Question:
 {prompt}
 
 Student Answer:
-{student_response}{standard_section}
+{student_response}
 
-Evaluate ONLY whether the Student Answer meets the specific requirement stated in Criterion ({c_id}) above.
+Evaluate strictly whether the Student Answer meets the requirement stated in the criterion above.
+Only explicit, literal, and complete compliance qualifies as PASS.
+
 Output valid JSON only:
-{{"status": "PASS" or "FAIL", "reason": "Brief explanation focusing on this criterion"}}
-"""
+{{"status": "PASS" or "FAIL", "reason": "Brief explanation"}}"""
         # Pass messages as system + user (eval_prompt) for format stability; prompt="" so client does not append
         judge_system = judge_system_prompt or "You are a precise evaluator. Output only valid JSON."
         messages = [{"role": "system", "content": judge_system}, {"role": "user", "content": eval_prompt}]
@@ -556,39 +545,22 @@ class OpenAIJudgeClient:
         c_id = criterion.get('id', 'Unknown')
         desc = criterion.get('description', '')
         
-        # Build prompt with standard response as reference context if available
-        standard_section = ""
-        if standard_response and standard_response.strip():
-            standard_section = f"""
-        
-        Standard/Expected Answer (for reference context):
-        {standard_response}
-        
-        Note: Use the standard answer as context to understand the expected format and approach, but evaluate the student answer strictly against the criterion below."""
-        
-        eval_prompt = f"""
-        TASK: Evaluate if the Student Answer meets this SINGLE criterion.
-        
-        IMPORTANT: You are evaluating ONLY this one criterion. Do NOT consider other criteria. 
-        A response can PASS some criteria while FAILING others - evaluate each criterion independently.
-        
-        Criterion ({c_id}): {desc}
-        
-        Original Question:
-        {prompt}
-        
-        Student Answer:
-        {student_response}{standard_section}
-        
-        Evaluate ONLY whether the Student Answer meets the specific requirement stated in Criterion ({c_id}) above.
-        Do not consider other criteria or make holistic judgments.
-        
-        Output JSON:
-        {{
-            "status": "PASS" or "FAIL",
-            "reason": "Brief explanation focusing specifically on this criterion"
-        }}
-        """
+        eval_prompt = f"""Criterion ({c_id}): {desc}
+
+Question:
+{prompt}
+
+Student Answer:
+{student_response}
+
+Evaluate strictly whether the Student Answer meets the requirement stated in the criterion above.
+Only explicit, literal, and complete compliance qualifies as PASS.
+
+Output JSON:
+{{
+    "status": "PASS" or "FAIL",
+    "reason": "Brief explanation"
+}}"""
         
         # Retry logic for connection errors (broken pipe, timeouts, etc.)
         max_retries = 3
