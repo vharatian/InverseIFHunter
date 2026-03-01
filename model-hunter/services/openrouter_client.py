@@ -109,7 +109,7 @@ class OpenRouterClient(BaseAPIClient):
         is_claude = 'claude' in model_lower or 'anthropic' in model_lower
         is_opus = 'opus' in model_lower
         is_gpt = 'gpt' in model_lower
-        is_gemini = 'gemini' in model_lower
+        is_gemini = 'gemini' in model_lower or model_lower.startswith('google/')
         # Reasoning: enabled for Qwen, Opus, GPT-5.2+, and Gemini. Disabled for Nemotron and Sonnet.
         is_reasoning_model = not is_nemotron and (not is_claude or is_opus) or is_gpt or is_gemini
         
@@ -147,10 +147,17 @@ class OpenRouterClient(BaseAPIClient):
         # Nemotron: not a reasoning model, causes empty responses
         # Sonnet: doesn't need reasoning
         if is_reasoning_model and reasoning_budget_percent > 0:
-            payload["reasoning"] = {
-                "exclude": False,
-                "effort": "high"
-            }
+            if is_gemini:
+                reasoning_tokens = int(max_tokens * reasoning_budget_percent)
+                payload["reasoning"] = {
+                    "exclude": False,
+                    "max_tokens": reasoning_tokens
+                }
+            else:
+                payload["reasoning"] = {
+                    "exclude": False,
+                    "effort": "high"
+                }
         elif is_reasoning_model:
             payload["reasoning"] = {"exclude": True}
         
@@ -221,7 +228,7 @@ class OpenRouterClient(BaseAPIClient):
                                         for detail in delta["reasoning_details"]:
                                             if isinstance(detail, dict):
                                                 detail_id = detail.get("id")
-                                                detail_text = detail.get("text", "")
+                                                detail_text = detail.get("text", "") or detail.get("summary", "")
                                                 if detail_id and detail_text:
                                                     current_text = reasoning_by_id.get(detail_id, "")
                                                     if len(detail_text) > len(current_text):
@@ -250,8 +257,10 @@ class OpenRouterClient(BaseAPIClient):
                 if final_message_reasoning:
                     reasoning_parts = []
                     for detail in final_message_reasoning:
-                        if isinstance(detail, dict) and "text" in detail:
-                            reasoning_parts.append(detail["text"])
+                        if isinstance(detail, dict):
+                            part = detail.get("text", "") or detail.get("summary", "")
+                            if part:
+                                reasoning_parts.append(part)
                     reasoning_trace = "".join(reasoning_parts)
                     logger.debug(f"OpenRouter: Using final message reasoning: {len(reasoning_trace)} chars")
                 elif reasoning_by_id:
@@ -313,8 +322,10 @@ class OpenRouterClient(BaseAPIClient):
         if "reasoning_details" in message and message["reasoning_details"]:
             logger.debug(f"OpenRouter: Found reasoning_details array with {len(message['reasoning_details'])} items")
             for detail in message["reasoning_details"]:
-                if isinstance(detail, dict) and "text" in detail:
-                    reasoning_trace += detail["text"]
+                if isinstance(detail, dict):
+                    part = detail.get("text", "") or detail.get("summary", "")
+                    if part:
+                        reasoning_trace += part
         
         # Fallback to direct reasoning/thinking fields
         if not reasoning_trace:
