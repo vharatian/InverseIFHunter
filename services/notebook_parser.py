@@ -24,7 +24,7 @@ class NotebookParser:
     HEADING_PATTERN = re.compile(r'\*\*\[([^\]]+)\]\*\*')
     
     # Known cell types
-    METADATA_HEADINGS = {'prompt', 'response', 'response_reference', 
+    METADATA_HEADINGS = {'prompt', 'response', 'reasoning_trace', 'response_reference', 
                          'judge_prompt_template', 'judge_system_prompt',
                          'number_of_attempts_made'}
     MODEL_PATTERN = re.compile(r'^(nemotron|qwen|model)_(\d+)$', re.IGNORECASE)
@@ -409,6 +409,9 @@ class NotebookParser:
         elif heading == 'response':
             if not result.response:  # Only set if not already set
                 result.response = content
+        elif heading == 'reasoning_trace':
+            if not result.reasoning_trace:
+                result.reasoning_trace = content
         elif heading == 'response_reference':
             if not result.response_reference:  # Only set if not already set - use FIRST occurrence
                 result.response_reference = content

@@ -83,7 +83,7 @@ Remember, you must be very strict when grading the student's answer. Award it wi
 
 /**
  * Shared left-panel state — same for ALL runs.
- * @type {{ prompt: string, idealResponse: string, criteriaChips: string[], judgePrompt: string }}
+ * @type {{ prompt: string, idealResponse: string, reasoningTrace: string, criteriaChips: string[], judgePrompt: string }}
  */
 let sharedLeft = null;
 
@@ -97,6 +97,7 @@ function getSharedLeft() {
         sharedLeft = {
             prompt:        promptEl?.value?.trim()   ?? state.notebook?.prompt ?? '',
             idealResponse: responseEl?.value?.trim() ?? state.notebook?.response ?? '',
+            reasoningTrace: state.notebook?.reasoning_trace ?? '',
             criteriaChips: criteriaStringToChips(criteriaRaw),
             judgePrompt:   judgeEl?.value?.trim()    || state.notebook?.judge_system_prompt || DEFAULT_JUDGE_SYSTEM_PROMPT,
         };
@@ -197,13 +198,15 @@ function makeRun(overrides = {}) {
         model:           src?.model    ?? modelEl?.value  ?? 'qwen/qwen3-235b-a22b-thinking-2507',
         judgeModel:      src?.judgeModel ?? 'openai/gpt-5.2',
         provider:        src?.provider ?? providerEl?.value ?? 'openrouter',
-        status:          'idle',
-        response:        '',
-        responseEditing: false,
-        errorMessage:    null,
-        judgeResult:     null,
-        score:           null,
-        maxScore:        null,
+        status:           'idle',
+        response:         '',
+        responseEditing:  false,
+        reasoningTrace:   '',
+        reasoningEditing: false,
+        errorMessage:     null,
+        judgeResult:      null,
+        score:            null,
+        maxScore:         null,
         ...overrides,
     };
 }
@@ -274,13 +277,14 @@ function switchToRun(id) {
 /** Flush live edits of the shared left panel back into sharedLeft */
 function persistTabEdits() {
     const left = getSharedLeft();
-    const promptEl  = document.getElementById('tbSharedPrompt');
-    const idealEl   = document.getElementById('tbSharedIdeal');
-    const judgeEl   = document.getElementById('tbSharedJudge');
-    if (promptEl) left.prompt        = promptEl.value;
-    if (idealEl)  left.idealResponse = idealEl.value;
-    if (judgeEl)  left.judgePrompt   = judgeEl.value;
-    // criteriaChips are persisted on each chip-edit event in real time
+    const promptEl    = document.getElementById('tbSharedPrompt');
+    const idealEl     = document.getElementById('tbSharedIdeal');
+    const reasoningEl = document.getElementById('tbSharedReasoning');
+    const judgeEl     = document.getElementById('tbSharedJudge');
+    if (promptEl)    left.prompt         = promptEl.value;
+    if (idealEl)     left.idealResponse  = idealEl.value;
+    if (reasoningEl) left.reasoningTrace = reasoningEl.value;
+    if (judgeEl)     left.judgePrompt    = judgeEl.value;
 }
 
 function closeRun(id) {
@@ -724,8 +728,10 @@ function renderActiveTab() {
     const isGenerating = run.status === 'generating';
     const isJudging    = run.status === 'judging';
     const isBusy       = isGenerating || isJudging;
-    const hasResponse  = run.response && run.response.trim().length > 0;
-    const isEditing    = run.responseEditing;
+    const hasResponse   = run.response && run.response.trim().length > 0;
+    const isEditing     = run.responseEditing;
+    const hasReasoning  = run.reasoningTrace && run.reasoningTrace.trim().length > 0;
+    const isEditingReas = run.reasoningEditing;
 
     const responseArea = hasResponse
         ? (isEditing
@@ -742,6 +748,31 @@ function renderActiveTab() {
                <div class="tb-placeholder-icon">◎</div>
                <div>Response will appear here after generation.</div>
            </div>`;
+
+    const reasoningSection = hasReasoning
+        ? `<div class="tb-reasoning-section">
+               <button class="tb-reasoning-collapse-btn" id="tbReasoningCollapseBtn-${run.id}" type="button">
+                   <span class="tb-reasoning-collapse-icon">▶</span>
+                   <span>Model Reasoning</span>
+                   <span class="tb-reasoning-badge">${run.reasoningTrace.length.toLocaleString()} chars</span>
+                   <span class="tb-reasoning-collapse-hint">click to expand</span>
+                   ${isEditingReas
+                       ? `<span class="tb-edit-toggle tb-edit-active tb-reasoning-edit-toggle" id="tbReasoningEditToggle-${run.id}" title="View rendered">👁 View</span>`
+                       : `<span class="tb-edit-toggle tb-reasoning-edit-toggle" id="tbReasoningEditToggle-${run.id}" title="Edit reasoning">✏️ Edit</span>`}
+               </button>
+               <div class="tb-collapsible-body tb-collapsed tb-reasoning-body" id="tbReasoningBody-${run.id}">
+                   ${isEditingReas
+                       ? `<textarea
+                           class="tb-response-edit-ta tb-reasoning-edit-ta"
+                           id="tbReasoningEdit-${run.id}"
+                           spellcheck="false"
+                         >${escapeHtml(run.reasoningTrace)}</textarea>`
+                       : (typeof marked !== 'undefined'
+                           ? `<div class="tb-response-markdown tb-reasoning-content">${marked.parse(run.reasoningTrace)}</div>`
+                           : `<pre class="tb-response-pre tb-reasoning-content">${escapeHtml(run.reasoningTrace)}</pre>`)}
+               </div>
+           </div>`
+        : '';
 
     content.innerHTML = `
     <div class="tb-layout" data-run-id="${run.id}" id="tbLayout-${run.id}">
@@ -781,6 +812,23 @@ function renderActiveTab() {
                             placeholder="Enter the ideal / standard response here…"
                             rows="8"
                         >${escapeHtml(left.idealResponse)}</textarea>
+                    </div>
+                </div>
+
+                <!-- Reasoning Trace (collapsible) -->
+                <div class="tb-field tb-field-collapsible">
+                    <button class="tb-judge-collapse-btn" id="tbReasoningTraceCollapseBtn" type="button">
+                        <span class="tb-judge-collapse-icon">${left.reasoningTrace ? '▼' : '▶'}</span>
+                        <span>Reasoning Trace</span>
+                        <span class="tb-judge-collapse-hint">${left.reasoningTrace ? 'click to collapse' : 'click to expand / edit'}</span>
+                    </button>
+                    <div class="tb-collapsible-body ${left.reasoningTrace ? '' : 'tb-collapsed'}" id="tbSharedReasoningBody">
+                        <textarea
+                            class="tb-textarea tb-textarea-judge"
+                            id="tbSharedReasoning"
+                            placeholder="Enter the reasoning trace / model thinking here…"
+                            rows="6"
+                        >${escapeHtml(left.reasoningTrace)}</textarea>
                     </div>
                 </div>
 
@@ -867,6 +915,7 @@ function renderActiveTab() {
                 <div class="tb-response-area ${!hasResponse ? 'tb-response-empty' : ''}">
                     ${responseArea}
                 </div>
+                ${reasoningSection}
                 ${run.judgeResult ? renderJudgeResult(run) : ''}
             </div>
 
@@ -920,6 +969,23 @@ function renderActiveTab() {
         const body = document.getElementById('tbSharedIdealBody');
         const icon = document.querySelector('#tbIdealCollapseBtn .tb-judge-collapse-icon');
         const hint = document.querySelector('#tbIdealCollapseBtn .tb-judge-collapse-hint');
+        if (body) {
+            const isCollapsed = body.classList.toggle('tb-collapsed');
+            if (icon) icon.textContent = isCollapsed ? '▶' : '▼';
+            if (hint) hint.textContent = isCollapsed ? 'click to expand / edit' : 'click to collapse';
+        }
+    });
+
+    // Shared reasoning trace persist
+    document.getElementById('tbSharedReasoning')?.addEventListener('input', (e) => {
+        getSharedLeft().reasoningTrace = e.target.value;
+    });
+
+    // Reasoning trace collapse toggle
+    document.getElementById('tbReasoningTraceCollapseBtn')?.addEventListener('click', () => {
+        const body = document.getElementById('tbSharedReasoningBody');
+        const icon = document.querySelector('#tbReasoningTraceCollapseBtn .tb-judge-collapse-icon');
+        const hint = document.querySelector('#tbReasoningTraceCollapseBtn .tb-judge-collapse-hint');
         if (body) {
             const isCollapsed = body.classList.toggle('tb-collapsed');
             if (icon) icon.textContent = isCollapsed ? '▶' : '▼';
@@ -987,6 +1053,39 @@ function renderActiveTab() {
     if (responseEditTa) {
         responseEditTa.addEventListener('input', () => {
             run.response = responseEditTa.value;
+        });
+    }
+
+    // Reasoning trace collapse toggle
+    document.getElementById(`tbReasoningCollapseBtn-${run.id}`)?.addEventListener('click', (e) => {
+        if (e.target.closest('.tb-reasoning-edit-toggle')) return;
+        const body = document.getElementById(`tbReasoningBody-${run.id}`);
+        const icon = document.querySelector(`#tbReasoningCollapseBtn-${run.id} .tb-reasoning-collapse-icon`);
+        const hint = document.querySelector(`#tbReasoningCollapseBtn-${run.id} .tb-reasoning-collapse-hint`);
+        if (body) {
+            const isCollapsed = body.classList.toggle('tb-collapsed');
+            if (icon) icon.textContent = isCollapsed ? '▶' : '▼';
+            if (hint) hint.textContent = isCollapsed ? 'click to expand' : 'click to collapse';
+        }
+    });
+
+    // Reasoning edit/view toggle
+    document.getElementById(`tbReasoningEditToggle-${run.id}`)?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (run.reasoningEditing) {
+            const ta = document.getElementById(`tbReasoningEdit-${run.id}`);
+            if (ta) run.reasoningTrace = ta.value;
+        }
+        run.reasoningEditing = !run.reasoningEditing;
+        renderActiveTab();
+        requestAnimationFrame(applySavedSplit);
+    });
+
+    // Reasoning edit textarea — persist on input
+    const reasoningEditTa = document.getElementById(`tbReasoningEdit-${run.id}`);
+    if (reasoningEditTa) {
+        reasoningEditTa.addEventListener('input', () => {
+            run.reasoningTrace = reasoningEditTa.value;
         });
     }
 
@@ -1129,11 +1228,12 @@ async function triggerGenerate(run) {
             throw new Error(err.detail || err.message || `HTTP ${res.status}`);
         }
 
-        const data   = await res.json();
-        run.response = data.response || '';
-        run.status   = 'done';
-        run.model    = data.model    || run.model;
-        run.provider = data.provider || run.provider;
+        const data          = await res.json();
+        run.response        = data.response  || '';
+        run.reasoningTrace  = data.reasoning || '';
+        run.status          = 'done';
+        run.model           = data.model     || run.model;
+        run.provider        = data.provider  || run.provider;
 
         showToast(`Run ${run.number} response ready`, 'success');
     } catch (err) {
@@ -1249,10 +1349,11 @@ export function showNotebookPreview(run) {
     document.getElementById('tbNotebookPreviewOverlay')?.remove();
 
     const nb = state.notebook || {};
-    const left        = getSharedLeft();
-    const promptMd    = left.prompt        || document.getElementById('promptMarkdown')?.value   || '';
-    const responseMd  = left.idealResponse || document.getElementById('responseMarkdown')?.value || '';
-    const criterias   = left.criteriaChips?.length
+    const left         = getSharedLeft();
+    const promptMd     = left.prompt         || document.getElementById('promptMarkdown')?.value   || '';
+    const responseMd   = left.idealResponse  || document.getElementById('responseMarkdown')?.value || '';
+    const reasoningMd  = left.reasoningTrace || '';
+    const criterias    = left.criteriaChips?.length
         ? left.criteriaChips
         : criteriaStringToChips(document.getElementById('modelrefPreview')?.value || '');
     const judgePrompt = left.judgePrompt  || document.getElementById('judgeMarkdown')?.value    || '';
@@ -1334,6 +1435,16 @@ export function showNotebookPreview(run) {
                     </div>
                 </section>
 
+                ${reasoningMd ? `
+                <!-- Reasoning Trace -->
+                <section class="nbp-section">
+                    <div class="nbp-section-label">
+                        <span class="nbp-section-dot nbp-dot-judge"></span>
+                        Reasoning Trace
+                    </div>
+                    <div class="nbp-prose">${md(reasoningMd)}</div>
+                </section>` : ''}
+
                 <!-- Criteria -->
                 <section class="nbp-section">
                     <div class="nbp-section-label">
@@ -1409,8 +1520,9 @@ export function syncActiveRunToNotebook() {
     persistTabEdits();  // Flush testbed DOM edits to sharedLeft first
     if (!state.notebook) state.notebook = {};
     const left = getSharedLeft();
-    if (left.prompt)       state.notebook.prompt             = left.prompt;
-    if (left.idealResponse) state.notebook.response          = left.idealResponse;
+    if (left.prompt)        state.notebook.prompt             = left.prompt;
+    if (left.idealResponse) state.notebook.response           = left.idealResponse;
+    if (left.reasoningTrace !== undefined) state.notebook.reasoning_trace = left.reasoningTrace;
     if (left.criteriaChips?.length) {
         state.notebook.response_reference = chipsToJson(left.criteriaChips);
         // Also update state.criteria so the grading slideout shows the criteria
@@ -1511,30 +1623,33 @@ function loadTurnContextIntoRun(turnKey) {
     const run = getActiveRun();
     if (!run) return;
 
-    let prompt = '', idealResponse = '', criteria = '', judgePrompt = '';
+    let prompt = '', idealResponse = '', reasoningTrace = '', criteria = '', judgePrompt = '';
 
     if (turnKey === 'current') {
-        prompt        = document.getElementById('promptMarkdown')?.value?.trim()  || state.notebook?.prompt || '';
-        idealResponse = document.getElementById('responseMarkdown')?.value?.trim() || state.notebook?.response || '';
-        criteria    = document.getElementById('modelrefPreview')?.value?.trim() || '';
-        judgePrompt = document.getElementById('judgeMarkdown')?.value?.trim()   || '';
+        prompt         = document.getElementById('promptMarkdown')?.value?.trim()  || state.notebook?.prompt || '';
+        idealResponse  = document.getElementById('responseMarkdown')?.value?.trim() || state.notebook?.response || '';
+        reasoningTrace = state.notebook?.reasoning_trace || '';
+        criteria       = document.getElementById('modelrefPreview')?.value?.trim() || '';
+        judgePrompt    = document.getElementById('judgeMarkdown')?.value?.trim()   || '';
     } else {
         const n    = parseInt(turnKey, 10);
         const turn = (state.turns || []).find(t => (t.turnNumber ?? t.turn_number) === n);
         if (!turn) return;
-        prompt        = turn.prompt      || '';
-        idealResponse = turn.response || turn.selectedResponse || turn.selected_response || '';
-        criteria    = typeof turn.response_reference === 'string'
+        prompt         = turn.prompt      || '';
+        idealResponse  = turn.response || turn.selectedResponse || turn.selected_response || '';
+        reasoningTrace = turn.reasoning_trace || '';
+        criteria       = typeof turn.response_reference === 'string'
             ? turn.response_reference
             : (turn.response_reference ? JSON.stringify(turn.response_reference, null, 2) : '');
-        judgePrompt = turn.judgePrompt || turn.judge_system_prompt || '';
+        judgePrompt    = turn.judgePrompt || turn.judge_system_prompt || '';
     }
 
     const left = getSharedLeft();
-    left.prompt        = prompt;
-    left.idealResponse = idealResponse;
-    left.judgePrompt   = judgePrompt || DEFAULT_JUDGE_SYSTEM_PROMPT;
-    left.criteriaChips = criteriaStringToChips(criteria);
+    left.prompt         = prompt;
+    left.idealResponse  = idealResponse;
+    left.reasoningTrace = reasoningTrace;
+    left.judgePrompt    = judgePrompt || DEFAULT_JUDGE_SYSTEM_PROMPT;
+    left.criteriaChips  = criteriaStringToChips(criteria);
 
     // Re-render the active tab so the edits are visible
     renderActiveTab();
@@ -1645,6 +1760,7 @@ async function saveRunToTurn() {
         const cells = [];
         if (left.prompt) cells.push({ cell_type: 'prompt', content: left.prompt });
         if (left.idealResponse) cells.push({ cell_type: 'response', content: left.idealResponse });
+        if (left.reasoningTrace) cells.push({ cell_type: 'reasoning_trace', content: left.reasoningTrace });
         if (criteriaJson) cells.push({ cell_type: 'response_reference', content: criteriaJson });
         if (left.judgePrompt) cells.push({ cell_type: 'judge_system_prompt', content: left.judgePrompt });
 

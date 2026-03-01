@@ -7351,6 +7351,69 @@ body.sidebar-visible .container.multi-turn-layout {
 }
 .tb-response-edit-ta:focus { outline: none; }
 
+/* ── Reasoning Trace Section (collapsible, below response) ────────────── */
+.tb-reasoning-section {
+    border-top: 1px solid var(--border);
+    background: var(--bg-primary);
+}
+.tb-reasoning-collapse-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    width: 100%;
+    padding: 0.65rem 1rem;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-align: left;
+    border-radius: 0;
+    transition: background 0.15s ease;
+    user-select: none;
+}
+.tb-reasoning-collapse-btn:hover {
+    background: var(--bg-hover, var(--bg-secondary));
+}
+.tb-reasoning-collapse-icon {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    transition: transform 0.2s ease;
+    flex-shrink: 0;
+}
+.tb-reasoning-collapse-hint {
+    margin-left: auto;
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    font-weight: 400;
+}
+.tb-reasoning-badge {
+    font-size: 0.68rem;
+    font-weight: 500;
+    color: var(--accent-primary);
+    background: color-mix(in srgb, var(--accent-primary) 12%, transparent);
+    padding: 0.1rem 0.45rem;
+    border-radius: 9999px;
+}
+.tb-reasoning-edit-toggle {
+    font-size: 0.75rem;
+    padding: 0.15rem 0.5rem;
+    margin-left: 0.3rem;
+}
+.tb-reasoning-body {
+    max-height: 400px;
+}
+.tb-reasoning-body .tb-reasoning-content {
+    font-size: 0.84rem;
+    color: var(--text-secondary);
+    line-height: 1.65;
+}
+.tb-reasoning-body .tb-reasoning-edit-ta {
+    min-height: 150px;
+    font-size: 0.84rem;
+}
+
 /* ── Committed card: collapses notebookPreviewCard to header only ── */
 .nb-card-committed .tabs,
 .nb-card-committed .preview-content,
