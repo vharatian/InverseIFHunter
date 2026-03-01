@@ -24,7 +24,7 @@ class NotebookParser:
     HEADING_PATTERN = re.compile(r'\*\*\[([^\]]+)\]\*\*')
     
     # Known cell types
-    METADATA_HEADINGS = {'prompt', 'response', 'reasoning_trace', 'response_reference', 
+    METADATA_HEADINGS = {'prompt', 'response', 'model_reasoning', 'response_reference', 
                          'judge_prompt_template', 'judge_system_prompt',
                          'number_of_attempts_made'}
     MODEL_PATTERN = re.compile(r'^(nemotron|qwen|model)_(\d+)$', re.IGNORECASE)
@@ -394,6 +394,10 @@ class NotebookParser:
                 result.judge_system_prompt = content
                 logger.debug("Parsed Turn-N: Judge System Prompt -> judge_system_prompt")
                 return
+            if section in ('model reasoning', 'model_reasoning') and not result.model_reasoning:
+                result.model_reasoning = content
+                logger.debug("Parsed Turn-N: Model Reasoning -> model_reasoning")
+                return
             if section == 'judge_prompt_template' or section == 'judge prompt template':
                 result.judge_prompt_template = content
                 logger.debug("Parsed Turn-N: judge_prompt_template")
@@ -409,9 +413,9 @@ class NotebookParser:
         elif heading == 'response':
             if not result.response:  # Only set if not already set
                 result.response = content
-        elif heading == 'reasoning_trace':
-            if not result.reasoning_trace:
-                result.reasoning_trace = content
+        elif heading == 'model_reasoning':
+            if not result.model_reasoning:
+                result.model_reasoning = content
         elif heading == 'response_reference':
             if not result.response_reference:  # Only set if not already set - use FIRST occurrence
                 result.response_reference = content

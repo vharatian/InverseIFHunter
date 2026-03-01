@@ -79,6 +79,8 @@ async def judge_reference(
                 parsed.response_reference = session.notebook.response_reference
             if not (parsed.judge_system_prompt or "").strip() and (session.notebook.judge_system_prompt or "").strip():
                 parsed.judge_system_prompt = session.notebook.judge_system_prompt
+            if not (parsed.model_reasoning or "").strip() and (session.notebook.model_reasoning or "").strip():
+                parsed.model_reasoning = session.notebook.model_reasoning
             session.notebook = parsed
             await redis_store.set_notebook(session_id, parsed)
             ref = session.notebook.response_reference or ""

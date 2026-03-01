@@ -14,13 +14,13 @@ from models.schemas import HuntSession
 HEADING_MAP = {
     "prompt": "**[prompt]**",
     "response": "**[response]**",
-    "reasoning_trace": "**[reasoning_trace]**",
+    "model_reasoning": "**[model_reasoning]**",
     "response_reference": "**[response_reference]**",
     "judge_system_prompt": "**[judge_system_prompt]**"
 }
 
 # Cell order for notebook structure
-CELL_ORDER = ["prompt", "response", "reasoning_trace", "response_reference", "judge_system_prompt"]
+CELL_ORDER = ["prompt", "response", "model_reasoning", "response_reference", "judge_system_prompt"]
 
 
 # ============== Turn-Aware Heading Helpers ==============
@@ -220,8 +220,8 @@ def _update_session_notebook_field(session: HuntSession, cell_type: str, content
         session.notebook.prompt = content
     elif cell_type == "response":
         session.notebook.response = content
-    elif cell_type == "reasoning_trace":
-        session.notebook.reasoning_trace = content
+    elif cell_type == "model_reasoning":
+        session.notebook.model_reasoning = content
     elif cell_type == "response_reference":
         session.notebook.response_reference = content
     elif cell_type == "judge_system_prompt":

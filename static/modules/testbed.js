@@ -83,7 +83,7 @@ Remember, you must be very strict when grading the student's answer. Award it wi
 
 /**
  * Shared left-panel state — same for ALL runs.
- * @type {{ prompt: string, idealResponse: string, reasoningTrace: string, criteriaChips: string[], judgePrompt: string }}
+ * @type {{ prompt: string, idealResponse: string, modelReasoning: string, criteriaChips: string[], judgePrompt: string }}
  */
 let sharedLeft = null;
 
@@ -97,7 +97,7 @@ function getSharedLeft() {
         sharedLeft = {
             prompt:        promptEl?.value?.trim()   ?? state.notebook?.prompt ?? '',
             idealResponse: responseEl?.value?.trim() ?? state.notebook?.response ?? '',
-            reasoningTrace: state.notebook?.reasoning_trace ?? '',
+            modelReasoning: state.notebook?.model_reasoning ?? '',
             criteriaChips: criteriaStringToChips(criteriaRaw),
             judgePrompt:   judgeEl?.value?.trim()    || state.notebook?.judge_system_prompt || DEFAULT_JUDGE_SYSTEM_PROMPT,
         };
@@ -283,7 +283,7 @@ function persistTabEdits() {
     const judgeEl     = document.getElementById('tbSharedJudge');
     if (promptEl)    left.prompt         = promptEl.value;
     if (idealEl)     left.idealResponse  = idealEl.value;
-    if (reasoningEl) left.reasoningTrace = reasoningEl.value;
+    if (reasoningEl) left.modelReasoning = reasoningEl.value;
     if (judgeEl)     left.judgePrompt    = judgeEl.value;
 }
 
@@ -815,20 +815,20 @@ function renderActiveTab() {
                     </div>
                 </div>
 
-                <!-- Reasoning Trace (collapsible) -->
+                <!-- Model Reasoning (collapsible) -->
                 <div class="tb-field tb-field-collapsible">
-                    <button class="tb-judge-collapse-btn" id="tbReasoningTraceCollapseBtn" type="button">
-                        <span class="tb-judge-collapse-icon">${left.reasoningTrace ? '▼' : '▶'}</span>
-                        <span>Reasoning Trace</span>
-                        <span class="tb-judge-collapse-hint">${left.reasoningTrace ? 'click to collapse' : 'click to expand / edit'}</span>
+                    <button class="tb-judge-collapse-btn" id="tbModelReasoningCollapseBtn" type="button">
+                        <span class="tb-judge-collapse-icon">${left.modelReasoning ? '▼' : '▶'}</span>
+                        <span>Model Reasoning</span>
+                        <span class="tb-judge-collapse-hint">${left.modelReasoning ? 'click to collapse' : 'click to expand / edit'}</span>
                     </button>
-                    <div class="tb-collapsible-body ${left.reasoningTrace ? '' : 'tb-collapsed'}" id="tbSharedReasoningBody">
+                    <div class="tb-collapsible-body ${left.modelReasoning ? '' : 'tb-collapsed'}" id="tbSharedReasoningBody">
                         <textarea
                             class="tb-textarea tb-textarea-judge"
                             id="tbSharedReasoning"
-                            placeholder="Enter the reasoning trace / model thinking here…"
+                            placeholder="Enter the model reasoning here…"
                             rows="6"
-                        >${escapeHtml(left.reasoningTrace)}</textarea>
+                        >${escapeHtml(left.modelReasoning)}</textarea>
                     </div>
                 </div>
 
@@ -978,14 +978,14 @@ function renderActiveTab() {
 
     // Shared reasoning trace persist
     document.getElementById('tbSharedReasoning')?.addEventListener('input', (e) => {
-        getSharedLeft().reasoningTrace = e.target.value;
+        getSharedLeft().modelReasoning = e.target.value;
     });
 
-    // Reasoning trace collapse toggle
-    document.getElementById('tbReasoningTraceCollapseBtn')?.addEventListener('click', () => {
+    // Model reasoning collapse toggle
+    document.getElementById('tbModelReasoningCollapseBtn')?.addEventListener('click', () => {
         const body = document.getElementById('tbSharedReasoningBody');
-        const icon = document.querySelector('#tbReasoningTraceCollapseBtn .tb-judge-collapse-icon');
-        const hint = document.querySelector('#tbReasoningTraceCollapseBtn .tb-judge-collapse-hint');
+        const icon = document.querySelector('#tbModelReasoningCollapseBtn .tb-judge-collapse-icon');
+        const hint = document.querySelector('#tbModelReasoningCollapseBtn .tb-judge-collapse-hint');
         if (body) {
             const isCollapsed = body.classList.toggle('tb-collapsed');
             if (icon) icon.textContent = isCollapsed ? '▶' : '▼';
@@ -1352,7 +1352,7 @@ export function showNotebookPreview(run) {
     const left         = getSharedLeft();
     const promptMd     = left.prompt         || document.getElementById('promptMarkdown')?.value   || '';
     const responseMd   = left.idealResponse  || document.getElementById('responseMarkdown')?.value || '';
-    const reasoningMd  = left.reasoningTrace || '';
+    const reasoningMd  = left.modelReasoning || '';
     const criterias    = left.criteriaChips?.length
         ? left.criteriaChips
         : criteriaStringToChips(document.getElementById('modelrefPreview')?.value || '');
@@ -1436,11 +1436,11 @@ export function showNotebookPreview(run) {
                 </section>
 
                 ${reasoningMd ? `
-                <!-- Reasoning Trace -->
+                <!-- Model Reasoning -->
                 <section class="nbp-section">
                     <div class="nbp-section-label">
                         <span class="nbp-section-dot nbp-dot-judge"></span>
-                        Reasoning Trace
+                        Model Reasoning
                     </div>
                     <div class="nbp-prose">${md(reasoningMd)}</div>
                 </section>` : ''}
@@ -1522,7 +1522,7 @@ export function syncActiveRunToNotebook() {
     const left = getSharedLeft();
     if (left.prompt)        state.notebook.prompt             = left.prompt;
     if (left.idealResponse) state.notebook.response           = left.idealResponse;
-    if (left.reasoningTrace !== undefined) state.notebook.reasoning_trace = left.reasoningTrace;
+    if (left.modelReasoning !== undefined) state.notebook.model_reasoning = left.modelReasoning;
     if (left.criteriaChips?.length) {
         state.notebook.response_reference = chipsToJson(left.criteriaChips);
         // Also update state.criteria so the grading slideout shows the criteria
@@ -1623,33 +1623,33 @@ function loadTurnContextIntoRun(turnKey) {
     const run = getActiveRun();
     if (!run) return;
 
-    let prompt = '', idealResponse = '', reasoningTrace = '', criteria = '', judgePrompt = '';
+    let prompt = '', idealResponse = '', modelReasoning = '', criteria = '', judgePrompt = '';
 
     if (turnKey === 'current') {
-        prompt         = document.getElementById('promptMarkdown')?.value?.trim()  || state.notebook?.prompt || '';
-        idealResponse  = document.getElementById('responseMarkdown')?.value?.trim() || state.notebook?.response || '';
-        reasoningTrace = state.notebook?.reasoning_trace || '';
-        criteria       = document.getElementById('modelrefPreview')?.value?.trim() || '';
-        judgePrompt    = document.getElementById('judgeMarkdown')?.value?.trim()   || '';
+        prompt          = document.getElementById('promptMarkdown')?.value?.trim()  || state.notebook?.prompt || '';
+        idealResponse   = document.getElementById('responseMarkdown')?.value?.trim() || state.notebook?.response || '';
+        modelReasoning  = state.notebook?.model_reasoning || '';
+        criteria        = document.getElementById('modelrefPreview')?.value?.trim() || '';
+        judgePrompt     = document.getElementById('judgeMarkdown')?.value?.trim()   || '';
     } else {
         const n    = parseInt(turnKey, 10);
         const turn = (state.turns || []).find(t => (t.turnNumber ?? t.turn_number) === n);
         if (!turn) return;
-        prompt         = turn.prompt      || '';
-        idealResponse  = turn.response || turn.selectedResponse || turn.selected_response || '';
-        reasoningTrace = turn.reasoning_trace || '';
-        criteria       = typeof turn.response_reference === 'string'
+        prompt          = turn.prompt      || '';
+        idealResponse   = turn.response || turn.selectedResponse || turn.selected_response || '';
+        modelReasoning  = turn.model_reasoning || '';
+        criteria        = typeof turn.response_reference === 'string'
             ? turn.response_reference
             : (turn.response_reference ? JSON.stringify(turn.response_reference, null, 2) : '');
-        judgePrompt    = turn.judgePrompt || turn.judge_system_prompt || '';
+        judgePrompt     = turn.judgePrompt || turn.judge_system_prompt || '';
     }
 
     const left = getSharedLeft();
-    left.prompt         = prompt;
-    left.idealResponse  = idealResponse;
-    left.reasoningTrace = reasoningTrace;
-    left.judgePrompt    = judgePrompt || DEFAULT_JUDGE_SYSTEM_PROMPT;
-    left.criteriaChips  = criteriaStringToChips(criteria);
+    left.prompt          = prompt;
+    left.idealResponse   = idealResponse;
+    left.modelReasoning  = modelReasoning;
+    left.judgePrompt     = judgePrompt || DEFAULT_JUDGE_SYSTEM_PROMPT;
+    left.criteriaChips   = criteriaStringToChips(criteria);
 
     // Re-render the active tab so the edits are visible
     renderActiveTab();
@@ -1708,6 +1708,7 @@ async function saveRunToTurn() {
     if (!state.notebook) state.notebook = {};
     state.notebook.prompt = left.prompt;
     if (left.idealResponse) state.notebook.response = left.idealResponse;
+    if (left.modelReasoning !== undefined) state.notebook.model_reasoning = left.modelReasoning;
     state.notebook.response_reference = criteriaJson || chipsToString(left.criteriaChips);
     if (left.judgePrompt) state.notebook.judge_system_prompt = left.judgePrompt;
 
@@ -1760,7 +1761,7 @@ async function saveRunToTurn() {
         const cells = [];
         if (left.prompt) cells.push({ cell_type: 'prompt', content: left.prompt });
         if (left.idealResponse) cells.push({ cell_type: 'response', content: left.idealResponse });
-        if (left.reasoningTrace) cells.push({ cell_type: 'reasoning_trace', content: left.reasoningTrace });
+        if (left.modelReasoning) cells.push({ cell_type: 'model_reasoning', content: left.modelReasoning });
         if (criteriaJson) cells.push({ cell_type: 'response_reference', content: criteriaJson });
         if (left.judgePrompt) cells.push({ cell_type: 'judge_system_prompt', content: left.judgePrompt });
 

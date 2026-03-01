@@ -42,7 +42,7 @@ class ParsedNotebook(BaseModel):
     metadata: Dict[str, Any] = {}
     prompt: str = ""
     response: str = ""
-    reasoning_trace: str = ""
+    model_reasoning: str = ""
     response_reference: str = ""
     judge_prompt_template: str = ""
     judge_system_prompt: str = ""
