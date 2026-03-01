@@ -953,39 +953,22 @@ class OpenAIJudgeClient:
         c_id = criterion.get('id', 'Unknown')
         desc = criterion.get('description', '')
         
-        # Build prompt with standard response as reference context if available
-        standard_section = ""
-        if standard_response and standard_response.strip():
-            standard_section = f"""
-        
-        Standard/Expected Answer (for reference context):
-        {standard_response}
-        
-        Note: Use the standard answer as context to understand the expected format and approach, but evaluate the student answer strictly against the criterion below."""
-        
-        eval_prompt = f"""
-        TASK: Evaluate if the Student Answer meets this SINGLE criterion.
-        
-        IMPORTANT: You are evaluating ONLY this one criterion. Do NOT consider other criteria. 
-        A response can PASS some criteria while FAILING others - evaluate each criterion independently.
-        
-        Criterion ({c_id}): {desc}
-        
-        Original Question:
-        {prompt}
-        
-        Student Answer:
-        {student_response}{standard_section}
-        
-        Evaluate ONLY whether the Student Answer meets the specific requirement stated in Criterion ({c_id}) above.
-        Do not consider other criteria or make holistic judgments.
-        
-        Output JSON:
-        {{
-            "status": "PASS" or "FAIL",
-            "reason": "Brief explanation focusing specifically on this criterion"
-        }}
-        """
+        eval_prompt = f"""Evaluate if the Student Answer meets this criterion.
+
+Criterion ({c_id}): {desc}
+
+Original Question:
+{prompt}
+
+Student Answer:
+{student_response}
+
+Output JSON:
+{{
+    "status": "PASS" or "FAIL",
+    "reason": "Brief explanation"
+}}
+"""
         
         # Retry logic for connection errors (broken pipe, timeouts, etc.)
         max_retries = 3
@@ -1002,6 +985,12 @@ class OpenAIJudgeClient:
                     timeout=120.0
                 )
                 content = response.choices[0].message.content
+                if not content or not content.strip():
+                    print(f"WARNING: Empty response for criterion {c_id} (attempt {attempt + 1}/{max_retries})")
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(retry_delay * (2 ** attempt))
+                        continue
+                    return {"id": c_id, "status": "FAIL", "reason": "Judge returned empty response"}
                 data = json.loads(content)
                 return {
                     "id": c_id,
