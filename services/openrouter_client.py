@@ -40,13 +40,18 @@ class OpenRouterClient(BaseAPIClient):
         "qwen3": "qwen/qwen3-235b-a22b-thinking-2507",
     }
     
-    # Default max tokens per model (actual model capabilities)
+    # Default max tokens per model
+    # Actual caps: GPT-5.2 128K, Sonnet 4.6 64K, Gemini 3.1 65K
+    # Capped at 32K for cost/speed in hunt use case (trainer can override)
     MAX_TOKENS = {
         "nvidia/nemotron-3-nano-30b-a3b": 32768,
         "qwen/qwen3-235b-a22b-thinking-2507": 131072,
         "anthropic/claude-opus-4.5": 32768,
         "anthropic/claude-opus-4.6": 32768,
         "anthropic/claude-sonnet-4.5": 16384,
+        "anthropic/claude-sonnet-4.6": 32768,
+        "openai/gpt-5.2": 32768,
+        "openai/gpt-5.2-pro": 32768,
         "google/gemini-3.1-pro-preview": 65536,
     }
     
@@ -108,8 +113,9 @@ class OpenRouterClient(BaseAPIClient):
         is_claude = 'claude' in model_lower or 'anthropic' in model_lower
         is_opus = 'opus' in model_lower
         is_gemini = 'gemini' in model_lower or model_lower.startswith('google/')
-        # Reasoning param: Qwen, Opus, and Gemini need it. Nemotron and Sonnet don't.
-        is_reasoning_model = not is_nemotron and (not is_claude or is_opus) or is_gemini
+        is_sonnet_46 = 'sonnet-4.6' in model_lower
+        # Reasoning: GPT-5, Qwen, Opus, Sonnet 4.6, Gemini. NOT Nemotron, NOT Sonnet 4.5.
+        is_reasoning_model = (not is_nemotron and (not is_claude or is_opus or is_sonnet_46)) or is_gemini
         
         if messages:
             # Multi-turn or full messages: append prompt only if provided (avoid empty user message)
@@ -145,9 +151,9 @@ class OpenRouterClient(BaseAPIClient):
                     "allow_fallbacks": False
                 }
         
-        # Add reasoning parameter for Qwen, Opus, and Gemini models
+        # Reasoning: Qwen, GPT-5, Opus, Sonnet 4.6, Gemini
         # Nemotron: not a reasoning model, causes empty responses
-        # Sonnet: doesn't need reasoning
+        # Sonnet 4.5: no reasoning support
         # Gemini: uses max_tokens (mapped to thinkingBudget/thinkingLevel by OpenRouter)
         if is_reasoning_model and reasoning_budget_percent > 0:
             if is_gemini:

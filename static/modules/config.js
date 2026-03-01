@@ -36,6 +36,7 @@ export function getConfigValue(key, staticDefault) {
 export const PROVIDER_MODELS = {
     'openrouter': [
         { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5' },
+        { id: 'anthropic/claude-sonnet-4.6', name: 'Claude Sonnet 4.6' },
         { id: 'anthropic/claude-opus-4.5', name: 'Claude Opus 4.5' },
         { id: 'anthropic/claude-opus-4.6', name: 'Claude Opus 4.6' },
         { id: 'openai/gpt-5.2', name: 'GPT-5.2' },
