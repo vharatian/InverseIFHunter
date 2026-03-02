@@ -28,7 +28,7 @@ import { showMultiTurnDecision, updateTurnAwareUI } from './multiturn.js';
 import { showUpdatePrompt, hasPendingUpdate } from './api.js';
 import { syncActiveRunToNotebook } from './testbed.js';
 
-import { saveCurrentCellsToColab } from './notebook.js';
+
 
 // ============== Hunt Limit Functions ==============
 // Helper functions moved to utils.js
@@ -345,19 +345,6 @@ export async function startHunt() {
                 body: JSON.stringify({ cells, session_only: true })
             });
         }
-    }
-
-    // Auto-save all current content to Colab before the hunt starts
-    // Warn on failure but never block the hunt
-    try {
-        const saveResult = await saveCurrentCellsToColab();
-        if (saveResult.success) {
-            showToast('Saved to Colab notebook', 'success');
-        } else {
-            showToast(`Could not auto-save to Colab: ${saveResult.message}. Hunt will still proceed.`, 'warning');
-        }
-    } catch (_) {
-        showToast('Auto-save to Colab failed. Hunt will still proceed.', 'warning');
     }
 
     // Update config on server WITH hunt offset for unique hunt_id generation
