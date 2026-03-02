@@ -164,9 +164,30 @@ export function showHuntLimitReachedError() {
 
 // ============== Hunt Configuration ==============
 
-function getHuntMode() {
+export function getHuntMode() {
     const sel = document.getElementById('huntModeSelect');
     return sel?.value || 'break_50';
+}
+
+/** Map hunt mode to {passing_mode, pass_threshold} for backend config.
+ *
+ * pass_threshold controls when the judge scores a response as passing (1) vs breaking (0):
+ *   0.0 → only pass_rate > 0 gives score=1  → breaking requires ALL criteria to fail
+ *   0.5 → pass_rate > 0.5 gives score=1     → breaking when >50% criteria fail
+ *   1.0 → only pass_rate == 1.0 gives score=1 → breaking when ANY 1 criterion fails
+ */
+function getHuntModeConfig(huntMode) {
+    switch (huntMode) {
+        case 'all_passing':
+            return { passing_mode: true, pass_threshold: 1.0 };
+        case 'break_all':
+            return { passing_mode: false, pass_threshold: 0.0 };
+        case '1_breaking':
+            return { passing_mode: false, pass_threshold: 1.0 };
+        case 'break_50':
+        default:
+            return { passing_mode: false, pass_threshold: 0.5 };
+    }
 }
 
 export function getConfig() {
@@ -181,8 +202,7 @@ export function getConfig() {
     const defaultJudge = judgeModels[0]?.id || 'openai/gpt-5.2';
 
     const huntMode = getHuntMode();
-    const passing_mode = huntMode === 'passing';
-    const pass_threshold = huntMode === 'break_all' ? 1.0 : (huntMode === 'passing' ? 1.0 : 0.5);
+    const { passing_mode, pass_threshold } = getHuntModeConfig(huntMode);
 
     return {
         parallel_workers: huntCount,
@@ -263,6 +283,12 @@ export async function startHunt() {
     // incrementHuntCount calls updateHuntLimitUI which modifies the UI input values!
     // If we call getConfig() after, it reads the modified (lower) values.
     state.config = getConfig();
+
+    // Persist the raw hunt mode string for selection-stage logic
+    state.config.hunt_mode = getHuntMode();
+
+    // Lock mode dropdown after first hunt — cannot switch modes within a session
+    lockHuntMode();
     
     // Increment hunt count immediately (before the hunt starts)
     // This will update UI but we already captured the config
@@ -749,7 +775,7 @@ function updateHuntButtonLabel() {
     const label = document.getElementById('startHuntBtnLabel');
     if (!label) return;
     const mode = getHuntMode();
-    label.textContent = mode === 'passing' ? 'Find Passing Responses' : 'Find Breaking Responses';
+    label.textContent = mode === 'all_passing' ? 'Find Passing Responses' : 'Find Breaking Responses';
 }
 
 /** Sync hunt mode from state.config (e.g. when hydrating session). */
@@ -757,14 +783,40 @@ export function syncHuntModeFromConfig() {
     const cfg = state.config || {};
     const passing = cfg.passing_mode === true;
     const threshold = cfg.pass_threshold ?? 0.5;
+    const huntMode = cfg.hunt_mode;
+
     let value = 'break_50';
-    if (passing) value = 'passing';
-    else if (threshold >= 1.0) value = 'break_all';
+    if (huntMode && huntMode !== 'break_50') {
+        value = huntMode;
+    } else if (passing) {
+        value = 'all_passing';
+    }
+
     const sel = document.getElementById('huntModeSelect');
     if (sel && sel.value !== value) {
         sel.value = value;
         updateHuntButtonLabel();
     }
+}
+
+/** Lock the hunt mode dropdown so it cannot be changed during the session. */
+export function lockHuntMode() {
+    const sel = document.getElementById('huntModeSelect');
+    if (sel) {
+        sel.disabled = true;
+        sel.title = 'Hunt mode is locked after the first hunt. Reload the notebook to change.';
+    }
+    state._huntModeLocked = true;
+}
+
+/** Unlock the hunt mode dropdown (e.g. on fresh notebook load). */
+export function unlockHuntMode() {
+    const sel = document.getElementById('huntModeSelect');
+    if (sel) {
+        sel.disabled = false;
+        sel.title = '';
+    }
+    state._huntModeLocked = false;
 }
 
 export function initHuntNumberControls() {

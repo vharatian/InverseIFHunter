@@ -87,6 +87,8 @@ class HuntConfig(BaseModel):
     pass_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
     # Passing mode: hunt for passes (success = all pass), not breaks
     passing_mode: bool = Field(default=False)
+    # Raw hunt mode string from UI — drives selection-stage rules
+    hunt_mode: str = Field(default="break_50")
     # InverseIF episode: batch and proceed policy
     batch_size: int = Field(default=4, ge=1, le=16)
     break_mode: Literal["ratio", "any_break", "no_break"] = "ratio"

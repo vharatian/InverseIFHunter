@@ -105,6 +105,7 @@ function _mergeConfig(serverConfig) {
         custom_judge_system_prompt: serverConfig.custom_judge_system_prompt ?? state.config.custom_judge_system_prompt,
         pass_threshold: serverConfig.pass_threshold ?? state.config.pass_threshold ?? 0.5,
         passing_mode: serverConfig.passing_mode ?? state.config.passing_mode ?? false,
+        hunt_mode: serverConfig.hunt_mode ?? state.config.hunt_mode ?? 'break_50',
     };
 }
 

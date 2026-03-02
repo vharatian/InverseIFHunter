@@ -26,6 +26,72 @@ import { showAppModal } from './api.js';
 import { scheduleLiveExportUpdate } from './notebook.js';
 import { MIN_EXPLANATION_WORDS, getConfigValue } from './config.js';
 
+// ============== Hunt Result Classification Helpers ==============
+
+/** Check if a hunt result is breaking (score === 0). */
+export function isResultBreaking(result) {
+    const judgeScore = result.judge_score !== undefined && result.judge_score !== null ? Number(result.judge_score) : null;
+    const score = result.score !== undefined && result.score !== null ? Number(result.score) : null;
+    return (judgeScore !== null && judgeScore === 0) || (score !== null && score === 0);
+}
+
+/** Check if a hunt result is passing (score > 0). */
+export function isResultPassing(result) {
+    const judgeScore = result.judge_score !== undefined && result.judge_score !== null ? Number(result.judge_score) : null;
+    const score = result.score !== undefined && result.score !== null ? Number(result.score) : null;
+    return (judgeScore !== null && judgeScore > 0) || (score !== null && score > 0);
+}
+
+/** Count breaking and passing results in an array. */
+export function countBreakingPassing(results) {
+    const breakingCount = results.filter(isResultBreaking).length;
+    const passingCount = results.filter(isResultPassing).length;
+    return { breakingCount, passingCount };
+}
+
+/**
+ * Validate a selection of hunts against the current hunt mode's rules.
+ * Returns { valid: boolean, message: string }.
+ */
+export function validateSelectionForMode(selectedResults, huntMode, isAdmin = false) {
+    if (isAdmin) return { valid: true, message: 'Admin: any combination allowed' };
+
+    const { breakingCount, passingCount } = countBreakingPassing(selectedResults);
+    const total = selectedResults.length;
+
+    switch (huntMode) {
+        case 'all_passing':
+            if (breakingCount > 0) {
+                return { valid: false, message: 'Only passing (non-breaking) hunts can be selected in All Passing mode.' };
+            }
+            if (total === 0) {
+                return { valid: false, message: 'Select at least one passing hunt.' };
+            }
+            return { valid: true, message: `${passingCount} passing selected` };
+
+        case '1_breaking':
+            if (breakingCount > 1) {
+                return { valid: false, message: 'Only 1 breaking hunt is allowed in 1 Breaking mode.' };
+            }
+            if (breakingCount === 0 && total > 0) {
+                return { valid: false, message: 'You must include the 1 breaking hunt in your selection.' };
+            }
+            return { valid: true, message: `${breakingCount} breaking, ${passingCount} passing selected` };
+
+        default: {
+            // break_50, break_all — require exactly 4 with 4B or 3B+1P
+            if (total !== 4) {
+                return { valid: total < 4, message: `Select ${4 - total} more hunt(s). Must be exactly 4 total.` };
+            }
+            const isValid = (breakingCount === 4) || (breakingCount === 3 && passingCount === 1);
+            if (!isValid) {
+                return { valid: false, message: `Invalid combination! Must be 4 breaking OR 3 breaking + 1 passing. Current: ${breakingCount} breaking, ${passingCount} passing.` };
+            }
+            return { valid: true, message: `Valid: ${breakingCount} breaking, ${passingCount} passing` };
+        }
+    }
+}
+
 // ============== Selection Section Collapse ==============
 export function toggleSelectionSectionCard() {
     state.selectionSectionCollapsed = !state.selectionSectionCollapsed;
@@ -859,12 +925,8 @@ export async function fetchAllResponsesAndShowSelection(completedHunts, breaksFo
             }
         });
         
-        // Count breaks for current turn (for selection logic)
-        const totalPasses = state.allResponses.filter(r => {
-            const judgeScore = r.judge_score !== undefined && r.judge_score !== null ? Number(r.judge_score) : null;
-            const score = r.score !== undefined && r.score !== null ? Number(r.score) : null;
-            return (judgeScore !== null && judgeScore > 0) || (score !== null && score > 0);
-        }).length;
+        const { breakingCount: totalBreaks, passingCount: totalPasses } = countBreakingPassing(state.allResponses);
+        const huntMode = state.config?.hunt_mode || 'break_50';
         
         // Populate summary with CUMULATIVE stats across all turns
         const cumulative = getCumulativeStats();
@@ -876,44 +938,33 @@ export async function fetchAllResponsesAndShowSelection(completedHunts, breaksFo
         document.getElementById('summarySuccess').textContent = `${successRate}% (${cumulative.totalBreaks}/${cumulative.totalHunts} breaks)`;
         document.getElementById('summaryMet').textContent = cumulative.totalBreaks >= 3 ? '✅ Yes' : '❌ No';
         
-        // VALIDATION 1: Need at least 3 breaks (use cumulative)
-        const totalBreaks = cumulative.totalBreaks;
-        const criteriaMetBreaks = totalBreaks >= 3;
-        
-        // VALIDATION 2: Criteria-level diversity - at least 1 criterion has both PASS and FAIL
-        // Build map of criteria grades across all hunts
-        const criteriaGrades = {}; // { C1: ['PASS','FAIL','PASS'], C2: ['FAIL','FAIL'], ... }
-        state.allResponses.forEach(r => {
-            const gradingBasis = r.judge_criteria || r.grading_basis || {};
-            Object.entries(gradingBasis).forEach(([key, val]) => {
-                if (!criteriaGrades[key]) criteriaGrades[key] = [];
-                const grade = String(val || '').toUpperCase();
-                if (grade === 'PASS' || grade === 'FAIL') {
-                    criteriaGrades[key].push(grade);
-                }
-            });
-        });
-        
-        // Check if at least one criterion has BOTH pass and fail
-        const diverseCriteria = Object.entries(criteriaGrades).filter(([key, grades]) => {
-            const hasPass = grades.includes('PASS');
-            const hasFail = grades.includes('FAIL');
-            return hasPass && hasFail;
-        });
-        const criteriaMetDiversity = diverseCriteria.length >= 1;
-        
-        
-        // Only check breaks requirement, not diversity (diversity is checked for LLM judge only, not for selection)
-        // In admin mode, allow proceeding even with 0 breaks
-        const criteriaMet = state.adminMode || criteriaMetBreaks;
+        // VALIDATION: Gate logic depends on hunt mode
+        let criteriaMet = state.adminMode;
+        let gateFailTitle = '';
+        let gateFailMessage = '';
+
+        if (!state.adminMode) {
+            if (huntMode === 'all_passing') {
+                criteriaMet = totalPasses >= 1;
+                gateFailTitle = 'No passing responses found';
+                gateFailMessage = `You need at least 1 passing (non-breaking) response to proceed. Currently ${totalPasses} passing, ${totalBreaks} breaking. Run more hunts!`;
+            } else if (huntMode === '1_breaking') {
+                criteriaMet = totalBreaks >= 1;
+                gateFailTitle = 'At least 1 breaking response is required';
+                gateFailMessage = `You need at least 1 breaking response in 1 Breaking mode. Currently ${totalBreaks} breaking, ${totalPasses} passing. Run more hunts!`;
+            } else {
+                criteriaMet = totalBreaks >= 3;
+                gateFailTitle = 'You need at least 3 breaking responses to continue';
+                gateFailMessage = `You have ${totalBreaks} right now. Run more hunts, then try again.`;
+            }
+        }
         
         if (!criteriaMet) {
-            // Don't show selection - criteria not met
             elements.selectionSection.classList.add('hidden');
-            showToast(`Need at least 3 breaking responses. You have ${totalBreaks}.`, 'warning');
+            showToast(gateFailMessage, 'warning');
             await showAppModal({
-                title: 'You need at least 3 breaking responses to continue',
-                message: `You have ${totalBreaks} right now. Run more hunts, then try again.`,
+                title: gateFailTitle,
+                message: gateFailMessage,
                 buttons: [ { label: 'OK', primary: true, value: true } ]
             });
             return;
@@ -921,15 +972,18 @@ export async function fetchAllResponsesAndShowSelection(completedHunts, breaksFo
         
         // Show selection section - criteria met!
         elements.selectionSection.classList.remove('hidden');
-        expandSelectionSectionCard();  // Ensure expanded so user can select
+        expandSelectionSectionCard();
         
-        // Show a selection tip
         renderInsightTip('selectionTipContainer', 'selection');
         
-        // Display selection cards (NO auto-selection)
         displaySelectionCards();
         
-        showToast(`✅ Criteria met! ${totalBreaks} breaks, ${totalPasses} passes. Select exactly 4 for review.`, 'success');
+        const modeHint = huntMode === 'all_passing'
+            ? `Select any number of passing hunts for review.`
+            : huntMode === '1_breaking'
+                ? `Select the 1 breaking hunt + any passing hunts for review.`
+                : `Select exactly 4 for review.`;
+        showToast(`✅ Criteria met! ${totalBreaks} breaks, ${totalPasses} passes. ${modeHint}`, 'success');
     } catch (error) {
         console.error('Error fetching results:', error);
         showError(error, { operation: 'Fetch results' });
@@ -951,19 +1005,19 @@ export async function exportNotebook() {
         return;
     }
     
-    // FIX 3: Require all 4 reviews before allowing export
     const selectedRowNumbers = state.selectedRowNumbers || [];
     const reviewKeys = selectedRowNumbers.map(rn => `row_${rn}`);
     const reviews = reviewKeys.map(key => state.humanReviews[key]).filter(r => r);
     const reviewCount = reviews.length;
+    const requiredCount = selectedRowNumbers.length;
     
-    if (selectedRowNumbers.length !== 4) {
-        showToast(`Must have exactly 4 hunts selected. Currently: ${selectedRowNumbers.length}`, 'error');
+    if (requiredCount === 0) {
+        showToast('No hunts selected for export.', 'error');
         return;
     }
     
-    if (reviewCount < 4) {
-        showToast(`Cannot export: Only ${reviewCount}/4 reviews completed. Please complete all 4 reviews before exporting.`, 'error');
+    if (reviewCount < requiredCount) {
+        showToast(`Cannot export: Only ${reviewCount}/${requiredCount} reviews completed. Please complete all reviews before exporting.`, 'error');
         return;
     }
     
@@ -1415,14 +1469,19 @@ export function displaySelectionCards() {
     
     const tbody = table.querySelector('#huntSelectionTableBody');
     
-    // Show all hunts in order (breaking first, then passing)
+    const huntMode = state.config?.hunt_mode || 'break_50';
+
+    // Sort: in all_passing mode show passing first; otherwise breaking first
     const sortedHunts = [...state.allResponses].sort((a, b) => {
-        const aJudgeScore = a.judge_score !== undefined && a.judge_score !== null ? Number(a.judge_score) : (a.score !== undefined && a.score !== null ? Number(a.score) : 999);
-        const bJudgeScore = b.judge_score !== undefined && b.judge_score !== null ? Number(b.judge_score) : (b.score !== undefined && b.score !== null ? Number(b.score) : 999);
-        const aIsBreaking = aJudgeScore === 0;
-        const bIsBreaking = bJudgeScore === 0;
-        if (aIsBreaking && !bIsBreaking) return -1;
-        if (!aIsBreaking && bIsBreaking) return 1;
+        const aBreaking = isResultBreaking(a);
+        const bBreaking = isResultBreaking(b);
+        if (huntMode === 'all_passing') {
+            if (!aBreaking && bBreaking) return -1;
+            if (aBreaking && !bBreaking) return 1;
+        } else {
+            if (aBreaking && !bBreaking) return -1;
+            if (!aBreaking && bBreaking) return 1;
+        }
         return 0;
     });
     
@@ -1430,14 +1489,10 @@ export function displaySelectionCards() {
         const rowNumber = state.allResponses.indexOf(result);
         const isSelected = state.selectedRowNumbers.includes(rowNumber);
         
-        // Get slot number if selected
         const slotIndex = isSelected ? state.selectedRowNumbers.indexOf(rowNumber) : -1;
         const slotNumber = slotIndex >= 0 ? slotIndex + 1 : null;
         
-        // Determine if breaking or passing
-        const judgeScore = result.judge_score !== undefined && result.judge_score !== null ? Number(result.judge_score) : null;
-        const score = result.score !== undefined && result.score !== null ? Number(result.score) : null;
-        const isBreaking = (judgeScore !== null && judgeScore === 0) || (score !== null && score === 0);
+        const isBreaking = isResultBreaking(result);
         
         const modelDisplay = getModelDisplayName(result.model);
         const responsePreview = (result.response || 'No response').substring(0, 120) + (result.response?.length > 120 ? '...' : '');
@@ -1568,59 +1623,57 @@ export function toggleHuntSelection(rowNumber, row) {
     
     const checkbox = row.querySelector('.hunt-selection-checkbox');
     
-    // Get the result directly by row number (no lookup needed!)
     const result = state.allResponses[rowNumber];
     if (!result) {
         console.error(`❌ CRITICAL: No result found at row number ${rowNumber}`);
         return;
     }
     
-    // Determine if breaking or passing
-    const judgeScore = result.judge_score !== undefined && result.judge_score !== null ? Number(result.judge_score) : null;
-    const score = result.score !== undefined && result.score !== null ? Number(result.score) : null;
-    const isBreaking = (judgeScore !== null && judgeScore === 0) || (score !== null && score === 0);
+    const huntMode = state.config?.hunt_mode || 'break_50';
+    const isBreaking = isResultBreaking(result);
     
     if (checkbox.checked) {
-        // Add to selection (max 4)
-        if (state.selectedRowNumbers.length >= 4) {
+        // Mode-specific per-item guards (block before adding to selection)
+        if (huntMode === 'all_passing' && isBreaking) {
+            checkbox.checked = false;
+            showToast('⚠️ Only passing (non-breaking) hunts can be selected in All Passing mode.', 'warning');
+            return;
+        }
+        if (huntMode === '1_breaking') {
+            const currentBreaking = state.selectedRowNumbers
+                .map(rn => state.allResponses[rn]).filter(r => r && isResultBreaking(r)).length;
+            if (isBreaking && currentBreaking >= 1) {
+                checkbox.checked = false;
+                showToast('⚠️ Only 1 breaking hunt is allowed in 1 Breaking mode. Unselect the current one first.', 'warning');
+                return;
+            }
+        }
+
+        // Legacy modes: max 4 hunts
+        const isLegacyMode = !['all_passing', '1_breaking'].includes(huntMode);
+        if (isLegacyMode && state.selectedRowNumbers.length >= 4) {
             checkbox.checked = false;
             showToast('Maximum 4 hunts allowed. Unselect one first.', 'warning');
             return;
         }
         
-        // Add to selection temporarily to validate
+        // Build temp selection and validate
         const tempSelection = [...state.selectedRowNumbers];
         if (!tempSelection.includes(rowNumber)) {
             tempSelection.push(rowNumber);
         }
         
-        // Validate selection combination: Must be exactly 4 hunts with either:
-        // - 4 breaking, OR
-        // - 3 breaking + 1 passing
-        if (tempSelection.length === 4) {
+        // For legacy modes, validate combination at exactly 4
+        if (isLegacyMode && tempSelection.length === 4) {
             const tempResults = tempSelection.map(rn => state.allResponses[rn]).filter(r => r);
-            const breakingCount = tempResults.filter(r => {
-                const judgeScore = r.judge_score !== undefined && r.judge_score !== null ? Number(r.judge_score) : null;
-                const score = r.score !== undefined && r.score !== null ? Number(r.score) : null;
-                return (judgeScore !== null && judgeScore === 0) || (score !== null && score === 0);
-            }).length;
-            const passingCount = tempResults.filter(r => {
-                const judgeScore = r.judge_score !== undefined && r.judge_score !== null ? Number(r.judge_score) : null;
-                const score = r.score !== undefined && r.score !== null ? Number(r.score) : null;
-                return (judgeScore !== null && judgeScore > 0) || (score !== null && score > 0);
-            }).length;
-            
-            // Check if combination is valid — bypass in admin mode (allow any combination)
-            const isValid = state.adminMode || (breakingCount === 4) || (breakingCount === 3 && passingCount === 1);
-            
-            if (!isValid) {
+            const validation = validateSelectionForMode(tempResults, huntMode, state.adminMode);
+            if (!validation.valid) {
                 checkbox.checked = false;
-                showToast(`❌ Invalid combination! Must select either 4 breaking OR 3 breaking + 1 passing. Current: ${breakingCount} breaking, ${passingCount} passing.`, 'error');
+                showToast(`❌ ${validation.message}`, 'error');
                 return;
             }
         }
         
-        // Add to selection - combination is valid
         if (!state.selectedRowNumbers.includes(rowNumber)) {
             state.selectedRowNumbers.push(rowNumber);
         }
@@ -1725,37 +1778,12 @@ export function toggleDetailsRow(rowNumber, row, result) {
 
 export function updateSelectionCount() {
     const count = state.selectedRowNumbers.length;
+    const huntMode = state.config?.hunt_mode || 'break_50';
     
-    // Get results directly by row numbers - NO LOOKUP NEEDED!
     const selectedResults = state.selectedRowNumbers.map(rn => state.allResponses[rn]).filter(r => r !== undefined);
+    const { breakingCount, passingCount } = countBreakingPassing(selectedResults);
     
-    // Count breaking vs passing
-    const breakingCount = selectedResults.filter(r => {
-        const judgeScore = r.judge_score !== undefined && r.judge_score !== null ? Number(r.judge_score) : null;
-        const score = r.score !== undefined && r.score !== null ? Number(r.score) : null;
-        return (judgeScore !== null && judgeScore === 0) || (score !== null && score === 0);
-    }).length;
-    const passingCount = selectedResults.filter(r => {
-        const judgeScore = r.judge_score !== undefined && r.judge_score !== null ? Number(r.judge_score) : null;
-        const score = r.score !== undefined && r.score !== null ? Number(r.score) : null;
-        return (judgeScore !== null && judgeScore > 0) || (score !== null && score > 0);
-    }).length;
-    
-    // Validate combination when exactly 4 are selected
-    let isValid = true;
-    let validationMessage = '';
-    if (count === 4) {
-        isValid = state.adminMode || (breakingCount === 4) || (breakingCount === 3 && passingCount === 1);
-        if (!isValid) {
-            validationMessage = `⚠️ Invalid combination! Must be either 4 breaking OR 3 breaking + 1 passing. Current: ${breakingCount} breaking, ${passingCount} passing.`;
-        } else {
-            validationMessage = `✅ Valid combination: ${breakingCount} breaking, ${passingCount} passing`;
-        }
-    } else if (count > 0 && count < 4 && !state.adminMode) {
-        validationMessage = `Select ${4 - count} more hunt(s). Must be exactly 4 total.`;
-    } else if (state.adminMode && count > 0) {
-        validationMessage = `Admin: ${count} selected — any combination allowed`;
-    }
+    const validation = validateSelectionForMode(selectedResults, huntMode, state.adminMode);
     
     if (selectedResults.length !== count) {
         console.error(`❌ CRITICAL: Expected ${count} results but found ${selectedResults.length}`);
@@ -1763,25 +1791,34 @@ export function updateSelectionCount() {
         console.error('   allResponses length:', state.allResponses.length);
     }
     
-    // Update UI with validation message
     if (elements.selectionCount) {
         let statusText = '';
         let statusColor = 'var(--text-muted)';
         
         if (count === 0) {
             statusText = 'No hunts selected';
-            statusColor = 'var(--text-muted)';
+        } else if (huntMode === 'all_passing') {
+            statusText = validation.valid
+                ? `✅ ${passingCount} passing hunt${passingCount !== 1 ? 's' : ''} selected`
+                : `❌ ${validation.message}`;
+            statusColor = validation.valid ? 'var(--success)' : 'var(--danger)';
+        } else if (huntMode === '1_breaking') {
+            const needsBreak = breakingCount === 0;
+            statusText = needsBreak
+                ? `⚠️ ${passingCount} passing selected — must include the 1 breaking hunt`
+                : `✅ ${breakingCount} breaking, ${passingCount} passing selected`;
+            statusColor = needsBreak ? 'var(--warning)' : 'var(--success)';
+        } else if (state.adminMode) {
+            statusText = `Admin: ${count} selected — any combination allowed`;
+            statusColor = 'var(--text-primary)';
         } else if (count < 4) {
-            statusText = `Selected: ${count}/4 hunts (${breakingCount} breaking, ${passingCount} passing) - Select ${4 - count} more`;
+            statusText = `Selected: ${count}/4 hunts (${breakingCount} breaking, ${passingCount} passing) — Select ${4 - count} more`;
             statusColor = 'var(--text-primary)';
         } else if (count === 4) {
-            if (isValid) {
-                statusText = `✅ Valid: ${breakingCount} breaking, ${passingCount} passing`;
-                statusColor = 'var(--success)';
-            } else {
-                statusText = `❌ Invalid: ${breakingCount} breaking, ${passingCount} passing - Must be 4 breaking OR 3 breaking + 1 passing`;
-                statusColor = 'var(--danger)';
-            }
+            statusText = validation.valid
+                ? `✅ Valid: ${breakingCount} breaking, ${passingCount} passing`
+                : `❌ ${validation.message}`;
+            statusColor = validation.valid ? 'var(--success)' : 'var(--danger)';
         } else {
             statusText = `Too many selected: ${count}/4`;
             statusColor = 'var(--danger)';
@@ -1791,21 +1828,23 @@ export function updateSelectionCount() {
         elements.selectionCount.style.color = statusColor;
     }
     
-    // Build status text - no validation restrictions, allow any combination
-    // Enable confirm button: exactly 4 + valid combo, OR in admin mode any 1-4 selected
-    const shouldEnable = state.adminMode ? (count >= 1 && count <= 4) : ((count === 4) && isValid);
+    // Enable confirm button based on mode-specific validation
+    let shouldEnable = false;
+    if (state.adminMode) {
+        shouldEnable = count >= 1;
+    } else if (huntMode === 'all_passing') {
+        shouldEnable = count >= 1 && validation.valid;
+    } else if (huntMode === '1_breaking') {
+        shouldEnable = count >= 1 && breakingCount === 1 && validation.valid;
+    } else {
+        shouldEnable = count === 4 && validation.valid;
+    }
+
     const confirmBtn = document.getElementById('confirmSelectionBtn') || elements.confirmSelectionBtn;
     if (confirmBtn) {
         confirmBtn.disabled = !shouldEnable;
-        if (!shouldEnable && count === 4 && !state.adminMode) {
-            confirmBtn.title = 'Invalid combination! Must be 4 breaking OR 3 breaking + 1 passing.';
-        } else if (!shouldEnable && count < 4 && !state.adminMode) {
-            confirmBtn.title = `Select ${4 - count} more hunt(s). Must be exactly 4 total.`;
-        } else {
-            confirmBtn.title = state.adminMode ? 'Admin mode — confirm with any selection' : '';
-        }
+        confirmBtn.title = !shouldEnable && !state.adminMode ? validation.message : '';
     }
-    
 }
 
 export async function confirmSelection() {
@@ -1814,7 +1853,6 @@ export async function confirmSelection() {
         return;
     }
     
-    // Get selected results directly by row numbers
     const selectedResults = state.selectedRowNumbers.map(rn => state.allResponses[rn]).filter(r => r);
     
     if (selectedResults.length === 0) {
@@ -1822,33 +1860,23 @@ export async function confirmSelection() {
         return;
     }
     
-    // MANDATORY: Must select exactly 4 hunts — in admin mode allow 1-4
-    if (!state.adminMode && selectedResults.length !== 4) {
+    const huntMode = state.config?.hunt_mode || 'break_50';
+    const isLegacyMode = !['all_passing', '1_breaking'].includes(huntMode);
+
+    // Count-based guards
+    if (!state.adminMode && isLegacyMode && selectedResults.length !== 4) {
         showToast(`❌ Must select exactly 4 hunts. Currently selected: ${selectedResults.length}`, 'error');
         return;
     }
-    if (state.adminMode && (selectedResults.length < 1 || selectedResults.length > 4)) {
-        showToast(`Select 1–4 hunts for review. Currently selected: ${selectedResults.length}`, 'error');
+    if (state.adminMode && selectedResults.length < 1) {
+        showToast(`Select at least 1 hunt for review.`, 'error');
         return;
     }
     
-    // Count breaking vs passing
-    const breakingCount = selectedResults.filter(r => {
-        const judgeScore = r.judge_score !== undefined && r.judge_score !== null ? Number(r.judge_score) : null;
-        const score = r.score !== undefined && r.score !== null ? Number(r.score) : null;
-        return (judgeScore !== null && judgeScore === 0) || (score !== null && score === 0);
-    }).length;
-    const passingCount = selectedResults.filter(r => {
-        const judgeScore = r.judge_score !== undefined && r.judge_score !== null ? Number(r.judge_score) : null;
-        const score = r.score !== undefined && r.score !== null ? Number(r.score) : null;
-        return (judgeScore !== null && judgeScore > 0) || (score !== null && score > 0);
-    }).length;
-    
-    // MANDATORY: Validate combination - must be either 4 breaking OR 3 breaking + 1 passing — bypass in admin mode
-    const isValid = state.adminMode || (breakingCount === 4) || (breakingCount === 3 && passingCount === 1);
-    
-    if (!isValid) {
-        showToast(`❌ Invalid combination! Must select either 4 breaking OR 3 breaking + 1 passing. Current: ${breakingCount} breaking, ${passingCount} passing.`, 'error');
+    // Mode-aware validation
+    const validation = validateSelectionForMode(selectedResults, huntMode, state.adminMode);
+    if (!validation.valid) {
+        showToast(`❌ ${validation.message}`, 'error');
         return;
     }
     
@@ -1939,7 +1967,7 @@ export async function confirmSelection() {
     // Auto-collapse the selection section when moved to review
     collapseSelectionSectionCard(selectedResults.length);
     
-    showToast(`Selection confirmed and locked! ${selectedResults.length} hunt(s) moved to human review. Complete all 4 reviews to proceed.`, 'success');
+    showToast(`Selection confirmed and locked! ${selectedResults.length} hunt(s) moved to human review. Complete all ${selectedResults.length} reviews to proceed.`, 'success');
 }
 
 export function displaySelectedForReview() {
@@ -2126,22 +2154,19 @@ export function updateReviewProgress() {
 export async function revealLLMJudgments() {
     const selectedRowNumbers = state.selectedRowNumbers || [];
     
-    // Bypass all validation in admin mode
+    const requiredReviews = selectedRowNumbers.length;
+
     if (!state.adminMode) {
         if (selectedRowNumbers.length === 0) {
             showToast('Please select hunts first', 'error');
-            return;
-        }
-        if (selectedRowNumbers.length !== 4) {
-            showToast(`Must have exactly 4 hunts selected. Currently: ${selectedRowNumbers.length}`, 'error');
             return;
         }
         
         const reviewKeys = selectedRowNumbers.map(rn => `row_${rn}`);
         const reviews = reviewKeys.map(key => state.humanReviews && state.humanReviews[key]).filter(Boolean);
         
-        if (reviews.length !== 4) {
-            showToast(`Only ${reviews.length}/4 review(s) complete. Please complete all 4 reviews before revealing.`, 'error');
+        if (reviews.length < requiredReviews) {
+            showToast(`Only ${reviews.length}/${requiredReviews} review(s) complete. Please complete all reviews before revealing.`, 'error');
             return;
         }
         
@@ -2757,24 +2782,18 @@ export function checkAllReviewsComplete() {
     const reviewCount = completedReviews.length;
     const totalSlots = selectedRowNumbers.length;
     
-    // FIX 3: Only enable buttons when exactly 4 reviews are complete
-    if (reviewCount >= totalSlots && totalSlots === 4) {
+    if (reviewCount >= totalSlots && totalSlots >= 1) {
         showToast(`All ${totalSlots} review(s) complete! Ready to export.`, 'success');
-        // Enable reveal button (Proceed to QC enabled after reveal)
         if (elements.revealLLMBtn) {
             elements.revealLLMBtn.disabled = false;
             elements.revealLLMBtn.style.opacity = '1';
             elements.revealLLMBtn.classList.add('pulse');
         }
-        // Save stays disabled until QC completes
-        // Update progress display
         updateReviewProgress();
-        // Refresh review sync block so Submit button shows correct state
         import('./reviewSync.js').then(({ refreshReviewSync }) => {
             refreshReviewSync(state.sessionId);
         }).catch(() => {});
-    } else if (totalSlots === 4 && reviewCount < 4) {
-        // FIX 3: Ensure buttons remain disabled if not all 4 reviews complete — enable in admin mode
+    } else if (totalSlots >= 1 && reviewCount < totalSlots) {
         if (state.adminMode) {
             if (elements.revealLLMBtn && !state.llmRevealed) {
                 elements.revealLLMBtn.disabled = false;

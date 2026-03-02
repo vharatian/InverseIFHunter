@@ -179,7 +179,7 @@ async function runQualityCheckBeforeSave(selectedHuntIds, humanReviews) {
     return runQualityCheckOverlay(state.sessionId, selectedHuntIds, humanReviews, storeEvaluation, openEvaluationSameWindow);
 }
 import { getTrainerInfo, startHeartbeat } from './auth.js';
-import { updateHuntLimitUI } from './hunt.js';
+import { updateHuntLimitUI, unlockHuntMode } from './hunt.js';
 import { resetAllStatuses } from './autosave.js';
 
 // ============== Turn Status Sync (Multi-Turn Restore) ==============
@@ -632,7 +632,9 @@ export function handleNotebookLoaded(data, isUrl = false, overrideUrl = null) {
     state.huntsThisTurn = 0;
     state.huntLimitReached = false;
     
-    // Update hunt limit UI
+    // Unlock hunt mode for fresh notebook (was locked during previous session)
+    unlockHuntMode();
+    
     updateHuntLimitUI();
     
     // Save sessionId to localStorage for restoration on refresh

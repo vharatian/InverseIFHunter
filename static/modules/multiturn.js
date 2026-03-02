@@ -311,34 +311,42 @@ export function showMultiTurnDecision() {
     if (nextTurnSpan) nextTurnSpan.textContent = state.currentTurn + 1;
     
     // --- Review Readiness Check ---
-    // Passing mode: no targets — need 4 responses to select for review. Break modes: 4 breaking or 3 breaking + 1 passing.
-    const canReview = state.adminMode || (passingMode ? hunts >= 4 : (breaks >= 4) || (breaks >= 3 && passes >= 1));
+    const huntMode = state.config?.hunt_mode || 'break_50';
+    let canReview = state.adminMode;
+    let readinessMsg = '';
+
+    if (!state.adminMode) {
+        if (huntMode === 'all_passing') {
+            canReview = passes >= 1;
+            if (!canReview) readinessMsg = `Need at least 1 passing response (currently ${passes}). Run more hunts!`;
+        } else if (huntMode === '1_breaking') {
+            canReview = breaks >= 1;
+            if (!canReview) readinessMsg = `Need at least 1 breaking response (currently ${breaks}). Run more hunts!`;
+        } else {
+            canReview = (breaks >= 4) || (breaks >= 3 && passes >= 1);
+            if (!canReview) {
+                if (breaks < 3) readinessMsg = `Need at least 3 breaking responses (currently ${breaks}). Run more hunts!`;
+                else readinessMsg = `Have 3 breaking but need at least 1 passing response (currently ${passes}). Run more hunts, or get 1 more breaking for 4 total.`;
+            }
+        }
+    }
+
     const markBreakingBtn = document.getElementById('markBreakingBtn');
     const reviewWarning = document.getElementById('reviewReadinessWarning');
     
     if (canReview) {
-        // Ready for review — enable button, hide warning
         if (markBreakingBtn) {
             markBreakingBtn.disabled = false;
-            markBreakingBtn.title = state.adminMode ? 'Admin mode — proceed without failures' : (passingMode ? '' : '');
+            markBreakingBtn.title = state.adminMode ? 'Admin mode — proceed without failures' : '';
         }
         if (reviewWarning) reviewWarning.classList.add('hidden');
     } else {
-        // Not ready — disable button, show warning with what's needed
         if (markBreakingBtn) {
             markBreakingBtn.disabled = true;
-            markBreakingBtn.title = passingMode ? 'Need 4 responses to select for review' : 'Need 4 breaking or 3 breaking + 1 passing to proceed';
+            markBreakingBtn.title = readinessMsg;
         }
         if (reviewWarning) {
-            let msg = '';
-            if (passingMode) {
-                msg = `Need at least 4 responses to select for review (currently ${hunts}). Run more hunts!`;
-            } else if (breaks < 3) {
-                msg = `Need at least 3 breaking responses (currently ${breaks}). Run more hunts!`;
-            } else if (breaks === 3 && passes === 0) {
-                msg = `Have 3 breaking but need at least 1 passing response (currently ${passes}). Run more hunts, or get 1 more breaking for 4 total.`;
-            }
-            reviewWarning.innerHTML = `<span style="margin-right: 0.5rem;">⚠️</span>${msg}`;
+            reviewWarning.innerHTML = `<span style="margin-right: 0.5rem;">⚠️</span>${readinessMsg}`;
             reviewWarning.classList.remove('hidden');
         }
     }

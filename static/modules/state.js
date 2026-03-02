@@ -21,7 +21,8 @@ export const state = {
         target_breaks: 4,
         pass_threshold: 0.5,
         passing_mode: false,
-        models: ['qwen/qwen3-235b-a22b-thinking-2507'],  // Default to Qwen instead of Nemotron
+        hunt_mode: 'break_50',
+        models: ['qwen/qwen3-235b-a22b-thinking-2507'],
         reasoning_budget_percent: 0.9,
         max_retries: 3,
         judge_model: 'openai/gpt-5.2',
