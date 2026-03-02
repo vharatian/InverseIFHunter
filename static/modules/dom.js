@@ -27,7 +27,7 @@ export const elements = {
     parallelWorkers: document.getElementById('parallelWorkers'),
     providerSelect: document.getElementById('providerSelect'),  // NEW
     modelSelect: document.getElementById('modelSelect'),
-    // independentJudge removed (now mandatory)
+    judgeModel: document.getElementById('judgeModel'),
     startHuntBtn: document.getElementById('startHuntBtn'),
     saveToColabBtn: document.getElementById('saveToColabBtn'),
     

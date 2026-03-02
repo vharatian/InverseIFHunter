@@ -196,7 +196,7 @@ function makeRun(overrides = {}) {
         id:              `run-${Date.now()}-${Math.random().toString(36).slice(2)}`,
         number:          runCounter,
         model:           src?.model    ?? modelEl?.value  ?? 'qwen/qwen3-235b-a22b-thinking-2507',
-        judgeModel:      src?.judgeModel ?? 'openai/gpt-5.2',
+        judgeModel:      src?.judgeModel ?? getJudgeModels()[0]?.id ?? 'openai/gpt-5.2',
         provider:        src?.provider ?? providerEl?.value ?? 'openrouter',
         status:           'idle',
         response:         '',
