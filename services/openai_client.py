@@ -98,8 +98,9 @@ You MUST respond with ONLY this JSON (no other text):
 If passing:  {{"status": "PASS", "reason": "why it passes"}}
 If failing:  {{"status": "FAIL", "reason": "why it fails"}}"""
         # Pass messages as system + user (eval_prompt) for format stability; prompt="" so client does not append
-        judge_system = judge_system_prompt or "You are a precise evaluator. Output only valid JSON."
-        messages = [{"role": "system", "content": judge_system}, {"role": "user", "content": eval_prompt}]
+        if not judge_system_prompt or not judge_system_prompt.strip():
+            raise ValueError("Judge system prompt is empty. Please provide a judge system prompt before running the hunt.")
+        messages = [{"role": "system", "content": judge_system_prompt}, {"role": "user", "content": eval_prompt}]
         status = "MISSING"
         reason = "after retries"
         for attempt in range(3):
@@ -255,8 +256,11 @@ class OpenAIJudgeClient:
         Returns:
             Dict with: score, criteria, explanation, raw_output
         """
-        # STRICT JSON VALIDATION: Validate response_reference before any LLM calls
-        # This ensures invalid JSON always raises an error (independent judging is always enabled)
+        if not judge_system_prompt or not judge_system_prompt.strip():
+            error_msg = "CRITICAL: Judge system prompt is empty. Please provide a judge system prompt before running the hunt."
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+        
         if not response_reference or not response_reference.strip():
             error_msg = "CRITICAL: Reference Answer must be VALID JSON. Error: response_reference is empty or missing"
             logger.error(error_msg)
@@ -427,7 +431,8 @@ class OpenAIJudgeClient:
         tasks = []
         for criterion in criteria_list:
             tasks.append(self._evaluate_single_criterion(
-                prompt, student_response, criterion, model, standard_response=standard_response
+                prompt, student_response, criterion, model,
+                standard_response=standard_response, judge_system_prompt=system_prompt
             ))
             
         # Run in parallel
@@ -541,7 +546,8 @@ class OpenAIJudgeClient:
         student_response: str, 
         criterion: Dict[str, str], 
         model: str,
-        standard_response: Optional[str] = None
+        standard_response: Optional[str] = None,
+        judge_system_prompt: Optional[str] = None
     ) -> Dict[str, str]:
         """Evaluate a single criterion."""
         c_id = criterion.get('id', 'Unknown')
@@ -569,9 +575,13 @@ If failing:  {{"status": "FAIL", "reason": "why it fails"}}"""
         
         for attempt in range(max_retries):
             try:
+                messages = []
+                if judge_system_prompt and judge_system_prompt.strip():
+                    messages.append({"role": "system", "content": judge_system_prompt})
+                messages.append({"role": "user", "content": eval_prompt})
                 response = await self.client.chat.completions.create(
                     model=model,
-                    messages=[{"role": "user", "content": eval_prompt}],
+                    messages=messages,
                     response_format={"type": "json_object"},
                     temperature=0,
                     timeout=120.0  # 2 minute timeout per criterion
