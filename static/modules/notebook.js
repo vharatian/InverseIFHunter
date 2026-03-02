@@ -91,8 +91,14 @@ export async function runProceedToQualityCheck() {
     const selectedResults = selectedRowNumbers.map(rn => state.allResponses[rn]).filter(r => r);
     const selectedHuntIds = selectedResults.map(r => r.hunt_id).filter(Boolean);
 
-    if (selectedHuntIds.length !== 4 || selectedResults.length !== 4) {
-        showToast('Select exactly 4 responses for review first.', 'error');
+    const huntMode = state.config?.hunt_mode || 'break_50';
+    if (huntMode === 'break_50') {
+        if (selectedHuntIds.length !== 4 || selectedResults.length !== 4) {
+            showToast('Select exactly 4 responses for review first.', 'error');
+            return;
+        }
+    } else if (selectedHuntIds.length === 0 || selectedResults.length === 0) {
+        showToast('Select at least 1 response for review first.', 'error');
         return;
     }
 
@@ -890,17 +896,10 @@ export async function saveToDrive() {
         return;
     }
     
-    // FIX 3: Require exactly 4 reviews before allowing save — bypass in admin mode (allow 0–4 selected)
     const selectedRowNumbers = state.selectedRowNumbers || [];
-    if (!state.adminMode) {
-        if (selectedRowNumbers.length === 0) {
-            showToast(`Please select hunts for review.`, 'error');
-            return;
-        }
-        if (selectedRowNumbers.length !== 4) {
-            showToast(`Must have exactly 4 hunts selected. Currently: ${selectedRowNumbers.length}`, 'error');
-            return;
-        }
+    if (!state.adminMode && selectedRowNumbers.length === 0) {
+        showToast('Please select hunts for review.', 'error');
+        return;
     }
     // Admin mode: allow 0–4 selected, save without reviewing all
     
@@ -1304,14 +1303,14 @@ export async function submitToColab() {
     }
 
     const selectedRowNumbers = state.selectedRowNumbers || [];
-    if (selectedRowNumbers.length !== 4) {
-        showToast(`Need exactly 4 selected responses. Currently: ${selectedRowNumbers.length}`, 'error');
+    if (selectedRowNumbers.length === 0) {
+        showToast('No responses selected. Please select and confirm responses first.', 'error');
         return;
     }
 
     const selectedResults = selectedRowNumbers.map(rn => state.allResponses[rn]).filter(r => r);
-    if (selectedResults.length !== 4) {
-        showToast('Could not resolve all 4 selected responses.', 'error');
+    if (selectedResults.length === 0) {
+        showToast('Could not resolve selected responses.', 'error');
         return;
     }
 

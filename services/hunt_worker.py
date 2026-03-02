@@ -102,7 +102,7 @@ async def _run_with_heartbeat(session_id: str):
     heartbeat_task = asyncio.create_task(refresh_heartbeat())
 
     try:
-        await hunt_engine.start_hunt(session_id)
+        await hunt_engine.run_hunt(session_id)
     finally:
         heartbeat_task.cancel()
         try:

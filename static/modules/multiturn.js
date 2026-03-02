@@ -319,6 +319,9 @@ export function showMultiTurnDecision() {
         if (huntMode === 'all_passing') {
             canReview = passes >= 1;
             if (!canReview) readinessMsg = `Need at least 1 passing response (currently ${passes}). Run more hunts!`;
+        } else if (huntMode === 'break_all') {
+            canReview = breaks >= 1;
+            if (!canReview) readinessMsg = `Need at least 1 breaking response (currently ${breaks}). Run more hunts!`;
         } else if (huntMode === '1_breaking') {
             canReview = breaks >= 1;
             if (!canReview) readinessMsg = `Need at least 1 breaking response (currently ${breaks}). Run more hunts!`;
