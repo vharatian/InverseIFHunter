@@ -93,8 +93,10 @@ Student Answer:
 Evaluate strictly whether the Student Answer meets the requirement stated in the criterion above.
 Only explicit, literal, and complete compliance qualifies as PASS.
 
-Output valid JSON only:
-{{"status": "PASS" or "FAIL", "reason": "Brief explanation"}}"""
+You MUST respond with ONLY this JSON (no other text):
+
+If passing:  {{"status": "PASS", "reason": "why it passes"}}
+If failing:  {{"status": "FAIL", "reason": "why it fails"}}"""
         # Pass messages as system + user (eval_prompt) for format stability; prompt="" so client does not append
         judge_system = judge_system_prompt or "You are a precise evaluator. Output only valid JSON."
         messages = [{"role": "system", "content": judge_system}, {"role": "user", "content": eval_prompt}]
@@ -556,11 +558,10 @@ Student Answer:
 Evaluate strictly whether the Student Answer meets the requirement stated in the criterion above.
 Only explicit, literal, and complete compliance qualifies as PASS.
 
-Output JSON:
-{{
-    "status": "PASS" or "FAIL",
-    "reason": "Brief explanation"
-}}"""
+You MUST respond with ONLY this JSON (no other text):
+
+If passing:  {{"status": "PASS", "reason": "why it passes"}}
+If failing:  {{"status": "FAIL", "reason": "why it fails"}}"""
         
         # Retry logic for connection errors (broken pipe, timeouts, etc.)
         max_retries = 3
