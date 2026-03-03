@@ -139,6 +139,37 @@ export function updateHuntLimitUI() {
     }
 }
 
+/**
+ * Show a warning confirmation dialog when hunts will cross 12 this turn.
+ * Returns a Promise that resolves to true (continue) or false (cancel).
+ */
+function showHuntWarningDialog(remainingAfter) {
+    return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:center;justify-content:center;';
+        overlay.innerHTML = `
+            <div style="background:var(--bg-secondary,#1e1e2e);border-radius:12px;padding:1.5rem 2rem;max-width:420px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.3);border:1px solid var(--border,#333);">
+                <div style="font-size:1.5rem;text-align:center;margin-bottom:0.75rem;">⚠️</div>
+                <div style="font-weight:700;font-size:1.05rem;text-align:center;margin-bottom:0.75rem;color:var(--warning,#f59e0b);">
+                    Hunt Limit Warning
+                </div>
+                <div style="font-size:0.9rem;color:var(--text-secondary,#a0a0b0);text-align:center;margin-bottom:1.25rem;line-height:1.5;">
+                    After this run, only <strong style="color:var(--warning,#f59e0b);">${Math.max(0, remainingAfter)}</strong> hunt${remainingAfter !== 1 ? 's' : ''} will remain for this turn (max ${MAX_HUNTS_PER_NOTEBOOK} per turn).<br>
+                    Are you sure you want to continue?
+                </div>
+                <div style="display:flex;gap:0.75rem;justify-content:center;">
+                    <button id="huntWarnNo" style="padding:0.5rem 1.25rem;border-radius:8px;border:1px solid var(--border,#444);background:transparent;color:var(--text-primary,#e0e0e0);cursor:pointer;font-weight:600;">No, go back</button>
+                    <button id="huntWarnYes" style="padding:0.5rem 1.25rem;border-radius:8px;border:none;background:var(--warning,#f59e0b);color:#000;cursor:pointer;font-weight:600;">Yes, continue</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+        overlay.querySelector('#huntWarnYes').addEventListener('click', () => { overlay.remove(); resolve(true); });
+        overlay.querySelector('#huntWarnNo').addEventListener('click', () => { overlay.remove(); resolve(false); });
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) { overlay.remove(); resolve(false); } });
+    });
+}
+
 export function showHuntLimitReachedError() {
     const turnLabel = state.currentTurn > 1 ? ` for Turn ${state.currentTurn}` : '';
     showToast(
@@ -241,6 +272,12 @@ export async function startHunt() {
         return;
     }
     
+    // MANDATORY: Testbed validation check — must pass ideal response judge before hunting
+    if (!state.referenceValidated && !state.adminMode && !getConfigValue('bypass_hunt_criteria', false)) {
+        showToast('❌ Please complete testbed validation first. Judge your ideal response in the Testbed before hunting.', 'error');
+        return;
+    }
+    
     // Check for pending update before starting new hunt
     if (hasPendingUpdate()) {
         await showUpdatePrompt();
@@ -272,6 +309,16 @@ export async function startHunt() {
                 'warning'
             );
             return;
+        }
+    }
+    
+    // WARNING: Show confirmation when hunts will cross 12 this turn (only 4 remaining)
+    if (!state.adminMode) {
+        const projectedTotal = state.huntsThisTurn + requestedHunts;
+        if (projectedTotal > 12) {
+            const remainingAfter = MAX_HUNTS_PER_NOTEBOOK - projectedTotal;
+            const confirmed = await showHuntWarningDialog(remainingAfter);
+            if (!confirmed) return;
         }
     }
     

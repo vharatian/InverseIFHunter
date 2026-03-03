@@ -18,8 +18,8 @@ import {
 } from './utils.js';
 import { showToast, showError } from './celebrations.js';
 import { fetchAllResponses, fetchAllResponsesAndShowSelection } from './results.js';
-import { renderPriorConversationBanner, enableNavTestbedButton } from './testbed.js';
-import { populatePreviewTabs } from './notebook.js';
+import { renderPriorConversationBanner, enableNavTestbedButton, resetTestbed, showTestbed } from './testbed.js';
+import { populatePreviewTabs, progressiveSaveToColab } from './notebook.js';
 import { validatePromptLength, convertStructuredToJSON } from './editors.js';
 // It uses showCalibrationPanel internally, so no import needed if it's in the same file.
 // It uses startHunt (for calibration).
@@ -679,13 +679,145 @@ export async function handleContinueToNextTurn() {
 }
 
 /**
+ * Shared post-advance-turn setup: update local state, save turn history,
+ * reset for new turn, and open testbed for validation.
+ *
+ * @param {object} apiData       — response from /api/advance-turn
+ * @param {object} selectedResp  — the selected good response object
+ * @param {string} completedPrompt   — prompt of the just-completed turn (for history)
+ * @param {string} completedCriteria — criteria of the just-completed turn (for history)
+ * @param {{ prompt: string, response_reference: string, response: string, judge_system_prompt?: string }} newNotebook
+ *   — notebook fields for the NEW turn
+ */
+async function _applyTurnAdvance(apiData, selectedResp, completedPrompt, completedCriteria, newNotebook) {
+    state.currentTurn = apiData.current_turn;
+    state.isMultiTurn = true;
+
+    state.conversationHistory.push(
+        { role: 'user', content: completedPrompt },
+        { role: 'assistant', content: selectedResp.response }
+    );
+
+    state.turns.push({
+        turnNumber: state.currentTurn - 1,
+        prompt: completedPrompt,
+        response_reference: completedCriteria,
+        response: selectedResp.response,
+        selectedResponse: selectedResp.response,
+        selectedHuntId: selectedResp.hunt_id,
+        judge_system_prompt: state.notebook?.judge_system_prompt || '',
+        judgeResult: {
+            score: selectedResp.judge_score,
+            criteria: selectedResp.judge_criteria || {},
+            explanation: selectedResp.judge_explanation || ''
+        },
+        results: state.allResponses.map(r => ({
+            hunt_id: r.hunt_id,
+            response: r.response,
+            judge_score: r.judge_score,
+            is_breaking: r.is_breaking
+        }))
+    });
+
+    state.multiTurnTotalHunts += state.allResponses.length;
+
+    state.notebook.prompt = newNotebook.prompt;
+    state.notebook.response_reference = newNotebook.response_reference;
+    state.notebook.response = newNotebook.response;
+    if (newNotebook.judge_system_prompt) {
+        state.notebook.judge_system_prompt = newNotebook.judge_system_prompt;
+    }
+
+    state.allResponses.forEach(r => {
+        if (r.hunt_id) state.previousTurnHuntIds.add(r.hunt_id);
+    });
+
+    resetTurnState();
+
+    if (elements.resultsTableBody) {
+        elements.resultsTableBody.innerHTML = '';
+    }
+
+    document.getElementById('multiTurnDecisionCard')?.classList.add('hidden');
+    document.getElementById('goodResponsePicker')?.classList.add('hidden');
+    document.getElementById('nextTurnEditor')?.classList.add('hidden');
+    document.getElementById('selectionSection')?.classList.add('hidden');
+    document.getElementById('resultsSection')?.classList.add('hidden');
+    document.getElementById('summarySection')?.classList.add('hidden');
+    document.getElementById('progressSection')?.classList.add('hidden');
+
+    renderTurnHistoryTabs();
+    document.getElementById('multiTurnSection').classList.remove('hidden');
+
+    populatePreviewTabs(state.notebook);
+    validatePromptLength();
+
+    const { hideTurn1TestPromptPanel } = await import('./notebook.js');
+    hideTurn1TestPromptPanel();
+    enableNavTestbedButton();
+
+    state.referenceValidated = false;
+    if (elements.startHuntBtn) {
+        elements.startHuntBtn.disabled = true;
+        elements.startHuntBtn.title = 'Complete testbed validation before hunting';
+    }
+
+    if (elements.referenceJudgeResult) {
+        elements.referenceJudgeResult.innerHTML = '';
+    }
+    state.initialCriteria = null;
+
+    updateTurnAwareUI();
+    updateHuntLimitUI();
+
+    renderPriorConversationBanner();
+    resetTestbed();
+    elements.configSection?.classList.remove('hidden');
+    showTestbed();
+
+    // --- Trigger 2: progressively save the just-completed turn's Selected Response ---
+    const completedTurnNum = state.currentTurn - 1;
+    if (selectedResp?.response) {
+        progressiveSaveToColab([
+            { heading: `Turn-${completedTurnNum}: Selected Response`, content: selectedResp.response }
+        ]).then(r => {
+            if (r.success) showToast(`Turn ${completedTurnNum} selected response saved to Colab`, 'success');
+            else console.warn('Progressive save (selected response) failed:', r.message);
+        }).catch(e => console.error('Progressive save error:', e));
+    }
+
+    showToast(`Turn ${state.currentTurn} — Fill in your prompt, criteria, and ideal response in the Testbed. Judge before hunting.`, 'success');
+}
+
+/**
+ * Read current prompt and criteria from the DOM editors.
+ * @returns {{ prompt: string, criteria: string }}
+ */
+function _readPromptAndCriteriaFromDOM() {
+    const promptEl = document.getElementById('promptMarkdown');
+    const modelRefEl = elements.modelrefPreview;
+    let prompt = state.notebook?.prompt || '';
+    let criteria = state.notebook?.response_reference || '';
+    if (promptEl && promptEl.value !== undefined) {
+        prompt = promptEl.value.trim();
+    }
+    if (modelRefEl) {
+        try {
+            convertStructuredToJSON();
+            criteria = state.convertedModelRefJSON || modelRefEl.value || criteria;
+        } catch {
+            criteria = modelRefEl.value || criteria;
+        }
+    }
+    return { prompt, criteria };
+}
+
+/**
  * Select a good response to carry forward to the next turn.
  */
 export async function selectGoodResponse(response) {
-    // Store the selected response
     state._selectedGoodResponse = response;
-    
-    // Highlight selected response card
+
     const cards = document.querySelectorAll('#goodResponseList > div');
     cards.forEach(card => { card.style.opacity = '0.5'; card.style.pointerEvents = 'none'; });
     const selectedIdx = state.allResponses.findIndex(r => r.hunt_id === response.hunt_id);
@@ -693,171 +825,55 @@ export async function selectGoodResponse(response) {
         cards[selectedIdx].style.opacity = '1';
         cards[selectedIdx].style.border = '3px solid var(--primary)';
     }
-    
+
     showToast(`Advancing to Turn ${state.currentTurn + 1}...`, 'info');
-    
-    // Read prompt and criteria from DOM BEFORE advance (for Turn 2+ history)
-    const promptEl = document.getElementById('promptMarkdown');
-    const modelRefEl = elements.modelrefPreview;
-    let currentPrompt = state.notebook?.prompt || '';
-    let currentCriteria = state.notebook?.response_reference || '';
-    if (promptEl && promptEl.value !== undefined) {
-        currentPrompt = promptEl.value.trim();
-    }
-    if (modelRefEl) {
-        try {
-            convertStructuredToJSON();
-            currentCriteria = state.convertedModelRefJSON || modelRefEl.value || currentCriteria;
-        } catch {
-            currentCriteria = modelRefEl.value || currentCriteria;
-        }
-    }
-    
-    // Call advance_turn with current prompt/criteria so backend saves them for turn history
+
+    const { prompt: currentPrompt, criteria: currentCriteria } = _readPromptAndCriteriaFromDOM();
+
     try {
         const res = await fetch(`/api/advance-turn/${state.sessionId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 selected_hunt_id: response.hunt_id,
-                next_prompt: '',  // User fills in new turn via full editor
+                next_prompt: '',
                 next_criteria: '',
                 current_prompt: currentPrompt,
                 current_criteria: typeof currentCriteria === 'string' ? currentCriteria : (currentCriteria ? JSON.stringify(currentCriteria) : '')
             })
         });
-        
+
         if (!res.ok) {
             const error = await res.json();
             throw new Error(error.detail || 'Failed to advance turn');
         }
-        
+
         const data = await res.json();
-        
-        // Update local state (same as old startNextTurn)
-        state.currentTurn = data.current_turn;
-        state.isMultiTurn = true;
-        
-        // Build local conversation history (use values we already read from DOM above)
-        state.conversationHistory.push(
-            { role: 'user', content: currentPrompt },
-            { role: 'assistant', content: response.response }
-        );
-        
-        // Save current turn data locally (use DOM-sourced values for history)
-        state.turns.push({
-            turnNumber: state.currentTurn - 1,
-            prompt: currentPrompt,
-            response_reference: currentCriteria,
+
+        await _applyTurnAdvance(data, response, currentPrompt, currentCriteria, {
+            prompt: '',
+            response_reference: '',
             response: response.response,
-            selectedResponse: response.response,
-            selectedHuntId: response.hunt_id,
-            judgeResult: {
-                score: response.judge_score,
-                criteria: response.judge_criteria || {},
-                explanation: response.judge_explanation || ''
-            },
-            results: state.allResponses.map(r => ({
-                hunt_id: r.hunt_id,
-                response: r.response,
-                judge_score: r.judge_score,
-                is_breaking: r.is_breaking
-            }))
         });
-        
-        // Track total hunts across turns
-        state.multiTurnTotalHunts += state.allResponses.length;
-        
-        // Update notebook state — editors will be blank for the new turn
-        state.notebook.prompt = '';
-        state.notebook.response_reference = '';
-        state.notebook.response = response.response; // Selected response as reference
-        // Keep judge_system_prompt from previous turn
-        
-        // Track hunt IDs from this turn so they're excluded from future fetches
-        state.allResponses.forEach(r => {
-            if (r.hunt_id) state.previousTurnHuntIds.add(r.hunt_id);
-        });
-        
-        // Reset hunt state for new turn
-        resetTurnState();
-        
-        // Clear the progress table rows
-        if (elements.resultsTableBody) {
-            elements.resultsTableBody.innerHTML = '';
-        }
-        
-        // Hide multi-turn decision sections
-        document.getElementById('multiTurnDecisionCard')?.classList.add('hidden');
-        document.getElementById('goodResponsePicker')?.classList.add('hidden');
-        document.getElementById('nextTurnEditor')?.classList.add('hidden');
-        document.getElementById('selectionSection')?.classList.add('hidden');
-        document.getElementById('resultsSection')?.classList.add('hidden');
-        document.getElementById('summarySection')?.classList.add('hidden');
-        document.getElementById('progressSection')?.classList.add('hidden');
-        
-        // Render turn history
-        renderTurnHistoryTabs();
-        document.getElementById('multiTurnSection').classList.remove('hidden');
-        
-        // Populate the FULL editors with blank content for the new turn
-        populatePreviewTabs(state.notebook);
-        validatePromptLength(); // Turn 2+: clear word limit/range in prompt section
-        
-        // Hide Turn 1 Test Prompt panel (we're now in Turn 2+)
-        const { hideTurn1TestPromptPanel } = await import('./notebook.js');
-        hideTurn1TestPromptPanel();
 
-        // Enable testbed button — prompt is ready from Turn 1 validation
-        enableNavTestbedButton();
-
-        state.referenceValidated = false;
-        if (elements.startHuntBtn) {
-            elements.startHuntBtn.disabled = false;
-            elements.startHuntBtn.title = '';
-        }
-        
-        // Clear previous judge results
-        if (elements.referenceJudgeResult) {
-            elements.referenceJudgeResult.innerHTML = '';
-        }
-        state.initialCriteria = null;
-        
-        // Update turn-aware UI
-        updateTurnAwareUI();
-        updateHuntLimitUI();
-        
-        // Render prior-conversation banner in configSection
-        renderPriorConversationBanner();
-
-        // Show config section (full editor) and scroll to it
-        elements.configSection?.classList.remove('hidden');
-        elements.configSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        
-        showToast(`Turn ${state.currentTurn} — Update your prompt and criteria, then Save & Check before hunting.`, 'success');
-        
     } catch (error) {
         console.error('Error advancing turn:', error);
         showError(error, { operation: 'Advance turn' });
-        // Re-enable response cards on error
         cards.forEach(card => { card.style.opacity = '1'; card.style.pointerEvents = 'auto'; });
     }
 }
 
 // ============== Calibration Mode (Turn 2+) ==============
 
-// Stores the last generated response for re-judging
 let _calibrationResponse = null;
-let _calibrationJudged = false; // Must judge at least once before hunting
+let _calibrationJudged = false;
 
 export function showCalibrationPanel() {
     const panel = document.getElementById('calibrationPanel');
     if (panel) {
         panel.classList.remove('hidden');
-        // Update turn badge
         const badge = document.getElementById('calibrationTurnBadge');
         if (badge) badge.textContent = `Turn ${state.currentTurn}`;
-        // Reset state
         _calibrationResponse = null;
         _calibrationJudged = false;
         document.getElementById('calibrationResponseArea')?.classList.add('hidden');
@@ -877,12 +893,11 @@ export function hideCalibrationPanel() {
 export async function calibrationGenerateOne() {
     if (!state.sessionId) return;
 
-    // Show loading
     const loadingEl = document.getElementById('calibrationLoading');
     const loadingText = document.getElementById('calibrationLoadingText');
     const genBtn = document.getElementById('generateOneBtn');
     const regenBtn = document.getElementById('regenerateBtn');
-    
+
     if (loadingEl) { loadingEl.classList.remove('hidden'); loadingText.textContent = 'Generating response...'; }
     if (genBtn) genBtn.disabled = true;
     if (regenBtn) regenBtn.disabled = true;
@@ -891,7 +906,7 @@ export async function calibrationGenerateOne() {
         const res = await fetch(`/api/generate-single/${state.sessionId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({})  // Empty body: use session config (model, provider, prompt)
+            body: JSON.stringify({})
         });
 
         if (!res.ok) {
@@ -902,22 +917,18 @@ export async function calibrationGenerateOne() {
         const data = await res.json();
         _calibrationResponse = data.response || '';
 
-        // Display the response
         const responseArea = document.getElementById('calibrationResponseArea');
         const responseText = document.getElementById('calibrationResponseText');
         const modelInfo = document.getElementById('calibrationModelInfo');
-        
+
         if (responseText) responseText.textContent = _calibrationResponse;
         if (modelInfo) modelInfo.textContent = `Model: ${data.model || 'unknown'} | Provider: ${data.provider || 'unknown'}`;
         if (responseArea) responseArea.classList.remove('hidden');
 
-        // Show Regenerate and Judge buttons
         if (regenBtn) { regenBtn.classList.remove('hidden'); regenBtn.disabled = false; }
         document.getElementById('judgeCalibrationBtn')?.classList.remove('hidden');
-
-        // Hide the initial Generate button, show Regenerate instead
         if (genBtn) genBtn.classList.add('hidden');
-        
+
         showToast('Response generated. Review it, then judge when ready.', 'info');
 
     } catch (error) {
@@ -938,7 +949,7 @@ export async function calibrationJudge() {
     const judgeBtn = document.getElementById('judgeCalibrationBtn');
     const loadingEl = document.getElementById('calibrationLoading');
     const loadingText = document.getElementById('calibrationLoadingText');
-    
+
     if (judgeBtn) { judgeBtn.disabled = true; judgeBtn.textContent = 'Judging...'; }
     if (loadingEl) { loadingEl.classList.remove('hidden'); loadingText.textContent = 'Running judge...'; }
 
@@ -957,16 +968,13 @@ export async function calibrationJudge() {
         const data = await res.json();
         _calibrationJudged = true;
 
-        // Display judge results
         const criteria = data.criteria || {};
         const score = data.score;
         const isPassing = (score || 0) >= 1;
         const scoreColor = isPassing ? 'var(--success, #10b981)' : 'var(--danger, #ef4444)';
-        
+
         const resultDiv = document.getElementById('calibrationJudgeResult');
         if (resultDiv) {
-
-            // Build criteria badges
             let criteriaHtml = '';
             for (const [k, v] of Object.entries(criteria)) {
                 const isPass = String(v).toUpperCase() === 'PASS';
@@ -994,7 +1002,6 @@ export async function calibrationJudge() {
             resultDiv.classList.remove('hidden');
         }
 
-        // Enable hunt button now that calibration is done
         state.referenceValidated = true;
         if (elements.startHuntBtn) {
             elements.startHuntBtn.disabled = false;
@@ -1017,21 +1024,19 @@ export function initCalibrationListeners() {
     const judgeBtn = document.getElementById('judgeCalibrationBtn');
 
     if (genBtn) genBtn.addEventListener('click', calibrationGenerateOne);
-    if (regenBtn) regenBtn.addEventListener('click', calibrationGenerateOne); // Regenerate = same function
+    if (regenBtn) regenBtn.addEventListener('click', calibrationGenerateOne);
     if (judgeBtn) judgeBtn.addEventListener('click', calibrationJudge);
 }
 
 /**
- * Start the next turn: call advance-turn API, then start a new hunt.
  * @deprecated The primary flow now uses selectGoodResponse() which calls advance_turn
- *   immediately. This function is only called when the user clicks the legacy
- *   "Start Turn N Hunt" button in the nextTurnEditor panel.
+ *   immediately. This function is only called from the legacy "Start Turn N Hunt" button.
  */
 export async function startNextTurn() {
     const nextPrompt = document.getElementById('nextTurnPrompt').value.trim();
     const nextCriteria = document.getElementById('nextTurnCriteria').value.trim();
     const nextJudgePrompt = document.getElementById('nextTurnJudgePrompt').value.trim() || null;
-    
+
     if (!nextPrompt) {
         showToast('Please enter a prompt for the next turn.', 'error');
         return;
@@ -1040,14 +1045,12 @@ export async function startNextTurn() {
         showToast('Please enter criteria for the next turn.', 'error');
         return;
     }
-    
     if (!state._selectedGoodResponse) {
         showToast('Please select a good response first.', 'error');
         return;
     }
-    
+
     try {
-        // Call advance-turn API
         const response = await fetch(`/api/advance-turn/${state.sessionId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1058,137 +1061,23 @@ export async function startNextTurn() {
                 next_judge_prompt: nextJudgePrompt
             })
         });
-        
+
         if (!response.ok) {
             const error = await response.json();
             throw new Error(error.detail || 'Failed to advance turn');
         }
-        
-        const data = await response.json();
-        
-        // Update local state
-        state.currentTurn = data.current_turn;
-        state.isMultiTurn = true;
-        
-        // Read completed turn's prompt/criteria from DOM (main editors, not nextTurn form)
-        const promptEl = document.getElementById('promptMarkdown');
-        const modelRefEl = elements.modelrefPreview;
-        let completedPrompt = state.notebook?.prompt || '';
-        let completedCriteria = state.notebook?.response_reference || '';
-        if (promptEl?.value !== undefined) completedPrompt = promptEl.value.trim();
-        if (modelRefEl) {
-            try {
-                convertStructuredToJSON();
-                completedCriteria = state.convertedModelRefJSON || modelRefEl.value || completedCriteria;
-            } catch {
-                completedCriteria = modelRefEl.value || completedCriteria;
-            }
-        }
-        
-        // Build local conversation history
-        state.conversationHistory.push(
-            { role: 'user', content: completedPrompt },
-            { role: 'assistant', content: state._selectedGoodResponse.response }
-        );
-        
-        // Save current turn data locally (use DOM-sourced values for history)
-        state.turns.push({
-            turnNumber: state.currentTurn - 1,
-            prompt: completedPrompt,
-            response_reference: completedCriteria,
-            selectedResponse: state._selectedGoodResponse.response,
-            selectedHuntId: state._selectedGoodResponse.hunt_id,
-            judgeResult: {
-                score: state._selectedGoodResponse.judge_score,
-                criteria: state._selectedGoodResponse.judge_criteria || {},
-                explanation: state._selectedGoodResponse.judge_explanation || ''
-            },
-            results: state.allResponses.map(r => ({
-                hunt_id: r.hunt_id,
-                response: r.response,
-                judge_score: r.judge_score,
-                is_breaking: r.is_breaking
-            }))
-        });
-        
-        // Track total hunts across turns
-        state.multiTurnTotalHunts += state.allResponses.length;
-        
-        // Update notebook state with new turn data
-        state.notebook.prompt = nextPrompt;
-        state.notebook.response_reference = nextCriteria;
-        // CRITICAL: Update response to the selected good response from this turn
-        // This is what gets judged when "Check Ideal Response" is clicked in the new turn
-        if (state._selectedGoodResponse?.response) {
-            state.notebook.response = state._selectedGoodResponse.response;
-        }
-        if (nextJudgePrompt) {
-            state.notebook.judge_system_prompt = nextJudgePrompt;
-        }
-        
-        // Track hunt IDs from this turn so they're excluded from future fetches
-        state.allResponses.forEach(r => {
-            if (r.hunt_id) state.previousTurnHuntIds.add(r.hunt_id);
-        });
-        
-        // Reset hunt state for new turn
-        resetTurnState();
-        
-        // Clear the progress table rows for the new turn
-        if (elements.resultsTableBody) {
-            elements.resultsTableBody.innerHTML = '';
-        }
-        
-        // Hide decision card and other sections, but KEEP turn history visible
-        document.getElementById('multiTurnDecisionCard')?.classList.add('hidden');
-        document.getElementById('selectionSection')?.classList.add('hidden');
-        document.getElementById('resultsSection')?.classList.add('hidden');
-        document.getElementById('summarySection')?.classList.add('hidden');
-        
-        // Re-render turn history tabs (now includes the just-completed turn)
-        renderTurnHistoryTabs();
-        // Show the multi-turn section (for the history card)
-        document.getElementById('multiTurnSection').classList.remove('hidden');
-        
-        // Update the notebook preview with new prompt/criteria
-        populatePreviewTabs(state.notebook);
-        validatePromptLength(); // Turn 2+: clear word limit/range in prompt section
-        
-        state.referenceValidated = false;
-        if (elements.startHuntBtn) {
-            elements.startHuntBtn.disabled = false;
-        }
-        
-        // Clear previous judge results display so old criteria grades don't persist
-        if (elements.referenceJudgeResult) {
-            elements.referenceJudgeResult.innerHTML = '';
-        }
-        // Reset initial criteria so judge validates against new turn's criteria
-        state.initialCriteria = null;
-        
-        // Hide Turn 1 Test Prompt panel; enable testbed for Turn 2+
-        const { hideTurn1TestPromptPanel } = await import('./notebook.js');
-        hideTurn1TestPromptPanel();
-        enableNavTestbedButton();
-        
-        // Update all turn-aware UI (journey bar, thread, badges, progress info)
-        updateTurnAwareUI();
-        updateHuntLimitUI();
-        
-        // Render prior-conversation banner in configSection
-        renderPriorConversationBanner();
 
-        // Turn transition toast with turn context
-        showToast(`Turn ${state.currentTurn} started — ${MAX_HUNTS_PER_NOTEBOOK} hunts available`, 'success');
-        
-        // Show config section and scroll to it
-        elements.configSection?.classList.remove('hidden');
-        elements.configSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        
-        // Refresh config tip for the new turn (model-aware)
-        const selectedModel = elements.modelSelect?.value || '';
-        renderInsightTip('configTipContainer', 'config', { model: selectedModel });
-        
+        const data = await response.json();
+
+        const { prompt: completedPrompt, criteria: completedCriteria } = _readPromptAndCriteriaFromDOM();
+
+        await _applyTurnAdvance(data, state._selectedGoodResponse, completedPrompt, completedCriteria, {
+            prompt: nextPrompt,
+            response_reference: nextCriteria,
+            response: state._selectedGoodResponse.response,
+            judge_system_prompt: nextJudgePrompt,
+        });
+
     } catch (error) {
         console.error('Error advancing turn:', error);
         showError(error, { operation: 'Advance turn' });

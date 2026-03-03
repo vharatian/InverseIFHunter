@@ -73,9 +73,9 @@ class SnapshotService:
             if 'nbformat' not in notebook:
                 return False, "Original notebook must have 'nbformat' field", None
             
-            # Validate selected_results
-            if len(snapshot.selected_results) > 4:
-                return False, "selected_results cannot have more than 4 results", None
+            # Validate selected_results (variable count for different hunt modes)
+            if len(snapshot.selected_results) > 16:
+                return False, "selected_results cannot have more than 16 results", None
             
             if len(snapshot.selected_results) == 0:
                 return False, "selected_results cannot be empty", None

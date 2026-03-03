@@ -816,7 +816,7 @@ export function handleNotebookLoaded(data, isUrl = false, overrideUrl = null) {
 
 /**
  * Save current notebook content (prompt, ideal response, criteria, judge prompts)
- * to the Colab notebook via the backend. No review-approval gates.
+ * to the Colab notebook using the progressive save endpoint with turn-aware headings.
  * Returns { success: boolean, message: string }.
  */
 export async function saveCurrentCellsToColab() {
@@ -825,7 +825,6 @@ export async function saveCurrentCellsToColab() {
     const notebookUrl = state.notebook?.url || document.getElementById('colabUrlInput')?.value || '';
     if (!notebookUrl) return { success: false, message: 'No Colab URL' };
 
-    // When testbed is visible, use state.notebook (caller must sync first) — DOM editors may be hidden/stale
     const testbedVisible = document.getElementById('testbedSection') && !document.getElementById('testbedSection').classList.contains('hidden');
     let prompt, idealResponse, criteria, judgePrompt;
     if (testbedVisible) {
@@ -840,20 +839,41 @@ export async function saveCurrentCellsToColab() {
         judgePrompt   = document.getElementById('judgeMarkdown')?.value?.trim()   || state.notebook?.judge_system_prompt || '';
     }
 
+    const turnNum = state.currentTurn || 1;
     const cells = [];
-    if (prompt)        cells.push({ cell_type: 'prompt',             content: prompt });
-    if (idealResponse) cells.push({ cell_type: 'response',           content: idealResponse });
-    if (criteria)      cells.push({ cell_type: 'response_reference', content: criteria });
-    if (judgePrompt)   cells.push({ cell_type: 'judge_system_prompt', content: judgePrompt });
+    if (prompt)        cells.push({ heading: `Turn-${turnNum}: Prompt`,             content: prompt });
+    if (idealResponse) cells.push({ heading: `Turn-${turnNum}: Ideal Response`,     content: idealResponse });
+    if (criteria)      cells.push({ heading: `Turn-${turnNum}: Criteria`,           content: parseCriteriaToJSON(criteria) });
+    if (judgePrompt)   cells.push({ heading: `Turn-${turnNum}: Judge System Prompt`, content: judgePrompt });
 
     if (cells.length === 0) return { success: false, message: 'Nothing to save' };
 
+    return progressiveSaveToColab(cells);
+}
+
+
+// ============== Progressive Colab Save ==============
+
+/**
+ * Save arbitrary cells to the Colab notebook via the progressive-save endpoint.
+ * Always fetches the live notebook from Drive, patches cells by heading, writes back.
+ *
+ * @param {Array<{heading: string, content: string}>} cells
+ *        Each heading is WITHOUT the **[...]** wrapper, e.g. "Turn-1: Prompt".
+ * @returns {{ success: boolean, message: string }}
+ */
+export async function progressiveSaveToColab(cells) {
+    if (!state.sessionId) return { success: false, message: 'No active session' };
+    if (!cells || cells.length === 0) return { success: false, message: 'Nothing to save' };
+
+    const colabUrl = (state.notebook?.url || document.getElementById('colabUrlInput')?.value || '').trim();
+    if (!colabUrl) return { success: false, message: 'No Colab URL' };
+
     try {
-        const colab_url = (state.notebook?.url || notebookUrl || '').trim() || undefined;
-        const res = await fetch(`/api/update-notebook-cells/${state.sessionId}`, {
-            method:  'POST',
+        const res = await fetch(`/api/progressive-save/${state.sessionId}`, {
+            method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify({ cells, session_only: false, colab_url: colab_url || undefined }),
+            body: JSON.stringify({ cells, colab_url: colabUrl }),
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
@@ -865,6 +885,7 @@ export async function saveCurrentCellsToColab() {
         return { success: false, message: e.message || 'Network error' };
     }
 }
+
 
 export async function saveToDrive() {
     if (!state.sessionId) return;
@@ -1284,8 +1305,15 @@ function _buildTurnCells(turnLabel, turnData, selectedResults, reviews, selected
 }
 
 /**
- * Submit to Colab: build a fully-formed notebook JSON from state and write it to Drive.
- * Enabled after LLM judgment is revealed. No reviewer-approval gate.
+ * Submit to Colab: progressively save slot content, judge_prompt_template,
+ * and number_of_attempts_made into the existing Colab notebook.
+ *
+ * Turn content (prompt, ideal response, criteria, JSP) is already saved
+ * progressively at testbed completion (Trigger 1) and turn advance (Trigger 2).
+ * This function (Trigger 3) only adds the final-save cells.
+ *
+ * Handles variable slot count: iterates over selectedResults.length, not
+ * a hard-coded 4.
  */
 export async function submitToColab() {
     const btn = elements.submitColabBtn;
@@ -1314,112 +1342,58 @@ export async function submitToColab() {
         return;
     }
 
-    // Debug: log reasoning_trace values for all selected results
-    selectedResults.forEach((r, i) => {
-    });
-
     const originalText = btn.textContent;
     btn.disabled = true;
     btn.textContent = '⏳ Saving...';
 
     try {
-        const allCells = [];
+        const cells = [];
 
-        // Determine total attempts across all turns
         const validResponseCount = state.allResponses.filter(r => r.response && r.response.trim() && !r.error).length;
         const totalAttempts = state.isMultiTurn
             ? state.multiTurnTotalHunts + validResponseCount
             : validResponseCount;
 
-        // DOM fallbacks — capture current textarea values in case state wasn't synced
-        const domResponse = document.getElementById('responseMarkdown')?.value?.trim() || '';
-        const domJudge = document.getElementById('judgeMarkdown')?.value?.trim() || '';
-        const domCriteria = document.getElementById('modelrefPreview')?.value?.trim() || '';
-        const domPrompt = document.getElementById('promptMarkdown')?.value?.trim() || '';
+        const judgeSystemPrompt = document.getElementById('judgeMarkdown')?.value?.trim()
+            || state.notebook?.judge_system_prompt || '';
 
-        const idealResponse = domResponse || state.notebook?.response || '';
-        const judgeSystemPrompt = domJudge || state.notebook?.judge_system_prompt || '';
-        const criteriaRef = domCriteria || state.notebook?.response_reference || '';
-        const notebookPrompt = domPrompt || state.notebook?.prompt || '';
+        const judgePromptTemplate = `Question\n{prompt}\n\nStudent Response\n{model_response}\n\nStandard Response\n{standard_response}\n\nEvaluation Criteria\n{criteria}`;
 
+        // judge_prompt_template for each turn (non-breaking + breaking)
         if (state.isMultiTurn && state.turns && state.turns.length > 0) {
-            // Previous (non-breaking) turns
             state.turns.forEach((turn) => {
                 const tNum = turn.turnNumber || turn.turn_number || 1;
-                const tLabel = `Turn-${tNum}`;
-                  // Non-breaking turns: only prompt, ideal response, criteria, judge system prompt
-                  // (no slots — the selected response for those turns is a single winner)
-                  const turnCells = [];
-                  const _jpt = `Question\n{prompt}\n\nStudent Response\n{model_response}\n\nStandard Response\n{standard_response}\n\nEvaluation Criteria\n{criteria}`;
-                  turnCells.push(_makeCell(`${tLabel}: Prompt`, turn.prompt || '', `cell_t${tNum}_prompt`));
-                  turnCells.push(_makeCell(`${tLabel}: Ideal Response`, turn.response || '', `cell_t${tNum}_ideal`));
-                  turnCells.push(_makeCell(`${tLabel}: Criteria`, parseCriteriaToJSON(turn.response_reference || ''), `cell_t${tNum}_criteria`));
-                  turnCells.push(_makeCell(`${tLabel}: judge_prompt_template`, _jpt, `cell_t${tNum}_jpt`));
-                  const jsp = turn.judge_system_prompt || judgeSystemPrompt;
-                  turnCells.push(_makeCell(`${tLabel}: Judge System Prompt`, jsp, `cell_t${tNum}_jsp`));
-                if (turn.selectedResponse || turn.selected_response) {
-                    turnCells.push(_makeCell(`${tLabel}: Selected Response`, turn.selectedResponse || turn.selected_response || '', `cell_t${tNum}_selected`));
-                }
-                allCells.push(...turnCells);
+                cells.push({ heading: `Turn-${tNum}: judge_prompt_template`, content: judgePromptTemplate });
             });
-
-            // Breaking turn (current turn)
-            const breakingTurnNum = state.currentTurn;
-            const breakingLabel = `Turn-${breakingTurnNum}`;
-            const breakingTurnData = {
-                prompt: notebookPrompt,
-                response: idealResponse,
-                response_reference: criteriaRef,
-                judge_system_prompt: judgeSystemPrompt
-            };
-            allCells.push(..._buildTurnCells(
-                breakingLabel, breakingTurnData,
-                selectedResults, state.humanReviews,
-                selectedRowNumbers, totalAttempts
-            ));
-        } else {
-            // Single-turn
-            const turnData = {
-                prompt: notebookPrompt,
-                response: idealResponse,
-                response_reference: criteriaRef,
-                judge_system_prompt: judgeSystemPrompt
-            };
-            allCells.push(..._buildTurnCells(
-                'Turn-1', turnData,
-                selectedResults, state.humanReviews,
-                selectedRowNumbers, totalAttempts
-            ));
         }
+        const breakingTurnNum = state.currentTurn || 1;
+        cells.push({ heading: `Turn-${breakingTurnNum}: judge_prompt_template`, content: judgePromptTemplate });
 
-        // Wrap cells into a valid .ipynb structure
-        const notebookJson = {
-            nbformat: 4,
-            nbformat_minor: 5,
-            metadata: state.notebook?.metadata || {},
-            cells: allCells
-        };
+        // Slot cells for breaking turn (variable count)
+        selectedResults.forEach((result, idx) => {
+            const slotNum = idx + 1;
+            const rowNum = selectedRowNumbers[idx];
+            const review = state.humanReviews[`row_${rowNum}`] || null;
+            const modelName = _modelCellName(result.model);
 
-        // Debug: log all reasoning_trace cells before sending
-        allCells.filter(c => c.id && c.id.includes('reasoning_trace')).forEach(c => {
+            cells.push({ heading: `${modelName}_${slotNum}`, content: _slotModelResponse(result) });
+            cells.push({ heading: `llm_judge_${slotNum}`,     content: _slotLlmJudge(result) });
+            cells.push({ heading: `human_judge_${slotNum}`,   content: _slotHumanJudge(review) });
+            cells.push({ heading: `reasoning_trace_${slotNum}`, content: _slotReasoningTrace(result) });
         });
 
-        const response = await fetch('/api/write-notebook', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url: notebookUrl, notebook_json: notebookJson })
-        });
+        // Number of attempts
+        cells.push({ heading: `Turn-${breakingTurnNum}: Number of Attempts Made`, content: String(totalAttempts) });
 
-        if (!response.ok) {
-            const err = await response.json();
-            throw new Error(err.detail || err.error || 'Write failed');
+        const result = await progressiveSaveToColab(cells);
+
+        if (!result.success) {
+            throw new Error(result.message || 'Progressive save failed');
         }
 
-        const result = await response.json();
-        showToast(`✅ Submitted to Colab! (${result.cells_written} cells written)`, 'success');
+        showToast(`✅ Submitted to Colab! (${cells.length} cells saved)`, 'success');
         triggerColabConfetti();
 
-        // Disable button to prevent double-submit
         btn.textContent = '✅ Submitted';
         btn.disabled = true;
 

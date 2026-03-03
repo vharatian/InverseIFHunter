@@ -113,6 +113,7 @@ async def advance_turn(session_id: str, request: AdvanceTurnRequest):
     # Reset current run results for the new turn
     session.results = []
     session.all_results = []
+    session.total_hunts = 0
     session.completed_hunts = 0
     session.breaks_found = 0
     session.passes_found = 0

@@ -10,7 +10,7 @@ from models.schemas import HuntSession
 
 # ============== Shared Constants ==============
 
-# Heading map for notebook cell types
+# Heading map for notebook cell types (used by update-notebook-cells endpoint)
 HEADING_MAP = {
     "prompt": "**[prompt]**",
     "response": "**[response]**",
@@ -22,21 +22,36 @@ HEADING_MAP = {
 # Cell order for notebook structure
 CELL_ORDER = ["prompt", "response", "model_reasoning", "response_reference", "judge_system_prompt"]
 
+# Progressive save heading map: cell_type -> human-readable label for **[Turn-N: Label]** format
+PROGRESSIVE_HEADING_MAP = {
+    "prompt": "Prompt",
+    "response": "Ideal Response",
+    "response_reference": "Criteria",
+    "judge_system_prompt": "Judge System Prompt",
+    "judge_prompt_template": "judge_prompt_template",
+    "selected_response": "Selected Response",
+    "number_of_attempts_made": "Number of Attempts Made",
+}
+
 
 # ============== Turn-Aware Heading Helpers ==============
 
 def _get_turn_heading(cell_type: str, turn: int) -> str:
     """
-    Get the cell heading for a specific turn.
-    Turn 1 uses original headings: **[prompt]**
-    Turn 2+ uses turn-specific headings: **[Turn 2 - prompt]**
+    Get the cell heading for a specific turn using the standardised
+    **[Turn-N: Label]** format (e.g. **[Turn-1: Prompt]**, **[Turn-2: Criteria]**).
+
+    Falls back to the legacy HEADING_MAP for Turn 1 when the cell_type is not
+    in PROGRESSIVE_HEADING_MAP (backward compat for update-notebook-cells).
     """
+    label = PROGRESSIVE_HEADING_MAP.get(cell_type)
+    if label:
+        return f"**[Turn-{turn}: {label}]**"
     base = HEADING_MAP.get(cell_type, f"**[{cell_type}]**")
     if turn <= 1:
         return base
-    # e.g. **[Turn 2 - prompt]**
-    inner = base.strip("*[]")  # "prompt"
-    return f"**[Turn {turn} - {inner}]**"
+    inner = base.strip("*[]")
+    return f"**[Turn-{turn}: {inner}]**"
 
 
 def _normalize_heading_line(line: str) -> str:
@@ -49,42 +64,74 @@ def _normalize_heading_line(line: str) -> str:
 def _cell_first_line_matches_type(source: str, cell_type: str, turn: int) -> bool:
     """
     Return True if the cell's first line looks like the given cell type heading.
-    Handles variants like "## Prompt", "[prompt]", "**[prompt]**", "### response reference".
+    Handles variants like "## Prompt", "[prompt]", "**[prompt]**", "### response reference",
+    and the progressive format **[Turn-1: Prompt]**.
     """
     first_line = (source.split("\n")[0] or "").strip()
     normalized = _normalize_heading_line(first_line)
-    # Turn 1: match canonical key e.g. "prompt", "responsereference"
     key = cell_type.replace("_", "")
     if turn <= 1:
-        return normalized == key
-    # Turn 2+: match "turn2prompt" or "turn 2 prompt" style
+        if normalized == key:
+            return True
+        # Also match progressive format for Turn 1: "turn1prompt", "turn1idealresponse", etc.
+        label = PROGRESSIVE_HEADING_MAP.get(cell_type, "")
+        if label and _normalize_heading_line(f"turn-1: {label}") == _normalize_heading_line(f"turn1{label}"):
+            progressive_norm = _normalize_heading_line(f"Turn-1: {label}")
+            if normalized.startswith("turn") and progressive_norm in normalized:
+                return True
+        return False
+    # Turn 2+: match "turn2prompt", "turn-2prompt", "turn2criteria" style
     turn_prefix = f"turn{turn}"
-    return normalized.startswith(turn_prefix) and key in normalized
+    if normalized.startswith(turn_prefix) and key in normalized:
+        return True
+    # Also match progressive label: "turn2idealresponse" for response type
+    label = PROGRESSIVE_HEADING_MAP.get(cell_type, "")
+    if label:
+        label_norm = _normalize_heading_line(label)
+        if normalized.startswith(turn_prefix) and label_norm in normalized:
+            return True
+    return False
 
 
 def _find_or_create_turn_cell(notebook_data: dict, cell_type: str, content: str, turn: int) -> bool:
     """
     Find an existing turn-specific cell and update it, or create a new one.
     For Turn 1, updates the original cell. For Turn 2+, creates/updates turn-specific cells.
-    Matches both canonical headings (e.g. **[prompt]**) and variants (e.g. ## Prompt, [prompt]).
+    Matches the progressive format **[Turn-N: Label]**, legacy formats
+    (e.g. **[Turn 2 - prompt]**, **[prompt]**), and alternative variants
+    (e.g. ## Prompt, [prompt]).
     Returns True if the notebook_data was modified.
     """
     heading = _get_turn_heading(cell_type, turn)
     heading_lower = heading.lower()
+
+    # Build a set of legacy heading patterns to also match
+    legacy_patterns = set()
+    legacy_patterns.add(heading_lower)
+    # Old format: **[Turn 2 - prompt]**
+    base = HEADING_MAP.get(cell_type, f"**[{cell_type}]**")
+    if turn > 1:
+        inner = base.strip("*[]")
+        legacy_patterns.add(f"**[turn {turn} - {inner}]**")
+    else:
+        legacy_patterns.add(base.lower())
+    # Old export format: **[prompt_2]** / **[response_reference_2]**
+    if turn > 1:
+        legacy_patterns.add(f"**[{cell_type}_{turn}]**")
 
     for cell in notebook_data.get("cells", []):
         if cell.get("cell_type") != "markdown":
             continue
         source = "".join(cell.get("source", []))
         source_lower = source.lower()
-        # Match canonical heading first
-        if heading_lower in source_lower:
+        # Match any known heading pattern
+        for pattern in legacy_patterns:
+            if pattern in source_lower:
+                _update_cell_source(cell, source, heading, content)
+                return True
+        # Fuzzy first-line match for alternative formatting
+        if _cell_first_line_matches_type(source, cell_type, turn):
             _update_cell_source(cell, source, heading, content)
-            return True
-        # Turn 1 only: match alternative heading formats so we overwrite in place
-        if turn <= 1 and _cell_first_line_matches_type(source, cell_type, turn):
-            heading_line = source.split("\n")[0]
-            _update_cell_source(cell, source, heading_line, content)
             return True
 
     # Cell not found — create it
@@ -92,6 +139,33 @@ def _find_or_create_turn_cell(notebook_data: dict, cell_type: str, content: str,
         notebook_data["cells"] = []
     new_cell = _create_notebook_cell(heading, content)
     notebook_data["cells"].append(new_cell)
+    return True
+
+
+def find_or_create_cell_by_heading(notebook_data: dict, heading: str, content: str) -> bool:
+    """
+    Find an existing cell whose first line matches ``heading`` (case-insensitive)
+    and update it, or append a new cell.  Used by the progressive-save endpoint
+    which works with arbitrary heading strings like ``**[Turn-2: Criteria]**``.
+    """
+    heading_lower = heading.lower()
+    norm = _normalize_heading_line(heading)
+
+    for cell in notebook_data.get("cells", []):
+        if cell.get("cell_type") != "markdown":
+            continue
+        source = "".join(cell.get("source", []))
+        if heading_lower in source.lower():
+            _update_cell_source(cell, source, heading, content)
+            return True
+        first_line = (source.split("\n")[0] or "").strip()
+        if _normalize_heading_line(first_line) == norm:
+            _update_cell_source(cell, source, heading, content)
+            return True
+
+    if "cells" not in notebook_data:
+        notebook_data["cells"] = []
+    notebook_data["cells"].append(_create_notebook_cell(heading, content))
     return True
 
 

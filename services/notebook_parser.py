@@ -603,33 +603,29 @@ class NotebookParser:
             slot_num = review.get('slotNum')
             if slot_num is not None:
                 slot_num = int(slot_num)
-                if 1 <= slot_num <= 4:
-                    # Create a deep copy of the review to avoid reference issues
-                    review_copy = {
-                        'judgment': review.get('judgment'),
-                        'grading_basis': dict(review.get('grading_basis', {})),  # Deep copy dict
-                        'explanation': review.get('explanation'),
-                        'slotNum': review.get('slotNum'),
-                        'timestamp': review.get('timestamp')
-                    }
-                    slot_to_review[slot_num] = review_copy
-                    # Extract hunt_id from key (may be "hunt_id:slotNum" or just "hunt_id")
-                    if ':' in key_str:
-                        hunt_id = int(key_str.split(':')[0]) if key_str.split(':')[0].isdigit() else None
-                    else:
-                        hunt_id = int(key_str) if key_str.isdigit() else None
-                    logger.debug("Mapped review for key %s (hunt_id %s) -> slot %d (from review.slotNum)", key_str, hunt_id, slot_num)
-                    logger.debug("Review judgment: %s, explanation preview: %s", review_copy.get('judgment'), review_copy.get('explanation', '')[:50])
+                review_copy = {
+                    'judgment': review.get('judgment'),
+                    'grading_basis': dict(review.get('grading_basis', {})),
+                    'explanation': review.get('explanation'),
+                    'slotNum': review.get('slotNum'),
+                    'timestamp': review.get('timestamp')
+                }
+                slot_to_review[slot_num] = review_copy
+                if ':' in key_str:
+                    hunt_id = int(key_str.split(':')[0]) if key_str.split(':')[0].isdigit() else None
                 else:
-                    logger.warning("Invalid slotNum %d in review for key %s (must be 1-4)", slot_num, key_str)
+                    hunt_id = int(key_str) if key_str.isdigit() else None
+                logger.debug("Mapped review for key %s (hunt_id %s) -> slot %d (from review.slotNum)", key_str, hunt_id, slot_num)
+                logger.debug("Review judgment: %s, explanation preview: %s", review_copy.get('judgment'), review_copy.get('explanation', '')[:50])
             else:
                 logger.warning("Review for key %s missing slotNum field", key_str)
         
         # Build slot_to_result mapping using array index (results order determines slots 1-4)
         # Frontend sends results in the exact order they should appear in slots
+        num_results = len(results)
         slot_to_result = {}
         logger.debug("Building slot_to_result using array index (order preserved from frontend)")
-        for idx, result in enumerate(results[:4], start=1):
+        for idx, result in enumerate(results, start=1):
             slot_to_result[idx] = result
             logger.debug("Mapped slot %d -> hunt_id %s (by array index)", idx, result.get('hunt_id'))
         
@@ -637,9 +633,6 @@ class NotebookParser:
         for slot_num, review in slot_to_review.items():
             result_hunt_id = int(slot_to_result.get(slot_num, {}).get('hunt_id', 0)) if slot_num in slot_to_result else None
             logger.debug("Slot %d: judgment=%s, result hunt_id=%s, review explanation preview=%s", slot_num, review.get('judgment'), result_hunt_id, review.get('explanation', '')[:50])
-        
-        if len(slot_to_result) < 4:
-            logger.warning("Only %d slots mapped, but creating 4 slots. Empty slots: %s", len(slot_to_result), [s for s in range(1, 5) if s not in slot_to_result])
         
         # Helper function to get cell heading
         def get_cell_heading(cell):
@@ -987,8 +980,9 @@ class NotebookParser:
                 # Keep all non-slot cells in their original order (for now)
                 non_slot_cells.append(cell)
         
-        # Step 2: Create missing slot cells
-        for slot_num in range(1, 5):  # Always create slots 1-4
+        # Step 2: Create missing slot cells (variable count based on results)
+        total_slots = max(num_results, len(slot_to_result)) if (num_results or slot_to_result) else 4
+        for slot_num in range(1, total_slots + 1):
             slot_result = slot_to_result.get(slot_num)
             if not slot_result and slot_num <= len(results):
                 slot_result = results[slot_num - 1]
@@ -1048,7 +1042,7 @@ class NotebookParser:
         # Step 3: Build ordered slot cells list (model_1, llm_judge_1, human_judge_1, reasoning_trace_1, model_2, ...)
         ordered_slot_cells = []
         cell_type_order = ['model', 'llm_judge', 'human_judge', 'reasoning_trace']
-        for slot_num in range(1, 5):
+        for slot_num in range(1, total_slots + 1):
             for cell_type in cell_type_order:
                 if (slot_num, cell_type) in slot_cells_dict:
                     ordered_slot_cells.append(slot_cells_dict[(slot_num, cell_type)])
@@ -1260,10 +1254,10 @@ class NotebookParser:
             slot_num = review.get('slotNum')
             if slot_num is not None:
                 slot_num = int(slot_num)
-                if 1 <= slot_num <= 4:
-                    slot_to_review[slot_num] = review
+                slot_to_review[slot_num] = review
         
-        for slot_num in range(1, 5):
+        num_slots = len(breaking_turn_results) if breaking_turn_results else 4
+        for slot_num in range(1, num_slots + 1):
             result = breaking_turn_results[slot_num - 1] if slot_num <= len(breaking_turn_results) else None
             
             # Model response

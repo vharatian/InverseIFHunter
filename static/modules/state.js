@@ -89,6 +89,9 @@ export const state = {
 
 /**
  * Reset all turn-level state. Called when advancing to a new turn.
+ * NOTE: totalHuntsCount and currentRunStartOffset are NOT reset here.
+ * They track the global accumulated count (for unique hunt IDs across turns).
+ * Only huntsThisTurn is reset (for per-turn limit enforcement).
  */
 export function resetTurnState() {
     state.allResponses = [];
@@ -101,8 +104,6 @@ export function resetTurnState() {
     state._selectedGoodResponse = null;
     state.huntsThisTurn = 0;
     state.huntLimitReached = false;
-    state.totalHuntsCount = 0;
-    state.currentRunStartOffset = 0;
 }
 
 

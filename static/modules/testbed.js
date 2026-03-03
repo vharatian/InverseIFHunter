@@ -15,7 +15,8 @@ import { PROVIDER_MODELS, getJudgeModels, getConfigValue } from './config.js';
 import { escapeHtml } from './utils.js';
 import { showToast } from './celebrations.js';
 import { updateMarkdownPreview } from './editors.js';
-import { populatePreviewTabs, parseCriteria, validateModelReferenceAndCriteria } from './notebook.js';
+import { populatePreviewTabs, parseCriteria, validateModelReferenceAndCriteria, progressiveSaveToColab } from './notebook.js';
+import { parseCriteriaToJSON } from './utils.js';
 
 const DEFAULT_JUDGE_SYSTEM_PROMPT = `Your role is that of a meticulous instruction-following grading teacher. Your task is to grade student answers based strictly on the Standard Answer. You must evaluate whether the student completely fulfills the requirement. You will be provide one requirement
 
@@ -336,6 +337,93 @@ function parseJudgeExplanation(explanation, criteria) {
     });
 }
 
+// ============== Progressive Save Helpers ==============
+
+/**
+ * Build and fire a progressive save for the current turn's content:
+ * prompt, ideal response, criteria, and (conditionally) judge system prompt.
+ * JSP is only saved for Turn 1 unconditionally.  For Turn 2+ it is saved only
+ * when it differs from the previous turn — after showing a warning dialog.
+ */
+async function _progressiveSaveTurnContent() {
+    const turnNum = state.currentTurn || 1;
+    const prompt      = state.notebook?.prompt || '';
+    const ideal       = state.notebook?.response || '';
+    const rawCriteria = state.notebook?.response_reference || '';
+    const jsp         = state.notebook?.judge_system_prompt || '';
+
+    const criteria = parseCriteriaToJSON(rawCriteria);
+
+    const cells = [];
+    if (prompt)   cells.push({ heading: `Turn-${turnNum}: Prompt`,         content: prompt });
+    if (ideal)    cells.push({ heading: `Turn-${turnNum}: Ideal Response`, content: ideal });
+    if (criteria) cells.push({ heading: `Turn-${turnNum}: Criteria`,       content: criteria });
+
+    // JSP: always save for Turn 1; for Turn 2+ save only if different
+    let shouldSaveJsp = false;
+    if (turnNum <= 1) {
+        shouldSaveJsp = !!jsp;
+    } else {
+        const prevJsp = _getPreviousTurnJsp(turnNum);
+        if (jsp && jsp.trim() !== (prevJsp || '').trim()) {
+            shouldSaveJsp = await _showJspChangeWarning(turnNum);
+        }
+    }
+    if (shouldSaveJsp && jsp) {
+        cells.push({ heading: `Turn-${turnNum}: Judge System Prompt`, content: jsp });
+    }
+
+    if (cells.length === 0) return;
+
+    try {
+        const result = await progressiveSaveToColab(cells);
+        if (result.success) {
+            showToast(`Turn ${turnNum} content saved to Colab`, 'success');
+        } else {
+            console.warn('Progressive save failed:', result.message);
+            showToast(`Could not save Turn ${turnNum} to Colab: ${result.message}`, 'warning');
+        }
+    } catch (e) {
+        console.error('Progressive save error:', e);
+        showToast(`Error saving Turn ${turnNum} to Colab`, 'error');
+    }
+}
+
+function _getPreviousTurnJsp(currentTurn) {
+    if (!state.turns || state.turns.length === 0) return '';
+    const prevTurn = state.turns.find(t =>
+        (t.turnNumber || t.turn_number) === currentTurn - 1
+    );
+    return prevTurn?.judge_system_prompt || prevTurn?.judgeSystemPrompt || state.turns[state.turns.length - 1]?.judge_system_prompt || '';
+}
+
+function _showJspChangeWarning(turnNum) {
+    return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:center;justify-content:center;';
+        overlay.innerHTML = `
+            <div style="background:var(--bg-secondary,#1e1e2e);border-radius:12px;padding:1.5rem 2rem;max-width:440px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.3);border:1px solid var(--border,#333);">
+                <div style="font-size:1.5rem;text-align:center;margin-bottom:0.75rem;">&#9888;&#65039;</div>
+                <div style="font-weight:700;font-size:1.05rem;text-align:center;margin-bottom:0.75rem;color:var(--warning,#f59e0b);">
+                    Judge System Prompt Changed
+                </div>
+                <div style="font-size:0.9rem;color:var(--text-secondary,#a0a0b0);text-align:center;margin-bottom:1.25rem;line-height:1.5;">
+                    The Judge System Prompt for <strong>Turn ${turnNum}</strong> differs from the previous turn.<br>
+                    Do you want to save the new version to Colab?
+                </div>
+                <div style="display:flex;gap:0.75rem;justify-content:center;">
+                    <button id="jspWarnNo" style="padding:0.5rem 1.25rem;border-radius:8px;border:1px solid var(--border,#444);background:transparent;color:var(--text-primary,#e0e0e0);cursor:pointer;font-weight:600;">Skip (use previous)</button>
+                    <button id="jspWarnYes" style="padding:0.5rem 1.25rem;border-radius:8px;border:none;background:var(--warning,#f59e0b);color:#000;cursor:pointer;font-weight:600;">Save new JSP</button>
+                </div>
+            </div>`;
+        document.body.appendChild(overlay);
+        overlay.querySelector('#jspWarnYes').addEventListener('click', () => { overlay.remove(); resolve(true); });
+        overlay.querySelector('#jspWarnNo').addEventListener('click', () => { overlay.remove(); resolve(false); });
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) { overlay.remove(); resolve(false); } });
+    });
+}
+
+
 /**
  * Show Save & Preview result modal: full ideal response + judge results (PASS/FAIL + explanation per criterion).
  * @param {{ idealResponse: string, judgeData: object, isPassing: boolean }} opts
@@ -388,9 +476,13 @@ function showSavePreviewModal(opts) {
         </div>`;
     document.body.appendChild(overlay);
 
-    overlay.querySelector('#spmContinueBtn')?.addEventListener('click', () => {
+    overlay.querySelector('#spmContinueBtn')?.addEventListener('click', async () => {
         overlay.remove();
         _previewDismissed = true;
+
+        // --- Progressive save: persist this turn's content to Colab ---
+        await _progressiveSaveTurnContent();
+
         hideTestbed();
         const card = document.getElementById('notebookPreviewCard');
         if (card) card.classList.add('hidden');
@@ -398,6 +490,12 @@ function showSavePreviewModal(opts) {
         if (configSection) {
             configSection.classList.remove('hidden');
             setTimeout(() => configSection.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
+        }
+        // Enable hunt button now that testbed validation passed
+        const startHuntBtn = document.getElementById('startHuntBtn');
+        if (startHuntBtn && state.referenceValidated) {
+            startHuntBtn.disabled = false;
+            startHuntBtn.title = '';
         }
     });
     overlay.querySelector('#spmFixBtn')?.addEventListener('click', () => overlay.remove());

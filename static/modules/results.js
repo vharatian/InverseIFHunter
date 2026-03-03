@@ -896,14 +896,9 @@ export async function fetchAllResponses(options = {}) {
         const data = await response.json();
         const rawResults = data.results || [];
         
-        // Filter out results from previous turns (they're already saved in state.turns)
-        // When replace=true (picker), use raw results — API returns current turn only after advance clears
-        const newResponses = options.replace
-            ? rawResults
-            : rawResults.filter(r => !state.previousTurnHuntIds.has(r.hunt_id));
-        
-        if (options.replace && rawResults.length > 0) {
-        }
+        // Always filter out results from previous turns (they're saved in state.turns).
+        // previousTurnHuntIds contains hunt_ids from all completed turns.
+        const newResponses = rawResults.filter(r => !state.previousTurnHuntIds.has(r.hunt_id));
         
         if (options.replace) {
             // Replace entirely — ensures picker always has fresh data

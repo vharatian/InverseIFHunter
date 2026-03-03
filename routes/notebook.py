@@ -1,12 +1,13 @@
 """
 Notebook Routes
 
-POST /api/upload-notebook                  — upload .ipynb file
-POST /api/fetch-notebook                   — fetch notebook from URL
-POST /api/warmup-connections               — pre-warm API connections
-POST /api/update-response/{session_id}     — update [response] cell
-POST /api/update-notebook-cell/{session_id} — update single cell
+POST /api/upload-notebook                    — upload .ipynb file
+POST /api/fetch-notebook                     — fetch notebook from URL
+POST /api/warmup-connections                 — pre-warm API connections
+POST /api/update-response/{session_id}       — update [response] cell
+POST /api/update-notebook-cell/{session_id}  — update single cell
 POST /api/update-notebook-cells/{session_id} — update multiple cells
+POST /api/progressive-save/{session_id}      — progressive cell save to Colab (live fetch)
 GET  /api/get-original-notebook/{session_id} — get original notebook JSON
 GET  /api/export-notebook/{session_id}       — export modified notebook
 POST /api/save-reviews/{session_id}          — save human reviews
@@ -493,6 +494,90 @@ async def update_notebook_cells(session_id: str, request: UpdateNotebookCellsReq
         raise
     except Exception as e:
         raise HTTPException(500, f"Error saving cells: {str(e)}")
+
+
+# ============== Progressive Save ==============
+
+class ProgressiveSaveCellItem(BaseModel):
+    heading: str   # Full heading string, e.g. "Turn-1: Prompt"
+    content: str
+
+class ProgressiveSaveRequest(BaseModel):
+    cells: List[ProgressiveSaveCellItem]
+    colab_url: Optional[str] = None
+
+
+@router.post("/progressive-save/{session_id}")
+async def progressive_save(session_id: str, request: ProgressiveSaveRequest):
+    """
+    Progressive save: patch individual cells into the live Colab notebook.
+
+    Always fetches the current notebook from Google Drive (never uses stale
+    cache), finds/updates cells by heading, and writes back.  Accepts
+    arbitrary heading strings so it works for turn content, slot content,
+    and any other cell type.
+    """
+    from services.google_drive_client import drive_client
+    from helpers.notebook_helpers import find_or_create_cell_by_heading
+
+    if not request.cells:
+        raise HTTPException(400, "No cells provided")
+
+    # --- resolve Colab URL ---
+    colab_url = (request.colab_url or "").strip() or None
+    if not colab_url:
+        storage = get_session_storage(session_id)
+        if storage:
+            colab_url = (storage.get("url") or "").strip() or None
+    if not colab_url:
+        try:
+            db_data = sqlite_load(session_id)
+            if db_data:
+                colab_url = (db_data.get("colab_url") or "").strip() or None
+        except Exception:
+            pass
+    if not colab_url:
+        raise HTTPException(400, "No Colab URL found for this session")
+
+    file_id = drive_client.get_file_id_from_url(colab_url)
+    if not file_id:
+        raise HTTPException(400, f"Could not extract file ID from URL: {colab_url}")
+
+    try:
+        # Fetch live notebook from Drive
+        _, content_str = await notebook_parser.load_from_url(colab_url)
+        notebook_data = json.loads(content_str)
+
+        # Patch each cell
+        for item in request.cells:
+            heading_full = f"**[{item.heading}]**"
+            find_or_create_cell_by_heading(notebook_data, heading_full, item.content)
+
+        # Write back
+        updated_content = json.dumps(notebook_data, indent=2)
+        success = drive_client.update_file_content(file_id, updated_content)
+        if not success:
+            raise HTTPException(500, "Failed to write notebook to Google Drive")
+
+        # Update cached original_content so other save paths stay in sync
+        storage = get_session_storage(session_id) or {}
+        storage["original_content"] = updated_content
+        if not storage.get("url"):
+            storage["url"] = colab_url.strip()
+        save_session_storage(session_id, storage)
+
+        headings = [c.heading for c in request.cells]
+        logger.info(f"Progressive save: wrote {len(headings)} cell(s) to {file_id}: {headings}")
+        return {
+            "success": True,
+            "message": f"Saved {len(request.cells)} cell(s) to Colab",
+            "saved_headings": headings,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Progressive save error: {e}", exc_info=True)
+        raise HTTPException(500, f"Progressive save failed: {str(e)}")
 
 
 # ============== Original / Export ==============
