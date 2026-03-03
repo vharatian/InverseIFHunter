@@ -91,7 +91,6 @@ Student Answer:
 {student_response}
 
 Evaluate strictly whether the Student Answer meets the requirement stated in the criterion above.
-Only explicit, literal, and complete compliance qualifies as PASS.
 
 You MUST respond with ONLY this JSON (no other text):
 
@@ -562,7 +561,6 @@ Student Answer:
 {student_response}
 
 Evaluate strictly whether the Student Answer meets the requirement stated in the criterion above.
-Only explicit, literal, and complete compliance qualifies as PASS.
 
 You MUST respond with ONLY this JSON (no other text):
 
