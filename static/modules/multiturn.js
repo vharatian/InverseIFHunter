@@ -164,13 +164,14 @@ export function renderConversationThread() {
         const color = getTurnColor(turnNum);
         node.style.setProperty('--node-color', color);
         
+        const turnHuntCount = t.huntCount || (t.results || []).length;
         node.innerHTML = `
             <div class="thread-turn-label">
                 <span class="turn-badge ${getTurnColorClass(turnNum)}" style="font-size:0.6rem; padding:0.1rem 0.4rem;">T${turnNum}</span>
             </div>
             <div class="thread-prompt-preview">${escapeHtml((t.prompt || '').substring(0, 80))}</div>
             ${t.selectedResponse ? `<div class="thread-response-preview" style="border-left-color:${color};">${escapeHtml(t.selectedResponse.substring(0, 80))}</div>` : ''}
-            <div class="thread-status done">&#10003; ${(t.results || []).length} hunts</div>
+            <div class="thread-status done">&#10003; ${turnHuntCount} hunts</div>
         `;
         
         node.addEventListener('click', () => {
@@ -188,7 +189,7 @@ export function renderConversationThread() {
     currentNode.style.setProperty('--node-color', currentColor);
     
     const currentPrompt = state.notebook?.prompt || '';
-    const huntCount = state.allResponses?.length || 0;
+    const huntCount = state.huntsThisTurn || 0;
     
     currentNode.innerHTML = `
         <div class="thread-turn-label">
@@ -633,6 +634,7 @@ export async function handleContinueToNextTurn() {
         const score = r.judge_score ?? r.score ?? '?';
         const isPassing = score > 0;
         const modelDisplay = getModelDisplayName(r.model);
+        const displayNum = idx + 1;
         
         // Build criteria badges if available
         const judgeCriteria = r.judge_criteria || {};
@@ -658,10 +660,10 @@ export async function handleContinueToNextTurn() {
         card.addEventListener('mouseenter', () => { card.style.transform = 'translateY(-1px)'; card.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)'; });
         card.addEventListener('mouseleave', () => { card.style.transform = ''; card.style.boxShadow = ''; });
         
-        // Show FULL response content (scrollable)
+        // Show FULL response content (scrollable) — display turn-local number
         card.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-                <span style="font-weight: 600;">Hunt #${r.hunt_id} — ${modelDisplay}</span>
+                <span style="font-weight: 600;">Hunt #${displayNum} — ${modelDisplay}</span>
                 <span style="font-weight: 700; color: ${isPassing ? 'var(--success, #10b981)' : 'var(--danger, #ef4444)'};">
                     Score: ${score} ${isPassing ? '(PASS)' : '(BREAK)'}
                 </span>
@@ -705,6 +707,7 @@ async function _applyTurnAdvance(apiData, selectedResp, completedPrompt, complet
         response: selectedResp.response,
         selectedResponse: selectedResp.response,
         selectedHuntId: selectedResp.hunt_id,
+        huntCount: state.huntsThisTurn || state.allResponses.length,
         judge_system_prompt: state.notebook?.judge_system_prompt || '',
         judgeResult: {
             score: selectedResp.judge_score,
@@ -719,7 +722,7 @@ async function _applyTurnAdvance(apiData, selectedResp, completedPrompt, complet
         }))
     });
 
-    state.multiTurnTotalHunts += state.allResponses.length;
+    state.multiTurnTotalHunts += state.huntsThisTurn || state.allResponses.length;
 
     state.notebook.prompt = newNotebook.prompt;
     state.notebook.response_reference = newNotebook.response_reference;

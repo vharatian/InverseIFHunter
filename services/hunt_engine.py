@@ -118,15 +118,19 @@ class HuntEngine:
         # Check for already-completed results (from a dead worker that partially finished)
         existing_results = await store.get_results(session_id)
         completed_hunt_ids = {r.hunt_id for r in existing_results}
-        is_resume = len(completed_hunt_ids) > 0
+
+        # Only treat as resume if existing results belong to THIS run's hunt_id range
+        expected_ids = {run_start_id + i + 1 for i in range(config.parallel_workers)}
+        relevant_completed = completed_hunt_ids & expected_ids
+        is_resume = len(relevant_completed) > 0
 
         if is_resume:
-            logger.info(f"Session {session_id}: RESUMING hunt — {len(completed_hunt_ids)} results already in Redis, "
-                         f"hunt_ids: {completed_hunt_ids}")
+            logger.info(f"Session {session_id}: RESUMING hunt — {len(relevant_completed)} results already in Redis "
+                         f"(matching this run's range), hunt_ids: {relevant_completed}")
             # Don't clear results or reset counters — we're continuing
             await store.set_status(session_id, HuntStatus.RUNNING)
         else:
-            # Fresh run — reset everything
+            # Fresh run — reset everything (clear any stale results from previous runs)
             await store.clear_results(session_id)
             await store.set_hunt_counters(
                 session_id,
@@ -163,13 +167,13 @@ class HuntEngine:
                 }
             ))
 
-        # Build the list of hunts to run (skip already-completed ones)
+        # Build the list of hunts to run (skip already-completed ones from THIS run only)
         tasks = []
         for i in range(config.parallel_workers):
             hunt_id = run_start_id + i + 1
             model = config.models[i % len(config.models)]
 
-            if hunt_id in completed_hunt_ids:
+            if hunt_id in relevant_completed:
                 logger.info(f"Session {session_id}: Skipping hunt {hunt_id} (already completed)")
                 continue
 

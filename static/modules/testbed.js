@@ -480,8 +480,23 @@ function showSavePreviewModal(opts) {
         overlay.remove();
         _previewDismissed = true;
 
-        // --- Progressive save: persist this turn's content to Colab ---
+        // --- Show saving overlay while progressive save runs ---
+        const savingOverlay = document.createElement('div');
+        savingOverlay.id = 'progressiveSavingOverlay';
+        savingOverlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:10001;display:flex;align-items:center;justify-content:center;';
+        savingOverlay.innerHTML = `
+            <div style="background:var(--bg-secondary,#1e1e2e);border-radius:12px;padding:1.75rem 2.25rem;max-width:360px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.35);border:1px solid var(--border,#333);text-align:center;">
+                <div style="margin-bottom:1rem;">
+                    <div class="tb-btn-spinner" style="width:28px;height:28px;border-width:3px;margin:0 auto;"></div>
+                </div>
+                <div style="font-weight:700;font-size:1rem;color:var(--text-primary,#e0e0e0);margin-bottom:0.4rem;">Saving to Colab…</div>
+                <div style="font-size:0.85rem;color:var(--text-secondary,#a0a0b0);line-height:1.5;">Syncing turn content with your notebook. This takes a moment.</div>
+            </div>`;
+        document.body.appendChild(savingOverlay);
+
         await _progressiveSaveTurnContent();
+
+        savingOverlay.remove();
 
         hideTestbed();
         const card = document.getElementById('notebookPreviewCard');
@@ -737,35 +752,36 @@ function renderJudgeResult(run) {
     const criteria     = jr.criteria || {};
     const criteriaKeys = Object.keys(criteria);
     const overallScore = jr.overall_score ?? jr.score ?? null;
-    const verdict      = jr.verdict || (overallScore === 0 ? 'BREAKING' : overallScore !== null ? 'PASSING' : '');
+    const explanation  = jr.overall_explanation || jr.explanation || '';
+    const parsed       = parseJudgeExplanation(explanation, criteria);
+
+    const passingCount = parsed.filter(p => p.status === 'PASS').length;
+    const totalCount   = parsed.length;
+    const allPass      = passingCount === totalCount && totalCount > 0;
+    const verdict      = jr.verdict || (allPass ? 'PASSING' : totalCount > 0 ? 'BREAKING' : '');
     const verdictCls   = verdict === 'BREAKING' ? 'tb-verdict-break' : verdict === 'PASSING' ? 'tb-verdict-pass' : '';
 
-    const rows = criteriaKeys.map(key => {
-        const crit   = criteria[key];
-        const val    = typeof crit === 'object' ? (crit.score ?? crit.result ?? crit.value ?? '') : crit;
-        const passed = String(val).toLowerCase() === 'pass' || val === 1 || val === true;
-        const failed = String(val).toLowerCase() === 'fail' || val === 0 || val === false;
-        const rowCls = passed ? 'tb-crit-pass' : failed ? 'tb-crit-fail' : '';
-        const icon   = passed ? '✓' : failed ? '✗' : '·';
-        const desc   = typeof crit === 'object' ? (crit.explanation || crit.description || '') : '';
-        return `<div class="tb-crit-row ${rowCls}">
-            <span class="tb-crit-icon">${icon}</span>
-            <span class="tb-crit-id">${escapeHtml(key)}</span>
-            <span class="tb-crit-val">${escapeHtml(String(val))}</span>
-            ${desc ? `<span class="tb-crit-desc">${escapeHtml(desc)}</span>` : ''}
+    const criteriaCards = parsed.map(({ id, status, explanation: expl }) => {
+        const isPass   = status === 'PASS';
+        const isMissing = status === 'MISSING';
+        const icon     = isMissing ? '⚠️' : isPass ? '✅' : '❌';
+        const color    = isMissing ? 'var(--warning, #f59e0b)' : isPass ? 'var(--success, #22c55e)' : 'var(--danger, #ef4444)';
+        return `<div style="margin-bottom: 0.5rem; padding: 0.65rem 0.75rem; background: var(--bg-primary); border-radius: 8px; border-left: 4px solid ${color};">
+            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: ${expl ? '0.25rem' : '0'};">
+                <span style="font-weight: 700; font-size: 0.88rem;">${icon} ${escapeHtml(id)}</span>
+                <span style="color: ${color}; font-weight: 600; font-size: 0.82rem;">${escapeHtml(status)}</span>
+            </div>
+            ${expl ? `<div style="font-size: 0.85rem; color: var(--text-secondary); line-height: 1.5;">${escapeHtml(expl)}</div>` : ''}
         </div>`;
     }).join('');
-
-    const explanation = jr.overall_explanation || jr.explanation || '';
 
     return `<div class="tb-judge-result">
         <div class="tb-judge-header">
             <span class="tb-judge-label">Judge Result</span>
             ${verdict ? `<span class="tb-verdict ${verdictCls}">${verdict}</span>` : ''}
-            ${overallScore !== null ? `<span class="tb-overall-score">Score: ${overallScore}</span>` : ''}
+            <span class="tb-overall-score">${passingCount}/${totalCount} Passing</span>
         </div>
-        ${rows ? `<div class="tb-crit-list">${rows}</div>` : ''}
-        ${explanation ? `<div class="tb-judge-explanation">${escapeHtml(explanation)}</div>` : ''}
+        ${criteriaCards}
     </div>`;
 }
 
@@ -1767,9 +1783,15 @@ function renderSaveFooter() {
     footer.classList.remove('hidden');
 
     // Button label: "Judge Ideal Response and Continue" for Turn 1, "Save to Turn N" for Turn 2+
-    const saveBtnLabel = document.getElementById('testbedSaveBtnLabel');
-    if (saveBtnLabel) {
-        saveBtnLabel.textContent = (state.currentTurn || 1) === 1 ? 'Judge Ideal Response and Continue' : `Save to Turn ${state.currentTurn}`;
+    const labelText = (state.currentTurn || 1) === 1 ? 'Judge Ideal Response and Continue' : `Save to Turn ${state.currentTurn}`;
+    const saveBtn0 = document.getElementById('testbedSaveBtn');
+    if (saveBtn0) {
+        const span = document.getElementById('testbedSaveBtnLabel');
+        if (span) {
+            span.textContent = labelText;
+        } else {
+            saveBtn0.innerHTML = `<span id="testbedSaveBtnLabel">${labelText}</span>`;
+        }
     }
 
     // Save button
@@ -1795,7 +1817,9 @@ async function saveRunToTurn() {
     const saveBtn = document.getElementById('testbedSaveBtn');
     if (saveBtn) {
         saveBtn.disabled = true;
-        saveBtn.textContent = 'Saving...';
+        const span = document.getElementById('testbedSaveBtnLabel');
+        if (span) span.textContent = 'Saving...';
+        else saveBtn.innerHTML = '<span id="testbedSaveBtnLabel">Saving...</span>';
     }
 
     _previewDismissed = false;
@@ -1942,7 +1966,13 @@ async function saveRunToTurn() {
     } finally {
         if (saveBtn) {
             saveBtn.disabled = false;
-            saveBtn.textContent = (state.currentTurn || 1) === 1 ? 'Judge Ideal Response and Continue' : `Save to Turn ${state.currentTurn}`;
+            const label = (state.currentTurn || 1) === 1 ? 'Judge Ideal Response and Continue' : `Save to Turn ${state.currentTurn}`;
+            const span = document.getElementById('testbedSaveBtnLabel');
+            if (span) {
+                span.textContent = label;
+            } else {
+                saveBtn.innerHTML = `<span id="testbedSaveBtnLabel">${label}</span>`;
+            }
         }
     }
 }

@@ -595,18 +595,20 @@ export function initProgressUI() {
         }
     }
     
-    // APPEND table rows (don't clear!) - use offset for proper numbering
+    // APPEND table rows — display turn-local numbers, but use global hunt_id for row ID (SSE matching)
     const models = state.config.models;
+    const turnLocalBase = state.huntsThisTurn - parallel_workers;
     
     for (let i = 1; i <= parallel_workers; i++) {
         const globalRowNum = offset + i;
+        const turnLocalNum = turnLocalBase + i;
         const model = models[i - 1] || models[0];
         const modelDisplay = getModelDisplayName(model);
         
         const row = document.createElement('tr');
         row.id = `hunt-row-${globalRowNum}`;
         row.innerHTML = `
-            <td>${globalRowNum}</td>
+            <td>${turnLocalNum}</td>
             <td class="model-cell" title="${model}">${modelDisplay}</td>
             <td class="response-cell" style="min-width: 180px; max-width: 360px;">
                 <span class="response-placeholder" style="color: var(--text-muted);">-</span>
@@ -684,11 +686,12 @@ export function handleHuntResult(data) {
     // Store result with response data
     state.results.push(data);
     
-    // Store in allResponses for selection phase (with row number for reference)
+    // Store in allResponses for selection phase (with turn-local row number)
     if (response && status === 'completed' && !error) {
+        const turnLocalIdx = state.allResponses.length;
         const responseData = {
             ...data,
-            rowNumber: globalRowNum - 1  // 0-based index for allResponses
+            rowNumber: turnLocalIdx
         };
         // Only add if not already present (avoid duplicates on re-judging)
         const existingIndex = state.allResponses.findIndex(r => r.hunt_id === data.hunt_id);
@@ -760,7 +763,7 @@ export function handleHuntResult(data) {
             
             // Store response data for slide-out panel (always, so View works)
             state.huntResponseData[globalRowNum] = {
-                huntNum: globalRowNum,
+                huntNum: state.allResponses.length,
                 model: model || 'Unknown',
                 status: status || 'pending',
                 score: score,
