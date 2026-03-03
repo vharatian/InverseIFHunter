@@ -394,6 +394,16 @@ async function restoreSession() {
             state.sessionId = savedSessionId;
             // Restore multi-turn state from Redis (turns, conversationHistory, currentTurn)
             await syncTurnStatusFromBackend(savedSessionId);
+
+            // Don't render multi-turn UI on initial load — user lands on queue/home view.
+            // UI will be rendered when they open a task via showTaskView().
+            const thread = document.getElementById('conversationThread');
+            if (thread) thread.classList.remove('visible');
+            const journeyBar = document.getElementById('turnJourneyBar');
+            if (journeyBar) journeyBar.classList.remove('visible');
+            const container = document.getElementById('mainContainer');
+            if (container) container.classList.remove('multi-turn-layout');
+
             showToast('🔄 Session found! Please reload the notebook to continue.', 'info');
         } else if (response.status === 404) {
             localStorage.removeItem('modelHunter_sessionId');

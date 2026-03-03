@@ -106,6 +106,16 @@ export function showQueueView() {
     const taskInfoChip = document.getElementById('taskInfoChip');
     if (taskInfoChip) taskInfoChip.classList.add('hidden');
 
+    // Hide multi-turn UI elements that belong to the task view
+    const thread = document.getElementById('conversationThread');
+    if (thread) thread.classList.remove('visible');
+
+    const journeyBar = document.getElementById('turnJourneyBar');
+    if (journeyBar) journeyBar.classList.remove('visible');
+
+    const container = document.getElementById('mainContainer');
+    if (container) container.classList.remove('multi-turn-layout');
+
     refreshQueue();
 }
 
