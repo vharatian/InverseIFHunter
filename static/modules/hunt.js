@@ -66,7 +66,9 @@ export function updateHuntLimitUI() {
     if (numberInput) {
         const val = parseInt(numberInput.value) || 4;
         if (val > maxAllowed) {
-            numberInput.value = maxAllowed > 0 ? maxAllowed : 1;
+            const clamped = maxAllowed > 0 ? maxAllowed : 1;
+            numberInput.value = clamped;
+            _syncPresetButtonActive(clamped);
         }
     }
     
@@ -328,9 +330,6 @@ export async function startHunt() {
     // Persist the raw hunt mode string for selection-stage logic
     state.config.hunt_mode = getHuntMode();
 
-    // Lock mode dropdown after first hunt — cannot switch modes within a session
-    lockHuntMode();
-    
     // Increment hunt count immediately (before the hunt starts)
     // This will update UI but we already captured the config
     incrementHuntCount(state.notebookId, requestedHunts);
@@ -850,6 +849,28 @@ export function unlockHuntMode() {
     state._huntModeLocked = false;
 }
 
+const DEFAULT_PARALLEL_HUNTS = 4;
+
+function _syncPresetButtonActive(value) {
+    const presetBtns = document.querySelectorAll('.hunt-parallel-btn');
+    presetBtns.forEach(btn => {
+        if (parseInt(btn.dataset.value) === value) {
+            btn.classList.add('active');
+        } else {
+            btn.classList.remove('active');
+        }
+    });
+}
+
+/** Reset hunt count input to the default (4) and sync preset buttons. Called on turn transitions. */
+export function resetHuntNumberToDefault() {
+    const numberInput = document.getElementById('parallelWorkers');
+    if (numberInput) {
+        numberInput.value = DEFAULT_PARALLEL_HUNTS;
+    }
+    _syncPresetButtonActive(DEFAULT_PARALLEL_HUNTS);
+}
+
 export function initHuntNumberControls() {
     const numberInput = document.getElementById('parallelWorkers');
     const presetBtns = document.querySelectorAll('.hunt-parallel-btn');
@@ -857,15 +878,9 @@ export function initHuntNumberControls() {
     if (!numberInput) return;
     
     function updateValue(value) {
-        const val = Math.max(1, Math.min(6, parseInt(value) || 4));
+        const val = Math.max(1, Math.min(6, parseInt(value) || DEFAULT_PARALLEL_HUNTS));
         numberInput.value = val;
-        presetBtns.forEach(btn => {
-            if (parseInt(btn.dataset.value) === val) {
-                btn.classList.add('active');
-            } else {
-                btn.classList.remove('active');
-            }
-        });
+        _syncPresetButtonActive(val);
     }
     
     presetBtns.forEach(btn => {
@@ -876,7 +891,7 @@ export function initHuntNumberControls() {
         });
     });
     
-    updateValue(4);
+    updateValue(DEFAULT_PARALLEL_HUNTS);
 
     // Hunt mode: update button label when mode changes
     const huntModeSel = document.getElementById('huntModeSelect');

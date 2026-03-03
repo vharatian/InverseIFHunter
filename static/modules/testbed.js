@@ -775,13 +775,17 @@ function renderJudgeResult(run) {
         </div>`;
     }).join('');
 
-    return `<div class="tb-judge-result">
-        <div class="tb-judge-header">
+    const collapseId = `tbJudgeCollapse-${run.id}`;
+    return `<div class="tb-judge-result tb-judge-collapsible">
+        <div class="tb-judge-header" style="cursor:pointer;" onclick="(function(e){var body=document.getElementById('${collapseId}');var arrow=e.currentTarget.querySelector('.tb-judge-toggle');if(body.classList.contains('collapsed')){body.classList.remove('collapsed');arrow.textContent='▾';}else{body.classList.add('collapsed');arrow.textContent='▸';}})(event)">
+            <span class="tb-judge-toggle" style="font-size:0.75rem;color:var(--text-muted);">▾</span>
             <span class="tb-judge-label">Judge Result</span>
             ${verdict ? `<span class="tb-verdict ${verdictCls}">${verdict}</span>` : ''}
             <span class="tb-overall-score">${passingCount}/${totalCount} Passing</span>
         </div>
-        ${criteriaCards}
+        <div id="${collapseId}" class="tb-judge-body">
+            ${criteriaCards}
+        </div>
     </div>`;
 }
 

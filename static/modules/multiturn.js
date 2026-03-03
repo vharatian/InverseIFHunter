@@ -23,7 +23,7 @@ import { populatePreviewTabs, progressiveSaveToColab } from './notebook.js';
 import { validatePromptLength, convertStructuredToJSON } from './editors.js';
 // It uses showCalibrationPanel internally, so no import needed if it's in the same file.
 // It uses startHunt (for calibration).
-import { updateHuntLimitUI } from './hunt.js';
+import { updateHuntLimitUI, resetHuntNumberToDefault } from './hunt.js';
 import { getConfigValue } from './config.js';
 // This circular dependency is fine as long as they are not used at top-level.
 // startHunt is called inside handleCalibrationGenerate -> fine.
@@ -771,6 +771,7 @@ async function _applyTurnAdvance(apiData, selectedResp, completedPrompt, complet
     state.initialCriteria = null;
 
     updateTurnAwareUI();
+    resetHuntNumberToDefault();
     updateHuntLimitUI();
 
     renderPriorConversationBanner();

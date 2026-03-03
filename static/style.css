@@ -6960,6 +6960,17 @@ body.sidebar-visible .container.multi-turn-layout {
     flex-direction: column;
     gap: 0.75rem;
     animation: testbedFadeIn 0.25s ease;
+    flex-shrink: 0;
+}
+.tb-judge-body {
+    max-height: 220px;
+    overflow-y: auto;
+    transition: max-height 0.25s ease, opacity 0.2s ease;
+}
+.tb-judge-body.collapsed {
+    max-height: 0;
+    overflow: hidden;
+    opacity: 0;
 }
 .tb-judge-header {
     display: flex;
