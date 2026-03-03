@@ -492,8 +492,9 @@ function showSavePreviewModal(opts) {
             setTimeout(() => configSection.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
         }
         // Enable hunt button now that testbed validation passed
+        state.referenceValidated = true;
         const startHuntBtn = document.getElementById('startHuntBtn');
-        if (startHuntBtn && state.referenceValidated) {
+        if (startHuntBtn) {
             startHuntBtn.disabled = false;
             startHuntBtn.title = '';
         }
@@ -1914,6 +1915,10 @@ async function saveRunToTurn() {
 
         // 4. Show Save Preview modal (full response + judge results) — both pass and fail
         populatePreviewTabs(state.notebook);
+        // populatePreviewTabs resets referenceValidated; restore it if judge passed
+        if (isPassing && !bypass) {
+            state.referenceValidated = true;
+        }
         validateModelReferenceAndCriteria(criteriaForValidation);
         const configSection = document.getElementById('configSection');
         if (configSection) configSection.classList.remove('hidden');

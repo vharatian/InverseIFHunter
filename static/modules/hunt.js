@@ -272,12 +272,6 @@ export async function startHunt() {
         return;
     }
     
-    // MANDATORY: Testbed validation check — must pass ideal response judge before hunting
-    if (!state.referenceValidated && !state.adminMode && !getConfigValue('bypass_hunt_criteria', false)) {
-        showToast('❌ Please complete testbed validation first. Judge your ideal response in the Testbed before hunting.', 'error');
-        return;
-    }
-    
     // Check for pending update before starting new hunt
     if (hasPendingUpdate()) {
         await showUpdatePrompt();
