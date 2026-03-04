@@ -59,18 +59,29 @@ if not os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON_PATH"):
 # ============== App Version ==============
 
 import hashlib as _hashlib
+import glob as _glob
 
 def _compute_app_version():
-    """Generate version from modification times of key files. Changes automatically on any update."""
-    files = [__file__, os.path.join(os.path.dirname(__file__), "static", "app.js"),
-             os.path.join(os.path.dirname(__file__), "static", "index.html")]
-    mtimes = ""
-    for f in files:
-        try:
-            mtimes += str(os.path.getmtime(f))
-        except OSError:
-            pass
-    short_hash = _hashlib.md5(mtimes.encode()).hexdigest()[:8]
+    """Generate version from modification times of all source files. Detects any code change after deploy."""
+    base = os.path.dirname(os.path.abspath(__file__))
+    patterns = [
+        os.path.join(base, "*.py"),
+        os.path.join(base, "routes", "*.py"),
+        os.path.join(base, "services", "*.py"),
+        os.path.join(base, "models", "*.py"),
+        os.path.join(base, "static", "**", "*.js"),
+        os.path.join(base, "static", "**", "*.css"),
+        os.path.join(base, "static", "**", "*.html"),
+    ]
+    mtimes = []
+    for pat in patterns:
+        for f in sorted(_glob.glob(pat, recursive=True)):
+            try:
+                mtimes.append(f"{f}:{os.path.getmtime(f)}")
+            except OSError:
+                pass
+    combined = "|".join(mtimes)
+    short_hash = _hashlib.md5(combined.encode()).hexdigest()[:8]
     return f"1.1.{short_hash}"
 
 APP_VERSION = _compute_app_version()
