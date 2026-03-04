@@ -91,6 +91,9 @@ let sharedLeft = null;
 /** Cached current-turn edits — saved when switching to a previous turn tab, restored on switch back. */
 let _savedCurrentTurnEdits = null;
 
+/** Tracks which turn-picker tab is currently active ('current' or a turn number string). */
+let _activeTurnTabKey = 'current';
+
 function getSharedLeft() {
     if (!sharedLeft) {
         const promptEl   = document.getElementById('promptMarkdown');
@@ -1667,6 +1670,7 @@ export function resetTestbed() {
     sharedLeft        = null;
     _previewDismissed = false;
     _savedCurrentTurnEdits = null;
+    _activeTurnTabKey = 'current';
     const bar     = getTabBarEl();
     const content = getTabContentEl();
     if (bar)     bar.innerHTML     = '';
@@ -1726,6 +1730,7 @@ function renderTurnPicker() {
     }).join('') + `<button class="tb-turn-tab tb-turn-tab-current tb-turn-tab-active" data-turn="current" title="Load current turn's context">${currentLabel}</button>`;
 
     tabsEl.innerHTML = tabHtml;
+    _activeTurnTabKey = 'current';
     if (hintEl) hintEl.textContent = 'Loads prompt, criteria, and judge prompt into the active run';
 
     // Wire tab clicks
@@ -1770,9 +1775,8 @@ function loadTurnContextIntoRun(turnKey) {
             judgePrompt    = state.notebook?.judge_system_prompt || '';
         }
     } else {
-        // Switching away from current — save current edits
-        const activePicker = document.querySelector('.tb-turn-tab-active');
-        if (activePicker?.dataset?.turn === 'current') {
+        // Switching away from current — save current edits using tracked variable
+        if (_activeTurnTabKey === 'current') {
             const chipsStr = left.criteriaChips?.length
                 ? chipsToJson(left.criteriaChips)
                 : '';
@@ -1802,6 +1806,9 @@ function loadTurnContextIntoRun(turnKey) {
     left.modelReasoning  = modelReasoning;
     left.judgePrompt     = judgePrompt || DEFAULT_JUDGE_SYSTEM_PROMPT;
     left.criteriaChips   = criteriaStringToChips(criteria);
+
+    // Track which tab is now active
+    _activeTurnTabKey = String(turnKey);
 
     // Re-render the active tab so the edits are visible
     renderActiveTab();
