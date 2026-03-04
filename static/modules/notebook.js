@@ -200,6 +200,7 @@ export async function syncTurnStatusFromBackend(sessionId) {
         if (!res.ok) return;
         const data = await res.json();
         if (!data.is_multi_turn || !data.turns?.length) return;
+        const sessionJudgeModel = data.judge_model || '';
         state.turns = (data.turns || []).map(t => ({
             turnNumber: t.turn_number ?? t.turnNumber,
             turn_number: t.turn_number ?? t.turnNumber,
@@ -211,6 +212,7 @@ export async function syncTurnStatusFromBackend(sessionId) {
             selected_response: t.selected_response ?? t.selectedResponse ?? null,
             judgeResult: t.judge_result ?? t.judgeResult ?? null,
             judge_result: t.judge_result ?? t.judgeResult ?? null,
+            judgeModel: sessionJudgeModel,
             results: t.results ?? []
         }));
         state.conversationHistory = data.conversation_history || [];

@@ -513,14 +513,15 @@ export function renderTurnContent(container, turn) {
         html += `</div>`;
     }
     
-    // Judge result for the selected response (for completed turns)
-    if (turn.judgeResult && turn.judgeResult.score !== undefined) {
+    // Judge result for the selected response (skip if no real judging occurred)
+    if (turn.judgeResult && turn.judgeResult.score != null) {
         const score = turn.judgeResult.score;
         const criteria = turn.judgeResult.criteria || {};
         const explanation = turn.judgeResult.explanation || '';
+        const judgeModelName = turn.judgeModel || state.notebook?.judge_model || 'Evaluation Model';
         
         html += `<div style="margin-bottom: 1rem;">`;
-        html += `<div style="font-weight: 700; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 0.4rem;">Auto-Judge Result for Selected Response <span style="font-weight:400;text-transform:none;letter-spacing:0;">(judged by GPT-5)</span></div>`;
+        html += `<div style="font-weight: 700; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 0.4rem;">Auto-Judge Result for Selected Response <span style="font-weight:400;text-transform:none;letter-spacing:0;">(judged by ${escapeHtml(judgeModelName)})</span></div>`;
         html += `<div style="padding: 0.75rem; background: var(--bg-tertiary); border-radius: 8px; border-left: 3px solid ${score > 0 ? 'var(--success, #10b981)' : 'var(--danger, #ef4444)'}; font-size: 0.9rem;">`;
         html += `<div style="font-weight: 600; margin-bottom: 0.5rem;">Score: ${score} ${score > 0 ? '(PASS)' : '(BREAK)'}</div>`;
         
@@ -757,6 +758,9 @@ async function _applyTurnAdvance(apiData, selectedResp, completedPrompt, complet
         { role: 'assistant', content: selectedResp.response }
     );
 
+    const judgeModelEl = document.getElementById('judgeModel');
+    const judgeModelName = judgeModelEl?.options?.[judgeModelEl.selectedIndex]?.text || judgeModelEl?.value || '';
+
     state.turns.push({
         turnNumber: state.currentTurn - 1,
         prompt: completedPrompt,
@@ -766,6 +770,7 @@ async function _applyTurnAdvance(apiData, selectedResp, completedPrompt, complet
         selectedHuntId: selectedResp.hunt_id,
         huntCount: state.huntsThisTurn || state.allResponses.length,
         judge_system_prompt: state.notebook?.judge_system_prompt || '',
+        judgeModel: judgeModelName,
         judgeResult: {
             score: selectedResp.judge_score,
             criteria: selectedResp.judge_criteria || {},

@@ -220,5 +220,6 @@ async def get_turn_status(session_id: str):
         "current_prompt": session.notebook.prompt if session.notebook else "",
         "current_criteria": session.notebook.response_reference if session.notebook else "",
         "current_judge_prompt": session.notebook.judge_system_prompt if session.notebook else "",
+        "judge_model": session.config.judge_model if session.config else "",
         "status": session.status.value,
     }
