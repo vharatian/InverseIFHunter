@@ -1845,12 +1845,6 @@ function renderSaveFooter() {
         saveBtn.addEventListener('click', saveRunToTurn);
     }
 
-    // Discard button
-    const discardBtn = document.getElementById('testbedDiscardBtn');
-    if (discardBtn && !discardBtn._wired) {
-        discardBtn._wired = true;
-        discardBtn.addEventListener('click', discardRunEdits);
-    }
 }
 
 /**
@@ -2048,20 +2042,6 @@ async function saveRunToTurn() {
     }
 }
 
-/**
- * Discard edits in the active run — reload from the currently selected
- * turn context (same as clicking that turn's tab again).
- */
-function discardRunEdits() {
-    const run = getActiveRun();
-    if (!run) return;
-
-    // Find active turn-picker tab to know which turn to reload from
-    const activePicker = document.querySelector('.tb-turn-tab-active');
-    const turnKey      = activePicker?.dataset?.turn || 'current';
-    loadTurnContextIntoRun(turnKey);
-    showToast('Edits discarded', 'info');
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Prior Conversation Banner

@@ -8298,9 +8298,7 @@ body.sidebar-visible .container.multi-turn-layout {
     color: var(--accent-primary);
     font-weight: 500;
 }
-.tb-discard-btn {
-    white-space: nowrap;
-}
+
 
 /* ── Prior Conversation Banner ───────────────────────────────────────────── */
 .pcb-banner {

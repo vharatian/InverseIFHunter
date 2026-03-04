@@ -8,7 +8,7 @@
 // Base Modules
 import { elements } from './modules/dom.js';
 import { initTheme, toggleTheme } from './modules/theme.js';
-import { state } from './modules/state.js';
+import { state, resetTurnState } from './modules/state.js';
 import { showTestbed, hideTestbed, initTestbed, resetTestbed, goBackToNotebook, syncActiveRunToNotebook } from './modules/testbed.js';
 
 // Auth & API
@@ -154,10 +154,71 @@ document.addEventListener('DOMContentLoaded', async () => {
             },
             onNewTask: () => {
                 showTaskView();
+
+                // ── Clear session identity ──
                 state.sessionId = null;
+                state.notebook = null;
+                state.notebookId = null;
+                state.metadata = null;
+                state.metadataModel = null;
+                state.criteria = null;
+                state.initialCriteria = null;
+                state.referenceValidated = false;
+                state.originalNotebookJson = null;
+                state.isHunting = false;
+                state.huntLimitReached = false;
+                state.totalHuntsCount = 0;
+                state.reviewFeedback = null;
+                state.adminMode = false;
                 localStorage.removeItem('modelHunter_sessionId');
+
+                // ── Reset multi-turn state ──
+                state.currentTurn = 1;
+                state.isMultiTurn = false;
+                state.conversationHistory = [];
+                state.turns = [];
+                state.multiTurnTotalHunts = 0;
+                state.previousTurnHuntIds = new Set();
+                resetTurnState();
+
+                // ── Hide multi-turn UI ──
+                const thread = document.getElementById('conversationThread');
+                if (thread) thread.classList.remove('visible');
+                const journeyBar = document.getElementById('turnJourneyBar');
+                if (journeyBar) journeyBar.classList.remove('visible');
+                const container = document.getElementById('mainContainer');
+                if (container) container.classList.remove('multi-turn-layout');
+
+                // ── Hide all task sections except upload ──
+                elements.configSection?.classList.add('hidden');
+                elements.progressSection?.classList.add('hidden');
+                elements.resultsSection?.classList.add('hidden');
+                elements.summarySection?.classList.add('hidden');
+                elements.multiTurnSection?.classList.add('hidden');
+                elements.selectionSection?.classList.add('hidden');
+                document.getElementById('multiTurnDecisionCard')?.classList.add('hidden');
+                document.getElementById('goodResponsePicker')?.classList.add('hidden');
+
+                // ── Show upload section, expanded ──
+                const uploadSection = elements.uploadSection;
+                if (uploadSection) uploadSection.classList.remove('hidden');
+                const uploadBody = document.getElementById('uploadBody');
+                const uploadChevron = document.getElementById('uploadChevron');
+                const uploadHeaderText = document.getElementById('uploadHeaderText');
+                if (uploadBody) uploadBody.classList.remove('collapsed');
+                if (uploadChevron) uploadChevron.classList.remove('collapsed');
+                if (uploadHeaderText) uploadHeaderText.textContent = 'Load Notebook';
+
+                // ── Reset testbed ──
+                resetTestbed();
+                hideTestbed();
+
+                // ── Clear input and focus ──
                 const urlInput = document.getElementById('colabUrlInput');
                 if (urlInput) { urlInput.value = ''; urlInput.focus(); }
+
+                clearSectionLocks();
+                resetAllStatuses();
             },
         });
 
