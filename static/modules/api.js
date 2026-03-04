@@ -9,24 +9,21 @@
 import { VERSION_CHECK_INTERVAL } from './config.js';
 import { escapeHtml } from './utils.js';
 
-// ============== Version Check & Update Prompt ==============
+// ============== Version Check & Update Indicator ==============
 let currentVersion = null;
-let pendingUpdateVersion = null; // Tracks if there's a new version available
-
+let pendingUpdateVersion = null;
+let _indicatorWired = false;
 
 export async function checkVersion() {
     try {
         const response = await fetch('/api/version');
         const data = await response.json();
-        
+
         if (currentVersion === null) {
-            // First check - just store the version
             currentVersion = data.version;
         } else if (data.version !== currentVersion) {
-            // Version changed - show prompt immediately so user sees it without having to click Start Hunt
             pendingUpdateVersion = data.version;
-            console.warn('🔄 New version detected:', data.version);
-            showUpdatePrompt();
+            _showUpdateIndicator();
         }
     } catch (e) {
         // Silently fail - server might be updating
@@ -41,65 +38,34 @@ function _hardRefresh() {
     window.location.href = window.location.pathname + '?_v=' + Date.now();
 }
 
-export function showUpdatePrompt() {
-    if (document.getElementById('update-notification-bar')) return;
+function _showUpdateIndicator() {
+    const btn = document.getElementById('updateIndicator');
+    if (!btn) return;
+    btn.classList.remove('hidden');
 
-    const bar = document.createElement('div');
-    bar.id = 'update-notification-bar';
-    bar.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        z-index: 10000;
-        background: linear-gradient(90deg, #2563eb, #7c3aed);
-        color: #fff;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 12px;
-        padding: 10px 16px;
-        font-size: 14px;
-        font-weight: 500;
-        box-shadow: 0 2px 12px rgba(0,0,0,0.3);
-        animation: updateBarSlideIn 0.3s ease;
-    `;
+    if (_indicatorWired) return;
+    _indicatorWired = true;
 
-    bar.innerHTML = `
-        <span>A new update is available.</span>
-        <a id="update-bar-refresh" href="#" style="color:#fff;font-weight:700;text-decoration:underline;cursor:pointer;">Click here to refresh</a>
-        <button id="update-bar-dismiss" style="
-            background: none;
-            border: none;
-            color: rgba(255,255,255,0.8);
-            font-size: 18px;
-            cursor: pointer;
-            margin-left: 8px;
-            padding: 0 4px;
-            line-height: 1;
-        " title="Dismiss">&times;</button>
-    `;
-
-    if (!document.getElementById('update-bar-keyframes')) {
-        const style = document.createElement('style');
-        style.id = 'update-bar-keyframes';
-        style.textContent = '@keyframes updateBarSlideIn{from{transform:translateY(-100%)}to{transform:translateY(0)}}';
-        document.head.appendChild(style);
-    }
-
-    document.body.appendChild(bar);
-
-    bar.querySelector('#update-bar-refresh').addEventListener('click', (e) => {
-        e.preventDefault();
-        _hardRefresh();
+    btn.addEventListener('click', async () => {
+        const confirmed = await showAppModal({
+            title: '🔄 New Update Available',
+            message:
+                'A new version of Model Hunter is ready.\n\n' +
+                'Refreshing will reload the app and any unsaved progress will be lost.\n\n' +
+                '💡 Tip: If you are in the middle of a task, finish and submit it first. ' +
+                'Update before starting your next task, not during one.',
+            buttons: [
+                { label: 'Not Now', primary: false, value: false },
+                { label: 'Update Now', primary: true, value: true },
+            ],
+        });
+        if (confirmed) _hardRefresh();
     });
+}
 
-    bar.querySelector('#update-bar-dismiss').addEventListener('click', () => {
-        bar.style.animation = 'none';
-        bar.style.transition = 'transform 0.25s ease';
-        bar.style.transform = 'translateY(-100%)';
-        setTimeout(() => bar.remove(), 260);
-    });
+function _hideUpdateIndicator() {
+    const btn = document.getElementById('updateIndicator');
+    if (btn) btn.classList.add('hidden');
 }
 
 /**

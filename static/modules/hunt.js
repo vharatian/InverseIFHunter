@@ -25,7 +25,6 @@ import {
     openResponseSlideout 
 } from './results.js';
 import { showMultiTurnDecision, updateTurnAwareUI } from './multiturn.js';
-import { showUpdatePrompt, hasPendingUpdate } from './api.js';
 import { syncActiveRunToNotebook } from './testbed.js';
 
 
@@ -274,12 +273,7 @@ export async function startHunt() {
         return;
     }
     
-    // Check for pending update before starting new hunt
-    if (hasPendingUpdate()) {
-        await showUpdatePrompt();
-        // If user chose "Continue Anyway", we proceed
-        // If user chose "Refresh Now", page reloads (won't reach here)
-    }
+    // (Update indicator is always visible in the header when an update is available)
     
     // TESTING FLAG: bypass_hunt_criteria in global.yaml skips the 3 criteria checks below
     const bypassCriteria = getConfigValue('bypass_hunt_criteria', false);

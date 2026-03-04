@@ -773,8 +773,9 @@ export function submitGradingReview(huntId, result, slotIndex, rowNumber) {
         }
     }
     
-    // Update review progress
+    // Update review progress and check if all reviews are now complete
     updateReviewProgress();
+    checkAllReviewsComplete();
     
     showToast(`Review for Slot ${slotIndex + 1} submitted!`, 'success');
     
