@@ -13,7 +13,7 @@ import { showTestbed, hideTestbed, initTestbed, resetTestbed, goBackToNotebook, 
 
 // Auth & API
 import { initTrainerRegistration, startHeartbeat } from './modules/auth.js';
-import { checkVersion, showAppModal } from './modules/api.js';
+import { initVersionCheck, showAppModal } from './modules/api.js';
 
 // Feature Modules
 import { initHuntNumberControls, startHunt } from './modules/hunt.js';
@@ -81,8 +81,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         initTrainerRegistration();
         startHeartbeat();
         
-        // 3. Initialize Version Check
-        checkVersion();
+        // 3. Initialize Version Check (polls every 30s)
+        initVersionCheck();
         
         // 4. Initialize Components & UI
         initFileUpload();

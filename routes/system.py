@@ -90,11 +90,11 @@ async def get_config():
 
 @router.get("/api/version")
 async def get_version():
-    """Get app version for soft-reload detection."""
-    # Import APP_VERSION from main module (set during startup)
-    from main import APP_VERSION
+    """Get app version for soft-reload detection. Recomputes on every call to detect file changes after deploy."""
+    from main import _compute_app_version
+    version = _compute_app_version()
     return Response(
-        content=json.dumps({"version": APP_VERSION}),
+        content=json.dumps({"version": version}),
         media_type="application/json",
         headers={"Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "no-cache"}
     )

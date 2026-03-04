@@ -37,89 +37,68 @@ export function hasPendingUpdate() {
     return pendingUpdateVersion !== null;
 }
 
-export function showUpdatePrompt() {
-    return new Promise((resolve) => {
-        // Create overlay
-        const overlay = document.createElement('div');
-        overlay.id = 'update-prompt-overlay';
-        overlay.style.cssText = `
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0, 0, 0, 0.5);
-            backdrop-filter: blur(6px);
-            -webkit-backdrop-filter: blur(6px);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            z-index: 10000;
-        `;
-        
-        // Create dialog
-        const dialog = document.createElement('div');
-        dialog.style.cssText = `
-            background: var(--bg-secondary, #1e1e2e);
-            border-radius: 12px;
-            padding: 24px 32px;
-            max-width: 450px;
-            text-align: center;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.4);
-            border: 1px solid var(--border, #333);
-        `;
-        
-        dialog.innerHTML = `
-            <div style="font-size: 48px; margin-bottom: 16px;">🔄</div>
-            <h3 style="margin: 0 0 12px 0; color: var(--text-primary, #fff); font-size: 18px;">New Version Available</h3>
-            <p style="margin: 0 0 24px 0; color: var(--text-secondary, #aaa); font-size: 14px; line-height: 1.5;">
-                A new version is available. Refreshing is recommended so you get the latest changes.
-            </p>
-            <div style="display: flex; gap: 12px; justify-content: center;">
-                <button id="update-refresh-btn" style="
-                    background: linear-gradient(90deg, #2563eb, #7c3aed);
-                    color: white;
-                    border: none;
-                    padding: 10px 24px;
-                    border-radius: 8px;
-                    cursor: pointer;
-                    font-weight: 600;
-                    font-size: 14px;
-                ">Refresh Now</button>
-                <button id="update-continue-btn" style="
-                    background: transparent;
-                    color: var(--text-secondary, #aaa);
-                    border: 1px solid var(--border, #444);
-                    padding: 10px 24px;
-                    border-radius: 8px;
-                    cursor: pointer;
-                    font-size: 14px;
-                ">Continue with current version for now</button>
-            </div>
-        `;
-        
-        overlay.appendChild(dialog);
-        document.body.appendChild(overlay);
-        
-        // Handle buttons
-        dialog.querySelector('#update-refresh-btn').onclick = async () => {
-            const ok = await showAppModal({
-                title: 'Refresh page?',
-                message: 'Refreshing will reload the page. Any unsaved changes will be lost and cannot be recovered.\n\nOK to refresh, Cancel to go back.',
-                buttons: [
-                    { label: 'Cancel', primary: false, value: false },
-                    { label: 'OK', primary: true, value: true }
-                ]
-            });
-            if (ok) {
-                window.location.reload();
-            }
-        };
+function _hardRefresh() {
+    window.location.href = window.location.pathname + '?_v=' + Date.now();
+}
 
-        dialog.querySelector('#update-continue-btn').onclick = () => {
-            overlay.remove();
-            resolve(true); // Continue with action
-        };
+export function showUpdatePrompt() {
+    if (document.getElementById('update-notification-bar')) return;
+
+    const bar = document.createElement('div');
+    bar.id = 'update-notification-bar';
+    bar.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 10000;
+        background: linear-gradient(90deg, #2563eb, #7c3aed);
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        padding: 10px 16px;
+        font-size: 14px;
+        font-weight: 500;
+        box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+        animation: updateBarSlideIn 0.3s ease;
+    `;
+
+    bar.innerHTML = `
+        <span>A new update is available.</span>
+        <a id="update-bar-refresh" href="#" style="color:#fff;font-weight:700;text-decoration:underline;cursor:pointer;">Click here to refresh</a>
+        <button id="update-bar-dismiss" style="
+            background: none;
+            border: none;
+            color: rgba(255,255,255,0.8);
+            font-size: 18px;
+            cursor: pointer;
+            margin-left: 8px;
+            padding: 0 4px;
+            line-height: 1;
+        " title="Dismiss">&times;</button>
+    `;
+
+    if (!document.getElementById('update-bar-keyframes')) {
+        const style = document.createElement('style');
+        style.id = 'update-bar-keyframes';
+        style.textContent = '@keyframes updateBarSlideIn{from{transform:translateY(-100%)}to{transform:translateY(0)}}';
+        document.head.appendChild(style);
+    }
+
+    document.body.appendChild(bar);
+
+    bar.querySelector('#update-bar-refresh').addEventListener('click', (e) => {
+        e.preventDefault();
+        _hardRefresh();
+    });
+
+    bar.querySelector('#update-bar-dismiss').addEventListener('click', () => {
+        bar.style.animation = 'none';
+        bar.style.transition = 'transform 0.25s ease';
+        bar.style.transform = 'translateY(-100%)';
+        setTimeout(() => bar.remove(), 260);
     });
 }
 
