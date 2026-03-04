@@ -844,7 +844,15 @@ export async function saveCurrentCellsToColab() {
     if (prompt)        cells.push({ heading: `Turn-${turnNum}: Prompt`,             content: prompt });
     if (idealResponse) cells.push({ heading: `Turn-${turnNum}: Ideal Response`,     content: idealResponse });
     if (criteria)      cells.push({ heading: `Turn-${turnNum}: Criteria`,           content: parseCriteriaToJSON(criteria) });
-    if (judgePrompt)   cells.push({ heading: `Turn-${turnNum}: Judge System Prompt`, content: judgePrompt });
+
+    if (judgePrompt) {
+        const prevTurn = (state.turns || []).slice().reverse().find(t => (t.turnNumber || t.turn_number) === turnNum - 1);
+        const prevJSP = prevTurn?.judge_system_prompt || '';
+        const isFirstTurn = turnNum === 1;
+        if (isFirstTurn || judgePrompt !== prevJSP) {
+            cells.push({ heading: `Turn-${turnNum}: Judge System Prompt`, content: judgePrompt });
+        }
+    }
 
     if (cells.length === 0) return { success: false, message: 'Nothing to save' };
 
@@ -1221,8 +1229,10 @@ function _modelCellName(modelId) {
 /**
  * Build the full notebook JSON for a single turn (or the current turn if no multi-turn).
  * turnLabel: e.g. "Turn-1"
+ * @param {number} turnNumber — 1-based turn number
+ * @param {string} prevJudgeSystemPrompt — the previous turn's judge system prompt (empty for turn 1)
  */
-function _buildTurnCells(turnLabel, turnData, selectedResults, reviews, selectedRowNumbers, totalAttempts) {
+function _buildTurnCells(turnLabel, turnData, selectedResults, reviews, selectedRowNumbers, totalAttempts, turnNumber = 1, prevJudgeSystemPrompt = '') {
     const cells = [];
 
     // Prompt
@@ -1246,21 +1256,25 @@ function _buildTurnCells(turnLabel, turnData, selectedResults, reviews, selected
         `cell_${turnLabel}_criteria`
     ));
 
-    // Judge Prompt Template
-    const judgePromptTemplate = `Question\n{prompt}\n\nStudent Response\n{model_response}\n\nStandard Response\n{standard_response}\n\nEvaluation Criteria\n{criteria}`;
-    cells.push(_makeCell(
-        `${turnLabel}: judge_prompt_template`,
-        judgePromptTemplate,
-        `cell_${turnLabel}_judge_prompt_template`
-    ));
+    // Judge Prompt Template — only saved on the first turn
+    if (turnNumber === 1) {
+        const judgePromptTemplate = `Question\n{prompt}\n\nStudent Response\n{model_response}\n\nStandard Response\n{standard_response}\n\nEvaluation Criteria\n{criteria}`;
+        cells.push(_makeCell(
+            `${turnLabel}: judge_prompt_template`,
+            judgePromptTemplate,
+            `cell_${turnLabel}_judge_prompt_template`
+        ));
+    }
 
-    // Judge System Prompt
+    // Judge System Prompt — saved on turn 1 (mandatory) or if changed from previous turn
     const judgePrompt = turnData.judge_system_prompt || '';
-    cells.push(_makeCell(
-        `${turnLabel}: Judge System Prompt`,
-        judgePrompt,
-        `cell_${turnLabel}_judge_system_prompt`
-    ));
+    if (turnNumber === 1 || judgePrompt !== prevJudgeSystemPrompt) {
+        cells.push(_makeCell(
+            `${turnLabel}: Judge System Prompt`,
+            judgePrompt,
+            `cell_${turnLabel}_judge_system_prompt`
+        ));
+    }
 
     // 4 selected slots — each slot produces 4 consecutive cells:
     // ModelName_N, llm_judge_N, human_judge_N, reasoning_trace_N
@@ -1359,15 +1373,10 @@ export async function submitToColab() {
 
         const judgePromptTemplate = `Question\n{prompt}\n\nStudent Response\n{model_response}\n\nStandard Response\n{standard_response}\n\nEvaluation Criteria\n{criteria}`;
 
-        // judge_prompt_template for each turn (non-breaking + breaking)
-        if (state.isMultiTurn && state.turns && state.turns.length > 0) {
-            state.turns.forEach((turn) => {
-                const tNum = turn.turnNumber || turn.turn_number || 1;
-                cells.push({ heading: `Turn-${tNum}: judge_prompt_template`, content: judgePromptTemplate });
-            });
-        }
+        // judge_prompt_template — only saved for Turn-1
+        cells.push({ heading: `Turn-1: judge_prompt_template`, content: judgePromptTemplate });
+
         const breakingTurnNum = state.currentTurn || 1;
-        cells.push({ heading: `Turn-${breakingTurnNum}: judge_prompt_template`, content: judgePromptTemplate });
 
         // Slot cells for breaking turn (variable count)
         selectedResults.forEach((result, idx) => {
