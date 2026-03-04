@@ -60,6 +60,12 @@ import { initNotifications } from './modules/notifications.js';
 import { hydrateSession, clearSectionLocks } from './modules/sessionHydrator.js';
 import { initOfflineQueue } from './modules/offlineQueue.js';
 
+// Clean cache-busting query param from URL (left over by version-update hard refresh)
+if (window.location.search.includes('_v=')) {
+    const clean = window.location.pathname;
+    window.history.replaceState(null, '', clean);
+}
+
 // Initialize Application
 document.addEventListener('DOMContentLoaded', async () => {
     
