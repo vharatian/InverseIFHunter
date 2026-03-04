@@ -676,8 +676,65 @@ export async function handleContinueToNextTurn() {
         list.appendChild(card);
     });
 
+    // Add "Skip — No Response Selected" button at the bottom
+    const skipBtn = document.createElement('button');
+    skipBtn.className = 'btn btn-secondary';
+    skipBtn.style.cssText = 'width: 100%; margin-top: 0.75rem; padding: 0.65rem; font-size: 0.88rem; border: 1.5px dashed var(--border); background: transparent; color: var(--text-muted); cursor: pointer;';
+    skipBtn.textContent = 'Skip — No Response Selected';
+    skipBtn.title = 'Advance to the next turn without selecting a response';
+    skipBtn.addEventListener('click', () => skipAndAdvanceToNextTurn());
+    list.appendChild(skipBtn);
+
     // Scroll picker into view so options are visible
     picker.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+/**
+ * Advance to next turn without selecting any response.
+ */
+async function skipAndAdvanceToNextTurn() {
+    showToast(`Advancing to Turn ${state.currentTurn + 1} without selecting a response...`, 'info');
+
+    const { prompt: currentPrompt, criteria: currentCriteria } = _readPromptAndCriteriaFromDOM();
+
+    try {
+        const res = await fetch(`/api/advance-turn/${state.sessionId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                selected_hunt_id: null,
+                next_prompt: currentPrompt,
+                next_criteria: currentCriteria,
+                current_prompt: currentPrompt,
+                current_criteria: typeof currentCriteria === 'string' ? currentCriteria : (currentCriteria ? JSON.stringify(currentCriteria) : '')
+            })
+        });
+
+        if (!res.ok) {
+            const error = await res.json();
+            throw new Error(error.detail || 'Failed to advance turn');
+        }
+
+        const data = await res.json();
+
+        const noResp = {
+            response: 'No response selected',
+            hunt_id: null,
+            judge_score: null,
+            judge_criteria: {},
+            judge_explanation: ''
+        };
+
+        await _applyTurnAdvance(data, noResp, currentPrompt, currentCriteria, {
+            prompt: currentPrompt,
+            response_reference: currentCriteria,
+            response: 'No response selected',
+        });
+
+    } catch (error) {
+        console.error('Error advancing turn (skip):', error);
+        showError(error, { operation: 'Advance turn (skip)' });
+    }
 }
 
 /**
@@ -780,8 +837,9 @@ async function _applyTurnAdvance(apiData, selectedResp, completedPrompt, complet
     showTestbed();
 
     // --- Trigger 2: progressively save the just-completed turn's Selected Response ---
+    // Skip if no response was selected (hunt_id is null)
     const completedTurnNum = state.currentTurn - 1;
-    if (selectedResp?.response) {
+    if (selectedResp?.hunt_id != null && selectedResp?.response) {
         progressiveSaveToColab([
             { heading: `Turn-${completedTurnNum}: Selected Response`, content: selectedResp.response }
         ]).then(r => {
@@ -840,8 +898,8 @@ export async function selectGoodResponse(response) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 selected_hunt_id: response.hunt_id,
-                next_prompt: '',
-                next_criteria: '',
+                next_prompt: currentPrompt,
+                next_criteria: currentCriteria,
                 current_prompt: currentPrompt,
                 current_criteria: typeof currentCriteria === 'string' ? currentCriteria : (currentCriteria ? JSON.stringify(currentCriteria) : '')
             })
@@ -854,10 +912,13 @@ export async function selectGoodResponse(response) {
 
         const data = await res.json();
 
+        const currentJudgePrompt = document.getElementById('judgeMarkdown')?.value?.trim()
+            || state.notebook?.judge_system_prompt || '';
         await _applyTurnAdvance(data, response, currentPrompt, currentCriteria, {
-            prompt: '',
-            response_reference: '',
+            prompt: currentPrompt,
+            response_reference: currentCriteria,
             response: response.response,
+            judge_system_prompt: currentJudgePrompt,
         });
 
     } catch (error) {

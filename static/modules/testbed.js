@@ -88,6 +88,9 @@ Remember, you must be very strict when grading the student's answer. Award it wi
  */
 let sharedLeft = null;
 
+/** Cached current-turn edits — saved when switching to a previous turn tab, restored on switch back. */
+let _savedCurrentTurnEdits = null;
+
 function getSharedLeft() {
     if (!sharedLeft) {
         const promptEl   = document.getElementById('promptMarkdown');
@@ -1663,6 +1666,7 @@ export function resetTestbed() {
     runCounter        = 0;
     sharedLeft        = null;
     _previewDismissed = false;
+    _savedCurrentTurnEdits = null;
     const bar     = getTabBarEl();
     const content = getTabContentEl();
     if (bar)     bar.innerHTML     = '';
@@ -1736,21 +1740,51 @@ function renderTurnPicker() {
 
 /**
  * Load a turn's prompt / criteria / judge prompt into the currently active run.
+ * Saves current-turn edits when switching away; restores them when switching back.
  * @param {string|number} turnKey — turn number (1-based) or 'current'
  */
 function loadTurnContextIntoRun(turnKey) {
     const run = getActiveRun();
     if (!run) return;
 
+    // Capture live testbed edits before overwriting
+    persistTabEdits();
+    const left = getSharedLeft();
+
     let prompt = '', idealResponse = '', modelReasoning = '', criteria = '', judgePrompt = '';
 
     if (turnKey === 'current') {
-        prompt          = document.getElementById('promptMarkdown')?.value?.trim()  || state.notebook?.prompt || '';
-        idealResponse   = document.getElementById('responseMarkdown')?.value?.trim() || state.notebook?.response || '';
-        modelReasoning  = state.notebook?.model_reasoning || '';
-        criteria        = document.getElementById('modelrefPreview')?.value?.trim() || '';
-        judgePrompt     = document.getElementById('judgeMarkdown')?.value?.trim()   || '';
+        // Restore from cache if available; otherwise fall back to state.notebook
+        if (_savedCurrentTurnEdits) {
+            prompt         = _savedCurrentTurnEdits.prompt;
+            idealResponse  = _savedCurrentTurnEdits.idealResponse;
+            modelReasoning = _savedCurrentTurnEdits.modelReasoning;
+            criteria       = _savedCurrentTurnEdits.criteria;
+            judgePrompt    = _savedCurrentTurnEdits.judgePrompt;
+            _savedCurrentTurnEdits = null;
+        } else {
+            prompt         = state.notebook?.prompt || '';
+            idealResponse  = state.notebook?.response || '';
+            modelReasoning = state.notebook?.model_reasoning || '';
+            criteria       = state.notebook?.response_reference || '';
+            judgePrompt    = state.notebook?.judge_system_prompt || '';
+        }
     } else {
+        // Switching away from current — save current edits
+        const activePicker = document.querySelector('.tb-turn-tab-active');
+        if (activePicker?.dataset?.turn === 'current') {
+            const chipsStr = left.criteriaChips?.length
+                ? chipsToJson(left.criteriaChips)
+                : '';
+            _savedCurrentTurnEdits = {
+                prompt:         left.prompt || '',
+                idealResponse:  left.idealResponse || '',
+                modelReasoning: left.modelReasoning || '',
+                criteria:       chipsStr,
+                judgePrompt:    left.judgePrompt || '',
+            };
+        }
+
         const n    = parseInt(turnKey, 10);
         const turn = (state.turns || []).find(t => (t.turnNumber ?? t.turn_number) === n);
         if (!turn) return;
@@ -1763,7 +1797,6 @@ function loadTurnContextIntoRun(turnKey) {
         judgePrompt     = turn.judgePrompt || turn.judge_system_prompt || '';
     }
 
-    const left = getSharedLeft();
     left.prompt          = prompt;
     left.idealResponse   = idealResponse;
     left.modelReasoning  = modelReasoning;
@@ -1885,19 +1918,46 @@ async function saveRunToTurn() {
         if (saveBtn) saveBtn.textContent = 'Saving to Colab...';
 
         // 2. Save to Colab first (then judge). Send colab_url so backend can write to Drive.
-        const cells = [];
-        if (left.prompt) cells.push({ cell_type: 'prompt', content: left.prompt });
-        if (left.idealResponse) cells.push({ cell_type: 'response', content: left.idealResponse });
-        if (left.modelReasoning) cells.push({ cell_type: 'model_reasoning', content: left.modelReasoning });
-        if (criteriaJson) cells.push({ cell_type: 'response_reference', content: criteriaJson });
-        if (left.judgePrompt) cells.push({ cell_type: 'judge_system_prompt', content: left.judgePrompt });
+        const colabCells = [];
+        if (left.prompt) colabCells.push({ cell_type: 'prompt', content: left.prompt });
+        if (left.idealResponse) colabCells.push({ cell_type: 'response', content: left.idealResponse });
+        if (left.modelReasoning) colabCells.push({ cell_type: 'model_reasoning', content: left.modelReasoning });
+        if (criteriaJson) colabCells.push({ cell_type: 'response_reference', content: criteriaJson });
+
+        // JSP: always save to Colab on Turn 1; on Turn 2+ only if changed from previous turn.
+        // Always update the backend session so judge-reference uses the current JSP.
+        const turnNum = state.currentTurn || 1;
+        let jspChangedOrFirst = false;
+        if (left.judgePrompt) {
+            if (turnNum === 1) {
+                jspChangedOrFirst = true;
+            } else {
+                const prevJsp = _getPreviousTurnJsp(turnNum);
+                jspChangedOrFirst = left.judgePrompt.trim() !== (prevJsp || '').trim();
+            }
+            if (jspChangedOrFirst) {
+                colabCells.push({ cell_type: 'judge_system_prompt', content: left.judgePrompt });
+            }
+        }
 
         const colabUrl = (state.notebook?.url || document.getElementById('colabUrlInput')?.value || '').trim() || undefined;
         const saveRes = await fetch(`/api/update-notebook-cells/${state.sessionId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ cells, session_only: false, colab_url: colabUrl }),
+            body: JSON.stringify({ cells: colabCells, session_only: false, colab_url: colabUrl }),
         });
+
+        // If JSP was skipped from Colab save, still update the backend session for judging
+        if (left.judgePrompt && !jspChangedOrFirst) {
+            fetch(`/api/update-notebook-cells/${state.sessionId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    cells: [{ cell_type: 'judge_system_prompt', content: left.judgePrompt }],
+                    session_only: true,
+                }),
+            }).catch(() => {});
+        }
         if (!saveRes.ok) {
             const err = await saveRes.json().catch(() => ({}));
             throw new Error(err.detail || err.message || `Save failed: ${saveRes.status}`);

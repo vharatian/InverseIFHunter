@@ -23,7 +23,7 @@ router = APIRouter(prefix="/api", tags=["multiturn"])
 
 class AdvanceTurnRequest(BaseModel):
     """Request to advance to the next turn in a multi-turn session."""
-    selected_hunt_id: int                    # Hunt ID of the "good" response from current turn
+    selected_hunt_id: Optional[int] = None   # Hunt ID of the "good" response (None = no response selected)
     next_prompt: Optional[str] = ""          # Optional — set later via full editor (selectGoodResponse flow)
     next_criteria: Optional[str] = ""        # Optional — set later via full editor
     next_judge_prompt: Optional[str] = None  # Optional judge system prompt for next turn
@@ -43,19 +43,22 @@ async def advance_turn(session_id: str, request: AdvanceTurnRequest):
     """
     session = await _get_validated_session(session_id)
     
-    # Find the selected response from current results
+    # Find the selected response from current results (optional — may be None)
     selected_result = None
-    all_results = session.all_results + session.results
-    for r in all_results:
-        if r.hunt_id == request.selected_hunt_id:
-            selected_result = r
-            break
-    
-    if not selected_result:
-        raise HTTPException(400, f"Hunt ID {request.selected_hunt_id} not found in session results")
-    
-    if not selected_result.response:
-        raise HTTPException(400, f"Hunt ID {request.selected_hunt_id} has no response")
+    selected_response_text = "No response selected"
+    if request.selected_hunt_id is not None:
+        all_results = session.all_results + session.results
+        for r in all_results:
+            if r.hunt_id == request.selected_hunt_id:
+                selected_result = r
+                break
+        
+        if not selected_result:
+            raise HTTPException(400, f"Hunt ID {request.selected_hunt_id} not found in session results")
+        
+        if not selected_result.response:
+            raise HTTPException(400, f"Hunt ID {request.selected_hunt_id} has no response")
+        selected_response_text = selected_result.response
     
     current_turn = session.current_turn
     
@@ -70,14 +73,14 @@ async def advance_turn(session_id: str, request: AdvanceTurnRequest):
         prompt=prompt_for_turn,
         response_reference=criteria_for_turn,
         judge_system_prompt=session.config.custom_judge_system_prompt or session.notebook.judge_system_prompt,
-        selected_response=selected_result.response,
+        selected_response=selected_response_text,
         selected_hunt_id=request.selected_hunt_id,
         judge_result={
-            "score": selected_result.judge_score,
-            "output": selected_result.judge_output,
-            "criteria": selected_result.judge_criteria,
-            "explanation": selected_result.judge_explanation,
-        },
+            "score": selected_result.judge_score if selected_result else None,
+            "output": selected_result.judge_output if selected_result else None,
+            "criteria": selected_result.judge_criteria if selected_result else {},
+            "explanation": selected_result.judge_explanation if selected_result else "",
+        } if selected_result else {},
         status="completed",
         results=[r.model_dump() for r in session.results if r.status == HuntStatus.COMPLETED]
     )
@@ -90,7 +93,7 @@ async def advance_turn(session_id: str, request: AdvanceTurnRequest):
     })
     session.conversation_history.append({
         "role": "assistant",
-        "content": selected_result.response
+        "content": selected_response_text
     })
     
     # Advance to next turn
@@ -99,7 +102,7 @@ async def advance_turn(session_id: str, request: AdvanceTurnRequest):
     # Update notebook with new turn's prompt and criteria
     session.notebook.prompt = request.next_prompt or ""
     session.notebook.response_reference = request.next_criteria or ""
-    session.notebook.response = selected_result.response
+    session.notebook.response = selected_response_text
     if request.next_judge_prompt is not None:
         session.notebook.judge_system_prompt = request.next_judge_prompt
         session.config.custom_judge_system_prompt = request.next_judge_prompt
