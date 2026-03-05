@@ -473,7 +473,10 @@ function showSavePreviewModal(opts) {
             <div class="tb-confirm-actions" style="margin-top: 1rem;">
                 ${isPassing
                     ? '<button class="tb-confirm-delete" id="spmContinueBtn">Continue to Hunt</button>'
-                    : '<button class="tb-confirm-cancel" id="spmFixBtn">Fix in Testbed</button>'}
+                    : `<button class="tb-confirm-cancel" id="spmFixBtn">Fix in Testbed</button>
+                       ${state.adminMode && adminBypass('reference_validation')
+                           ? '<button class="tb-confirm-delete" id="spmContinueBtn" style="background:linear-gradient(135deg,#7c6cf0,#60a5fa);">Continue Anyway (Admin)</button>'
+                           : ''}`}
             </div>
         </div>`;
     document.body.appendChild(overlay);
