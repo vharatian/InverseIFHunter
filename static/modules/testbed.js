@@ -797,7 +797,13 @@ function renderStatusBanner(run) {
     if (run.status === 'generating') {
         return `<div class="tb-status-banner tb-banner-generating">
             <span class="tb-spinner"></span>
-            <span>Generating response… this may take a couple of minutes. Switch tabs freely — this run keeps going in the background.</span>
+            <span>Connecting to model… this may take a moment.</span>
+        </div>`;
+    }
+    if (run.status === 'streaming') {
+        return `<div class="tb-status-banner tb-banner-generating">
+            <span class="tb-spinner"></span>
+            <span>Streaming response… switch tabs freely — this run keeps going in the background.</span>
         </div>`;
     }
     if (run.status === 'judging') {
@@ -842,15 +848,20 @@ function renderActiveTab() {
 
     const left         = getSharedLeft();
     const isGenerating = run.status === 'generating';
+    const isStreaming   = run.status === 'streaming';
     const isJudging    = run.status === 'judging';
-    const isBusy       = isGenerating || isJudging;
+    const isBusy       = isGenerating || isStreaming || isJudging;
     const hasResponse   = run.response && run.response.trim().length > 0;
     const isEditing     = run.responseEditing;
     const hasReasoning  = run.reasoningTrace && run.reasoningTrace.trim().length > 0;
     const isEditingReas = run.reasoningEditing;
 
-    const responseArea = hasResponse
-        ? (isEditing
+    let responseArea;
+    if (isStreaming) {
+        // Live streaming view: show accumulated text with a blinking cursor
+        responseArea = `<div class="tb-response-stream" id="tbStreamArea-${run.id}">${escapeHtml(run.response || '')}<span class="tb-stream-cursor"></span></div>`;
+    } else if (hasResponse) {
+        responseArea = isEditing
             ? `<textarea
                 class="tb-response-edit-ta"
                 id="tbResponseEdit-${run.id}"
@@ -858,12 +869,13 @@ function renderActiveTab() {
               >${escapeHtml(run.response)}</textarea>`
             : (typeof marked !== 'undefined'
                 ? `<div class="tb-response-markdown">${marked.parse(run.response)}</div>`
-                : `<pre class="tb-response-pre">${escapeHtml(run.response)}</pre>`)
-          )
-        : `<div class="tb-response-placeholder">
+                : `<pre class="tb-response-pre">${escapeHtml(run.response)}</pre>`);
+    } else {
+        responseArea = `<div class="tb-response-placeholder">
                <div class="tb-placeholder-icon">◎</div>
                <div>Response will appear here after generation.</div>
            </div>`;
+    }
 
     const reasoningSection = hasReasoning
         ? `<div class="tb-reasoning-section">
@@ -1349,6 +1361,8 @@ async function triggerGenerate(run) {
     if (judgeModelSel) run.judgeModel = judgeModelSel.value;
 
     run.status          = 'generating';
+    run.response        = '';
+    run.reasoningTrace  = '';
     run.errorMessage    = null;
     run.judgeResult     = null;
     run.score           = null;
@@ -1359,7 +1373,7 @@ async function triggerGenerate(run) {
     if (run.id === activeRunId) renderActiveTab();
 
     try {
-        const res = await fetch(`/api/generate-single/${state.sessionId}`, {
+        const res = await fetch(`/api/generate-single-stream/${state.sessionId}`, {
             method:  'POST',
             headers: { 'Content-Type': 'application/json' },
             body:    JSON.stringify({
@@ -1374,13 +1388,55 @@ async function triggerGenerate(run) {
             throw new Error(err.detail || err.message || `HTTP ${res.status}`);
         }
 
-        const data          = await res.json();
-        run.response        = data.response  || '';
-        run.reasoningTrace  = data.reasoning || '';
-        run.status          = 'done';
-        run.model           = data.model     || run.model;
-        run.provider        = data.provider  || run.provider;
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let firstContentReceived = false;
 
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+
+                const jsonStr = line.slice(6);
+                let chunk;
+                try { chunk = JSON.parse(jsonStr); } catch { continue; }
+
+                if (chunk.type === 'error') {
+                    throw new Error(chunk.text || 'Generation failed');
+                }
+
+                if (chunk.type === 'content') {
+                    if (!firstContentReceived) {
+                        firstContentReceived = true;
+                        run.status = 'streaming';
+                        renderTabBar();
+                        if (run.id === activeRunId) renderActiveTab();
+                    }
+                    run.response += chunk.text;
+                    _appendStreamChunk(run);
+                }
+
+                if (chunk.type === 'reasoning') {
+                    run.reasoningTrace += chunk.text;
+                }
+
+                if (chunk.type === 'done') {
+                    run.response       = chunk.response  ?? run.response;
+                    run.reasoningTrace = chunk.reasoning  ?? run.reasoningTrace;
+                    run.model          = chunk.model     || run.model;
+                    run.provider       = chunk.provider  || run.provider;
+                }
+            }
+        }
+
+        run.status = 'done';
         showToast(`Run ${run.number} response ready`, 'success');
     } catch (err) {
         run.status       = 'error';
@@ -1390,6 +1446,29 @@ async function triggerGenerate(run) {
 
     renderTabBar();
     if (run.id === activeRunId) { renderActiveTab(); requestAnimationFrame(applySavedSplit); }
+}
+
+/**
+ * Efficiently append streamed text to the response area without a full re-render.
+ * Falls back to a full renderActiveTab if the streaming element isn't in the DOM.
+ */
+function _appendStreamChunk(run) {
+    if (run.id !== activeRunId) return;
+    const streamEl = document.getElementById(`tbStreamArea-${run.id}`);
+    if (!streamEl) {
+        renderActiveTab();
+        return;
+    }
+    // Update text content (keep cursor at end)
+    const cursor = streamEl.querySelector('.tb-stream-cursor');
+    if (cursor) cursor.remove();
+    streamEl.textContent = run.response;
+    const newCursor = document.createElement('span');
+    newCursor.className = 'tb-stream-cursor';
+    streamEl.appendChild(newCursor);
+    // Auto-scroll the response area
+    const scrollParent = streamEl.closest('.tb-right-body') || streamEl.parentElement;
+    if (scrollParent) scrollParent.scrollTop = scrollParent.scrollHeight;
 }
 
 async function triggerJudge(run) {
@@ -1601,13 +1680,16 @@ export function showNotebookPreview(run) {
                 </section>
 
                 ${judgePrompt ? `
-                <!-- Judge Prompt -->
+                <!-- Judge Prompt (collapsible) -->
                 <section class="nbp-section">
-                    <div class="nbp-section-label">
-                        <span class="nbp-section-dot nbp-dot-judge"></span>
-                        Judge System Prompt
-                    </div>
-                    <pre class="nbp-judge-pre">${escapeHtml(judgePrompt)}</pre>
+                    <details class="nbp-collapsible">
+                        <summary class="nbp-section-label nbp-collapsible-trigger">
+                            <span class="nbp-section-dot nbp-dot-judge"></span>
+                            Judge System Prompt
+                            <span class="nbp-collapse-arrow">›</span>
+                        </summary>
+                        <pre class="nbp-judge-pre">${escapeHtml(judgePrompt)}</pre>
+                    </details>
                 </section>` : ''}
 
 

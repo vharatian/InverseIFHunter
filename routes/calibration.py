@@ -1,15 +1,17 @@
 """
 Calibration Routes
 
-POST /api/generate-single/{session_id}   — generate single model response (no judging)
-POST /api/judge-calibration/{session_id} — judge a specific response text
-POST /api/judge-reference/{session_id}   — judge the reference response
+POST /api/generate-single/{session_id}        — generate single model response (no judging)
+POST /api/generate-single-stream/{session_id}  — SSE streaming version of the above
+POST /api/judge-calibration/{session_id}       — judge a specific response text
+POST /api/judge-reference/{session_id}         — judge the reference response
 """
 import re
 import json
 import logging
 
 from fastapi import APIRouter, Body, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from services.notebook_parser import notebook_parser
@@ -209,6 +211,80 @@ async def generate_single(session_id: str, request: GenerateSingleRequest | None
         raise
     except Exception as e:
         raise HTTPException(500, f"Generation error: {str(e)}")
+
+
+@router.post("/generate-single-stream/{session_id}")
+async def generate_single_stream(session_id: str, request: GenerateSingleRequest | None = Body(default=None)):
+    """
+    SSE streaming version of generate-single.
+    Yields `event: chunk` with `{"type":"content"|"reasoning","text":"..."}`,
+    then `event: done` with the full accumulated result.
+    """
+    session = await _get_validated_session(session_id)
+
+    prompt = (
+        request.prompt if request and request.prompt is not None
+        else (session.notebook.prompt if session.notebook else "")
+    )
+    if not prompt or not prompt.strip():
+        raise HTTPException(400, "No prompt set. Please write a prompt first.")
+
+    provider = (
+        request.provider if request and request.provider is not None
+        else getattr(session.config, 'provider', 'openrouter')
+    )
+    model = (
+        request.model if request and request.model is not None
+        else (session.config.models[0] if session.config.models else "qwen/qwen3-235b-a22b-thinking-2507")
+    )
+    conversation_history = session.config.conversation_history or []
+
+    async def _event_generator():
+        try:
+            messages_kwarg = conversation_history if conversation_history else None
+
+            if provider == 'fireworks':
+                from services.fireworks_client import get_fireworks_client
+                client = get_fireworks_client()
+                response_text, reasoning, error = await client.call_with_retry(
+                    prompt=prompt, model=model,
+                    max_retries=session.config.max_retries,
+                )
+                if error:
+                    yield f"event: chunk\ndata: {json.dumps({'type': 'error', 'text': error})}\n\n"
+                    return
+                if response_text:
+                    yield f"event: chunk\ndata: {json.dumps({'type': 'content', 'text': response_text})}\n\n"
+                yield f"event: done\ndata: {json.dumps({'type': 'done', 'response': response_text or '', 'reasoning': reasoning or '', 'model': model, 'provider': provider})}\n\n"
+            else:
+                from services.openrouter_client import get_openrouter_client
+                client = get_openrouter_client()
+                rbp = session.config.reasoning_budget_percent if provider != 'fireworks' else 0.9
+                async for chunk in client.stream_model_chunks(
+                    prompt=prompt,
+                    model=model,
+                    max_tokens=None,
+                    reasoning_budget_percent=rbp or 0.9,
+                    messages=messages_kwarg,
+                ):
+                    chunk_type = chunk.get("type", "")
+                    if chunk_type in ("content", "reasoning"):
+                        yield f"event: chunk\ndata: {json.dumps(chunk)}\n\n"
+                    elif chunk_type == "done":
+                        chunk["provider"] = provider
+                        yield f"event: done\ndata: {json.dumps(chunk)}\n\n"
+                    elif chunk_type == "error":
+                        yield f"event: chunk\ndata: {json.dumps(chunk)}\n\n"
+                        return
+        except Exception as e:
+            logger.exception("Streaming generation error")
+            yield f"event: chunk\ndata: {json.dumps({'type': 'error', 'text': str(e)})}\n\n"
+
+    return StreamingResponse(
+        _event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/judge-calibration/{session_id}")

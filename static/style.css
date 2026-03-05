@@ -6112,6 +6112,35 @@ body.sidebar-visible .container.multi-turn-layout {
     overflow-x: auto;
 }
 
+/* Streaming response area */
+.tb-response-stream {
+    padding: 1.25rem 1.5rem;
+    font-size: 0.9rem;
+    line-height: 1.7;
+    color: var(--text-primary);
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: var(--font-body);
+    min-height: 3rem;
+}
+.tb-stream-cursor {
+    display: inline-block;
+    width: 2px;
+    height: 1.1em;
+    background: var(--accent, #7c6cf0);
+    margin-left: 1px;
+    vertical-align: text-bottom;
+    animation: tb-cursor-blink 0.8s steps(2) infinite;
+}
+@keyframes tb-cursor-blink {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0; }
+}
+.tb-pill-streaming {
+    background: var(--accent, #7c6cf0);
+    color: #fff;
+}
+
 .tb-response-empty {
     border-style: dashed;
     border-color: var(--border-subtle);
@@ -6953,6 +6982,29 @@ body.sidebar-visible .container.multi-turn-layout {
     line-height: 1.55;
 }
 
+/* Collapsible sections in notebook preview */
+.nbp-collapsible {
+    border: none;
+}
+.nbp-collapsible-trigger {
+    cursor: pointer;
+    user-select: none;
+    list-style: none;          /* hide default <details> triangle */
+}
+.nbp-collapsible-trigger::-webkit-details-marker { display: none; }
+.nbp-collapsible-trigger::marker { content: ''; }
+.nbp-collapse-arrow {
+    margin-left: auto;
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    transition: transform 0.2s ease;
+    display: inline-block;
+}
+.nbp-collapsible[open] > .nbp-collapsible-trigger .nbp-collapse-arrow {
+    transform: rotate(90deg);
+}
+
 /* Judge prompt pre */
 .nbp-judge-pre {
     font-family: var(--font-mono);
@@ -6965,7 +7017,7 @@ body.sidebar-visible .container.multi-turn-layout {
     padding: 1rem 1.1rem;
     white-space: pre-wrap;
     word-break: break-word;
-    margin: 0;
+    margin: 0.75rem 0 0;
     max-height: 300px;
     overflow-y: auto;
 }

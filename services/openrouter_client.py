@@ -351,9 +351,158 @@ class OpenRouterClient(BaseAPIClient):
 
         return response_text.strip(), reasoning_trace.strip()
     
+    def _build_payload(
+        self,
+        prompt: str,
+        model: str,
+        max_tokens: Optional[int] = None,
+        reasoning_budget_percent: float = 0.9,
+        messages: Optional[list] = None,
+        temperature: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Build the API payload (shared by call_model and stream_model_chunks)."""
+        if model.lower() in self.MODELS:
+            model = self.MODELS[model.lower()]
+
+        if max_tokens is None:
+            max_tokens = self._get_max_tokens(model)
+
+        model_lower = model.lower()
+        is_nemotron = 'nemotron' in model_lower
+        is_claude = 'claude' in model_lower or 'anthropic' in model_lower
+        is_opus = 'opus' in model_lower
+        is_gemini = 'gemini' in model_lower or model_lower.startswith('google/')
+        is_sonnet_46 = 'sonnet-4.6' in model_lower
+        is_reasoning_model = (not is_nemotron and (not is_claude or is_opus or is_sonnet_46)) or is_gemini
+
+        if messages:
+            msgs = list(messages)
+            if prompt:
+                msgs = msgs + [{"role": "user", "content": prompt}]
+        else:
+            msgs = [{"role": "user", "content": prompt or ""}]
+
+        temp = temperature if temperature is not None else 1.0
+        payload: Dict[str, Any] = {
+            "model": model,
+            "messages": msgs,
+            "max_tokens": max_tokens,
+            "stream": True,
+            "temperature": temp,
+        }
+
+        if is_opus:
+            if '4.6' in model_lower:
+                payload["provider"] = {"order": ["Amazon Bedrock"], "allow_fallbacks": False}
+            else:
+                payload["provider"] = {"order": ["Anthropic"], "allow_fallbacks": False}
+
+        if is_reasoning_model and reasoning_budget_percent > 0:
+            if is_gemini:
+                reasoning_tokens = int(max_tokens * reasoning_budget_percent)
+                payload["reasoning"] = {"exclude": False, "max_tokens": reasoning_tokens}
+            else:
+                payload["reasoning"] = {"exclude": False, "effort": "high"}
+        elif is_reasoning_model:
+            payload["reasoning"] = {"exclude": True}
+
+        return payload
+
+    async def stream_model_chunks(
+        self,
+        prompt: str,
+        model: str,
+        max_tokens: Optional[int] = None,
+        reasoning_budget_percent: float = 0.9,
+        timeout: float = 180.0,
+        messages: Optional[list] = None,
+        temperature: Optional[float] = None,
+    ):
+        """
+        Async generator that yields SSE-friendly dicts as chunks arrive.
+
+        Yields dicts with keys:
+            type: "content" | "reasoning" | "done" | "error"
+            text: the chunk text (for content/reasoning)
+            response / reasoning: full accumulated text (for done)
+        """
+        payload = self._build_payload(
+            prompt, model, max_tokens, reasoning_budget_percent, messages, temperature,
+        )
+        resolved_model = payload["model"]
+        client = await self._get_client()
+
+        response_text = ""
+        reasoning_trace = ""
+
+        try:
+            async with client.stream(
+                "POST", self.BASE_URL,
+                headers=self._get_headers(),
+                json=payload,
+                timeout=timeout,
+            ) as response:
+                if response.status_code >= 400:
+                    await response.aread()
+                    yield {"type": "error", "text": f"HTTP {response.status_code}"}
+                    return
+
+                async for line in response.aiter_lines():
+                    if not line or not line.startswith("data: "):
+                        continue
+                    data = line[6:]
+                    if data == "[DONE]":
+                        break
+
+                    try:
+                        chunk = json_loads(data)
+                        if "error" in chunk:
+                            yield {"type": "error", "text": chunk["error"].get("message", str(chunk["error"]))}
+                            return
+
+                        choices = chunk.get("choices", [])
+                        if not choices:
+                            continue
+                        delta = choices[0].get("delta", {})
+
+                        # Reasoning chunks
+                        reasoning_chunk = ""
+                        if delta:
+                            if "reasoning" in delta and delta["reasoning"]:
+                                reasoning_chunk = delta["reasoning"]
+                            elif "thinking" in delta and delta["thinking"]:
+                                reasoning_chunk = delta["thinking"]
+                        if reasoning_chunk:
+                            reasoning_trace += reasoning_chunk
+                            yield {"type": "reasoning", "text": reasoning_chunk}
+
+                        # Content chunks
+                        if delta and "content" in delta and delta["content"]:
+                            content_chunk = delta["content"]
+                            response_text += content_chunk
+                            yield {"type": "content", "text": content_chunk}
+
+                    except (JSONDecodeError, KeyError):
+                        continue
+
+        except Exception as e:
+            yield {"type": "error", "text": str(e)}
+            return
+
+        # Post-process: parse <think> tags from accumulated content
+        clean_response, extracted = self.parse_think_tags(response_text.strip())
+        if extracted and (not reasoning_trace or len(extracted) > len(reasoning_trace)):
+            reasoning_trace = extracted
+
+        yield {
+            "type": "done",
+            "response": clean_response.strip(),
+            "reasoning": reasoning_trace.strip(),
+            "model": resolved_model,
+        }
+
     # Note: Uses BaseAPIClient.call_with_retry which passes **kwargs to call_model
     # This allows reasoning_budget_percent to be passed through
-    
 
 
 # Singleton instance
