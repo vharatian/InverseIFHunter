@@ -1500,15 +1500,15 @@ async function triggerJudge(run) {
 
     run.status       = 'judging';
     run.errorMessage = null;
+    run.judgeResult  = null;
 
     renderTabBar();
     if (run.id === activeRunId) renderActiveTab();
 
     try {
-        // Build criteria string from chips — backend needs response_reference as JSON-like criteria
         const criteriaForJudge = chipsToString(left.criteriaChips);
 
-        const res = await fetch(`/api/judge-calibration/${state.sessionId}`, {
+        const res = await fetch(`/api/judge-calibration-stream/${state.sessionId}`, {
             method:  'POST',
             headers: { 'Content-Type': 'application/json' },
             body:    JSON.stringify({
@@ -1525,22 +1525,50 @@ async function triggerJudge(run) {
             throw new Error(err.detail || err.message || `HTTP ${res.status}`);
         }
 
-        const data      = await res.json();
-        run.judgeResult = data;
-        run.status      = 'judged';
+        _injectStreamingJudgeContainer(run);
 
-        const criteria = data.criteria || {};
-        const cKeys    = Object.keys(criteria);
-        run.maxScore   = cKeys.length || null;
-        // Count how many criteria passed
-        const passingCount = cKeys.filter(k => {
-            const v = typeof criteria[k] === 'object'
-                ? (criteria[k].score ?? criteria[k].result ?? criteria[k].value ?? '')
-                : criteria[k];
-            return String(v).toLowerCase() === 'pass' || v === 1 || v === true;
-        }).length;
-        run.score = cKeys.length > 0 ? passingCount : (data.score ?? data.overall_score ?? null);
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
 
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                let event;
+                try { event = JSON.parse(line.slice(6)); } catch { continue; }
+
+                if (event.type === 'error') {
+                    throw new Error(event.message || 'Judge streaming error');
+                }
+                if (event.type === 'start') {
+                    _updateStreamingJudgeHeader(run, 0, event.total);
+                }
+                if (event.type === 'criterion') {
+                    _appendStreamingCriterion(run, event);
+                    _updateStreamingJudgeHeader(run, event.passing, event.total);
+                }
+                if (event.type === 'done') {
+                    run.judgeResult = {
+                        criteria: event.criteria,
+                        explanation: event.explanation,
+                        score: event.score,
+                    };
+                    run.status   = 'judged';
+                    run.maxScore = event.total;
+                    run.score    = event.passing;
+                    _finalizeStreamingJudge(run, event);
+                }
+            }
+        }
+
+        if (run.status !== 'judged') {
+            run.status = 'judged';
+        }
         showToast(`Run ${run.number} judged`, 'success');
     } catch (err) {
         run.status       = 'error';
@@ -1550,6 +1578,163 @@ async function triggerJudge(run) {
 
     renderTabBar();
     if (run.id === activeRunId) { renderActiveTab(); requestAnimationFrame(applySavedSplit); }
+}
+
+function _injectStreamingJudgeContainer(run) {
+    const existing = document.getElementById(`tbJudgeStream-${run.id}`);
+    if (existing) existing.remove();
+    const rightBody = document.querySelector(`#tbLayout-${run.id} .tb-right-body`);
+    if (!rightBody) return;
+    const container = document.createElement('div');
+    container.id = `tbJudgeStream-${run.id}`;
+    container.className = 'tb-judge-result tb-judge-collapsible';
+    container.innerHTML = `
+        <div class="tb-judge-header">
+            <span class="tb-judge-label">Judge Result</span>
+            <span class="tb-judge-stream-score" id="tbJudgeStreamScore-${run.id}">
+                <span class="tb-spinner" style="width:14px;height:14px;"></span> Evaluating…
+            </span>
+        </div>
+        <div class="tb-judge-body tb-judge-stream-body" id="tbJudgeStreamBody-${run.id}"></div>`;
+    rightBody.appendChild(container);
+    const scrollParent = rightBody;
+    if (scrollParent) scrollParent.scrollTop = scrollParent.scrollHeight;
+}
+
+function _updateStreamingJudgeHeader(run, passing, total) {
+    const scoreEl = document.getElementById(`tbJudgeStreamScore-${run.id}`);
+    if (!scoreEl) return;
+    scoreEl.innerHTML = `<span class="tb-spinner" style="width:14px;height:14px;"></span> ${passing}/${total} Passing…`;
+}
+
+function _appendStreamingCriterion(run, event) {
+    const body = document.getElementById(`tbJudgeStreamBody-${run.id}`);
+    if (!body) return;
+    const isPass   = event.status === 'PASS';
+    const isMissing = event.status === 'MISSING';
+    const icon     = isMissing ? '⚠️' : isPass ? '✅' : '❌';
+    const color    = isMissing ? 'var(--warning, #f59e0b)' : isPass ? 'var(--success, #22c55e)' : 'var(--danger, #ef4444)';
+    const card = document.createElement('div');
+    card.className = 'tb-criterion-enter';
+    card.style.cssText = `margin-bottom: 0.5rem; padding: 0.65rem 0.75rem; background: var(--bg-primary); border-radius: 8px; border-left: 4px solid ${color};`;
+    card.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: ${event.reason ? '0.25rem' : '0'};">
+            <span style="font-weight: 700; font-size: 0.88rem;">${icon} ${escapeHtml(event.id)}</span>
+            <span style="color: ${color}; font-weight: 600; font-size: 0.82rem;">${escapeHtml(event.status)}</span>
+        </div>
+        ${event.reason ? `<div style="font-size: 0.85rem; color: var(--text-secondary); line-height: 1.5;">${escapeHtml(event.reason)}</div>` : ''}`;
+    body.appendChild(card);
+    const scrollParent = body.closest('.tb-right-body') || body.parentElement;
+    if (scrollParent) scrollParent.scrollTop = scrollParent.scrollHeight;
+}
+
+function _finalizeStreamingJudge(run, event) {
+    const scoreEl = document.getElementById(`tbJudgeStreamScore-${run.id}`);
+    if (!scoreEl) return;
+    const allPass = event.passing === event.total && event.total > 0;
+    const verdict = allPass ? 'PASSING' : 'BREAKING';
+    const verdictCls = allPass ? 'tb-verdict-pass' : 'tb-verdict-break';
+    scoreEl.innerHTML = `<span class="tb-verdict ${verdictCls}">${verdict}</span> <span class="tb-overall-score">${event.passing}/${event.total} Passing</span>`;
+}
+
+function _showStreamingSavePreviewModal(idealResponse) {
+    document.getElementById('spmStreamOverlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'spmStreamOverlay';
+    overlay.className = 'tb-confirm-overlay';
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('role', 'dialog');
+    overlay.innerHTML = `
+        <div class="tb-confirm-box" style="max-width: 640px; max-height: 90vh; display: flex; flex-direction: column;">
+            <div class="tb-confirm-title" id="spmStreamTitle" style="margin-bottom: 0.5rem;">
+                <span class="tb-spinner" style="width:18px;height:18px;"></span> Evaluating Criteria…
+            </div>
+            <div style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 1rem;">
+                <div>
+                    <label style="font-weight: 600; font-size: 0.9rem; display: block; margin-bottom: 0.5rem;">Ideal Response</label>
+                    <div style="max-height: 400px; overflow-y: auto; padding: 0.75rem; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border); font-size: 0.9rem; line-height: 1.6; white-space: pre-wrap;">${escapeHtml(idealResponse || '(empty)')}</div>
+                </div>
+                <div>
+                    <label style="font-weight: 600; font-size: 0.9rem; display: block; margin-bottom: 0.5rem;">
+                        Judge Results
+                        <span id="spmStreamScore" style="font-weight: 400; font-size: 0.82rem; margin-left: 0.5rem; color: var(--text-secondary);"></span>
+                    </label>
+                    <div id="spmStreamBody"></div>
+                </div>
+            </div>
+            <div class="tb-confirm-actions" id="spmStreamActions" style="margin-top: 1rem;"></div>
+        </div>`;
+    document.body.appendChild(overlay);
+}
+
+function _updateSpmJudgeHeader(passing, total, isLoading) {
+    const scoreEl = document.getElementById('spmStreamScore');
+    if (scoreEl) {
+        scoreEl.innerHTML = isLoading
+            ? `<span class="tb-spinner" style="width:12px;height:12px;display:inline-block;vertical-align:middle;"></span> ${passing}/${total} Passing…`
+            : `${passing}/${total} Passing`;
+    }
+    const titleEl = document.getElementById('spmStreamTitle');
+    if (titleEl && !isLoading) {
+        const allPass = passing === total && total > 0;
+        titleEl.textContent = allPass ? '✅ Ideal Response Verified' : '⚠️ Criteria Not Passed';
+    }
+}
+
+function _appendSpmCriterion(event) {
+    const body = document.getElementById('spmStreamBody');
+    if (!body) return;
+    const isPass = event.status === 'PASS';
+    const isMissing = event.status === 'MISSING';
+    const icon = isMissing ? '⚠️' : isPass ? '✅' : '❌';
+    const statusColor = isMissing ? 'var(--warning, #f59e0b)' : isPass ? 'var(--success, #22c55e)' : 'var(--danger, #ef4444)';
+    const card = document.createElement('div');
+    card.className = 'tb-criterion-enter';
+    card.style.cssText = `margin-bottom: 0.75rem; padding: 0.75rem; background: var(--bg-primary); border-radius: 8px; border-left: 4px solid ${statusColor};`;
+    card.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
+            <span style="font-weight: 700;">${icon} ${escapeHtml(event.id)}</span>
+            <span style="color: ${statusColor}; font-weight: 600;">${escapeHtml(event.status)}</span>
+        </div>
+        ${event.reason ? `<div style="font-size: 0.9rem; color: var(--text-secondary); margin-top: 0.35rem; line-height: 1.5;">${escapeHtml(event.reason)}</div>` : ''}`;
+    body.appendChild(card);
+}
+
+function _finalizeSavePreviewModal(isPassing, idealResponse, judgeData) {
+    const actionsEl = document.getElementById('spmStreamActions');
+    if (!actionsEl) return;
+    actionsEl.innerHTML = isPassing
+        ? '<button class="tb-confirm-delete" id="spmContinueBtn">Continue to Hunt</button>'
+        : `<button class="tb-confirm-cancel" id="spmFixBtn">Fix in Testbed</button>
+           ${state.adminMode && adminBypass('reference_validation')
+               ? '<button class="tb-confirm-delete" id="spmContinueBtn" style="background:linear-gradient(135deg,#7c6cf0,#60a5fa);">Continue Anyway (Admin)</button>'
+               : ''}`;
+
+    const overlay = document.getElementById('spmStreamOverlay');
+    if (!overlay) return;
+
+    overlay.querySelector('#spmContinueBtn')?.addEventListener('click', async () => {
+        overlay.remove();
+        const savingOverlay = document.createElement('div');
+        savingOverlay.id = 'progressiveSavingOverlay';
+        savingOverlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:10001;display:flex;align-items:center;justify-content:center;';
+        savingOverlay.innerHTML = `
+            <div style="background:var(--bg-secondary,#1e1e2e);border-radius:12px;padding:1.75rem 2.25rem;max-width:360px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.35);border:1px solid var(--border,#333);text-align:center;">
+                <div style="margin-bottom:1rem;"><div class="tb-btn-spinner" style="width:28px;height:28px;border-width:3px;margin:0 auto;"></div></div>
+                <div style="font-weight:700;font-size:1rem;color:var(--text-primary,#e0e0e0);margin-bottom:0.4rem;">Saving to Colab…</div>
+                <div style="font-size:0.85rem;color:var(--text-secondary,#a0a0b0);line-height:1.5;">Syncing turn content with your notebook. This takes a moment.</div>
+            </div>`;
+        document.body.appendChild(savingOverlay);
+        await _progressiveSaveTurnContent();
+        savingOverlay.remove();
+        state.referenceValidated = true;
+        const startHuntBtn = document.getElementById('startHuntBtn');
+        if (startHuntBtn) { startHuntBtn.disabled = false; startHuntBtn.title = ''; }
+        showNotebookPreview();
+    });
+
+    overlay.querySelector('#spmFixBtn')?.addEventListener('click', () => overlay.remove());
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2072,26 +2257,54 @@ async function saveRunToTurn() {
 
         if (saveBtn) saveBtn.textContent = 'Judging...';
 
-        // 3. Judge ideal response (always run for modal display; bypass only affects hunt gate)
+        // 3. Judge ideal response via streaming SSE (per-criterion progressive results)
         const bypass = getConfigValue('bypass_hunt_criteria', false);
-        let judgeData = {};
-        try {
-            const judgeRes = await fetch(`/api/judge-reference/${state.sessionId}?skip_colab_refresh=true`, { method: 'POST' });
-            if (!judgeRes.ok) {
-                if (judgeRes.status === 404) {
-                    showSaveValidationModal({
-                        type: 'error',
-                        title: 'Session Expired',
-                        message: 'Please reload the notebook from Colab.',
-                    });
-                    return;
-                }
-                const err = await judgeRes.json().catch(() => ({}));
-                throw new Error(err.detail || err.message || 'Judge failed');
+        let judgeData = { criteria: {}, explanation: '', score: 0 };
+
+        const judgeRes = await fetch(`/api/judge-reference-stream/${state.sessionId}?skip_colab_refresh=true`, { method: 'POST' });
+        if (!judgeRes.ok) {
+            if (judgeRes.status === 404) {
+                showSaveValidationModal({ type: 'error', title: 'Session Expired', message: 'Please reload the notebook from Colab.' });
+                return;
             }
-            judgeData = await judgeRes.json();
-        } catch (e) {
-            throw e;
+            const err = await judgeRes.json().catch(() => ({}));
+            throw new Error(err.detail || err.message || 'Judge failed');
+        }
+
+        _showStreamingSavePreviewModal(left.idealResponse || '');
+
+        const reader = judgeRes.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let streamPassing = 0, streamTotal = 0;
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                let event;
+                try { event = JSON.parse(line.slice(6)); } catch { continue; }
+                if (event.type === 'error') throw new Error(event.message || 'Judge streaming error');
+                if (event.type === 'start') {
+                    streamTotal = event.total;
+                    _updateSpmJudgeHeader(0, streamTotal, true);
+                }
+                if (event.type === 'criterion') {
+                    streamPassing = event.passing;
+                    _appendSpmCriterion(event);
+                    _updateSpmJudgeHeader(event.passing, event.total, true);
+                }
+                if (event.type === 'done') {
+                    judgeData = { criteria: event.criteria, explanation: event.explanation, score: event.score };
+                    streamPassing = event.passing;
+                    streamTotal = event.total;
+                    _updateSpmJudgeHeader(event.passing, event.total, false);
+                }
+            }
         }
 
         const criteria = judgeData.criteria || {};
@@ -2104,7 +2317,7 @@ async function saveRunToTurn() {
             state.referenceValidated = true;
         }
 
-        // 4. Show Save Preview modal (full response + judge results) — both pass and fail
+        // 4. Finalize Save Preview modal with action buttons
         validateModelReferenceAndCriteria(criteriaForValidation);
         if (isPassing && !bypass) {
             state.referenceValidated = true;
@@ -2112,16 +2325,13 @@ async function saveRunToTurn() {
         const configSection = document.getElementById('configSection');
         if (configSection) configSection.classList.remove('hidden');
 
-        showSavePreviewModal({
-            idealResponse: left.idealResponse || '',
-            judgeData,
-            isPassing,
-        });
+        _finalizeSavePreviewModal(isPassing, left.idealResponse || '', judgeData);
 
         if (isPassing) {
             showToast('Ideal response verified — continue to hunt when ready', 'success');
         }
     } catch (err) {
+        document.getElementById('spmStreamOverlay')?.remove();
         showSaveValidationModal({
             type: 'error',
             title: 'Error',

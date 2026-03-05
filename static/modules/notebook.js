@@ -38,6 +38,25 @@ import { renderQCPersistentSection } from './qcPersistentSection.js';
 import { runQualityCheckInline } from './qcInline.js';
 import { enableNavTestbedButton, validateJudgeOutputFormat, syncActiveRunToNotebook } from './testbed.js';
 
+function _appendNbStreamCriterion(containerId, event) {
+    const body = document.getElementById(containerId);
+    if (!body) return;
+    const isPass = event.status === 'PASS';
+    const isMissing = event.status === 'MISSING';
+    const icon = isMissing ? '⚠️' : isPass ? '✅' : '❌';
+    const color = isMissing ? 'var(--warning, #f59e0b)' : isPass ? 'var(--success, #22c55e)' : 'var(--danger, #ef4444)';
+    const card = document.createElement('div');
+    card.className = 'tb-criterion-enter';
+    card.style.cssText = `margin-bottom: 0.5rem; padding: 0.65rem 0.75rem; background: var(--bg-secondary); border-radius: 8px; border-left: 4px solid ${color};`;
+    card.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: ${event.reason ? '0.25rem' : '0'};">
+            <span style="font-weight: 700; font-size: 0.88rem;">${icon} ${escapeHtml(event.id)}</span>
+            <span style="color: ${color}; font-weight: 600; font-size: 0.82rem;">${escapeHtml(event.status)}</span>
+        </div>
+        ${event.reason ? `<div style="font-size: 0.85rem; color: var(--text-secondary); line-height: 1.5;">${escapeHtml(event.reason)}</div>` : ''}`;
+    body.appendChild(card);
+}
+
 /**
  * Enable/disable the Colab save button based on review_status.
  * Save is only allowed when review_status is "approved" (post-reviewer-approval)
@@ -2378,48 +2397,85 @@ export async function saveAndJudgeResponse() {
         
         showToast('✅ Saved to Colab!', 'success');
         btn.textContent = '⚖️ Judging...';
-        
-        // Step 2: Judge
-        const judgeResponse = await fetch(`/api/judge-reference/${state.sessionId}`, {
-            method: 'POST'
-        });
-        
+
+        // Step 2: Judge via streaming SSE
+        const judgeResponse = await fetch(`/api/judge-reference-stream/${state.sessionId}`, { method: 'POST' });
         if (!judgeResponse.ok) {
             if (judgeResponse.status === 404) {
                 showToast('⚠️ Session expired. Please reload the notebook.', 'error');
                 throw new Error('Session not found. Please reload the notebook from Colab.');
             }
-            const error = await judgeResponse.json();
+            const error = await judgeResponse.json().catch(() => ({}));
             throw new Error(error.detail || 'Judge failed');
         }
-        
-        const data = await judgeResponse.json();
-        
-        // Update state.criteria from judge result
-        let criteria = data.criteria || {};
-        let criteriaEntries = Object.entries(criteria);
-        
-        // Check for missing criteria
+
+        if (resultDiv) {
+            resultDiv.innerHTML = `
+                <div style="padding: 1rem; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border);">
+                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
+                        <span class="tb-spinner" style="width:14px;height:14px;"></span>
+                        <span id="nbSaveJudgeScoreLabel" style="font-weight: 700;">Evaluating…</span>
+                    </div>
+                    <div id="nbSaveJudgeCriteriaBody" style="margin-top: 0.5rem;"></div>
+                </div>`;
+            resultDiv.classList.remove('hidden');
+        }
+
+        const reader = judgeResponse.body.getReader();
+        const decoder = new TextDecoder();
+        let sseBuffer = '';
+        let finalEvent = {};
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            sseBuffer += decoder.decode(value, { stream: true });
+            const sseLines = sseBuffer.split('\n');
+            sseBuffer = sseLines.pop() || '';
+            for (const line of sseLines) {
+                if (!line.startsWith('data: ')) continue;
+                let ev;
+                try { ev = JSON.parse(line.slice(6)); } catch { continue; }
+                if (ev.type === 'error') throw new Error(ev.message || 'Judge failed');
+                if (ev.type === 'start') {
+                    const lbl = document.getElementById('nbSaveJudgeScoreLabel');
+                    if (lbl) lbl.textContent = `0/${ev.total} Passing…`;
+                }
+                if (ev.type === 'criterion') {
+                    _appendNbStreamCriterion('nbSaveJudgeCriteriaBody', ev);
+                    const lbl = document.getElementById('nbSaveJudgeScoreLabel');
+                    if (lbl) lbl.textContent = `${ev.passing}/${ev.total} Passing…`;
+                }
+                if (ev.type === 'done') finalEvent = ev;
+            }
+        }
+
+        const criteria = finalEvent.criteria || {};
+        const criteriaEntries = Object.entries(criteria);
         const evaluatedCriteria = criteriaEntries.map(([id]) => id);
         const missingCriteria = (state.initialCriteria || [])
             .filter(c => !evaluatedCriteria.includes(c.id))
             .map(c => [c.id, c.criteria]);
         const hasMissingCriteria = missingCriteria.length > 0;
-        
-        // Determine if all criteria pass
-        const allCriteriaPass = criteriaEntries.length > 0 && 
+        const allCriteriaPass = criteriaEntries.length > 0 &&
             criteriaEntries.every(([k, v]) => String(v).toUpperCase() === 'PASS');
         const isPassing = allCriteriaPass && !hasMissingCriteria;
-        
-        // Update reference validated state
+
         state.referenceValidated = isPassing;
-        
-        if (elements.startHuntBtn) {
-            elements.startHuntBtn.disabled = false;
-            elements.startHuntBtn.title = '';
+        if (elements.startHuntBtn) { elements.startHuntBtn.disabled = false; elements.startHuntBtn.title = ''; }
+
+        const lbl = document.getElementById('nbSaveJudgeScoreLabel');
+        if (lbl) {
+            lbl.previousElementSibling?.remove();
+            const sc = isPassing ? 'var(--success,#22c55e)' : 'var(--danger,#ef4444)';
+            lbl.style.color = sc;
+            lbl.textContent = `${isPassing ? '✅' : '❌'} Score: ${finalEvent.score ?? 0} — ${finalEvent.passing || 0}/${finalEvent.total || 0} Passing`;
+            if (resultDiv) {
+                const container = resultDiv.querySelector('div');
+                if (container) container.style.borderColor = sc;
+            }
         }
-        
-        // Show toasts
+
         if (hasMissingCriteria) {
             const missingIds = missingCriteria.map(([id]) => id).join(', ');
             showToast(`Saved, but MISSING CRITERIA: ${missingIds}`, 'warning');
@@ -2429,19 +2485,6 @@ export async function saveAndJudgeResponse() {
         } else {
             showToast('Saved, but criteria failed. Fix before hunting.', 'info');
         }
-        
-        // Display result (reusing the logic from judgeReferenceResponse would be better, but copying for now is safer/faster)
-        // Actually, let's just delegate to judgeReferenceResponse logic if possible, but the button text update is custom here.
-        // For now, I'll rely on judgeReferenceResponse to do the UI update if called separately, but here we just show Toast.
-        // Wait, the user wants the UI update too.
-        // Let's copy the UI update logic from judgeReferenceResponse or make it shared.
-        // Given complexity, I will just call judgeReferenceResponse() instead of manual fetch if I can?
-        // But saveAndJudgeResponse does TWO things.
-        // I'll stick to what I pasted above for now, but I realized I didn't include the UI update code block in `saveAndJudgeResponse`.
-        
-        // Let's use the code I read from app.js which HAD the logic.
-        // I will paste judgeReferenceResponse and saveResponseOnly fully.
-        
     } catch (error) {
         showError(error, { operation: 'Operation' });
         state.referenceValidated = false;
@@ -2516,104 +2559,106 @@ export async function judgeReferenceResponse() {
             resultDiv.classList.add('hidden');
         }
         
-        const response = await fetch(`/api/judge-reference/${state.sessionId}`, {
-            method: 'POST'
-        });
-        
+        const response = await fetch(`/api/judge-reference-stream/${state.sessionId}`, { method: 'POST' });
         if (!response.ok) {
             if (response.status === 404) {
                 showToast('⚠️ Session expired. Please reload notebook.', 'error');
                 throw new Error('Session not found');
             }
-            const error = await response.json();
+            const error = await response.json().catch(() => ({}));
             throw new Error(error.detail || 'Judge failed');
         }
-        
-        const data = await response.json();
-        
-        // Logic for handling judge result (same as app.js)
-        let criteria = data.criteria || {};
-        let criteriaEntries = Object.entries(criteria);
-        
-        let currentCriteriaList = [];
-        if (data.response_reference) {
-            try {
-                currentCriteriaList = parseCriteria(data.response_reference);
-                state.criteria = currentCriteriaList;
-            } catch (e) {
-                console.error('Failed to parse response_reference', e);
+
+        if (resultDiv) {
+            resultDiv.innerHTML = `
+                <div style="padding: 1rem; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border);">
+                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
+                        <span class="tb-spinner" style="width:14px;height:14px;"></span>
+                        <span id="nbRefJudgeScoreLabel" style="font-weight: 700;">Evaluating…</span>
+                    </div>
+                    <div id="nbRefJudgeCriteriaBody" style="margin-top: 0.5rem;"></div>
+                </div>`;
+            resultDiv.classList.remove('hidden');
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let sseBuffer = '';
+        let finalEvent = {};
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            sseBuffer += decoder.decode(value, { stream: true });
+            const sseLines = sseBuffer.split('\n');
+            sseBuffer = sseLines.pop() || '';
+            for (const line of sseLines) {
+                if (!line.startsWith('data: ')) continue;
+                let ev;
+                try { ev = JSON.parse(line.slice(6)); } catch { continue; }
+                if (ev.type === 'error') throw new Error(ev.message || 'Judge failed');
+                if (ev.type === 'start') {
+                    const lbl = document.getElementById('nbRefJudgeScoreLabel');
+                    if (lbl) lbl.textContent = `0/${ev.total} Passing…`;
+                }
+                if (ev.type === 'criterion') {
+                    _appendNbStreamCriterion('nbRefJudgeCriteriaBody', ev);
+                    const lbl = document.getElementById('nbRefJudgeScoreLabel');
+                    if (lbl) lbl.textContent = `${ev.passing}/${ev.total} Passing…`;
+                }
+                if (ev.type === 'done') finalEvent = ev;
             }
-        } else {
-            const judgedIds = new Set(Object.keys(criteria));
-            state.criteria = (state.criteria || []).filter(c => judgedIds.has(c.id));
-            currentCriteriaList = state.criteria;
         }
-        
-        const parsedIds = new Set(currentCriteriaList.map(c => c.id));
-        const judgedIds = new Set(Object.keys(criteria));
-        const notInRef = [...judgedIds].filter(id => !parsedIds.has(id));
-        
-        if (notInRef.length > 0) {
-             for (const id of notInRef) {
-                 criteria[id] = 'MISSING';
-                 if (!state.criteria.find(c => c.id === id)) {
-                     state.criteria.push({ id, criteria: `Criterion ${id} (not in reference)` });
-                 }
-             }
-             criteriaEntries = Object.entries(criteria);
-        }
-        
+
+        let criteria = finalEvent.criteria || {};
+        let criteriaEntries = Object.entries(criteria);
+
         const initIds = new Set((state.initialCriteria || []).map(c => c.id));
+        const judgedIds = new Set(Object.keys(criteria));
         const missingIds = [...initIds].filter(id => !judgedIds.has(id));
-        
         if (missingIds.length > 0) {
             for (const id of missingIds) {
                 if (!(id in criteria)) criteria[id] = 'MISSING';
-                if (!state.criteria.find(c => c.id === id)) {
-                     const c = (state.initialCriteria || []).find(x => x.id === id);
-                     state.criteria.push(c || { id, criteria: 'Missing' });
-                }
             }
             criteriaEntries = Object.entries(criteria);
         }
-        
+
         const evaluated = criteriaEntries.filter(([k, v]) => String(v).toUpperCase() !== 'MISSING');
         const missing = criteriaEntries.filter(([k, v]) => String(v).toUpperCase() === 'MISSING');
         const allPass = evaluated.length > 0 && evaluated.every(([k, v]) => String(v).toUpperCase() === 'PASS');
         const isPassing = allPass && missing.length === 0;
-        
+
         state.referenceValidated = isPassing;
-        
-        if (elements.startHuntBtn) {
-            elements.startHuntBtn.disabled = false;
-            elements.startHuntBtn.title = '';
-        }
-        
-        const criteriaHtml = formatJudgeCriteriaDisplay(criteria);
+        if (elements.startHuntBtn) { elements.startHuntBtn.disabled = false; elements.startHuntBtn.title = ''; }
+
         let statusMsg = isPassing ? 'ALL CRITERIA PASS' : 'CRITERIA FAILED';
         if (missing.length > 0) statusMsg = `MISSING CRITERIA: ${missing.map(x => x[0]).join(',')}`;
-        
+
+        const lbl = document.getElementById('nbRefJudgeScoreLabel');
+        if (lbl) {
+            lbl.previousElementSibling?.remove();
+            const sc = missing.length > 0 ? 'var(--warning)' : (isPassing ? 'var(--success,#22c55e)' : 'var(--danger,#ef4444)');
+            lbl.style.color = sc;
+            lbl.innerHTML = `<span class="score-badge ${isPassing ? 'score-1' : 'score-0'}">${isPassing ? '✅' : '❌'} Score: ${finalEvent.score ?? 0}</span> ${escapeHtml(statusMsg)}`;
+            if (resultDiv) {
+                const container = resultDiv.querySelector('div');
+                if (container) container.style.borderColor = sc;
+            }
+        }
+
         if (resultDiv) {
-            resultDiv.innerHTML = `
-                <div style="padding: 1rem; background: var(--bg-primary); border-radius: 8px; border: 1px solid ${missing.length > 0 ? 'var(--warning)' : (isPassing ? 'var(--success)' : 'var(--danger)')};">
-                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
-                        <span class="score-badge ${isPassing ? 'score-1' : 'score-0'}">${isPassing ? '✅' : '❌'} Score: ${data.score}</span>
-                        <span style="font-weight: 600;">${statusMsg}</span>
-                    </div>
-                    <div style="margin-top: 0.75rem;">
-                        <label style="font-weight: 600; font-size: 0.9rem;">📋 Criteria Breakdown:</label>
-                        ${criteriaHtml}
-                    </div>
-                    <div style="margin-top: 0.75rem;">
-                        <label style="font-weight: 600; font-size: 0.9rem;">📝 Judge Explanation:</label>
-                        <p style="margin-top: 0.25rem; font-size: 0.9rem; color: var(--text-secondary); white-space: pre-wrap;">${escapeHtml(data.explanation || 'No explanation')}</p>
-                    </div>
-                </div>
-            `;
-            resultDiv.classList.remove('hidden');
+            const mainContainer = resultDiv.querySelector('div');
+            if (mainContainer) {
+                const explEl = document.createElement('div');
+                explEl.style.marginTop = '0.75rem';
+                explEl.innerHTML = `
+                    <label style="font-weight: 600; font-size: 0.9rem;">📝 Judge Explanation:</label>
+                    <p style="margin-top: 0.25rem; font-size: 0.9rem; color: var(--text-secondary); white-space: pre-wrap;">${escapeHtml(finalEvent.explanation || 'No explanation')}</p>`;
+                mainContainer.appendChild(explEl);
+            }
         }
         if (elements.referencePreview) elements.referencePreview.scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'nearest' });
-        
+
         const passCount = criteriaEntries.filter(([k, v]) => String(v).toUpperCase() === 'PASS').length;
         showToast(`Reference: ${passCount}/${criteriaEntries.length} pass`, isPassing ? 'success' : 'warning');
         

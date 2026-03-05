@@ -13,7 +13,7 @@ import re
 import json
 import asyncio
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, AsyncGenerator
 from openai import AsyncOpenAI
 from dotenv import load_dotenv
 import time
@@ -181,6 +181,120 @@ If failing:  {{"status": "FAIL", "reason": "why it fails"}}"""
         + "\n".join(criteria_lines)
     )
     return {"score": score, "criteria": final_criteria, "explanation": explanation, "raw_output": "Generated via OpenRouter (independent criteria judging)"}
+
+
+async def _judge_via_openrouter_streaming(
+    prompt: str,
+    student_response: str,
+    response_reference: str,
+    judge_system_prompt: str,
+    judge_prompt_template: Optional[str],
+    model: str,
+    standard_response: str,
+    pass_threshold: float = 0.5,
+) -> AsyncGenerator[Dict[str, Any], None]:
+    """Streaming variant: yields per-criterion results as they complete."""
+    from services.openrouter_client import get_openrouter_client
+    criteria_list = _extract_criteria_list(response_reference)
+    if not criteria_list:
+        raise ValueError("CRITICAL: Could not extract criteria for judging. Reference must contain a valid JSON array or C1: ... format.")
+
+    total = len(criteria_list)
+    yield {"type": "start", "total": total, "criteria_ids": [c.get("id", f"C{i+1}") for i, c in enumerate(criteria_list)]}
+
+    client = get_openrouter_client()
+    if not judge_system_prompt or not judge_system_prompt.strip():
+        raise ValueError("Judge system prompt is empty.")
+
+    results = []
+    pass_count = 0
+
+    async def _eval_one(criterion):
+        c_id = criterion.get("id", "?")
+        desc = criterion.get("description", "")
+        eval_prompt = f"""Criterion ({c_id}): {desc}
+
+Question:
+{prompt}
+
+Student Answer:
+{student_response}
+
+Evaluate strictly whether the Student Answer meets the requirement stated in the criterion above.
+
+You MUST respond with ONLY this JSON (no other text):
+
+If passing:  {{"status": "PASS", "reason": "why it passes"}}
+If failing:  {{"status": "FAIL", "reason": "why it fails"}}"""
+        messages = [{"role": "system", "content": judge_system_prompt}, {"role": "user", "content": eval_prompt}]
+        status = "MISSING"
+        reason = "after retries"
+        for attempt in range(3):
+            try:
+                response_text, _ = await client.call_model(
+                    prompt="", model=model, max_tokens=2048, stream=False,
+                    messages=messages, reasoning_budget_percent=0, temperature=0,
+                )
+                data = {}
+                if response_text:
+                    text = response_text.strip()
+                    import re as _re
+                    fence_match = _re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, _re.DOTALL)
+                    if fence_match:
+                        text = fence_match.group(1)
+                    try:
+                        data = json.loads(text)
+                    except json.JSONDecodeError:
+                        brace = text.find("{")
+                        if brace != -1:
+                            depth = 0
+                            for i in range(brace, len(text)):
+                                if text[i] == "{": depth += 1
+                                elif text[i] == "}": depth -= 1
+                                if depth == 0:
+                                    try:
+                                        data = json.loads(text[brace : i + 1])
+                                    except json.JSONDecodeError:
+                                        pass
+                                    break
+                raw_status = (data.get("status") or data.get("result") or "").strip()
+                if not raw_status:
+                    reason = "JSON missing 'status' or 'result'"
+                    continue
+                raw_status_upper = raw_status.upper()
+                if raw_status_upper not in ("PASS", "FAIL"):
+                    reason = f"status value '{raw_status}' not in {{PASS, FAIL}}"
+                    continue
+                status = raw_status_upper
+                reason = data.get("reason") or data.get("explanation") or data.get("message") or "No reason"
+                break
+            except Exception as e:
+                reason = f"Eval error: {str(e)}"
+        if status == "MISSING":
+            reason = f"⚠️ {reason}"
+        return {"id": c_id, "status": status, "reason": reason}
+
+    tasks = {asyncio.ensure_future(_eval_one(c)): c for c in criteria_list}
+    for future in asyncio.as_completed(tasks.keys()):
+        result = await future
+        results.append(result)
+        if result["status"] == "PASS":
+            pass_count += 1
+        yield {"type": "criterion", "id": result["id"], "status": result["status"], "reason": result["reason"],
+               "passing": pass_count, "evaluated": len(results), "total": total}
+
+    pass_rate = pass_count / (total or 1)
+    score = 1 if (pass_rate >= 1.0) or (pass_threshold < 1.0 and pass_rate > pass_threshold) else 0
+    sorted_results = sorted(results, key=lambda r: r["id"])
+    def _icon(s):
+        if s == "PASS": return "✅"
+        if s == "MISSING": return "⚠️"
+        return "❌"
+    criteria_lines = [f"{_icon(r['status'])} {r['id']} ({r['status']}): {r['reason']}" for r in sorted_results]
+    explanation = f"Independent Judging Results:\n- Passing Criteria: {pass_count}/{total}\n\n" + "\n".join(criteria_lines)
+    final_criteria = {r["id"]: r["status"] for r in results}
+    yield {"type": "done", "score": score, "passing": pass_count, "total": total,
+           "criteria": final_criteria, "explanation": explanation}
 
 
 class OpenAIJudgeClient:
@@ -521,6 +635,107 @@ class OpenAIJudgeClient:
             "explanation": explanation,
             "raw_output": "Generated via Independent Criteria Judging"
         }
+
+    async def judge_response_streaming(
+        self,
+        prompt: str,
+        student_response: str,
+        response_reference: str,
+        judge_system_prompt: str,
+        judge_prompt_template: Optional[str] = None,
+        model: str = "gpt-5",
+        standard_response: Optional[str] = None,
+        pass_threshold: float = 0.5,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """Streaming variant of judge_response — yields per-criterion results via SSE."""
+        if not judge_system_prompt or not judge_system_prompt.strip():
+            raise ValueError("CRITICAL: Judge system prompt is empty.")
+        if not response_reference or not response_reference.strip():
+            raise ValueError("CRITICAL: response_reference is empty or missing")
+
+        if "/" in (model or ""):
+            if not self.openrouter_key:
+                raise ValueError("OpenRouter model selected but OPENROUTER_API_KEY not set.")
+            async for event in _judge_via_openrouter_streaming(
+                prompt=prompt, student_response=student_response,
+                response_reference=response_reference, judge_system_prompt=judge_system_prompt,
+                judge_prompt_template=judge_prompt_template, model=model,
+                standard_response=standard_response or "", pass_threshold=pass_threshold,
+            ):
+                yield event
+            return
+
+        if not self.client:
+            raise ValueError("Direct OpenAI judge model selected but OPENAI_API_KEY not set.")
+
+        async for event in self._judge_independently_streaming(
+            prompt, student_response, response_reference,
+            judge_system_prompt, model, standard_response=standard_response or "",
+            pass_threshold=pass_threshold,
+        ):
+            yield event
+
+    async def _judge_independently_streaming(
+        self,
+        prompt: str,
+        student_response: str,
+        reference: str,
+        system_prompt: str,
+        model: str,
+        standard_response: Optional[str] = None,
+        pass_threshold: float = 0.5,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """Streaming variant: yields per-criterion results as tasks complete."""
+        criteria_list = await self._extract_criteria(reference, model)
+        if not criteria_list:
+            raise ValueError("CRITICAL: Could not extract criteria for independent judging.")
+
+        total = len(criteria_list)
+        yield {"type": "start", "total": total,
+               "criteria_ids": [c.get("id", f"C{i+1}") for i, c in enumerate(criteria_list)]}
+
+        tasks = {
+            asyncio.ensure_future(
+                self._evaluate_single_criterion(
+                    prompt, student_response, criterion, model,
+                    standard_response=standard_response, judge_system_prompt=system_prompt
+                )
+            ): criterion
+            for criterion in criteria_list
+        }
+
+        results = []
+        pass_count = 0
+        for future in asyncio.as_completed(tasks.keys()):
+            result = await future
+            results.append(result)
+            if result["status"] == "PASS":
+                pass_count += 1
+            yield {"type": "criterion", "id": result["id"], "status": result["status"],
+                   "reason": result["reason"], "passing": pass_count,
+                   "evaluated": len(results), "total": total}
+
+        fail_count = sum(1 for r in results if r["status"] != "PASS")
+        pass_rate = pass_count / (total or 1)
+        score = 1 if (pass_rate >= 1.0) or (pass_threshold < 1.0 and pass_rate > pass_threshold) else 0
+
+        final_criteria = {r["id"]: r["status"] for r in results}
+        sorted_results = sorted(results, key=lambda r: r["id"])
+        def _icon(s):
+            if s == "PASS": return "✅"
+            if s == "MISSING": return "⚠️"
+            return "❌"
+        criteria_lines = [
+            f"{_icon(r['status'])} {r['id']} ({r['status']}): {r['reason']}"
+            for r in sorted_results
+        ]
+        explanation = (
+            f"Independent Judging Results:\n"
+            f"- Passing Criteria: {pass_count}/{total}\n\n"
+            + "\n".join(criteria_lines)
+        )
+        yield {"type": "done", "score": score, "passing": pass_count, "total": total,
+               "criteria": final_criteria, "explanation": explanation}
 
     async def _extract_criteria(self, reference: str, model: str) -> List[Dict[str, str]]:
         """

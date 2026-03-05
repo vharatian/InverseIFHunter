@@ -959,28 +959,61 @@ export async function calibrationGenerateOne() {
     if (regenBtn) regenBtn.disabled = true;
 
     try {
-        const res = await fetch(`/api/generate-single/${state.sessionId}`, {
+        const res = await fetch(`/api/generate-single-stream/${state.sessionId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({})
         });
 
         if (!res.ok) {
-            const err = await res.json();
+            const err = await res.json().catch(() => ({}));
             throw new Error(err.detail || 'Generation failed');
         }
-
-        const data = await res.json();
-        _calibrationResponse = data.response || '';
 
         const responseArea = document.getElementById('calibrationResponseArea');
         const responseText = document.getElementById('calibrationResponseText');
         const modelInfo = document.getElementById('calibrationModelInfo');
+        if (responseArea) responseArea.classList.remove('hidden');
+        if (responseText) { responseText.textContent = ''; responseText.innerHTML = '<span class="tb-stream-cursor"></span>'; }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        _calibrationResponse = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            for (const line of lines) {
+                if (!line.startsWith('data: ') && !line.startsWith('event: ')) continue;
+                if (line.startsWith('event: ')) continue;
+                let event;
+                try { event = JSON.parse(line.slice(6)); } catch { continue; }
+
+                if (event.type === 'content') {
+                    _calibrationResponse += event.text;
+                    if (responseText) {
+                        responseText.textContent = _calibrationResponse;
+                        const cursor = document.createElement('span');
+                        cursor.className = 'tb-stream-cursor';
+                        responseText.appendChild(cursor);
+                    }
+                }
+                if (event.type === 'error') {
+                    throw new Error(event.text || 'Generation failed');
+                }
+                if (event.type === 'done') {
+                    _calibrationResponse = event.response || _calibrationResponse;
+                    if (responseText) responseText.textContent = _calibrationResponse;
+                    if (modelInfo) modelInfo.textContent = `Model: ${event.model || 'unknown'} | Provider: ${event.provider || 'unknown'}`;
+                }
+            }
+        }
 
         if (responseText) responseText.textContent = _calibrationResponse;
-        if (modelInfo) modelInfo.textContent = `Model: ${data.model || 'unknown'} | Provider: ${data.provider || 'unknown'}`;
-        if (responseArea) responseArea.classList.remove('hidden');
-
         if (regenBtn) { regenBtn.classList.remove('hidden'); regenBtn.disabled = false; }
         document.getElementById('judgeCalibrationBtn')?.classList.remove('hidden');
         if (genBtn) genBtn.classList.add('hidden');
@@ -1010,52 +1043,97 @@ export async function calibrationJudge() {
     if (loadingEl) { loadingEl.classList.remove('hidden'); loadingText.textContent = 'Running judge...'; }
 
     try {
-        const res = await fetch(`/api/judge-calibration/${state.sessionId}`, {
+        const res = await fetch(`/api/judge-calibration-stream/${state.sessionId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ response_text: _calibrationResponse })
         });
 
         if (!res.ok) {
-            const err = await res.json();
+            const err = await res.json().catch(() => ({}));
             throw new Error(err.detail || 'Judge failed');
         }
 
-        const data = await res.json();
         _calibrationJudged = true;
-
-        const criteria = data.criteria || {};
-        const score = data.score;
-        const isPassing = (score || 0) >= 1;
-        const scoreColor = isPassing ? 'var(--success, #10b981)' : 'var(--danger, #ef4444)';
-
         const resultDiv = document.getElementById('calibrationJudgeResult');
         if (resultDiv) {
-            let criteriaHtml = '';
-            for (const [k, v] of Object.entries(criteria)) {
-                const isPass = String(v).toUpperCase() === 'PASS';
-                criteriaHtml += `<span style="display: inline-block; padding: 0.15rem 0.5rem; margin: 0.15rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; background: ${isPass ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)'}; color: ${isPass ? 'var(--success,#10b981)' : 'var(--danger,#ef4444)'};">${escapeHtml(k)}: ${escapeHtml(String(v))}</span>`;
-            }
-
             resultDiv.innerHTML = `
-                <div style="padding: 1rem; background: var(--bg-primary); border-radius: 8px; border: 1px solid ${scoreColor};">
+                <div style="padding: 1rem; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border);">
                     <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
-                        <span style="font-weight: 700; color: ${scoreColor};">Score: ${score} ${isPassing ? '(PASS)' : '(FAIL)'}</span>
+                        <span class="tb-spinner" style="width:14px;height:14px;"></span>
+                        <span style="font-weight: 700;" id="calJudgeScoreLabel">Evaluating…</span>
                     </div>
                     <div style="margin-bottom: 0.75rem;">
                         <label style="font-weight: 600; font-size: 0.85rem;">Criteria Breakdown:</label>
-                        <div style="margin-top: 0.25rem;">${criteriaHtml || '<span style="color:var(--text-muted);">No criteria data</span>'}</div>
+                        <div style="margin-top: 0.25rem;" id="calJudgeCriteriaBody"></div>
                     </div>
-                    <div>
-                        <label style="font-weight: 600; font-size: 0.85rem;">Judge Explanation:</label>
-                        <p style="margin-top: 0.25rem; font-size: 0.85rem; color: var(--text-secondary); white-space: pre-wrap;">${escapeHtml(data.explanation || 'No explanation')}</p>
-                    </div>
-                    <p style="margin-top: 0.75rem; font-size: 0.8rem; color: var(--text-muted);">
-                        You can tweak your criteria or judge prompt above, then click "Judge This Response" again to re-judge the same response.
-                    </p>
-                </div>
-            `;
+                </div>`;
             resultDiv.classList.remove('hidden');
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let finalData = {};
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                let event;
+                try { event = JSON.parse(line.slice(6)); } catch { continue; }
+                if (event.type === 'error') throw new Error(event.message || 'Judge failed');
+                if (event.type === 'start') {
+                    const label = document.getElementById('calJudgeScoreLabel');
+                    if (label) label.textContent = `0/${event.total} Passing…`;
+                }
+                if (event.type === 'criterion') {
+                    const body = document.getElementById('calJudgeCriteriaBody');
+                    if (body) {
+                        const isPass = event.status === 'PASS';
+                        const chip = document.createElement('span');
+                        chip.className = 'tb-criterion-enter';
+                        chip.style.cssText = `display: inline-block; padding: 0.15rem 0.5rem; margin: 0.15rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; background: ${isPass ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)'}; color: ${isPass ? 'var(--success,#10b981)' : 'var(--danger,#ef4444)'};`;
+                        chip.textContent = `${event.id}: ${event.status}`;
+                        body.appendChild(chip);
+                    }
+                    const label = document.getElementById('calJudgeScoreLabel');
+                    if (label) label.textContent = `${event.passing}/${event.total} Passing…`;
+                }
+                if (event.type === 'done') {
+                    finalData = event;
+                }
+            }
+        }
+
+        const score = finalData.score ?? 0;
+        const isPassing = score >= 1;
+        const scoreColor = isPassing ? 'var(--success, #10b981)' : 'var(--danger, #ef4444)';
+        const label = document.getElementById('calJudgeScoreLabel');
+        if (label) {
+            label.style.color = scoreColor;
+            label.textContent = `Score: ${score} ${isPassing ? '(PASS)' : '(FAIL)'} — ${finalData.passing || 0}/${finalData.total || 0} Passing`;
+            label.previousElementSibling?.remove();
+        }
+
+        if (resultDiv) {
+            const container = resultDiv.querySelector('div');
+            if (container) container.style.borderColor = scoreColor;
+            const explanationEl = document.createElement('div');
+            explanationEl.innerHTML = `
+                <div style="margin-top: 0.75rem;">
+                    <label style="font-weight: 600; font-size: 0.85rem;">Judge Explanation:</label>
+                    <p style="margin-top: 0.25rem; font-size: 0.85rem; color: var(--text-secondary); white-space: pre-wrap;">${escapeHtml(finalData.explanation || 'No explanation')}</p>
+                </div>
+                <p style="margin-top: 0.75rem; font-size: 0.8rem; color: var(--text-muted);">
+                    You can tweak your criteria or judge prompt above, then click "Judge This Response" again to re-judge the same response.
+                </p>`;
+            const mainContainer = resultDiv.querySelector('div');
+            if (mainContainer) mainContainer.appendChild(explanationEl);
         }
 
         state.referenceValidated = true;

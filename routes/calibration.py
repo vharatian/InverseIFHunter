@@ -1,10 +1,12 @@
 """
 Calibration Routes
 
-POST /api/generate-single/{session_id}        — generate single model response (no judging)
-POST /api/generate-single-stream/{session_id}  — SSE streaming version of the above
-POST /api/judge-calibration/{session_id}       — judge a specific response text
-POST /api/judge-reference/{session_id}         — judge the reference response
+POST /api/generate-single/{session_id}              — generate single model response (no judging)
+POST /api/generate-single-stream/{session_id}        — SSE streaming version of the above
+POST /api/judge-calibration/{session_id}             — judge a specific response text
+POST /api/judge-reference/{session_id}               — judge the reference response
+POST /api/judge-calibration-stream/{session_id}      — SSE streaming judge (per-criterion)
+POST /api/judge-reference-stream/{session_id}        — SSE streaming reference judge (per-criterion)
 """
 import re
 import json
@@ -333,3 +335,109 @@ async def judge_calibration(session_id: str, request: JudgeCalibrateRequest):
         raise
     except Exception as e:
         raise HTTPException(500, f"Judge calibration error: {str(e)}")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# SSE streaming judge endpoints (per-criterion progressive results)
+# ──────────────────────────────────────────────────────────────────────────────
+
+@router.post("/judge-calibration-stream/{session_id}")
+async def judge_calibration_stream(session_id: str, request: JudgeCalibrateRequest):
+    """SSE streaming version of judge-calibration. Yields per-criterion results as they complete."""
+    session = await _get_validated_session(session_id)
+    notebook = session.notebook
+    if not notebook:
+        raise HTTPException(400, "No notebook data in session")
+    if not request.response_text:
+        raise HTTPException(400, "No response text provided to judge")
+
+    from services.openai_client import get_openai_judge_client
+    judge = get_openai_judge_client()
+
+    judge_model = request.judge_model or getattr(session.config, "judge_model", None) or "gpt-4o"
+    effective_prompt = request.prompt if request.prompt is not None else notebook.prompt
+    effective_response_reference = request.response_reference if request.response_reference is not None else notebook.response_reference
+    effective_judge_system_prompt = request.judge_system_prompt if request.judge_system_prompt is not None else notebook.judge_system_prompt
+
+    if not effective_response_reference:
+        raise HTTPException(400, "response_reference is empty or missing")
+
+    async def _stream():
+        try:
+            async for event in judge.judge_response_streaming(
+                prompt=effective_prompt,
+                student_response=request.response_text,
+                response_reference=effective_response_reference,
+                judge_system_prompt=effective_judge_system_prompt,
+                judge_prompt_template=notebook.judge_prompt_template,
+                model=judge_model,
+                standard_response=request.response_text,
+            ):
+                yield f"data: {json.dumps(event)}\n\n"
+        except Exception as e:
+            logger.exception("Streaming judge-calibration error")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(
+        _stream(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.post("/judge-reference-stream/{session_id}")
+async def judge_reference_stream(
+    session_id: str,
+    skip_colab_refresh: bool = Query(False),
+):
+    """SSE streaming version of judge-reference. Yields per-criterion results as they complete."""
+    session = await _get_validated_session(session_id)
+
+    storage = get_session_storage(session_id)
+    if skip_colab_refresh or session.current_turn > 1:
+        pass
+    elif storage and "url" in storage:
+        try:
+            parsed, _ = await notebook_parser.load_from_url(storage["url"])
+            if not (parsed.prompt or "").strip() and (session.notebook.prompt or "").strip():
+                parsed.prompt = session.notebook.prompt
+            if not (parsed.response or "").strip() and (session.notebook.response or "").strip():
+                parsed.response = session.notebook.response
+            if not (parsed.response_reference or "").strip() and (session.notebook.response_reference or "").strip():
+                parsed.response_reference = session.notebook.response_reference
+            if not (parsed.judge_system_prompt or "").strip() and (session.notebook.judge_system_prompt or "").strip():
+                parsed.judge_system_prompt = session.notebook.judge_system_prompt
+            if not (parsed.model_reasoning or "").strip() and (session.notebook.model_reasoning or "").strip():
+                parsed.model_reasoning = session.notebook.model_reasoning
+            session.notebook = parsed
+            await redis_store.set_notebook(session_id, parsed)
+        except Exception as e:
+            logger.warning(f"Could not refresh notebook from Colab: {e}. Using cached version.")
+
+    notebook = session.notebook
+    if not notebook.response:
+        raise HTTPException(400, "No expected response available in notebook")
+
+    from services.openai_client import get_openai_judge_client
+    judge = get_openai_judge_client()
+    judge_model = getattr(session.config, "judge_model", None) or "gpt-4o"
+
+    async def _stream():
+        try:
+            async for event in judge.judge_response_streaming(
+                prompt=notebook.prompt,
+                student_response=notebook.response,
+                response_reference=notebook.response_reference,
+                judge_system_prompt=notebook.judge_system_prompt,
+                judge_prompt_template=notebook.judge_prompt_template,
+                model=judge_model,
+                standard_response=notebook.response,
+            ):
+                yield f"data: {json.dumps(event)}\n\n"
+        except Exception as e:
+            logger.exception("Streaming judge-reference error")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(
+        _stream(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
