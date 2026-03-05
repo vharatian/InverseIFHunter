@@ -17,6 +17,7 @@ import {
     disableSelectionCheckboxes,
 } from './results.js';
 import { syncHuntModeFromConfig } from './hunt.js';
+import { resetTestbed, showTestbed } from './testbed.js';
 
 /**
  * Fetch full session state from backend and hydrate the UI.
@@ -156,6 +157,12 @@ function _restoreSectionVisibility() {
         // Show config section (prompt, criteria, hunt config)
         if (elements.configSection) elements.configSection.classList.remove('hidden');
         syncHuntModeFromConfig();
+
+        // Auto-open Testbed when no hunt results exist (user is still in editing phase)
+        if (state.allResponses.length === 0) {
+            resetTestbed();
+            showTestbed();
+        }
     }
 
     // 2. If hunt results exist, show selection section
@@ -345,46 +352,19 @@ function _applySectionLocks(flags, feedback) {
 }
 
 /**
- * Lock prompt, model reference, and judge system prompt sections and show reviewer feedback modals.
- * @param {object} feedback - feedback.prompt_feedback, model_reference_feedback, judge_system_prompt_feedback
+ * Lock notebook-editing sections and store reviewer feedback in state.
+ * Old preview card panels have been removed — the Testbed reads feedback from state.
  */
 function _lockConfigSectionsAndShowFeedback(feedback) {
-    const promptFb = (feedback.prompt_feedback || '').trim();
-    const modelRefFb = (feedback.model_reference_feedback || '').trim();
-    const judgeFb = (feedback.judge_system_prompt_feedback || '').trim();
-
-    const panels = [
-        { id: 'previewPrompt', label: 'Prompt', text: promptFb },
-        { id: 'previewModelref', label: 'Model Reference', text: modelRefFb },
-        { id: 'previewJudge', label: 'Judge System Prompt', text: judgeFb },
-    ];
-    panels.forEach(({ id, label, text }) => {
-        const panel = document.getElementById(id);
-        if (!panel) return;
-        panel.classList.add('config-section-locked');
-        panel.querySelectorAll('input, textarea, select, button').forEach(el => {
-            if (!el.classList.contains('section-lock-bypass')) el.disabled = true;
-        });
-        let box = panel.querySelector('.config-section-reviewer-feedback');
-        if (box) box.remove();
-        if (text) {
-            box = document.createElement('div');
-            box.className = 'config-section-reviewer-feedback';
-            box.innerHTML = `<div class="config-section-reviewer-feedback-label">📋 Reviewer feedback (${label})</div><div class="config-section-reviewer-feedback-text">${escapeHtml(text)}</div>`;
-            panel.prepend(box);
-        }
-    });
+    state._reviewerConfigFeedback = {
+        prompt: (feedback.prompt_feedback || '').trim(),
+        modelRef: (feedback.model_reference_feedback || '').trim(),
+        judge: (feedback.judge_system_prompt_feedback || '').trim(),
+    };
 }
 
 function _unlockConfigSections() {
-    ['previewPrompt', 'previewModelref', 'previewJudge'].forEach(id => {
-        const panel = document.getElementById(id);
-        if (!panel) return;
-        panel.classList.remove('config-section-locked');
-        panel.querySelectorAll('input, textarea, select, button').forEach(el => { el.disabled = false; });
-        const box = panel.querySelector('.config-section-reviewer-feedback');
-        if (box) box.remove();
-    });
+    state._reviewerConfigFeedback = null;
 }
 
 function _setLocked(element, locked) {

@@ -18,16 +18,11 @@ import { initVersionCheck, showAppModal } from './modules/api.js';
 // Feature Modules
 import { initHuntNumberControls, startHunt } from './modules/hunt.js';
 import { 
-    initPreviewTabs, 
     initFileUpload,
     fetchFromUrl, 
     toggleMetadataSidebar, 
     runProceedToQualityCheck,
-    saveResponseOnly,
-    judgeReferenceResponse,
-    saveAllCells,
     saveCurrentCellsToColab,
-    setupSaveHandlers,
     syncTurnStatusFromBackend,
     initTurn1TestPromptListeners,
     updateAdminModeIndicator,
@@ -44,13 +39,7 @@ import {
     initSelectionSectionCollapse
 } from './modules/results.js';
 import { initMultiTurnListeners, initCalibrationListeners } from './modules/multiturn.js';
-import { 
-    initRichTextEditors, 
-    initResizablePanels, 
-    initStructuredInput, 
-    initPromptLengthValidation, 
-    updateModelOptions
-} from './modules/editors.js';
+import { updateModelOptions } from './modules/editors.js';
 import { initAutosave, initNextTurnAutosave, initGradingAutosave, resetAllStatuses } from './modules/autosave.js';
 import { handleHumanJudgment, showNextBlindJudge, showToast, showError } from './modules/celebrations.js';
 import { updateCriteriaButtonsState } from './modules/utils.js';
@@ -93,7 +82,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         // 4. Initialize Components & UI
         initFileUpload();
         initHuntNumberControls();
-        initPreviewTabs();
         initSlideoutResize();
         initCalibrationListeners();
         initTestbed();
@@ -101,15 +89,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Back button: Hunt Config → Notebook Preview
         document.getElementById('huntBackBtn')?.addEventListener('click', goBackToNotebook);
         
-        // Notebook / Editor Inits (ensure they run if notebook.js doesn't auto-run them on import)
-        // Check if notebook.js exports an init function? No, it exports specific inits.
-        // But populatePreviewTabs calls them on load.
-        // We might need to call them initially for empty state?
-        initRichTextEditors();
-        initResizablePanels();
-        initStructuredInput();
-        initPromptLengthValidation();
-        setupSaveHandlers();
         initTurn1TestPromptListeners();
         initOfflineQueue();
         initAutosave();
@@ -374,12 +353,7 @@ function initEventListeners() {
     elements.humanJudgeSkip?.addEventListener('click', () => handleHumanJudgment(null));
     elements.nextHuntBtn?.addEventListener('click', showNextBlindJudge);
     
-    // Reference Judging
-    elements.judgeReferenceBtn?.addEventListener('click', judgeReferenceResponse);
-    elements.judgeBeforeHuntBtn?.addEventListener('click', judgeReferenceResponse);
-    
-    // Save Response
-    elements.saveResponseBtn?.addEventListener('click', saveResponseOnly);
+    // Reference Judging — handled by Testbed
     
     // Selection & Reveal (use getElementById as fallback - elements may be null if DOM not ready at module load)
     const confirmBtn = document.getElementById('confirmSelectionBtn') || elements.confirmSelectionBtn;
@@ -391,29 +365,12 @@ function initEventListeners() {
     }
     initSelectionSectionCollapse();
 
-    // Add criterion buttons (data-target/data-prefix) — insert C1:, C2:, etc. into textarea
-    document.querySelectorAll('.add-criterion-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const targetId = btn.dataset.target;
-            const prefix = btn.dataset.prefix || 'C1';
-            const textarea = document.getElementById(targetId);
-            if (!textarea || btn.disabled) return;
-            const current = textarea.value;
-            const endsWithNewline = current.endsWith('\n') || current.endsWith('\r');
-            const toInsert = current.length === 0 ? `${prefix}: ` : (endsWithNewline ? `${prefix}: ` : `\n${prefix}: `);
-            textarea.value = current + toInsert;
-            textarea.selectionStart = textarea.selectionEnd = textarea.value.length;
-            textarea.focus();
-            textarea.dispatchEvent(new Event('input', { bubbles: true }));
-        });
-    });
-    ['modelrefPreview', 'nextTurnCriteria'].forEach(targetId => {
-        const el = document.getElementById(targetId);
-        if (el) {
-            el.addEventListener('input', () => updateCriteriaButtonsState(targetId));
-            updateCriteriaButtonsState(targetId);
-        }
-    });
+    // Criteria button state for next-turn editor
+    const nextCriteriaEl = document.getElementById('nextTurnCriteria');
+    if (nextCriteriaEl) {
+        nextCriteriaEl.addEventListener('input', () => updateCriteriaButtonsState('nextTurnCriteria'));
+        updateCriteriaButtonsState('nextTurnCriteria');
+    }
     
     // Slideouts
     elements.slideoutCloseBtn?.addEventListener('click', closeResponseSlideout);

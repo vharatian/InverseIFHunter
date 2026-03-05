@@ -266,8 +266,7 @@ export async function startHunt() {
     }
     
     // MANDATORY: Empty prompt check — no bypass (admin or normal)
-    const promptEl = document.getElementById('promptMarkdown');
-    const promptText = (promptEl?.value ?? state.notebook?.prompt ?? '').trim();
+    const promptText = (state.notebook?.prompt ?? '').trim();
     if (!promptText) {
         showToast('❌ Prompt cannot be empty. Please enter a prompt before starting the hunt.', 'error');
         return;
@@ -360,10 +359,9 @@ export async function startHunt() {
     // Covers the case where the user edited prompt/criteria in the testbed
     // (saveRunToTurn updates state.notebook but not Redis).
     // Always read prompt from the DOM editor first — it is the authoritative source.
-    syncActiveRunToNotebook();  // pull latest testbed run → state.notebook (no-op if no active run)
+    syncActiveRunToNotebook();
     {
-        const promptEl = document.getElementById('promptMarkdown');
-        const livePrompt = (promptEl?.value ?? '').trim() || (state.notebook?.prompt ?? '').trim();
+        const livePrompt = (state.notebook?.prompt ?? '').trim();
         const liveRef   = state.notebook?.response_reference ?? '';
         const liveJsp   = state.notebook?.judge_system_prompt ?? '';
 

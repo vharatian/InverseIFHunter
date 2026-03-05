@@ -19,8 +19,8 @@ import {
 import { showToast, showError } from './celebrations.js';
 import { fetchAllResponses, fetchAllResponsesAndShowSelection } from './results.js';
 import { renderPriorConversationBanner, enableNavTestbedButton, resetTestbed, showTestbed } from './testbed.js';
-import { populatePreviewTabs, progressiveSaveToColab } from './notebook.js';
-import { validatePromptLength, convertStructuredToJSON } from './editors.js';
+import { progressiveSaveToColab } from './notebook.js';
+import { validatePromptLength } from './editors.js';
 // It uses showCalibrationPanel internally, so no import needed if it's in the same file.
 // It uses startHunt (for calibration).
 import { updateHuntLimitUI, resetHuntNumberToDefault } from './hunt.js';
@@ -814,7 +814,6 @@ async function _applyTurnAdvance(apiData, selectedResp, completedPrompt, complet
     renderTurnHistoryTabs();
     document.getElementById('multiTurnSection').classList.remove('hidden');
 
-    populatePreviewTabs(state.notebook);
     validatePromptLength();
 
     const { hideTurn1TestPromptPanel } = await import('./notebook.js');
@@ -857,25 +856,12 @@ async function _applyTurnAdvance(apiData, selectedResp, completedPrompt, complet
 }
 
 /**
- * Read current prompt and criteria from the DOM editors.
+ * Read current prompt and criteria from state.notebook (single source of truth).
  * @returns {{ prompt: string, criteria: string }}
  */
 function _readPromptAndCriteriaFromDOM() {
-    const promptEl = document.getElementById('promptMarkdown');
-    const modelRefEl = elements.modelrefPreview;
-    let prompt = state.notebook?.prompt || '';
-    let criteria = state.notebook?.response_reference || '';
-    if (promptEl && promptEl.value !== undefined) {
-        prompt = promptEl.value.trim();
-    }
-    if (modelRefEl) {
-        try {
-            convertStructuredToJSON();
-            criteria = state.convertedModelRefJSON || modelRefEl.value || criteria;
-        } catch {
-            criteria = modelRefEl.value || criteria;
-        }
-    }
+    const prompt = state.notebook?.prompt || '';
+    const criteria = state.notebook?.response_reference || '';
     return { prompt, criteria };
 }
 
@@ -917,8 +903,7 @@ export async function selectGoodResponse(response) {
 
         const data = await res.json();
 
-        const currentJudgePrompt = document.getElementById('judgeMarkdown')?.value?.trim()
-            || state.notebook?.judge_system_prompt || '';
+        const currentJudgePrompt = state.notebook?.judge_system_prompt || '';
         await _applyTurnAdvance(data, response, currentPrompt, currentCriteria, {
             prompt: currentPrompt,
             response_reference: currentCriteria,

@@ -25,16 +25,9 @@ import {
 import { showToast, showError, triggerColabConfetti } from './celebrations.js';
 import { clearPreviousResults, formatJudgeCriteriaDisplay, warmupConnections, setReviewModeButtonsDisabled } from './results.js';
 import { 
-    initMarkdownEditors, 
-    convertStructuredToJSON, 
     validateModelMatch, 
     updateModelOptions, 
-    updateMarkdownPreview, 
     validatePromptLength,
-    initRichTextEditors,
-    initResizablePanels,
-    initStructuredInput,
-    initPromptLengthValidation,
     showModelLockedIndicator,
     hideModelLockedIndicator
 } from './editors.js';
@@ -42,7 +35,7 @@ import { showAppModal, showPasswordPrompt } from './api.js';
 import { runQualityCheckOverlay } from './qualityCheckOverlay.js';
 import { renderQCPersistentSection } from './qcPersistentSection.js';
 import { runQualityCheckInline } from './qcInline.js';
-import { enableNavTestbedButton, validateJudgeOutputFormat } from './testbed.js';
+import { enableNavTestbedButton, validateJudgeOutputFormat, syncActiveRunToNotebook } from './testbed.js';
 
 /**
  * Enable/disable the Colab save button based on review_status.
@@ -827,19 +820,11 @@ export async function saveCurrentCellsToColab() {
     const notebookUrl = state.notebook?.url || document.getElementById('colabUrlInput')?.value || '';
     if (!notebookUrl) return { success: false, message: 'No Colab URL' };
 
-    const testbedVisible = document.getElementById('testbedSection') && !document.getElementById('testbedSection').classList.contains('hidden');
-    let prompt, idealResponse, criteria, judgePrompt;
-    if (testbedVisible) {
-        prompt        = state.notebook?.prompt || '';
-        idealResponse = state.notebook?.response || '';
-        criteria      = state.notebook?.response_reference || '';
-        judgePrompt   = state.notebook?.judge_system_prompt || '';
-    } else {
-        prompt        = document.getElementById('promptMarkdown')?.value?.trim()  || state.notebook?.prompt || '';
-        idealResponse = document.getElementById('responseMarkdown')?.value?.trim() || state.notebook?.response || '';
-        criteria      = (state.convertedModelRefJSON || document.getElementById('modelrefPreview')?.value?.trim() || state.notebook?.response_reference || '').trim();
-        judgePrompt   = document.getElementById('judgeMarkdown')?.value?.trim()   || state.notebook?.judge_system_prompt || '';
-    }
+    const nb = state.notebook || {};
+    const prompt        = nb.prompt || '';
+    const idealResponse = nb.response || '';
+    const criteria      = nb.response_reference || '';
+    const judgePrompt   = nb.judge_system_prompt || '';
 
     const turnNum = state.currentTurn || 1;
     const cells = [];
@@ -1370,8 +1355,7 @@ export async function submitToColab() {
             ? state.multiTurnTotalHunts + validResponseCount
             : validResponseCount;
 
-        const judgeSystemPrompt = document.getElementById('judgeMarkdown')?.value?.trim()
-            || state.notebook?.judge_system_prompt || '';
+        const judgeSystemPrompt = state.notebook?.judge_system_prompt || '';
 
         const judgePromptTemplate = `Question\n{prompt}\n\nStudent Response\n{model_response}\n\nStandard Response\n{standard_response}\n\nEvaluation Criteria\n{criteria}`;
 
@@ -1417,100 +1401,31 @@ export async function submitToColab() {
 }
 
 export function populatePreviewTabs(notebook) {
-    // Content changed — previous judge result is stale
     if (!state.adminMode && !getConfigValue('bypass_hunt_criteria', false)) {
         state.referenceValidated = false;
     }
-    // Populate Markdown editors (textareas) and update previews
-    const promptTextarea = document.getElementById('promptMarkdown');
-    if (promptTextarea) {
-        promptTextarea.value = notebook.prompt || '';
-        // Update preview
-        updateMarkdownPreview(promptTextarea);
-        // Reset unsaved changes
-        state.unsavedChanges.prompt = false;
-        // Update word count display after loading
-        setTimeout(() => validatePromptLength(), 100);
-    }
-    
-    const responseTextarea = document.getElementById('responseMarkdown');
-    if (responseTextarea) {
-        responseTextarea.value = notebook.response || '';
-        // Update preview
-        updateMarkdownPreview(responseTextarea);
-        state.unsavedChanges.response = false;
-    }
-    
-    const judgeTextarea = document.getElementById('judgeMarkdown');
-    if (judgeTextarea) {
-        judgeTextarea.value = notebook.judge_system_prompt || '';
-        // Update preview
-        updateMarkdownPreview(judgeTextarea);
-        state.unsavedChanges.judge = false;
-    }
-    
-    // Populate Model Reference with structured input
-    if (elements.modelrefPreview) {
-        // Convert JSON to structured text format if it's JSON
-        const responseRef = notebook.response_reference || '';
-        if (responseRef.trim().startsWith('[') || responseRef.trim().startsWith('{')) {
-            // It's JSON, convert to structured format
-            try {
-                const json = JSON.parse(responseRef);
-                if (Array.isArray(json)) {
-                    const structured = json.map(item => {
-                        const id = item.id || 'C1';
-                        const criteriaKey = Object.keys(item).find(k => k.startsWith('criteria'));
-                        const description = criteriaKey ? item[criteriaKey] : '';
-                        return `${id}: ${description}`;
-                    }).join('\n');
-                    elements.modelrefPreview.value = structured;
-                } else {
-                    elements.modelrefPreview.value = responseRef;
-                }
-            } catch (e) {
-                // If parsing fails, use as-is
-                elements.modelrefPreview.value = responseRef;
-            }
-        } else {
-            // Already in structured format or plain text
-            elements.modelrefPreview.value = responseRef;
-        }
-    }
-    
-    // Display metadata FIRST - before any validation that might cause early return
-    // This ensures metadata is always shown even if other parts of the notebook are invalid
-    
-    // Try multiple ways to get metadata
-    let metadataToDisplay = null;
-    if (notebook.metadata && typeof notebook.metadata === 'object' && Object.keys(notebook.metadata).length > 0) {
-        metadataToDisplay = notebook.metadata;
-    } else if (notebook.metadata) {
-        // Metadata exists but might be empty
-        metadataToDisplay = notebook.metadata;
-    } else {
-        console.warn('⚠️ No metadata found in notebook object');
-        metadataToDisplay = {};
-    }
-    
+
+    state.unsavedChanges.prompt = false;
+    state.unsavedChanges.response = false;
+    state.unsavedChanges.judge = false;
+
+    // Display metadata
+    const metadataToDisplay = (notebook.metadata && typeof notebook.metadata === 'object')
+        ? notebook.metadata : {};
     displayMetadata(metadataToDisplay);
-    
-    // Validate Model Reference is valid JSON format
+
+    // Validate Model Reference JSON format
     const modelRefValidation = validateModelReferenceJSON(notebook.response_reference || '');
     state.modelRefValid = modelRefValidation.valid;
-    
-    if (!modelRefValidation.valid) {
-        // Log for debugging only — do not show error toasts during notebook load
-        if ((notebook.response_reference || '').trim()) {
-            console.warn('Model Reference not valid JSON at load time — user can edit in testbed');
-        }
+
+    if (!modelRefValidation.valid && (notebook.response_reference || '').trim()) {
+        console.warn('Model Reference not valid JSON at load time — user can edit in testbed');
     }
-    
-    // Parse and store criteria from response_reference
+
+    // Parse and store criteria
     let parsedCriteria;
     try {
         const rawRef = notebook.response_reference || '';
-        // Empty notebook — no criteria to parse, not an error
         if (!rawRef.trim()) {
             state.criteria = null;
         } else {
@@ -1521,46 +1436,19 @@ export function populatePreviewTabs(notebook) {
         console.error('Failed to parse criteria:', error);
         showError(error, { operation: 'Parse criteria' });
         state.criteria = null;
-        // Disable hunt button — bypass in admin mode or bypass_hunt_criteria
         if (elements.startHuntBtn) {
             elements.startHuntBtn.disabled = false;
             elements.startHuntBtn.title = '';
         }
-        // Don't return early - continue to initialize other features
-        // Metadata is already displayed above
     }
-    
-    // Only continue with criteria-related code if parsing succeeded
+
     if (parsedCriteria && Array.isArray(parsedCriteria)) {
-        // Store initial criteria to detect missing ones later
-        // CRITICAL: Only set initialCriteria ONCE when notebook is first loaded
-        // This must happen BEFORE any modifications to response_reference
         if (!state.initialCriteria || !Array.isArray(state.initialCriteria) || state.initialCriteria.length === 0) {
-            state.initialCriteria = JSON.parse(JSON.stringify(parsedCriteria)); // Deep copy
+            state.initialCriteria = JSON.parse(JSON.stringify(parsedCriteria));
         }
-        
-        // Validate Model Reference: Check JSON format AND criteria completeness
         validateModelReferenceAndCriteria(notebook.response_reference || '');
     }
-    
-    renderLiveExportPreview();
-    
-    // Initialize rich text editors
-    initRichTextEditors();
-    
-    // Initialize resizable panels
-    initResizablePanels();
-    
-    // Initialize structured input for Model Reference
-    initStructuredInput();
-    
-    // Initialize prompt length validation
-    initPromptLengthValidation();
-    
-    // Setup save button handlers
-    setupSaveHandlers();
 
-    // Reset auto-save status indicators to "saved" after load
     resetAllStatuses();
 }
 
@@ -1571,7 +1459,7 @@ export function populatePreviewTabs(notebook) {
  * Restores normal lock behavior (disabled button if conditions not met).
  */
 export function refreshValidationState() {
-    const responseRef = elements.modelrefPreview?.value?.trim() || state.notebook?.response_reference || '';
+    const responseRef = state.notebook?.response_reference || '';
     validateModelReferenceAndCriteria(responseRef);
     updateHuntLimitUI();
     // Re-check review mode: disable all action buttons when selection confirmed
@@ -1904,14 +1792,6 @@ function _populateTaskInfoChip(fields, getValue) {
 
 // ============== Save Handlers ==============
 
-export function setupSaveHandlers() {
-    // Individual save buttons removed — auto-save handles prompt, response, criteria, judge
-    // Save All & Judge button only
-    if (elements.saveAllBtn) {
-        elements.saveAllBtn.addEventListener('click', saveAllCells);
-    }
-}
-
 export async function saveCell(cellType) {
     if (!state.sessionId) {
         showToast('Please load a notebook first', 'error');
@@ -1927,25 +1807,19 @@ export async function saveCell(cellType) {
     let content = '';
     let cellHeading = '';
     
+    syncActiveRunToNotebook();
+    const nb = state.notebook || {};
     switch (cellType) {
         case 'prompt':
-            // Get raw Markdown from textarea (preserves formatting directly)
-            const promptTextarea = document.getElementById('promptMarkdown');
-            content = promptTextarea ? promptTextarea.value : '';
+            content = nb.prompt || '';
             cellHeading = 'prompt';
             break;
         case 'response':
-            // Get raw Markdown from textarea
-            const responseTextarea = document.getElementById('responseMarkdown');
-            content = responseTextarea ? responseTextarea.value : '';
+            content = nb.response || '';
             cellHeading = 'response';
             break;
         case 'response_reference':
-            // Use converted JSON if available, otherwise try to convert now
-            if (!state.convertedModelRefJSON) {
-                convertStructuredToJSON();
-            }
-            content = state.convertedModelRefJSON || '';
+            content = (nb.response_reference || '').trim();
             if (!content) {
                 showToast('⚠️ Please ensure Model Reference is in valid format', 'error');
                 return;
@@ -1953,9 +1827,7 @@ export async function saveCell(cellType) {
             cellHeading = 'response_reference';
             break;
         case 'judge_system_prompt':
-            // Get raw Markdown from textarea
-            const judgeTextarea = document.getElementById('judgeMarkdown');
-            content = judgeTextarea ? judgeTextarea.value : '';
+            content = nb.judge_system_prompt || '';
             cellHeading = 'judge_system_prompt';
             break;
         default:
@@ -2046,6 +1918,8 @@ export async function saveAllCells() {
         showToast('Please load a notebook first', 'error');
         return;
     }
+
+    syncActiveRunToNotebook();
     
     // Validate prompt length (skip validation in multi-turn — turn 2+ prompts don't have metadata length constraints)
     if (!state.isMultiTurn && !validatePromptLength()) {
@@ -2053,60 +1927,24 @@ export async function saveAllCells() {
         return;
     }
     
-    // Try to convert model reference (don't block save if it fails)
-    if (!state.convertedModelRefJSON) {
-        convertStructuredToJSON();
-    }
-    
+    const nb = state.notebook || {};
     const cellsToSave = [];
     
-    // Collect all edited content from Markdown textareas
-    const promptTextarea = document.getElementById('promptMarkdown');
-    const promptContent = promptTextarea ? promptTextarea.value : '';
-    if (promptContent.trim()) {
-        cellsToSave.push({
-            cell_type: 'prompt',
-            content: promptContent
-        });
+    if ((nb.prompt || '').trim()) {
+        cellsToSave.push({ cell_type: 'prompt', content: nb.prompt });
     }
     
-    const responseTextarea = document.getElementById('responseMarkdown');
-    const responseContent = responseTextarea ? responseTextarea.value : '';
-    if (responseContent.trim()) {
-        cellsToSave.push({
-            cell_type: 'response',
-            content: responseContent
-        });
+    if ((nb.response || '').trim()) {
+        cellsToSave.push({ cell_type: 'response', content: nb.response });
     }
     
-    // Model Reference / Criteria — use converted JSON if available, else raw textarea content
-    if (!state.convertedModelRefJSON) {
-        convertStructuredToJSON();
-    }
-    if (state.convertedModelRefJSON) {
-        cellsToSave.push({
-            cell_type: 'response_reference',
-            content: state.convertedModelRefJSON
-        });
-    } else {
-        // Fallback: save raw criteria text (Turn 2+ may not have JSON format)
-        const modelrefTextarea = document.getElementById('modelrefPreview');
-        const modelrefContent = modelrefTextarea ? modelrefTextarea.value.trim() : '';
-        if (modelrefContent) {
-            cellsToSave.push({
-                cell_type: 'response_reference',
-                content: modelrefContent
-            });
-        }
+    const criteriaContent = (nb.response_reference || '').trim();
+    if (criteriaContent) {
+        cellsToSave.push({ cell_type: 'response_reference', content: criteriaContent });
     }
     
-    const judgeTextarea = document.getElementById('judgeMarkdown');
-    const judgeContent = judgeTextarea ? judgeTextarea.value : '';
-    if (judgeContent.trim()) {
-        cellsToSave.push({
-            cell_type: 'judge_system_prompt',
-            content: judgeContent
-        });
+    if ((nb.judge_system_prompt || '').trim()) {
+        cellsToSave.push({ cell_type: 'judge_system_prompt', content: nb.judge_system_prompt });
     }
     
     if (cellsToSave.length === 0) {
@@ -2167,7 +2005,7 @@ export async function saveAllCells() {
 export function invalidateReferenceJudge() {
     if (state.adminMode || getConfigValue('bypass_hunt_criteria', false)) return;
     state.referenceValidated = false;
-    const responseRef = elements.modelrefPreview?.value?.trim() || state.notebook?.response_reference || '';
+    const responseRef = state.notebook?.response_reference || '';
     validateModelReferenceAndCriteria(responseRef);
 }
 
@@ -2486,109 +2324,6 @@ export function getDefaultCriteria() {
     ];
 }
 
-export function initPreviewTabs() {
-    if (!elements.previewTabs) return;
-    
-    const tabs = elements.previewTabs.querySelectorAll('.tab');
-    tabs.forEach(tab => {
-        tab.addEventListener('click', () => {
-            tabs.forEach(t => t.classList.remove('active'));
-            tab.classList.add('active');
-            
-            const previewType = tab.dataset.preview;
-            const panelId = `preview${previewType.charAt(0).toUpperCase() + previewType.slice(1)}`;
-            document.querySelectorAll('.preview-panel').forEach(p => p.classList.add('hidden'));
-            const targetPanel = document.getElementById(panelId);
-            if (targetPanel) targetPanel.classList.remove('hidden');
-            if (previewType === 'liveExport') renderLiveExportPreview();
-        });
-    });
-}
-
-/**
- * Build live export preview (what would be saved to Colab)
- * Updates as user edits, hunts, selects, and reviews.
- */
-function buildLiveExportHtml() {
-    const prompt = document.getElementById('promptMarkdown')?.value || state.notebook?.prompt || '';
-    const response = document.getElementById('responseMarkdown')?.value || state.notebook?.response || '';
-    const criteria = document.getElementById('modelrefPreview')?.value || state.notebook?.response_reference || '';
-    const judge = document.getElementById('judgeMarkdown')?.value || state.notebook?.judge_system_prompt || '';
-    
-    const selectedRows = state.selectedRowNumbers || [];
-    const results = selectedRows.map(rn => state.allResponses?.[rn]).filter(Boolean);
-    const reviews = state.humanReviews || {};
-    
-    const isMulti = state.isMultiTurn && state.turns?.length > 0;
-    const turnNum = isMulti ? (state.currentTurn || state.turns?.length) : 1;
-    
-    let html = '';
-    
-    const section = (title, content) => {
-        if (!content) return '';
-        return `<div class="live-export-section"><h4>${escapeHtml(title)}</h4><div class="live-export-body">${escapeHtml(content)}</div></div>`;
-    };
-    
-    html += section(`Turn ${turnNum} - prompt`, prompt);
-    html += section(`Turn ${turnNum} - response`, response);
-    html += section(`Turn ${turnNum} - response_reference`, criteria);
-    html += section(`Turn ${turnNum} - judge_system_prompt`, judge);
-    
-    const modelPrefix = results[0]?.model ? (results[0].model.toLowerCase().includes('nemotron') ? 'Nemotron' : results[0].model.toLowerCase().includes('qwen') ? 'Qwen' : 'Model') : 'Model';
-    
-    for (let i = 0; i < 4; i++) {
-        const r = results[i];
-        const slot = i + 1;
-        const resp = r?.response || '(empty)';
-        html += section(`Turn ${turnNum} - ${modelPrefix}_${slot}`, resp);
-        
-        const llm = r?.judge_explanation || (r?.judge_criteria ? JSON.stringify(r.judge_criteria, null, 2) : '') || '(pending)';
-        html += section(`Turn ${turnNum} - llm_judge_${slot}`, llm);
-        
-        const reviewKey = `row_${selectedRows[i]}`;
-        const review = reviews[reviewKey];
-        const human = review ? (review.explanation || JSON.stringify(review.grading_basis || {}, null, 2)) : '(pending)';
-        html += section(`Turn ${turnNum} - human_judge_${slot}`, human);
-    }
-    
-    const perModel = {};
-    const countResult = (r) => r?.model && r?.response && String(r.response).trim() && !r?.error;
-    (state.allResponses || []).forEach(r => {
-        if (countResult(r)) perModel[r.model] = (perModel[r.model] || 0) + 1;
-    });
-    if (state.isMultiTurn && state.turns) {
-        state.turns.forEach(t => {
-            (t.results || []).forEach(r => {
-                if (countResult(r)) perModel[r.model] = (perModel[r.model] || 0) + 1;
-            });
-        });
-    }
-    const attemptsLines = Object.entries(perModel).length > 0
-        ? Object.entries(perModel).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${getModelDisplayName(k)}: ${v}`).join('\n')
-        : String((state.allResponses || []).filter(countResult).length);
-    html += section('number_of_attempts_made', attemptsLines);
-    
-    return html || '<p class="text-muted">Load a notebook and start editing to see the live export preview.</p>';
-}
-
-export function renderLiveExportPreview() {
-    const el = document.getElementById('liveExportContent');
-    if (!el) return;
-    el.innerHTML = buildLiveExportHtml();
-}
-
-/**
- * Update Live Export tab if visible. Call from autosave, hunt complete, selection, reviews.
- */
-export function scheduleLiveExportUpdate() {
-    const panel = document.getElementById('previewLiveExport');
-    if (panel && !panel.classList.contains('hidden')) {
-        renderLiveExportPreview();
-    }
-}
-
-
-
 // Combined Save & Judge function for Response tab
 export async function saveAndJudgeResponse() {
     if (!state.sessionId) {
@@ -2596,8 +2331,9 @@ export async function saveAndJudgeResponse() {
         return;
     }
     
+    syncActiveRunToNotebook();
     // Check minimum 3 criteria requirement
-    const currentRefText = elements.modelrefPreview?.textContent || '';
+    const currentRefText = state.notebook?.response_reference || '';
     let currentCriteria;
     try {
         currentCriteria = parseCriteria(currentRefText);
@@ -2732,38 +2468,18 @@ export async function judgeReferenceResponse() {
         return;
     }
 
+    syncActiveRunToNotebook();
+
     // Block judging if judge system prompt is empty or missing required output format
-    const judgePromptValue = document.getElementById('judgeMarkdown')?.value?.trim()
-        || state.notebook?.judge_system_prompt?.trim()
-        || '';
+    const judgePromptValue = (state.notebook?.judge_system_prompt || '').trim();
     const formatCheck = validateJudgeOutputFormat(judgePromptValue);
     if (!formatCheck.valid) {
         showToast(formatCheck.message, 'error');
-        document.getElementById('judgeMarkdown')?.focus();
         return;
     }
 
     // Check for missing criteria before judging
-    let currentRefText = '';
-    if (state.convertedModelRefJSON) {
-        currentRefText = state.convertedModelRefJSON;
-    } else if (elements.modelrefPreview) {
-        const inputValue = elements.modelrefPreview.value.trim();
-        if (inputValue) {
-            try {
-                const parsed = JSON.parse(inputValue);
-                if (Array.isArray(parsed)) {
-                    currentRefText = inputValue;
-                } else {
-                    convertStructuredToJSON();
-                    currentRefText = state.convertedModelRefJSON || inputValue;
-                }
-            } catch (e) {
-                convertStructuredToJSON();
-                currentRefText = state.convertedModelRefJSON || inputValue;
-            }
-        }
-    }
+    const currentRefText = (state.notebook?.response_reference || '').trim();
     
     let currentCriteria;
     try {
@@ -2887,23 +2603,25 @@ export async function judgeReferenceResponse() {
         let statusMsg = isPassing ? 'ALL CRITERIA PASS' : 'CRITERIA FAILED';
         if (missing.length > 0) statusMsg = `MISSING CRITERIA: ${missing.map(x => x[0]).join(',')}`;
         
-        resultDiv.innerHTML = `
-            <div style="padding: 1rem; background: var(--bg-primary); border-radius: 8px; border: 1px solid ${missing.length > 0 ? 'var(--warning)' : (isPassing ? 'var(--success)' : 'var(--danger)')};">
-                <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
-                    <span class="score-badge ${isPassing ? 'score-1' : 'score-0'}">${isPassing ? '✅' : '❌'} Score: ${data.score}</span>
-                    <span style="font-weight: 600;">${statusMsg}</span>
+        if (resultDiv) {
+            resultDiv.innerHTML = `
+                <div style="padding: 1rem; background: var(--bg-primary); border-radius: 8px; border: 1px solid ${missing.length > 0 ? 'var(--warning)' : (isPassing ? 'var(--success)' : 'var(--danger)')};">
+                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
+                        <span class="score-badge ${isPassing ? 'score-1' : 'score-0'}">${isPassing ? '✅' : '❌'} Score: ${data.score}</span>
+                        <span style="font-weight: 600;">${statusMsg}</span>
+                    </div>
+                    <div style="margin-top: 0.75rem;">
+                        <label style="font-weight: 600; font-size: 0.9rem;">📋 Criteria Breakdown:</label>
+                        ${criteriaHtml}
+                    </div>
+                    <div style="margin-top: 0.75rem;">
+                        <label style="font-weight: 600; font-size: 0.9rem;">📝 Judge Explanation:</label>
+                        <p style="margin-top: 0.25rem; font-size: 0.9rem; color: var(--text-secondary); white-space: pre-wrap;">${escapeHtml(data.explanation || 'No explanation')}</p>
+                    </div>
                 </div>
-                <div style="margin-top: 0.75rem;">
-                    <label style="font-weight: 600; font-size: 0.9rem;">📋 Criteria Breakdown:</label>
-                    ${criteriaHtml}
-                </div>
-                <div style="margin-top: 0.75rem;">
-                    <label style="font-weight: 600; font-size: 0.9rem;">📝 Judge Explanation:</label>
-                    <p style="margin-top: 0.25rem; font-size: 0.9rem; color: var(--text-secondary); white-space: pre-wrap;">${escapeHtml(data.explanation || 'No explanation')}</p>
-                </div>
-            </div>
-        `;
-        resultDiv.classList.remove('hidden');
+            `;
+            resultDiv.classList.remove('hidden');
+        }
         if (elements.referencePreview) elements.referencePreview.scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'nearest' });
         
         const passCount = criteriaEntries.filter(([k, v]) => String(v).toUpperCase() === 'PASS').length;
@@ -2934,9 +2652,9 @@ export async function saveResponseOnly() {
     
     const btn = elements.saveResponseBtn;
     if (!btn) return;
-    
-    const responseEditor = elements.referencePreview;
-    const newResponse = responseEditor?.textContent || responseEditor?.innerText || '';
+
+    syncActiveRunToNotebook();
+    const newResponse = state.notebook?.response || '';
     
     if (!newResponse.trim()) {
         showToast('Response cannot be empty', 'error');
@@ -2970,158 +2688,11 @@ export async function saveResponseOnly() {
 
 
 
-// ============== Turn 1 Test Prompt (Generate Response Before Criteria) ==============
-
-/**
- * Show the Turn 1 Test Prompt panel when in Turn 1.
- */
-export function showTurn1TestPromptPanel() {
-    const panel = document.getElementById('turn1TestPromptPanel');
-    if (panel) panel.classList.remove('hidden');
-}
-
-/**
- * Hide the Turn 1 Test Prompt panel (e.g. when advancing to Turn 2).
- */
-export function hideTurn1TestPromptPanel() {
-    const panel = document.getElementById('turn1TestPromptPanel');
-    if (panel) panel.classList.add('hidden');
-}
-
-/**
- * Update visibility based on current turn. Show only in Turn 1.
- */
-export function updateTurn1TestPromptVisibility() {
-    const turn = state.currentTurn ?? 1;
-    if (turn === 1) {
-        showTurn1TestPromptPanel();
-    } else {
-        hideTurn1TestPromptPanel();
-    }
-}
-
-/**
- * Populate Turn 1 model dropdown based on selected provider.
- */
-function updateTurn1ModelOptions() {
-    const providerSel = document.getElementById('turn1ProviderSelect');
-    const modelSel = document.getElementById('turn1ModelSelect');
-    if (!providerSel || !modelSel) return;
-    const provider = providerSel.value;
-    const models = PROVIDER_MODELS[provider] || PROVIDER_MODELS.openrouter;
-    const currentVal = modelSel.value;
-    modelSel.innerHTML = '';
-    models.forEach(m => {
-        const opt = document.createElement('option');
-        opt.value = m.id;
-        opt.textContent = m.name;
-        modelSel.appendChild(opt);
-    });
-    const hasCurrent = Array.from(modelSel.options).some(o => o.value === currentVal);
-    if (hasCurrent) modelSel.value = currentVal;
-    else if (modelSel.options.length) modelSel.value = modelSel.options[0].value;
-}
-
-/**
- * Generate a single response for Turn 1 test prompt. Uses model/provider from Test Prompt dropdowns.
- * Saves response to notebook. Latest overwrites. Single button: "Generate Response" becomes "Regenerate" after first run.
- */
-export async function turn1TestPromptGenerate() {
-    if (!state.sessionId) {
-        showToast('Please load a notebook first', 'error');
-        return;
-    }
-
-    const promptEl = document.getElementById('promptMarkdown');
-    const prompt = promptEl?.value?.trim() || state.notebook?.prompt || '';
-    if (!prompt) {
-        showToast('Please enter a prompt first', 'error');
-        return;
-    }
-
-    const modelSel = document.getElementById('turn1ModelSelect');
-    const providerSel = document.getElementById('turn1ProviderSelect');
-    const model = modelSel?.value || 'qwen/qwen3-235b-a22b-thinking-2507';
-    const provider = providerSel?.value || 'openrouter';
-
-    const loadingEl = document.getElementById('turn1TestPromptLoading');
-    const genBtn = document.getElementById('turn1GenerateBtn');
-
-    if (loadingEl) loadingEl.classList.remove('hidden');
-    if (genBtn) genBtn.disabled = true;
-
-    try {
-        const res = await fetch(`/api/generate-single/${state.sessionId}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model, provider, prompt })
-        });
-
-        if (!res.ok) {
-            const err = await res.json();
-            throw new Error(err.detail || 'Generation failed');
-        }
-
-        const data = await res.json();
-        const responseText = data.response || '';
-
-        // Populate response editor and update preview
-        const responseTextarea = document.getElementById('responseMarkdown');
-        if (responseTextarea) {
-            responseTextarea.value = responseText;
-            updateMarkdownPreview(responseTextarea);
-        }
-
-        // Save to notebook
-        const saveRes = await fetch(`/api/update-response/${state.sessionId}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ response: responseText })
-        });
-
-        if (!saveRes.ok) {
-            throw new Error('Failed to save response to notebook');
-        }
-
-        updateOriginalNotebookWithCell('response', responseText);
-        if (state.notebook) state.notebook.response = responseText;
-        state.unsavedChanges.response = false;
-
-        // Show response area
-        const responseArea = document.getElementById('turn1TestPromptResponseArea');
-        const responseTextEl = document.getElementById('turn1TestPromptResponseText');
-        const modelInfoEl = document.getElementById('turn1TestPromptModelInfo');
-
-        if (responseTextEl) responseTextEl.textContent = responseText;
-        if (modelInfoEl) modelInfoEl.textContent = `Model: ${data.model || model} | Provider: ${data.provider || provider}`;
-        if (responseArea) responseArea.classList.remove('hidden');
-
-        // Change button to "Regenerate" after first generation
-        if (genBtn) genBtn.textContent = 'Regenerate';
-
-        showToast('Response generated and saved. Latest is used; you can regenerate with a different model.', 'success');
-    } catch (error) {
-        showError(error, { operation: 'Generate response', retry: () => turn1TestPromptGenerate() });
-    } finally {
-        if (loadingEl) loadingEl.classList.add('hidden');
-        if (genBtn) genBtn.disabled = false;
-    }
-}
-
-/**
- * Initialize Turn 1 Test Prompt: dropdowns and button.
- */
-export function initTurn1TestPromptListeners() {
-    const genBtn = document.getElementById('turn1GenerateBtn');
-    const providerSel = document.getElementById('turn1ProviderSelect');
-
-    if (genBtn) genBtn.addEventListener('click', () => turn1TestPromptGenerate());
-
-    if (providerSel) {
-        providerSel.addEventListener('change', updateTurn1ModelOptions);
-    }
-    updateTurn1ModelOptions();  // Initial populate
-}
+// Turn 1 test prompt functions — deprecated stubs (HTML elements removed; Testbed handles generation now)
+export function showTurn1TestPromptPanel() {}
+export function hideTurn1TestPromptPanel() {}
+export function updateTurn1TestPromptVisibility() {}
+export function initTurn1TestPromptListeners() {}
 
 // ============== Metadata Sidebar Toggle ==============
 

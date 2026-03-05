@@ -10,8 +10,7 @@ import { elements } from './dom.js';
 import { state } from './state.js';
 import { showToast, showError } from './celebrations.js';
 import { validatePromptLength } from './editors.js';
-import { convertStructuredToJSON } from './editors.js';
-import { updateOriginalNotebookWithCell, scheduleLiveExportUpdate } from './notebook.js';
+import { updateOriginalNotebookWithCell } from './notebook.js';
 import { fetchConfigFromAPI } from './config.js';
 import { isOnline, enqueue, onStatusChange } from './offlineQueue.js';
 
@@ -163,21 +162,11 @@ async function performBatchSave() {
     if (!state.sessionId || saveInProgress) return;
     if (_isLocked()) { _setGlobalStatus('locked'); return; }
 
-    const promptInput = document.getElementById('promptMarkdown');
-    const responseInput = document.getElementById('responseMarkdown');
-    const modelrefInput = document.getElementById('modelrefPreview');
-    const judgeInput = document.getElementById('judgeMarkdown');
-
-    let prompt = promptInput?.value ?? '';
-    let response = responseInput?.value ?? '';
-    let modelref = '';
-    try {
-        convertStructuredToJSON();
-        modelref = state.convertedModelRefJSON || (modelrefInput?.value ?? '');
-    } catch {
-        modelref = modelrefInput?.value ?? '';
-    }
-    const judge = judgeInput?.value ?? '';
+    const nb = state.notebook || {};
+    const prompt = nb.prompt || '';
+    const response = nb.response || '';
+    const modelref = nb.response_reference || '';
+    const judge = nb.judge_system_prompt || '';
 
     if (state.currentTurn <= 1 && !state.isMultiTurn && !validatePromptLength()) return;
 
@@ -279,34 +268,6 @@ export async function initAutosave() {
         _setGlobalStatus(online ? 'saved' : 'offline');
     });
 
-    const promptSection = document.getElementById('previewPrompt');
-    const promptInput = document.getElementById('promptMarkdown');
-    const responseSection = document.getElementById('previewReference');
-    const responseInput = document.getElementById('responseMarkdown');
-    const modelrefSection = document.getElementById('previewModelref');
-    const modelrefInput = document.getElementById('modelrefPreview');
-    const judgeSection = document.getElementById('previewJudge');
-    const judgeInput = document.getElementById('judgeMarkdown');
-
-    [promptSection, responseSection, modelrefSection, judgeSection].forEach((s, i) => {
-        if (s) getOrCreateStatusEl(['prompt', 'response', 'modelref', 'judge'][i], s);
-    });
-
-    const onInput = () => {
-        if (state.currentTurn > 1 || state.isMultiTurn || validatePromptLength()) scheduleBatchSave();
-        else setStatus('prompt', STATUS.UNSAVED, promptSection);
-    };
-
-    let liveExportTimer = null;
-    const onLiveExportInput = () => {
-        if (liveExportTimer) clearTimeout(liveExportTimer);
-        liveExportTimer = setTimeout(() => { scheduleLiveExportUpdate(); liveExportTimer = null; }, 400);
-    };
-    if (promptInput) promptInput.addEventListener('input', onInput);
-    if (responseInput) responseInput.addEventListener('input', () => { scheduleBatchSave(); onLiveExportInput(); });
-    if (modelrefInput) modelrefInput.addEventListener('input', () => { scheduleBatchSave(); onLiveExportInput(); });
-    if (judgeInput) judgeInput.addEventListener('input', () => { scheduleBatchSave(); onLiveExportInput(); });
-    if (promptInput) promptInput.addEventListener('input', onLiveExportInput);
 }
 
 /**

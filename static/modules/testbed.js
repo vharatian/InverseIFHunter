@@ -14,8 +14,7 @@ import { state } from './state.js';
 import { PROVIDER_MODELS, getJudgeModels, getConfigValue } from './config.js';
 import { escapeHtml } from './utils.js';
 import { showToast } from './celebrations.js';
-import { updateMarkdownPreview } from './editors.js';
-import { populatePreviewTabs, parseCriteria, validateModelReferenceAndCriteria, progressiveSaveToColab } from './notebook.js';
+import { parseCriteria, validateModelReferenceAndCriteria, progressiveSaveToColab } from './notebook.js';
 import { parseCriteriaToJSON } from './utils.js';
 
 const DEFAULT_JUDGE_SYSTEM_PROMPT = `Your role is that of a meticulous instruction-following grading teacher. Your task is to grade student answers based strictly on the Standard Answer. You must evaluate whether the student completely fulfills the requirement. You will be provide one requirement
@@ -96,17 +95,13 @@ let _activeTurnTabKey = 'current';
 
 function getSharedLeft() {
     if (!sharedLeft) {
-        const promptEl   = document.getElementById('promptMarkdown');
-        const criteriaEl = document.getElementById('modelrefPreview');
-        const judgeEl    = document.getElementById('judgeMarkdown');
-        const responseEl = document.getElementById('responseMarkdown');
-        const criteriaRaw = criteriaEl?.value?.trim() ?? state.notebook?.response_reference ?? '';
+        const nb = state.notebook || {};
         sharedLeft = {
-            prompt:        promptEl?.value?.trim()   ?? state.notebook?.prompt ?? '',
-            idealResponse: responseEl?.value?.trim() ?? state.notebook?.response ?? '',
-            modelReasoning: state.notebook?.model_reasoning ?? '',
-            criteriaChips: criteriaStringToChips(criteriaRaw),
-            judgePrompt:   judgeEl?.value?.trim()    || state.notebook?.judge_system_prompt || DEFAULT_JUDGE_SYSTEM_PROMPT,
+            prompt:        nb.prompt ?? '',
+            idealResponse: nb.response ?? '',
+            modelReasoning: nb.model_reasoning ?? '',
+            criteriaChips: criteriaStringToChips(nb.response_reference ?? ''),
+            judgePrompt:   nb.judge_system_prompt || DEFAULT_JUDGE_SYSTEM_PROMPT,
         };
     }
     return sharedLeft;
@@ -506,8 +501,6 @@ function showSavePreviewModal(opts) {
         savingOverlay.remove();
 
         hideTestbed();
-        const card = document.getElementById('notebookPreviewCard');
-        if (card) card.classList.add('hidden');
         const configSection = document.getElementById('configSection');
         if (configSection) {
             configSection.classList.remove('hidden');
@@ -923,6 +916,7 @@ function renderActiveTab() {
                         placeholder="Enter your prompt here…"
                         rows="4"
                     >${escapeHtml(left.prompt)}</textarea>
+                    <div class="tb-word-count" id="tbPromptWordCount"></div>
                 </div>
 
                 <!-- Ideal Response (collapsible) -->
@@ -1081,10 +1075,12 @@ function renderActiveTab() {
         ta.addEventListener('input', () => autoGrow(ta));
     });
 
-    // Shared prompt persist
+    // Shared prompt persist + word count
     document.getElementById('tbSharedPrompt')?.addEventListener('input', (e) => {
         getSharedLeft().prompt = e.target.value;
+        updateTestbedWordCount();
     });
+    updateTestbedWordCount();
 
     // Shared ideal response persist
     document.getElementById('tbSharedIdeal')?.addEventListener('input', (e) => {
@@ -1227,6 +1223,33 @@ function renderActiveTab() {
 function autoGrow(ta) {
     ta.style.height = 'auto';
     ta.style.height = Math.max(ta.scrollHeight, 60) + 'px';
+}
+
+/** Update the word count display below the testbed prompt textarea. */
+function updateTestbedWordCount() {
+    const el = document.getElementById('tbPromptWordCount');
+    if (!el) return;
+    const ta = document.getElementById('tbSharedPrompt');
+    const text = ta?.value || '';
+    const wordCount = text.trim().split(/\s+/).filter(w => w.length > 0).length;
+
+    const turnAboveOne = (state.currentTurn || 1) > 1 || state.isMultiTurn;
+    const range = state.promptLengthRange;
+
+    let label = `${wordCount} word${wordCount !== 1 ? 's' : ''}`;
+    let cls = 'tb-wc-neutral';
+
+    if (!turnAboveOne && range) {
+        label += ` · target: ${range.min}–${range.max}`;
+        if (wordCount >= range.min && wordCount <= range.max) {
+            cls = 'tb-wc-ok';
+        } else {
+            cls = 'tb-wc-bad';
+        }
+    }
+
+    el.textContent = label;
+    el.className = 'tb-word-count ' + cls;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1477,13 +1500,13 @@ export function showNotebookPreview(run) {
 
     const nb = state.notebook || {};
     const left         = getSharedLeft();
-    const promptMd     = left.prompt         || document.getElementById('promptMarkdown')?.value   || '';
-    const responseMd   = left.idealResponse  || document.getElementById('responseMarkdown')?.value || '';
+    const promptMd     = left.prompt         || '';
+    const responseMd   = left.idealResponse  || '';
     const reasoningMd  = left.modelReasoning || '';
     const criterias    = left.criteriaChips?.length
         ? left.criteriaChips
-        : criteriaStringToChips(document.getElementById('modelrefPreview')?.value || '');
-    const judgePrompt = left.judgePrompt  || document.getElementById('judgeMarkdown')?.value    || '';
+        : criteriaStringToChips(nb.response_reference || '');
+    const judgePrompt = left.judgePrompt  || '';
 
     const md = typeof marked !== 'undefined'
         ? (s) => marked.parse(s)
@@ -1603,10 +1626,6 @@ export function showNotebookPreview(run) {
         _previewDismissed = true;
         overlay.remove();
         hideTestbed();
-
-        // Hide notebookPreviewCard completely
-        const card = document.getElementById('notebookPreviewCard');
-        if (card) card.classList.add('hidden');
 
         if (configSection) {
             setTimeout(() => configSection.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
@@ -2005,12 +2024,10 @@ async function saveRunToTurn() {
         }
 
         // 4. Show Save Preview modal (full response + judge results) — both pass and fail
-        populatePreviewTabs(state.notebook);
-        // populatePreviewTabs resets referenceValidated; restore it if judge passed
+        validateModelReferenceAndCriteria(criteriaForValidation);
         if (isPassing && !bypass) {
             state.referenceValidated = true;
         }
-        validateModelReferenceAndCriteria(criteriaForValidation);
         const configSection = document.getElementById('configSection');
         if (configSection) configSection.classList.remove('hidden');
 

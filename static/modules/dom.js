@@ -31,34 +31,11 @@ export const elements = {
     startHuntBtn: document.getElementById('startHuntBtn'),
     saveToColabBtn: document.getElementById('saveToColabBtn'),
     
-    // Preview
-    previewTabs: document.getElementById('previewTabs'),
-    promptPreview: document.getElementById('promptPreview'),
-    referencePreview: document.getElementById('referencePreview'),
-    modelrefPreview: document.getElementById('modelrefPreview'),
-    judgePreview: document.getElementById('judgePreview'),
-    // Markdown textareas (new split view editors)
-    promptMarkdown: document.getElementById('promptMarkdown'),
-    responseMarkdown: document.getElementById('responseMarkdown'),
-    judgeMarkdown: document.getElementById('judgeMarkdown'),
-    judgeReferenceBtn: document.getElementById('judgeReferenceBtn'),
-    saveResponseBtn: document.getElementById('saveResponseBtn'),
-    judgeBeforeHuntBtn: document.getElementById('judgeBeforeHuntBtn'),  // Judge button next to Start Hunt
-    referenceJudgeResult: document.getElementById('referenceJudgeResult'),
+    // Metadata
     metadataToggleBtn: document.getElementById('metadataToggleBtn'),
-    
-    // New editable elements
     metadataSidebar: document.getElementById('metadataSidebar'),
-    metadataCard: document.getElementById('metadataCard'), // Keep for backward compatibility
+    metadataCard: document.getElementById('metadataCard'),
     metadataGrid: document.getElementById('metadataGrid'),
-    promptLengthWarning: document.getElementById('promptLengthWarning'),
-    promptLengthInfo: document.getElementById('promptLengthInfo'),
-    savePromptBtn: document.getElementById('savePromptBtn'),
-    saveModelRefBtn: document.getElementById('saveModelRefBtn'),
-    saveJudgeBtn: document.getElementById('saveJudgeBtn'),
-    saveAllBtn: document.getElementById('saveAllBtn'),
-    jsonPreviewContent: document.getElementById('jsonPreviewContent'),
-    jsonPreviewStatus: document.getElementById('jsonPreviewStatus'),
     
     // Progress
     progressSection: document.getElementById('progressSection'),
