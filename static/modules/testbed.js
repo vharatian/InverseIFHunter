@@ -480,7 +480,6 @@ function showSavePreviewModal(opts) {
 
     overlay.querySelector('#spmContinueBtn')?.addEventListener('click', async () => {
         overlay.remove();
-        _previewDismissed = true;
 
         // --- Show saving overlay while progressive save runs ---
         const savingOverlay = document.createElement('div');
@@ -500,12 +499,6 @@ function showSavePreviewModal(opts) {
 
         savingOverlay.remove();
 
-        hideTestbed();
-        const configSection = document.getElementById('configSection');
-        if (configSection) {
-            configSection.classList.remove('hidden');
-            setTimeout(() => configSection.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
-        }
         // Enable hunt button now that testbed validation passed
         state.referenceValidated = true;
         const startHuntBtn = document.getElementById('startHuntBtn');
@@ -513,6 +506,9 @@ function showSavePreviewModal(opts) {
             startHuntBtn.disabled = false;
             startHuntBtn.title = '';
         }
+
+        // Show the Notion-style Notebook Preview Overlay for read-only review
+        showNotebookPreview(getActiveRun());
     });
     overlay.querySelector('#spmFixBtn')?.addEventListener('click', () => overlay.remove());
     overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
