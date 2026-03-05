@@ -298,6 +298,7 @@ function closeRun(id) {
     persistTabEdits();
     const idx = runs.findIndex(r => r.id === id);
     if (idx === -1) return;
+    if (runs[idx].number === 1) return;
     runs.splice(idx, 1);
     if (runs.length === 0) {
         runCounter = 0;
@@ -624,6 +625,7 @@ function renderTabBar() {
 
     const tabs = runs.map(run => {
         const active = run.id === activeRunId;
+        const showClose = run.number > 1;
         return `<button
             class="tb-tab ${active ? 'tb-tab-active' : ''} tb-status-${run.status}"
             data-run-id="${run.id}"
@@ -633,7 +635,7 @@ function renderTabBar() {
             <span class="tb-tab-label">Run ${run.number}</span>
             <span class="tb-tab-model">${modelShortName(run)}</span>
             ${scoreLabel(run)}
-            <button class="tb-tab-close" data-close-run-id="${run.id}" title="Close this run">✕</button>
+            ${showClose ? `<button class="tb-tab-close" data-close-run-id="${run.id}" title="Close this run">✕</button>` : ''}
         </button>`;
     }).join('');
 
