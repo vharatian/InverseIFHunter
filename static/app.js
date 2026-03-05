@@ -48,6 +48,7 @@ import { initTrainerQueue, showQueueView, showTaskView } from './modules/trainer
 import { initNotifications } from './modules/notifications.js';
 import { hydrateSession, clearSectionLocks } from './modules/sessionHydrator.js';
 import { initOfflineQueue } from './modules/offlineQueue.js';
+import { initAdminMode, deactivateAdminMode } from './modules/adminMode.js';
 
 // Clean cache-busting query param from URL (left over by version-update hard refresh)
 if (window.location.search.includes('_v=')) {
@@ -291,16 +292,12 @@ function initEventListeners() {
         elements.submitColabBtn.addEventListener('click', submitToColab);
     }
     
-    // Admin mode indicator (click to disable)
+    // Admin mode: logo drag-down activation + badge click to deactivate
+    initAdminMode();
     const adminIndicator = document.getElementById('adminModeIndicator');
     if (adminIndicator) {
         adminIndicator.addEventListener('click', () => {
-            if (state.adminMode) {
-                state.adminMode = false;
-                updateAdminModeIndicator(false);
-                refreshValidationState(); // Re-apply locks so button disables if conditions not met
-                showToast('Admin mode OFF — locks restored', 'info');
-            }
+            if (state.adminMode) deactivateAdminMode();
         });
     }
     

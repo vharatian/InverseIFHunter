@@ -23,7 +23,7 @@ import { showToast, showError, showNextBlindJudge } from './celebrations.js';
 import { hideModelLockedIndicator } from './editors.js';
 import { showMultiTurnDecision } from './multiturn.js';
 import { showAppModal } from './api.js';
-import { MIN_EXPLANATION_WORDS, getConfigValue } from './config.js';
+import { MIN_EXPLANATION_WORDS, getConfigValue, adminBypass } from './config.js';
 
 // ============== Hunt Result Classification Helpers ==============
 
@@ -53,7 +53,7 @@ export function countBreakingPassing(results) {
  * Returns { valid: boolean, message: string }.
  */
 export function validateSelectionForMode(selectedResults, huntMode, isAdmin = false) {
-    if (isAdmin) return { valid: true, message: 'Admin: any combination allowed' };
+    if (isAdmin && adminBypass('selection_mode_rules')) return { valid: true, message: 'Admin: any combination allowed' };
 
     const { breakingCount, passingCount } = countBreakingPassing(selectedResults);
     const total = selectedResults.length;
@@ -186,7 +186,7 @@ export function initSelectionSectionCollapse() {
  * except view buttons (Expand/Collapse, etc.). Bypassed in admin mode.
  */
 export function setReviewModeButtonsDisabled(disabled) {
-    if (disabled && (state.adminMode || getConfigValue('bypass_hunt_criteria', false))) return; // Admin/bypass: keep buttons enabled for testing
+    if (disabled && ((state.adminMode && adminBypass('post_confirmation_lock')) || getConfigValue('bypass_hunt_criteria', false))) return;
     const title = disabled ? 'Complete reviews or refresh page to unlock' : '';
     if (elements.startHuntBtn) {
         elements.startHuntBtn.disabled = false;
@@ -983,11 +983,12 @@ export async function fetchAllResponsesAndShowSelection(completedHunts, breaksFo
         document.getElementById('summaryMet').textContent = cumulative.totalBreaks >= 3 ? '✅ Yes' : '❌ No';
         
         // VALIDATION: Gate logic depends on hunt mode
-        let criteriaMet = state.adminMode;
+        const _bypassSel = state.adminMode && adminBypass('selection_mode_rules');
+        let criteriaMet = _bypassSel;
         let gateFailTitle = '';
         let gateFailMessage = '';
 
-        if (!state.adminMode) {
+        if (!_bypassSel) {
             if (huntMode === 'all_passing') {
                 criteriaMet = totalPasses >= 1;
                 gateFailTitle = 'No passing responses found';
@@ -1847,7 +1848,7 @@ export function updateSelectionCount() {
         
         if (count === 0) {
             statusText = 'No hunts selected';
-        } else if (state.adminMode) {
+        } else if (state.adminMode && adminBypass('selection_mode_rules')) {
             statusText = `Admin: ${count} selected — any combination allowed`;
             statusColor = 'var(--text-primary)';
         } else if (huntMode === 'all_passing') {
@@ -1885,7 +1886,7 @@ export function updateSelectionCount() {
     
     // Enable confirm button based on mode-specific validation
     let shouldEnable = false;
-    if (state.adminMode) {
+    if (state.adminMode && adminBypass('selection_count')) {
         shouldEnable = count >= 1;
     } else if (huntMode === 'all_passing' || huntMode === 'break_all') {
         shouldEnable = count >= 1 && validation.valid;
@@ -1898,7 +1899,7 @@ export function updateSelectionCount() {
     const confirmBtn = document.getElementById('confirmSelectionBtn') || elements.confirmSelectionBtn;
     if (confirmBtn) {
         confirmBtn.disabled = !shouldEnable;
-        confirmBtn.title = !shouldEnable && !state.adminMode ? validation.message : '';
+        confirmBtn.title = !shouldEnable && !(state.adminMode && adminBypass('selection_count')) ? validation.message : '';
     }
 }
 
@@ -1917,12 +1918,13 @@ export async function confirmSelection() {
     
     const huntMode = state.config?.hunt_mode || 'break_50';
 
+    const _bypassSelCount = state.adminMode && adminBypass('selection_count');
     // break_50 requires exactly 4; other modes are flexible
-    if (!state.adminMode && huntMode === 'break_50' && selectedResults.length !== 4) {
+    if (!_bypassSelCount && huntMode === 'break_50' && selectedResults.length !== 4) {
         showToast(`❌ Must select exactly 4 hunts. Currently selected: ${selectedResults.length}`, 'error');
         return;
     }
-    if (state.adminMode && selectedResults.length < 1) {
+    if (_bypassSelCount && selectedResults.length < 1) {
         showToast(`Select at least 1 hunt for review.`, 'error');
         return;
     }
@@ -1937,7 +1939,7 @@ export async function confirmSelection() {
     const n = selectedResults.length;
     const confirmed = await showAppModal({
         title: `Move these ${n} to human review?`,
-        message: state.adminMode
+        message: _bypassSelCount
             ? `These ${n} response(s) will go to the review step. Admin mode: you can save without completing all reviews.`
             : `These ${n} response(s) will go to the review step. You won't be able to change which are selected until you finish all reviews or refresh the page.`,
         buttons: [
@@ -2005,7 +2007,7 @@ export function displaySelectedForReview() {
     
     // Show save container (QC + review sync buttons)
     elements.saveDriveContainer.classList.remove('hidden');
-    if (state.adminMode) {
+    if (state.adminMode && adminBypass('all_grades_before_reveal')) {
         if (elements.revealLLMBtn) {
             elements.revealLLMBtn.disabled = false;
             elements.revealLLMBtn.style.opacity = '1';
@@ -2088,8 +2090,9 @@ export function updateReviewProgress() {
     // Enable reveal button only when all selected reviews are complete — always enable in admin mode
     const allComplete = reviewCount >= selectedCount && selectedCount > 0;
     
+    const _bypassReveal = state.adminMode && adminBypass('all_grades_before_reveal');
     if (elements.revealLLMBtn) {
-        if (state.adminMode) {
+        if (_bypassReveal) {
             elements.revealLLMBtn.disabled = state.llmRevealed;
             elements.revealLLMBtn.style.opacity = state.llmRevealed ? '0.5' : '1';
         } else {
@@ -2099,9 +2102,9 @@ export function updateReviewProgress() {
         if (state.llmRevealed) {
             elements.revealLLMBtn.textContent = '✅ AI Evaluation Shown';
             elements.revealLLMBtn.disabled = true;
-        } else if (allComplete || state.adminMode) {
+        } else if (allComplete || _bypassReveal) {
             elements.revealLLMBtn.textContent = '👁️ Show AI Evaluation';
-            if (state.adminMode) elements.revealLLMBtn.disabled = false;
+            if (_bypassReveal) elements.revealLLMBtn.disabled = false;
         }
     }
 
@@ -2117,7 +2120,7 @@ export function updateReviewProgress() {
     
     // Enable save button when all reviews complete (or always in admin mode)
     if (elements.saveDriveBtn) {
-        if (state.adminMode) {
+        if (state.adminMode && adminBypass('reviews_complete_before_save')) {
             elements.saveDriveBtn.disabled = false;
             elements.saveDriveBtn.style.opacity = '1';
         } else if (allComplete && selectedCount === 4) {
@@ -2158,7 +2161,7 @@ export async function revealLLMJudgments() {
     
     const requiredReviews = selectedRowNumbers.length;
 
-    if (!state.adminMode) {
+    if (!(state.adminMode && adminBypass('all_grades_before_reveal'))) {
         if (selectedRowNumbers.length === 0) {
             showToast('Please select hunts first', 'error');
             return;
@@ -2237,7 +2240,7 @@ export async function revealLLMJudgments() {
         elements.proceedToQCBtn.disabled = false;
         elements.proceedToQCBtn.style.opacity = '1';
     }
-    if (state.adminMode && elements.saveDriveBtn) {
+    if (state.adminMode && adminBypass('reviews_complete_before_save') && elements.saveDriveBtn) {
         elements.saveDriveBtn.disabled = false;
         elements.saveDriveBtn.style.opacity = '1';
     }
@@ -2796,7 +2799,7 @@ export function checkAllReviewsComplete() {
             refreshReviewSync(state.sessionId);
         }).catch(() => {});
     } else if (totalSlots >= 1 && reviewCount < totalSlots) {
-        if (state.adminMode) {
+        if (state.adminMode && adminBypass('all_grades_before_reveal')) {
             if (elements.revealLLMBtn && !state.llmRevealed) {
                 elements.revealLLMBtn.disabled = false;
                 elements.revealLLMBtn.style.opacity = '1';

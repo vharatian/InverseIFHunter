@@ -24,7 +24,7 @@ import { validatePromptLength } from './editors.js';
 // It uses showCalibrationPanel internally, so no import needed if it's in the same file.
 // It uses startHunt (for calibration).
 import { updateHuntLimitUI, resetHuntNumberToDefault } from './hunt.js';
-import { getConfigValue } from './config.js';
+import { getConfigValue, adminBypass } from './config.js';
 // This circular dependency is fine as long as they are not used at top-level.
 // startHunt is called inside handleCalibrationGenerate -> fine.
 // showMultiTurnDecision is called inside handleHuntComplete -> fine.
@@ -313,10 +313,11 @@ export function showMultiTurnDecision() {
     
     // --- Review Readiness Check ---
     const huntMode = state.config?.hunt_mode || 'break_50';
-    let canReview = state.adminMode;
+    const _bypassSelRules = state.adminMode && adminBypass('selection_mode_rules');
+    let canReview = _bypassSelRules;
     let readinessMsg = '';
 
-    if (!state.adminMode) {
+    if (!_bypassSelRules) {
         if (huntMode === 'all_passing') {
             canReview = passes >= 1;
             if (!canReview) readinessMsg = `Need at least 1 passing response (currently ${passes}). Run more hunts!`;
@@ -341,7 +342,7 @@ export function showMultiTurnDecision() {
     if (canReview) {
         if (markBreakingBtn) {
             markBreakingBtn.disabled = false;
-            markBreakingBtn.title = state.adminMode ? 'Admin mode — proceed without failures' : '';
+            markBreakingBtn.title = _bypassSelRules ? 'Admin mode — proceed without failures' : '';
         }
         if (reviewWarning) reviewWarning.classList.add('hidden');
     } else {

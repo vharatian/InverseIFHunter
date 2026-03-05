@@ -7,6 +7,7 @@
 import { state } from './state.js';
 import { elements } from './dom.js';
 import { escapeHtml } from './utils.js';
+import { adminBypass } from './config.js';
 import { refreshReviewSync } from './reviewSync.js';
 import { populatePreviewTabs, parseCriteria, validateModelReferenceAndCriteria } from './notebook.js';
 import {
@@ -342,9 +343,10 @@ function _applySectionLocks(flags, feedback) {
         _setLocked(qcSection, !flagSet.has('qc'));
     }
 
-    // When only judgement is flagged, lock prompt / model reference / judge and show reviewer feedback for those sections
+    // When only judgement is flagged, lock prompt / model reference / judge
+    // Admin bypass: skip section locks entirely
     const isJudgementOnly = flags.length > 0 && flags.every(f => JUDGEMENT_ONLY_FLAGS.has(f));
-    if (isJudgementOnly && feedback && typeof feedback === 'object') {
+    if (isJudgementOnly && feedback && typeof feedback === 'object' && !(state.adminMode && adminBypass('section_locks'))) {
         _lockConfigSectionsAndShowFeedback(feedback);
     } else {
         _unlockConfigSections();

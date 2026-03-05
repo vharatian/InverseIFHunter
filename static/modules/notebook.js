@@ -9,7 +9,7 @@
 
 import { elements } from './dom.js';
 import { state } from './state.js';
-import { PROVIDER_MODELS, ADMIN_MODE_PASSWORD, getConfigValue, fetchConfigFromAPI } from './config.js';
+import { PROVIDER_MODELS, ADMIN_MODE_PASSWORD, getConfigValue, fetchConfigFromAPI, adminBypass } from './config.js';
 import { 
     escapeHtml, 
     loadHuntCount, 
@@ -32,6 +32,7 @@ import {
     hideModelLockedIndicator
 } from './editors.js';
 import { showAppModal, showPasswordPrompt } from './api.js';
+import { activateAdminMode } from './adminMode.js';
 import { runQualityCheckOverlay } from './qualityCheckOverlay.js';
 import { renderQCPersistentSection } from './qcPersistentSection.js';
 import { runQualityCheckInline } from './qcInline.js';
@@ -45,7 +46,7 @@ import { enableNavTestbedButton, validateJudgeOutputFormat, syncActiveRunToNoteb
 async function _refreshSaveBtnFromStatus() {
     const saveBtn = document.getElementById('saveDriveBtn');
     if (!saveBtn) return;
-    if (state.adminMode) {
+    if (state.adminMode && adminBypass('reviewer_approval')) {
         saveBtn.disabled = false;
         saveBtn.style.opacity = '1';
         saveBtn.title = 'Admin mode — save anytime';
@@ -885,8 +886,8 @@ export async function progressiveSaveToColab(cells) {
 export async function saveToDrive() {
     if (!state.sessionId) return;
 
-    // ===== VALIDATION: Reviewer must have approved before Colab save — bypass in admin mode =====
-    if (!state.adminMode) {
+    // ===== VALIDATION: Reviewer must have approved before Colab save =====
+    if (!(state.adminMode && adminBypass('reviewer_approval'))) {
         try {
             const statusRes = await fetch(`/api/session/${state.sessionId}`, { cache: 'no-store' });
             if (statusRes.ok) {
@@ -906,27 +907,26 @@ export async function saveToDrive() {
         } catch (_) { /* network error — proceed with remaining validations */ }
     }
 
-    // ===== VALIDATION 0: Check LLM revealed — bypass in admin mode =====
-    if (!state.adminMode && !state.llmRevealed) {
+    // ===== VALIDATION 0: Check LLM revealed =====
+    if (!(state.adminMode && adminBypass('llm_revealed_before_save')) && !state.llmRevealed) {
         showToast('Complete all reviews and reveal LLM judgments before saving.', 'error');
         return;
     }
     
     const selectedRowNumbers = state.selectedRowNumbers || [];
-    if (!state.adminMode && selectedRowNumbers.length === 0) {
+    if (!(state.adminMode && adminBypass('selection_required_before_save')) && selectedRowNumbers.length === 0) {
         showToast('Please select hunts for review.', 'error');
         return;
     }
-    // Admin mode: allow 0–4 selected, save without reviewing all
     
     // Get selected results and their hunt_ids
     const selectedResults = selectedRowNumbers.map(rn => state.allResponses[rn]).filter(r => r);
     const selectedHuntIds = selectedResults.map(r => r.hunt_id);
     
-    // Check that reviews exist for all selected row numbers — bypass in admin mode
+    // Check that reviews exist for all selected row numbers
     const reviewKeys = selectedRowNumbers.map(rn => `row_${rn}`);
     const missingReviews = reviewKeys.filter(key => !state.humanReviews || !state.humanReviews[key]);
-    if (!state.adminMode && missingReviews.length > 0) {
+    if (!(state.adminMode && adminBypass('review_count_matches')) && missingReviews.length > 0) {
         showToast(`Missing reviews for ${missingReviews.length} selected hunt(s). Please complete all reviews first.`, 'error');
         console.error('Missing reviews for row numbers:', missingReviews);
         console.error('Available review keys:', Object.keys(state.humanReviews || {}));
@@ -936,14 +936,14 @@ export async function saveToDrive() {
     // Get reviews only for selected row numbers
     const reviews = reviewKeys.map(key => state.humanReviews[key]).filter(r => r);
     
-    if (!state.adminMode && reviews.length !== selectedRowNumbers.length) {
+    if (!(state.adminMode && adminBypass('review_count_matches')) && reviews.length !== selectedRowNumbers.length) {
         showToast(`Only ${reviews.length}/${selectedRowNumbers.length} review(s) found for selected hunts. Please complete all reviews.`, 'error');
         return;
     }
     
-    // ===== VALIDATION 1b: Check each review has criteria grading and explanation (min 10 words) — bypass in admin mode =====
+    // ===== VALIDATION 1b: Check each review has criteria grading and explanation =====
     const incompleteReviews = getIncompleteReviewIssues(reviews);
-    if (!state.adminMode && incompleteReviews.length > 0) {
+    if (!(state.adminMode && adminBypass('reviews_complete_before_save')) && incompleteReviews.length > 0) {
         showToast(`${incompleteReviews.length} review(s) incomplete.`, 'error');
         await showAppModal({
             title: 'Please complete all reviews before saving',
@@ -954,14 +954,11 @@ export async function saveToDrive() {
     }
     
     // ===== VALIDATION 2: Removed - no longer require specific combination =====
-    // Allow any combination of hunts to be saved
     const failCount = reviews.filter(r => r.judgment === 'bad' || r.judgment === 'fail').length;
     const passCount = reviews.filter(r => r.judgment === 'good' || r.judgment === 'pass').length;
     
-    // Log combination for informational purposes only
-    
-    // ===== VALIDATION: Check if diversity check was already passed at confirmation — bypass in admin mode =====
-    if (!state.adminMode && !state.diversityCheckPassed) {
+    // ===== VALIDATION: Check if diversity check was already passed at confirmation =====
+    if (!(state.adminMode && adminBypass('diversity_check')) && !state.diversityCheckPassed) {
         console.warn('⚠️ Diversity check not passed at confirmation. This should not happen if user confirmed selection properly.');
         showToast('Diversity check was not completed. Please confirm your selection again.', 'error');
         return;
@@ -1015,7 +1012,7 @@ export async function saveToDrive() {
         });
         
         // VALIDATION: No save without reviews — bypass in admin mode (save without reviewing all)
-        if (!state.adminMode && missingReviews.length > 0) {
+        if (!(state.adminMode && adminBypass('reviews_complete_before_save')) && missingReviews.length > 0) {
             showToast('Cannot save: all 4 slots must have a review. Please complete reviews for every selected slot.', 'error');
             btn.disabled = false;
             btn.textContent = originalText;
@@ -1026,8 +1023,7 @@ export async function saveToDrive() {
         // Save is enabled only after QC completes. No QC gate here.
         
         // ===== WYSIWYG SNAPSHOT APPROACH =====
-        // Validate selectedResults — in admin mode allow 0 (backend will use all_results)
-        if (selectedResults.length === 0 && !state.adminMode) {
+        if (selectedResults.length === 0 && !(state.adminMode && adminBypass('selection_required_before_save'))) {
             throw new Error(`No selected results to save. Please select at least 1 hunt.`);
         }
         
@@ -1401,7 +1397,7 @@ export async function submitToColab() {
 }
 
 export function populatePreviewTabs(notebook) {
-    if (!state.adminMode && !getConfigValue('bypass_hunt_criteria', false)) {
+    if (!(state.adminMode && adminBypass('reference_validation')) && !getConfigValue('bypass_hunt_criteria', false)) {
         state.referenceValidated = false;
     }
 
@@ -1650,13 +1646,7 @@ export function displayMetadata(metadata) {
                         message: 'Enter password to enable admin mode (all locks disabled for testing).'
                     });
                     if (password === expectedPassword) {
-                        state.adminMode = true;
-                        updateAdminModeIndicator(true);
-                        if (elements.startHuntBtn) {
-                            elements.startHuntBtn.disabled = false;
-                            elements.startHuntBtn.title = 'Admin mode — all locks bypassed';
-                        }
-                        showToast('🟢 Admin mode ON — all locks disabled', 'success');
+                        activateAdminMode();
                     } else if (password !== null) {
                         showToast('Wrong password', 'error');
                     }
@@ -2003,7 +1993,7 @@ export async function saveAllCells() {
  * Ensures hunt button is disabled until user re-judges.
  */
 export function invalidateReferenceJudge() {
-    if (state.adminMode || getConfigValue('bypass_hunt_criteria', false)) return;
+    if ((state.adminMode && adminBypass('reference_validation')) || getConfigValue('bypass_hunt_criteria', false)) return;
     state.referenceValidated = false;
     const responseRef = state.notebook?.response_reference || '';
     validateModelReferenceAndCriteria(responseRef);
@@ -2011,7 +2001,7 @@ export function invalidateReferenceJudge() {
 
 // Validate Model Reference: JSON format AND criteria completeness
 export function validateModelReferenceAndCriteria(responseReference) {
-    if (state.adminMode) {
+    if (state.adminMode && adminBypass('reference_validation')) {
         if (elements.startHuntBtn) { elements.startHuntBtn.disabled = false; elements.startHuntBtn.title = 'Admin mode'; }
         return;
     }

@@ -32,6 +32,17 @@ export function getConfigValue(key, staticDefault) {
     return staticDefault;
 }
 
+/**
+ * Check whether a specific admin bypass toggle is ON in server config.
+ * Usage: `state.adminMode && adminBypass('hunt_limit')`
+ * Returns true if the key is missing (default = bypass when admin).
+ */
+export function adminBypass(bypassKey) {
+    const bypassMap = _apiConfig?.app?.admin_bypass;
+    if (!bypassMap || typeof bypassMap !== 'object') return true;
+    return bypassMap[bypassKey] !== false;
+}
+
 /** Static fallback when global.yaml hunt.provider_models is not set. Prefer getProviderModels() after fetchConfigFromAPI(). */
 export const PROVIDER_MODELS = {
     'openrouter': [

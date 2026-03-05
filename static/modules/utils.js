@@ -8,8 +8,10 @@ import {
     PROVIDER_MODELS, 
     INSIGHT_TIPS,
     HUNT_COUNT_STORAGE_PREFIX,
-    TIPS_PAUSED_KEY
+    TIPS_PAUSED_KEY,
+    adminBypass
 } from './config.js';
+import { state } from './state.js';
 
 const _tipIntervals = new Map();
 
@@ -48,6 +50,7 @@ export function getWordCountLabel(words) {
 }
 
 export function getExplanationValidationError(notes) {
+    if (state.adminMode && adminBypass('min_explanation_words')) return null;
     const wordCount = countWords(notes);
     if (wordCount < MIN_EXPLANATION_WORDS) {
         return `Explanation must be at least ${MIN_EXPLANATION_WORDS} words (currently ${wordCount})`;
@@ -56,6 +59,7 @@ export function getExplanationValidationError(notes) {
 }
 
 export function getIncompleteReviewIssues(reviews) {
+    if (state.adminMode && adminBypass('min_explanation_words')) return [];
     const list = [];
     for (let i = 0; i < reviews.length; i++) {
         const review = reviews[i];

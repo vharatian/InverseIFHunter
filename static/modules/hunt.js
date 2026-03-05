@@ -8,7 +8,7 @@
  */
 
 import { elements } from './dom.js';
-import { MAX_HUNTS_PER_NOTEBOOK, getJudgeModels, getConfigValue } from './config.js';
+import { MAX_HUNTS_PER_NOTEBOOK, getJudgeModels, getConfigValue, adminBypass } from './config.js';
 import { 
     loadHuntCount, 
     saveHuntCount, 
@@ -134,7 +134,7 @@ export function updateHuntLimitUI() {
     }
     
     // Disable Start Hunt button if per-turn limit reached — bypass in admin mode or bypass_hunt_criteria
-    if (elements.startHuntBtn && state.huntLimitReached && !state.adminMode && !getConfigValue('bypass_hunt_criteria', false)) {
+    if (elements.startHuntBtn && state.huntLimitReached && !(state.adminMode && adminBypass('hunt_limit')) && !getConfigValue('bypass_hunt_criteria', false)) {
         elements.startHuntBtn.disabled = true;
         elements.startHuntBtn.title = 'Turn hunt limit reached. Continue to next turn or end session.';
     }
@@ -279,12 +279,13 @@ export async function startHunt() {
 
     // CHECK HUNT LIMIT: Block if maximum hunts reached for this notebook — bypass in admin mode
     const requestedHunts = parseInt(elements.parallelWorkers?.value) || 4;
-    if (!state.adminMode && state.huntLimitReached) {
+    const _bypassLimit = state.adminMode && adminBypass('hunt_limit');
+    if (!_bypassLimit && state.huntLimitReached) {
         showHuntLimitReachedError();
         return;
     }
     
-    if (!state.adminMode && !canStartMoreHunts(requestedHunts)) {
+    if (!_bypassLimit && !canStartMoreHunts(requestedHunts)) {
         const remaining = getRemainingHunts();
         const turnCtx = (state.isMultiTurn || state.currentTurn > 1) ? ` this turn` : '';
         if (remaining === 0) {
@@ -302,7 +303,7 @@ export async function startHunt() {
     }
     
     // WARNING: Show confirmation when hunts will cross 12 this turn (only 4 remaining)
-    if (!state.adminMode) {
+    if (!(state.adminMode && adminBypass('hunt_limit_warning'))) {
         const projectedTotal = state.huntsThisTurn + requestedHunts;
         if (projectedTotal > 12) {
             const remainingAfter = MAX_HUNTS_PER_NOTEBOOK - projectedTotal;

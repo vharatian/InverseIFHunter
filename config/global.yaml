@@ -12,10 +12,36 @@ secrets:
 # App (hunt UI)
 app:
   max_hunts_per_notebook: 16
-  admin_mode_enabled: true   # false = 5-click does nothing; true = 5-click + password unlocks
-  admin_mode_password: ${ADMIN_MODE_PASSWORD:-}
   min_explanation_words: 10
   version_check_interval: 30000
+
+  # Admin mode — drag the logo down to activate
+  admin_mode_enabled: true             # false = logo drag does nothing
+  admin_mode_password: ${ADMIN_MODE_PASSWORD:-}
+
+  # Per-lock bypass toggles (only apply when admin mode is active)
+  admin_bypass:
+    min_criteria_count: true           # A1  — skip "min 3 criteria" on testbed save
+    prompt_length_range: true          # A4  — skip prompt word-count range check
+    reference_validation: true         # A5  — hunt button enabled without judge pass
+    hunt_limit: true                   # B1  — ignore 16-hunt-per-notebook cap
+    hunt_limit_warning: true           # B2  — skip ">12 hunts" confirmation dialog
+    selection_count: true              # C1  — skip "exactly 4" rule in break_50
+    selection_mode_rules: true         # C2  — skip break/pass mix requirements
+    post_confirmation_lock: true       # C3  — keep buttons enabled after confirming selection
+    diversity_check: true              # C4  — skip diversity validation
+    min_explanation_words: true         # D1  — skip 10-word minimum on reviews
+    all_grades_before_reveal: true     # D2  — reveal LLM without grading all
+    reviews_readonly_after_reveal: true # D3  — keep reviews editable after reveal
+    reveal_one_way: true               # D4  — allow re-reveal (no practical lock today)
+    reviewer_approval: true            # E1  — save to Drive without reviewer approval
+    llm_revealed_before_save: true     # E2  — save without revealing LLM
+    reviews_complete_before_save: true  # E3  — save with incomplete reviews
+    selection_required_before_save: true # E4  — save with 0 selections
+    review_count_matches: true          # E5  — save even if review count != selection count
+    section_locks: true                # F1  — bypass reviewer section locks
+    autosave_lock: true                # F2  — autosave even when submitted/approved
+    model_mismatch_warning: true       # G1  — suppress model mismatch warning + unlock hunt
 
 # Hunt limits & slots
 hunt:

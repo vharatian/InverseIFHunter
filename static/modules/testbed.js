@@ -11,7 +11,7 @@
  */
 
 import { state } from './state.js';
-import { PROVIDER_MODELS, getJudgeModels, getConfigValue } from './config.js';
+import { PROVIDER_MODELS, getJudgeModels, getConfigValue, adminBypass } from './config.js';
 import { escapeHtml } from './utils.js';
 import { showToast } from './celebrations.js';
 import { parseCriteria, validateModelReferenceAndCriteria, progressiveSaveToColab } from './notebook.js';
@@ -1983,7 +1983,7 @@ async function saveRunToTurn() {
             const parsed = parseCriteria(criteriaForValidation);
             criteriaCount = (parsed || []).length;
         } catch (_) { /* ignore */ }
-        if (criteriaCount < 3) missing.push(`Criteria (minimum 3 required, you have ${criteriaCount})`);
+        if (criteriaCount < 3 && !(state.adminMode && adminBypass('min_criteria_count'))) missing.push(`Criteria (minimum 3 required, you have ${criteriaCount})`);
         if (!(left.judgePrompt || '').trim()) missing.push('Judge System Prompt');
 
         if (missing.length > 0) {

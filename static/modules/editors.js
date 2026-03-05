@@ -10,14 +10,14 @@ import { elements } from './dom.js';
 import { state } from './state.js';
 import { renderInsightTip } from './utils.js';
 import { showToast } from './celebrations.js';
-import { getProviderModels, getJudgeModels, getConfigValue } from './config.js';
+import { getProviderModels, getJudgeModels, getConfigValue, adminBypass } from './config.js';
 import { validateModelReferenceAndCriteria } from './notebook.js';
 
 // ============== Prompt Length Validation ==============
 
 export function validatePromptLength() {
     const text = state.notebook?.prompt || '';
-    if (state.adminMode) return true;
+    if (state.adminMode && adminBypass('prompt_length_range')) return true;
 
     const wordCount = text.trim().split(/\s+/).filter(w => w.length > 0).length;
 
@@ -66,7 +66,7 @@ export function clearModelMismatchWarning() {
 }
 
 export function showModelMismatchWarning(selectedModel, metadataModel) {
-    if (state.adminMode) return;
+    if (state.adminMode && adminBypass('model_mismatch_warning')) return;
     
     state.modelMismatchWarning = true;
     
@@ -95,7 +95,7 @@ export function showModelMismatchWarning(selectedModel, metadataModel) {
         elements.startHuntBtn.style.cursor = '';
     }
     
-    if (!state.adminMode) {
+    if (!(state.adminMode && adminBypass('model_mismatch_warning'))) {
         showToast('⛔ Model mismatch! Select the correct model to hunt.', 'error');
     }
 }

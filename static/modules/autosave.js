@@ -11,7 +11,7 @@ import { state } from './state.js';
 import { showToast, showError } from './celebrations.js';
 import { validatePromptLength } from './editors.js';
 import { updateOriginalNotebookWithCell } from './notebook.js';
-import { fetchConfigFromAPI } from './config.js';
+import { fetchConfigFromAPI, adminBypass } from './config.js';
 import { isOnline, enqueue, onStatusChange } from './offlineQueue.js';
 
 let DEBOUNCE_MS = 800;
@@ -48,6 +48,7 @@ async function _loadAutoSaveConfig() {
  */
 function _isLocked() {
     if (!_autoSaveEnabled) return true;
+    if (state.adminMode && adminBypass('autosave_lock')) return false;
     const rs = state.reviewStatus || state._reviewStatus;
     return rs && LOCKED_STATUSES.has(rs);
 }
