@@ -15,6 +15,7 @@ service_account.json
 
 # Data & storage
 .storage/
+.storage-staging/
 .telemetry/
 debug.log
 

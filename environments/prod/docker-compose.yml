@@ -1,7 +1,6 @@
 version: '3.8'
 
 services:
-  # Redis - Session storage (survives restarts)
   redis:
     image: redis:7-alpine
     container_name: model-hunter-redis
@@ -17,22 +16,19 @@ services:
     networks:
       - model-hunter-network
 
-  # Stateless app instances — both active behind nginx load balancer.
-  # Deploy: rebuild one at a time. Nginx auto-routes to the healthy one.
-  # All state lives in Redis — killing either instance loses nothing.
-
   model-hunter-blue:
-    build: .
+    build:
+      context: ../..
+      dockerfile: docker/Dockerfile
     image: model-hunter_model-hunter-blue
     container_name: model-hunter-blue
     restart: unless-stopped
-    env_file: .env
+    env_file: ../../.env
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       - PORT=8000
-      - AGENTIC_REVIEWER_ROOT=/workspace
-      - GOOGLE_SERVICE_ACCOUNT_JSON_PATH=/workspace/InverseIFHunter/service_account.json
+      - GOOGLE_SERVICE_ACCOUNT_JSON_PATH=/workspace/service_account.json
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - FIREWORKS_API_KEY=${FIREWORKS_API_KEY}
@@ -42,9 +38,9 @@ services:
       - OPENAI_CONCURRENCY=30
     volumes:
       - ../../:/workspace:ro
-      - ./.storage:/app/.storage
+      - ../../.storage:/app/.storage
       - telemetry-data:/app/.telemetry
-      - ./static:/app/static:ro
+      - ../../static:/app/static:ro
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
       interval: 30s
@@ -55,22 +51,21 @@ services:
       redis:
         condition: service_healthy
     networks:
-      model-hunter-network:
-        aliases:
-          - mh-prod-blue
+      - model-hunter-network
 
   model-hunter-green:
-    build: .
+    build:
+      context: ../..
+      dockerfile: docker/Dockerfile
     image: model-hunter_model-hunter-green
     container_name: model-hunter-green
     restart: unless-stopped
-    env_file: .env
+    env_file: ../../.env
     ports:
-      - "8002:8002"
+      - "127.0.0.1:8002:8002"
     environment:
       - PORT=8002
-      - AGENTIC_REVIEWER_ROOT=/workspace
-      - GOOGLE_SERVICE_ACCOUNT_JSON_PATH=/workspace/InverseIFHunter/service_account.json
+      - GOOGLE_SERVICE_ACCOUNT_JSON_PATH=/workspace/service_account.json
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - FIREWORKS_API_KEY=${FIREWORKS_API_KEY}
@@ -80,9 +75,9 @@ services:
       - OPENAI_CONCURRENCY=30
     volumes:
       - ../../:/workspace:ro
-      - ./.storage:/app/.storage
+      - ../../.storage:/app/.storage
       - telemetry-data:/app/.telemetry
-      - ./static:/app/static:ro
+      - ../../static:/app/static:ro
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/api/health')"]
       interval: 30s
@@ -93,18 +88,16 @@ services:
       redis:
         condition: service_healthy
     networks:
-      model-hunter-network:
-        aliases:
-          - mh-prod-green
+      - model-hunter-network
 
   dashboard:
     build:
-      context: ./dashboard
+      context: ../../dashboard
       dockerfile: Dockerfile
     container_name: model-hunter-dashboard
     restart: unless-stopped
     ports:
-      - "8001:8001"
+      - "127.0.0.1:8001:8001"
     environment:
       - DASHBOARD_PORT=8001
       - TELEMETRY_LOG_PATH=/app/.telemetry/events.jsonl
@@ -114,8 +107,8 @@ services:
       - REDIS_URL=redis://redis:6379/0
     volumes:
       - telemetry-data:/app/.telemetry:ro
-      - ./.storage:/app/.storage:ro
-      - ./ml_pipeline/models:/app/ml_models:ro
+      - ../../.storage:/app/.storage:ro
+      - ../../ml_pipeline/models:/app/ml_models:ro
     depends_on:
       - model-hunter-blue
     networks:

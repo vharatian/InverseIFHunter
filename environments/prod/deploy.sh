@@ -1,38 +1,34 @@
 #!/bin/bash
 #
-# Zero-Downtime Deploy Script
+# PRODUCTION Deploy — Zero-Downtime
 #
 # The app is stateless — all state lives in Redis.
-# Nginx load-balances between blue and green.
-# Deploy = rebuild one container at a time.
-# Trainers see zero disruption (SSE auto-reconnects via Redis Streams).
+# Nginx load-balances between blue and green with automatic failover.
+# Deploy = rebuild one container at a time. Nginx retries on the healthy one.
 #
 # Usage:
-#   ./deploy.sh              # Full deploy (pull + rebuild both)
-#   ./deploy.sh --status     # Show container status
-#   ./deploy.sh --frontend   # Frontend-only (just git pull, no rebuild)
+#   ./environments/prod/deploy.sh              # Full deploy (pull + rebuild both)
+#   ./environments/prod/deploy.sh --status     # Show container status
+#   ./environments/prod/deploy.sh --frontend   # Frontend-only (just git pull, no rebuild)
 #
 
 set -e
 
-# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-COMPOSE_FILE="docker-compose.yml"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+COMPOSE="docker-compose --project-name prod-server -f $SCRIPT_DIR/docker-compose.yml --env-file $REPO_ROOT/.env"
 BLUE_PORT=8000
 GREEN_PORT=8002
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "$SCRIPT_DIR"
-
-# ---- Status ----
 show_status() {
     echo -e "${BLUE}╔═══════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}║   Model Hunter — Deployment Status    ║${NC}"
+    echo -e "${BLUE}║   Production — Deployment Status      ║${NC}"
     echo -e "${BLUE}╚═══════════════════════════════════════╝${NC}"
     echo ""
 
@@ -51,7 +47,6 @@ show_status() {
     echo ""
 }
 
-# ---- Health check ----
 wait_healthy() {
     local port=$1
     local name=$2
@@ -72,33 +67,27 @@ wait_healthy() {
     return 1
 }
 
-# ---- Frontend-only deploy ----
 deploy_frontend() {
     echo -e "${YELLOW}[1/1] Pulling latest code (frontend-only)...${NC}"
-    cd "$SCRIPT_DIR/.." && git pull origin main && cd "$SCRIPT_DIR"
+    cd "$REPO_ROOT" && git pull origin mth
     echo -e "${GREEN}Done. Static files are volume-mounted — changes are live immediately.${NC}"
 }
 
-# ---- Full deploy ----
 deploy_full() {
     echo -e "${BLUE}╔═══════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}║   Zero-Downtime Deploy                ║${NC}"
+    echo -e "${BLUE}║   Production — Zero-Downtime Deploy   ║${NC}"
     echo -e "${BLUE}╚═══════════════════════════════════════╝${NC}"
     echo ""
 
-    # Step 1: Pull latest code
     echo -e "${YELLOW}[1/5] Pulling latest code...${NC}"
-    cd "$SCRIPT_DIR/.." && git pull origin multiturn-hunter && cd "$SCRIPT_DIR"
+    cd "$REPO_ROOT" && git pull origin mth
     echo -e "${GREEN}  Code updated.${NC}"
     echo ""
 
-    # Step 2: Rebuild and restart GREEN (blue stays up, serves all traffic)
     echo -e "${YELLOW}[2/5] Rebuilding green...${NC}"
-    docker-compose -f $COMPOSE_FILE up -d --build --no-deps model-hunter-green
-    docker network connect model-hunter_model-hunter-network model-hunter-green 2>/dev/null || true
+    $COMPOSE up -d --build --no-deps model-hunter-green
     echo ""
 
-    # Step 3: Wait for green to be healthy
     echo -e "${YELLOW}[3/5] Health checking green...${NC}"
     if ! wait_healthy $GREEN_PORT "green"; then
         echo -e "${RED}Green failed health check. Blue is still serving. Deploy aborted.${NC}"
@@ -106,13 +95,10 @@ deploy_full() {
     fi
     echo ""
 
-    # Step 4: Rebuild and restart BLUE (green is now up, serves traffic)
     echo -e "${YELLOW}[4/5] Rebuilding blue...${NC}"
-    docker-compose -f $COMPOSE_FILE up -d --build --no-deps model-hunter-blue
-    docker network connect model-hunter_model-hunter-network model-hunter-blue 2>/dev/null || true
+    $COMPOSE up -d --build --no-deps model-hunter-blue
     echo ""
 
-    # Step 5: Wait for blue to be healthy
     echo -e "${YELLOW}[5/5] Health checking blue...${NC}"
     if ! wait_healthy $BLUE_PORT "blue"; then
         echo -e "${RED}Blue failed health check. Green is serving. Manual intervention needed.${NC}"
@@ -120,18 +106,10 @@ deploy_full() {
     fi
     echo ""
 
-    # Ensure nginx can reach app (blue/green may be on model-hunter-refactored network)
-    docker network connect model-hunter-refactored_model-hunter-network model-hunter-nginx 2>/dev/null || true
-    # If nginx mounts from model-hunter/ (VM layout), copy config there
-    REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-    if [ -d "$REPO_ROOT/model-hunter" ]; then
-        cp "$SCRIPT_DIR/nginx.conf" "$REPO_ROOT/model-hunter/nginx.conf"
-    fi
-    # Reload nginx to pick up fresh container IPs
-    docker-compose -f $COMPOSE_FILE exec -T nginx nginx -s reload 2>/dev/null || true
+    $COMPOSE exec -T nginx nginx -s reload 2>/dev/null || true
 
     echo -e "${GREEN}╔═══════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}║   Deploy Complete — Zero Downtime     ║${NC}"
+    echo -e "${GREEN}║   Production Deploy Complete          ║${NC}"
     echo -e "${GREEN}╚═══════════════════════════════════════╝${NC}"
     echo ""
     echo -e "  Both containers running new code."
@@ -139,7 +117,6 @@ deploy_full() {
     echo ""
 }
 
-# ---- Parse args ----
 case "${1:-}" in
     --status)
         show_status
