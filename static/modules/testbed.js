@@ -474,7 +474,7 @@ function showSavePreviewModal(opts) {
                 ${isPassing
                     ? '<button class="tb-confirm-delete" id="spmContinueBtn">Continue to Hunt</button>'
                     : `<button class="tb-confirm-cancel" id="spmFixBtn">Fix in Testbed</button>
-                       ${state.adminMode && adminBypass('reference_validation')
+                       ${(state.adminMode || !document.getElementById('adminModeIndicator')?.classList.contains('hidden')) && adminBypass('reference_validation')
                            ? '<button class="tb-confirm-delete" id="spmContinueBtn" style="background:linear-gradient(135deg,#7c6cf0,#60a5fa);">Continue Anyway (Admin)</button>'
                            : ''}`}
             </div>
@@ -1703,10 +1703,11 @@ function _appendSpmCriterion(event) {
 function _finalizeSavePreviewModal(isPassing, idealResponse, judgeData) {
     const actionsEl = document.getElementById('spmStreamActions');
     if (!actionsEl) return;
+    const isAdmin = state.adminMode || !document.getElementById('adminModeIndicator')?.classList.contains('hidden');
     actionsEl.innerHTML = isPassing
         ? '<button class="tb-confirm-delete" id="spmContinueBtn">Continue to Hunt</button>'
         : `<button class="tb-confirm-cancel" id="spmFixBtn">Fix in Testbed</button>
-           ${state.adminMode && adminBypass('reference_validation')
+           ${isAdmin && adminBypass('reference_validation')
                ? '<button class="tb-confirm-delete" id="spmContinueBtn" style="background:linear-gradient(135deg,#7c6cf0,#60a5fa);">Continue Anyway (Admin)</button>'
                : ''}`;
 

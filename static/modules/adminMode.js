@@ -31,17 +31,19 @@ export function initAdminMode() {
     _brandEl = document.getElementById('headerBrand');
     if (!_brandEl) return;
 
-    // Inject the aura ring (hidden by default)
     _auraEl = document.createElement('span');
     _auraEl.className = 'admin-aura';
     _brandEl.style.position = 'relative';
     _brandEl.prepend(_auraEl);
 
-    // Pointer events (works for mouse + touch)
     _brandEl.addEventListener('pointerdown', _onPointerDown, { passive: false });
     document.addEventListener('pointermove', _onPointerMove, { passive: false });
     document.addEventListener('pointerup',   _onPointerUp);
     document.addEventListener('pointercancel', _onPointerUp);
+
+    if (localStorage.getItem('modelHunter_adminMode') === '1') {
+        activateAdminMode();
+    }
 }
 
 /**
@@ -50,6 +52,7 @@ export function initAdminMode() {
  */
 export function activateAdminMode() {
     state.adminMode = true;
+    localStorage.setItem('modelHunter_adminMode', '1');
     _showAdminIndicator(true);
 
     const huntBtn = document.getElementById('startHuntBtn');
@@ -62,6 +65,7 @@ export function activateAdminMode() {
 
 export function deactivateAdminMode() {
     state.adminMode = false;
+    localStorage.removeItem('modelHunter_adminMode');
     _showAdminIndicator(false);
     // Re-apply locks
     try {
