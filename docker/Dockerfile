@@ -11,7 +11,12 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
-RUN mkdir -p .storage .telemetry
+
+RUN useradd -u 1005 -m appuser \
+    && mkdir -p .storage .telemetry \
+    && chown -R appuser:appuser .storage .telemetry
+
+USER appuser
 
 EXPOSE 8010
 

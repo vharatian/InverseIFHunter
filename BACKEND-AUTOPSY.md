@@ -13,18 +13,18 @@
 | CRITICAL-01 Disk 84% | CRITICAL | FIXED | Pruned 46 dangling images, orphaned volumes/networks, removed old production dir |
 | CRITICAL-02 Different codebases | CRITICAL | FIXED | Both prod and staging now run `mth` branch with shared `docker/Dockerfile` |
 | CRITICAL-03 Wrong branch in deploy | CRITICAL | FIXED | `environments/prod/deploy.sh` and `environments/staging/deploy.sh` both pull `mth` |
-| CRITICAL-04 Log rotation | CRITICAL | DEFERRED | Requires Docker daemon restart (brief container restart) |
+| CRITICAL-04 Log rotation | CRITICAL | FIXED | `/etc/docker/daemon.json` configured: 20m x 3 files per container, daemon restarted |
 | CRITICAL-05 502 during deploy | CRITICAL | FIXED | nginx `max_fails=1 fail_timeout=30s` + `proxy_next_upstream` auto-retries |
 | HIGH-06 Host nginx wrong port | HIGH | FIXED | Stale `/etc/nginx/sites-enabled/model-hunter` removed |
 | HIGH-07 Stale systemd services | HIGH | FIXED | `model-hunter.service` and dashboard service removed |
 | HIGH-08 Dashboard 444MB memory | HIGH | FIXED | Fresh container start with new production setup |
 | HIGH-09 No graceful shutdown | HIGH | FIXED | `exec` added to Dockerfile CMD -- uvicorn receives SIGTERM directly |
-| HIGH-10 Cron wrong container | HIGH | DEFERRED | Needs separate fix |
-| MEDIUM-11 No swap | MEDIUM | DEFERRED | Low priority -- current usage 2.6/16 GB |
+| HIGH-10 Cron wrong container | HIGH | FIXED | Dead cron entry removed -- script never worked (empty log, wrong paths) |
+| MEDIUM-11 No swap | MEDIUM | FIXED | 2 GB swapfile at `/swapfile`, persists via `/etc/fstab` |
 | MEDIUM-12 Ports exposed 0.0.0.0 | MEDIUM | FIXED | All app ports bound to `127.0.0.1` in docker-compose |
 | MEDIUM-13 Orphaned volumes | MEDIUM | FIXED | All orphaned volumes pruned |
 | MEDIUM-14 Redis AOF | MEDIUM | NO CHANGE | Monitoring only |
-| MEDIUM-15 Root-owned files | MEDIUM | DEFERRED | Needs USER directive in Dockerfile |
+| MEDIUM-15 Root-owned files | MEDIUM | FIXED | Dockerfile runs as UID 1005 (appuser/mandy), existing files chowned |
 | MEDIUM-16 No backup | MEDIUM | DEFERRED | Needs GCS/Drive backup setup |
 | LOW-17 Weak passwords | LOW | USER ACTION | User sets strong password in `.env` |
 | LOW-18 Staging in prod nginx | LOW | FIXED | Separate `environments/prod/nginx.conf` and `environments/staging/nginx.conf` |

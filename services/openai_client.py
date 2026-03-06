@@ -30,6 +30,40 @@ except ImportError:
 load_dotenv()
 
 
+JUDGE_PROMPT_TEMPLATE = """## Question
+{prompt}
+
+---
+## Student Response
+{student_response}
+
+---
+## Standard Responses
+{standard_response}
+
+---
+## Evaluation Criteria
+{response_reference}
+
+---"""
+
+
+def _build_criterion_prompt(
+    prompt: str,
+    student_response: str,
+    standard_response: str,
+    criterion_id: str,
+    criterion_description: str,
+) -> str:
+    """Build the user message for a single criterion using the standard template."""
+    return JUDGE_PROMPT_TEMPLATE.format(
+        prompt=prompt,
+        student_response=student_response,
+        standard_response=standard_response,
+        response_reference=f"{criterion_id}: {criterion_description}",
+    )
+
+
 def _extract_criteria_list(reference: str) -> List[Dict[str, str]]:
     """Extract criteria list from reference (JSON array or plain C1: ... format). Used by OpenRouter judge."""
     array_match = re.search(r'\[.*?\]', reference, re.DOTALL)
@@ -78,28 +112,20 @@ async def _judge_via_openrouter(
     if not criteria_list:
         raise ValueError("CRITICAL: Could not extract criteria for judging. Reference must contain a valid JSON array or C1: ... format.")
     client = get_openrouter_client()
+    if not judge_system_prompt or not judge_system_prompt.strip():
+        raise ValueError("Judge system prompt is empty. Please provide a judge system prompt before running the hunt.")
     results = []
     for criterion in criteria_list:
         c_id = criterion.get("id", "?")
         desc = criterion.get("description", "")
-        eval_prompt = f"""Criterion ({c_id}): {desc}
-
-Question:
-{prompt}
-
-Student Answer:
-{student_response}
-
-Evaluate strictly whether the Student Answer meets the requirement stated in the criterion above.
-
-You MUST respond with ONLY this JSON (no other text):
-
-If passing:  {{"status": "PASS", "reason": "why it passes"}}
-If failing:  {{"status": "FAIL", "reason": "why it fails"}}"""
-        # Pass messages as system + user (eval_prompt) for format stability; prompt="" so client does not append
-        if not judge_system_prompt or not judge_system_prompt.strip():
-            raise ValueError("Judge system prompt is empty. Please provide a judge system prompt before running the hunt.")
-        messages = [{"role": "system", "content": judge_system_prompt}, {"role": "user", "content": eval_prompt}]
+        user_prompt = _build_criterion_prompt(
+            prompt=prompt,
+            student_response=student_response,
+            standard_response=standard_response,
+            criterion_id=c_id,
+            criterion_description=desc,
+        )
+        messages = [{"role": "system", "content": judge_system_prompt}, {"role": "user", "content": user_prompt}]
         status = "MISSING"
         reason = "after retries"
         for attempt in range(3):
@@ -212,21 +238,14 @@ async def _judge_via_openrouter_streaming(
     async def _eval_one(criterion):
         c_id = criterion.get("id", "?")
         desc = criterion.get("description", "")
-        eval_prompt = f"""Criterion ({c_id}): {desc}
-
-Question:
-{prompt}
-
-Student Answer:
-{student_response}
-
-Evaluate strictly whether the Student Answer meets the requirement stated in the criterion above.
-
-You MUST respond with ONLY this JSON (no other text):
-
-If passing:  {{"status": "PASS", "reason": "why it passes"}}
-If failing:  {{"status": "FAIL", "reason": "why it fails"}}"""
-        messages = [{"role": "system", "content": judge_system_prompt}, {"role": "user", "content": eval_prompt}]
+        user_prompt = _build_criterion_prompt(
+            prompt=prompt,
+            student_response=student_response,
+            standard_response=standard_response,
+            criterion_id=c_id,
+            criterion_description=desc,
+        )
+        messages = [{"role": "system", "content": judge_system_prompt}, {"role": "user", "content": user_prompt}]
         status = "MISSING"
         reason = "after retries"
         for attempt in range(3):
@@ -454,47 +473,6 @@ class OpenAIJudgeClient:
                 "Direct OpenAI judge model selected but OPENAI_API_KEY not set. "
                 "Add OPENAI_API_KEY to .env, or use an OpenRouter model (e.g. openai/gpt-5.2) with OPENROUTER_API_KEY."
             )
-        
-        # Build the judge prompt
-        # Use standard_response if provided, otherwise empty string
-        standard_resp = standard_response or ""
-        
-        if judge_prompt_template:
-            # Support both old and new template placeholders
-            user_prompt = judge_prompt_template.replace(
-                "{prompt}", prompt
-            ).replace(
-                "{model_response}", student_response
-            ).replace(
-                "{model_response}", student_response  # Also support correct spelling
-            ).replace(
-                "{response}", student_response  # Legacy support
-            ).replace(
-                "{standard_response}", standard_resp
-            ).replace(
-                "{criteria}", response_reference
-            ).replace(
-                "{response_reference}", response_reference  # Legacy support
-            )
-        else:
-            # Default template using new format
-            user_prompt = f"""## Question
-{prompt}
-
----
-## Student Response
-{student_response}
-
----
-## Standard Responses
-{standard_resp}
-
----
-## Evaluation Criteria
-{response_reference}
-
----
-"""
         
         return await self._judge_independently(
             prompt, student_response, response_reference,
@@ -766,32 +744,23 @@ class OpenAIJudgeClient:
         """Evaluate a single criterion."""
         c_id = criterion.get('id', 'Unknown')
         desc = criterion.get('description', '')
+        user_prompt = _build_criterion_prompt(
+            prompt=prompt,
+            student_response=student_response,
+            standard_response=standard_response or "",
+            criterion_id=c_id,
+            criterion_description=desc,
+        )
         
-        eval_prompt = f"""Criterion ({c_id}): {desc}
-
-Question:
-{prompt}
-
-Student Answer:
-{student_response}
-
-Evaluate strictly whether the Student Answer meets the requirement stated in the criterion above.
-
-You MUST respond with ONLY this JSON (no other text):
-
-If passing:  {{"status": "PASS", "reason": "why it passes"}}
-If failing:  {{"status": "FAIL", "reason": "why it fails"}}"""
-        
-        # Retry logic for connection errors (broken pipe, timeouts, etc.)
         max_retries = 3
-        retry_delay = 1  # seconds
+        retry_delay = 1
         
         for attempt in range(max_retries):
             try:
                 messages = []
                 if judge_system_prompt and judge_system_prompt.strip():
                     messages.append({"role": "system", "content": judge_system_prompt})
-                messages.append({"role": "user", "content": eval_prompt})
+                messages.append({"role": "user", "content": user_prompt})
                 response = await self.client.chat.completions.create(
                     model=model,
                     messages=messages,
