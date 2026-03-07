@@ -60,17 +60,17 @@ hunt:
       - { id: "anthropic/claude-sonnet-4.6", name: "Claude Sonnet 4.6" }
       - { id: "anthropic/claude-opus-4.5", name: "Claude Opus 4.5" }
       - { id: "anthropic/claude-opus-4.6", name: "Claude Opus 4.6" }
-      - { id: "openai/gpt-5.2", name: "GPT-5.2" }
+      - { id: "openai/gpt-5.4", name: "GPT-5.4" }
+      - { id: "openai/gpt-5.4-pro", name: "GPT 5.4 Pro" }
       - { id: "google/gemini-3.1-pro-preview", name: "Gemini 3.1 Pro (Preview)" }
-      - { id: "openai/gpt-5.2-pro", name: "GPT 5.2 Pro" }
     # fireworks:
     #   - { id: "accounts/fireworks/models/qwen3-235b-a22b-thinking-2507", name: "Qwen3-235B (Thinking)" }
   # Trainer "Evaluation Model" (judge) dropdown in hunt config. First entry is default.
   judge_models:
     openrouter:
       - { id: "anthropic/claude-opus-4.6", name: "Opus 4.6" }
-      - { id: "openai/gpt-5.2", name: "GPT-5.2" }
-      - { id: "openai/gpt-5.2-pro", name: "GPT 5.2 Pro" }
+      - { id: "openai/gpt-5.4", name: "GPT-5.4" }
+      - { id: "openai/gpt-5.4-pro", name: "GPT 5.4 Pro" }
 
 # HTTP / backend
 http:
