@@ -72,6 +72,9 @@ def _compute_app_version():
         os.path.join(base, "static", "**", "*.js"),
         os.path.join(base, "static", "**", "*.css"),
         os.path.join(base, "static", "**", "*.html"),
+        os.path.join(base, "config", "*.yaml"),
+        os.path.join(base, "config", "*.yml"),
+        os.path.join(base, "templates", "**", "*.html"),
     ]
     mtimes = []
     for pat in patterns:
