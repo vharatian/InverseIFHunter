@@ -68,8 +68,8 @@ hunt:
   # Trainer "Evaluation Model" (judge) dropdown in hunt config. First entry is default.
   judge_models:
     openrouter:
-      - { id: "anthropic/claude-opus-4.6", name: "Opus 4.6" }
       - { id: "openai/gpt-5.4", name: "GPT-5.4" }
+      - { id: "anthropic/claude-opus-4.6", name: "Opus 4.6" }
       - { id: "openai/gpt-5.4-pro", name: "GPT 5.4 Pro" }
 
 # HTTP / backend
