@@ -62,7 +62,7 @@ import hashlib as _hashlib
 import glob as _glob
 
 def _compute_app_version():
-    """Generate version from modification times of all source files. Detects any code change after deploy."""
+    """Generate version from file contents (not mtimes) so blue/green containers produce the same hash."""
     base = os.path.dirname(os.path.abspath(__file__))
     patterns = [
         os.path.join(base, "*.py"),
@@ -76,16 +76,15 @@ def _compute_app_version():
         os.path.join(base, "config", "*.yml"),
         os.path.join(base, "templates", "**", "*.html"),
     ]
-    mtimes = []
+    content_hash = _hashlib.md5()
     for pat in patterns:
         for f in sorted(_glob.glob(pat, recursive=True)):
             try:
-                mtimes.append(f"{f}:{os.path.getmtime(f)}")
+                with open(f, "rb") as fh:
+                    content_hash.update(fh.read())
             except OSError:
                 pass
-    combined = "|".join(mtimes)
-    short_hash = _hashlib.md5(combined.encode()).hexdigest()[:8]
-    return f"1.1.{short_hash}"
+    return f"1.1.{content_hash.hexdigest()[:8]}"
 
 APP_VERSION = _compute_app_version()
 
