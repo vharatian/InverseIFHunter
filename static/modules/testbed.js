@@ -1517,6 +1517,7 @@ async function triggerJudge(run) {
                 prompt:              left.prompt     || null,
                 response_reference:  criteriaForJudge || null,
                 judge_system_prompt: left.judgePrompt  || null,
+                standard_response:   left.idealResponse || null,
             }),
         });
 

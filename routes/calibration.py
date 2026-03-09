@@ -34,6 +34,7 @@ class JudgeCalibrateRequest(BaseModel):
     prompt: str | None = None
     response_reference: str | None = None  # criteria JSON / criteria string
     judge_system_prompt: str | None = None
+    standard_response: str | None = None  # ideal/expected response for judge comparison
 
 
 class GenerateSingleRequest(BaseModel):
@@ -320,6 +321,8 @@ async def judge_calibration(session_id: str, request: JudgeCalibrateRequest):
         if not effective_response_reference:
             raise HTTPException(400, "CRITICAL: Reference Answer must be VALID JSON. Error: response_reference is empty or missing")
 
+        effective_standard_response = request.standard_response if request.standard_response is not None else notebook.response or request.response_text
+
         judge_result = await judge.judge_response(
             prompt=effective_prompt,
             student_response=request.response_text,
@@ -327,7 +330,7 @@ async def judge_calibration(session_id: str, request: JudgeCalibrateRequest):
             judge_system_prompt=effective_judge_system_prompt,
             judge_prompt_template=notebook.judge_prompt_template,
             model=judge_model,
-            standard_response=request.response_text
+            standard_response=effective_standard_response
         )
 
         return _format_judge_result(judge_result, notebook)
@@ -362,6 +365,8 @@ async def judge_calibration_stream(session_id: str, request: JudgeCalibrateReque
     if not effective_response_reference:
         raise HTTPException(400, "response_reference is empty or missing")
 
+    effective_standard_response = request.standard_response if request.standard_response is not None else notebook.response or request.response_text
+
     async def _stream():
         try:
             async for event in judge.judge_response_streaming(
@@ -371,7 +376,7 @@ async def judge_calibration_stream(session_id: str, request: JudgeCalibrateReque
                 judge_system_prompt=effective_judge_system_prompt,
                 judge_prompt_template=notebook.judge_prompt_template,
                 model=judge_model,
-                standard_response=request.response_text,
+                standard_response=effective_standard_response,
             ):
                 yield f"data: {json.dumps(event)}\n\n"
         except Exception as e:
