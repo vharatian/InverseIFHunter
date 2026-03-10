@@ -32,6 +32,11 @@ debug.log
 # Node (if ever needed)
 node_modules/
 
+# Docs (except READMEs)
+*.md
+!README.md
+!*/README.md
+
 # OS
 .DS_Store
 Thumbs.db
