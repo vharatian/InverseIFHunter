@@ -100,8 +100,12 @@ async def advance_turn(session_id: str, request: AdvanceTurnRequest):
     session.current_turn = current_turn + 1
     
     # Update notebook with new turn's prompt and criteria
-    session.notebook.prompt = request.next_prompt or ""
-    session.notebook.response_reference = request.next_criteria or ""
+    if not request.next_prompt or not request.next_prompt.strip():
+        raise HTTPException(400, "Next turn prompt is required. Please write a prompt for the next turn.")
+    if not request.next_criteria or not request.next_criteria.strip():
+        raise HTTPException(400, "Next turn criteria is required. Please add criteria for the next turn.")
+    session.notebook.prompt = request.next_prompt
+    session.notebook.response_reference = request.next_criteria
     session.notebook.response = selected_response_text
     if request.next_judge_prompt is not None:
         session.notebook.judge_system_prompt = request.next_judge_prompt

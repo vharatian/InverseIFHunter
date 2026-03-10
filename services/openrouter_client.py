@@ -118,13 +118,13 @@ class OpenRouterClient(BaseAPIClient):
         is_reasoning_model = (not is_nemotron and (not is_claude or is_opus or is_sonnet_46)) or is_gemini
         
         if messages:
-            # Multi-turn or full messages: append prompt only if provided (avoid empty user message)
             messages = list(messages)
             if prompt:
                 messages = messages + [{"role": "user", "content": prompt}]
         else:
-            # Single-turn: just user prompt
-            messages = [{"role": "user", "content": prompt or ""}]
+            if not prompt or not prompt.strip():
+                raise ValueError("No prompt provided. Please provide a prompt before calling the model.")
+            messages = [{"role": "user", "content": prompt}]
         
         # temperature: default 1 for generation; judge passes 0 explicitly
         temp = temperature if temperature is not None else 1.0
@@ -380,7 +380,9 @@ class OpenRouterClient(BaseAPIClient):
             if prompt:
                 msgs = msgs + [{"role": "user", "content": prompt}]
         else:
-            msgs = [{"role": "user", "content": prompt or ""}]
+            if not prompt or not prompt.strip():
+                raise ValueError("No prompt provided. Please provide a prompt before calling the model.")
+            msgs = [{"role": "user", "content": prompt}]
 
         temp = temperature if temperature is not None else 1.0
         payload: Dict[str, Any] = {

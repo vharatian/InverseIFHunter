@@ -135,8 +135,9 @@ async def judge_reference(
             except Exception as e:
                 logger.debug(f" judge_reference - Could not parse criteria from response_reference: {e}")
         
-        # Use session's judge model so OpenRouter IDs (openai/gpt-5.2, anthropic/...) use OpenRouter path
-        judge_model = getattr(session.config, "judge_model", None) or "gpt-4o"
+        judge_model = getattr(session.config, "judge_model", None)
+        if not judge_model:
+            raise HTTPException(400, "No judge model selected. Please select a judge model before judging.")
         judge_result = await judge.judge_response(
             prompt=notebook.prompt,
             student_response=notebook.response,
@@ -311,7 +312,9 @@ async def judge_calibration(session_id: str, request: JudgeCalibrateRequest):
         from services.openai_client import get_openai_judge_client
         judge = get_openai_judge_client()
 
-        judge_model = request.judge_model or getattr(session.config, "judge_model", None) or "gpt-4o"
+        judge_model = request.judge_model or getattr(session.config, "judge_model", None)
+        if not judge_model:
+            raise HTTPException(400, "No judge model selected. Please select a judge model before judging.")
 
         # Use inline overrides from testbed if provided; fall back to session notebook
         effective_prompt             = request.prompt              if request.prompt              is not None else notebook.prompt
@@ -359,7 +362,9 @@ async def judge_calibration_stream(session_id: str, request: JudgeCalibrateReque
     from services.openai_client import get_openai_judge_client
     judge = get_openai_judge_client()
 
-    judge_model = request.judge_model or getattr(session.config, "judge_model", None) or "gpt-4o"
+    judge_model = request.judge_model or getattr(session.config, "judge_model", None)
+    if not judge_model:
+        raise HTTPException(400, "No judge model selected. Please select a judge model before judging.")
     effective_prompt = request.prompt if request.prompt is not None else notebook.prompt
     effective_response_reference = request.response_reference if request.response_reference is not None else notebook.response_reference
     effective_judge_system_prompt = request.judge_system_prompt if request.judge_system_prompt is not None else notebook.judge_system_prompt
@@ -428,7 +433,9 @@ async def judge_reference_stream(
 
     from services.openai_client import get_openai_judge_client
     judge = get_openai_judge_client()
-    judge_model = getattr(session.config, "judge_model", None) or "gpt-4o"
+    judge_model = getattr(session.config, "judge_model", None)
+    if not judge_model:
+        raise HTTPException(400, "No judge model selected. Please select a judge model before judging.")
 
     async def _stream():
         try:
