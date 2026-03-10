@@ -1018,7 +1018,7 @@ function renderActiveTab() {
             <div class="tb-right-header">
                 <div class="tb-panel-header">
                     <span class="tb-panel-icon">🤖</span>
-                    <span class="tb-panel-title">Response</span>
+                    <span class="tb-panel-title">Model Response</span>
 
                     <!-- Model & Judge Model dropdowns inline in header -->
                     <div class="tb-header-dropdowns">
@@ -1065,7 +1065,7 @@ function renderActiveTab() {
                         ${isBusy || !hasResponse ? 'disabled' : ''}
                         title="${!hasResponse ? 'Generate a response first' : 'Judge this response against your criteria'}"
                     >
-                        ${isJudging ? `<span class="tb-btn-spinner"></span> Judging with ${getJudgeModels().find(m => m.id === run.judgeModel)?.name || 'judge'}…` : '⚖️ Judge'}
+                        ${isJudging ? `<span class="tb-btn-spinner"></span> Judging with ${getJudgeModels().find(m => m.id === run.judgeModel)?.name || 'judge'}…` : '⚖️ Judge Model Response'}
                     </button>
                     <button
                         class="btn btn-secondary tb-regen-btn"
