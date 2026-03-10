@@ -82,17 +82,6 @@ class HuntEngine:
         """Get session from Redis. Returns None if not found."""
         return await store.get_full_session(session_id)
 
-    # Keep sync version for backward compat (wraps async)
-    def get_session(self, session_id: str) -> Optional[HuntSession]:
-        """Sync wrapper — prefer get_session_async."""
-        try:
-            loop = asyncio.get_running_loop()
-            # If we're in an async context, we can't call run_until_complete.
-            # Return None and let callers use get_session_async instead.
-            return None
-        except RuntimeError:
-            return None
-
     # ------------------------------------------------------------------
     # Hunt execution
     # ------------------------------------------------------------------
@@ -474,49 +463,27 @@ class HuntEngine:
 
         episode_start = datetime.utcnow()
         batch_index = 0
+        batches_completed = 0
         error_batches_run = 0
 
         try:
             while True:
                 if batch_index >= max_batches:
                     await store.set_status(session_id, HuntStatus.STOPPED_BUDGET)
-                    await events.publish(session_id, HuntEvent(
-                        event_type="complete",
-                        data={
-                            "session_id": session_id,
-                            "reason": "max_batches_per_turn",
-                            "status": HuntStatus.STOPPED_BUDGET.value,
-                        }
-                    ))
                     break
 
                 total_so_far = batch_index * batch_size
                 if total_so_far + batch_size > max_samples:
                     await store.set_status(session_id, HuntStatus.STOPPED_BUDGET)
-                    await events.publish(session_id, HuntEvent(
-                        event_type="complete",
-                        data={
-                            "session_id": session_id,
-                            "reason": "max_total_samples",
-                            "status": HuntStatus.STOPPED_BUDGET.value,
-                        }
-                    ))
                     break
 
                 elapsed = (datetime.utcnow() - episode_start).total_seconds()
                 if elapsed >= max_wall:
                     await store.set_status(session_id, HuntStatus.STOPPED_BUDGET)
-                    await events.publish(session_id, HuntEvent(
-                        event_type="complete",
-                        data={
-                            "session_id": session_id,
-                            "reason": "max_wall_time_seconds",
-                            "status": HuntStatus.STOPPED_BUDGET.value,
-                        }
-                    ))
                     break
 
                 batch_results = await self._run_batch(session_id, batch_index, config, notebook)
+                batches_completed += 1
                 labels = [r.sample_label or "ERROR" for r in batch_results]
                 agg = aggregate_batch(labels, config)
 
@@ -544,14 +511,6 @@ class HuntEngine:
                     error_batches_run += 1
                     if error_batches_run > max_error_batches:
                         await store.set_status(session_id, HuntStatus.NEEDS_ATTENTION)
-                        await events.publish(session_id, HuntEvent(
-                            event_type="complete",
-                            data={
-                                "session_id": session_id,
-                                "reason": "persistent_errors",
-                                "status": HuntStatus.NEEDS_ATTENTION.value,
-                            }
-                        ))
                         break
                     batch_index += 1
                     continue
@@ -571,21 +530,26 @@ class HuntEngine:
         for result in current_results:
             if result.status == HuntStatus.COMPLETED:
                 await store.append_all_result(session_id, result)
-        new_count = config.hunt_offset + (batch_index + 1) * batch_size
+        new_count = config.hunt_offset + batches_completed * batch_size
         await store.set_accumulated_hunt_count(session_id, new_count)
         meta = await store.get_meta(session_id)
         all_results = await store.get_all_results(session_id)
         final_status = await store.get_status(session_id)
+        passing_mode = getattr(config, "passing_mode", False)
+        breaks_found = int(meta.get("breaks_found", 0))
+        episode_success = final_status == HuntStatus.COMPLETED and (
+            True if passing_mode else breaks_found >= config.target_breaks
+        )
 
         await events.publish(session_id, HuntEvent(
             event_type="complete",
             data={
                 "session_id": session_id,
                 "completed_hunts": int(meta.get("completed_hunts", 0)),
-                "breaks_found": int(meta.get("breaks_found", 0)),
+                "breaks_found": breaks_found,
                 "passes_found": int(meta.get("passes_found", 0)),
-                "passing_mode": getattr(config, "passing_mode", False),
-                "success": True,
+                "passing_mode": passing_mode,
+                "success": episode_success,
                 "total_accumulated": len(all_results),
                 "status": final_status.value,
             }
@@ -677,7 +641,7 @@ class HuntEngine:
                 hint = ""
                 if "404" in str(error):
                     hint = f" (model '{model}' may not exist — check OpenRouter/Fireworks model IDs)"
-                result.error = f"⚠️ Model failed after 3 tries: {error}{hint}"
+                result.error = f"⚠️ Model failed after {config.max_retries} tries: {error}{hint}"
                 result.response = ""
                 result.reasoning_trace = reasoning or ""
             elif not response or not response.strip():
@@ -705,7 +669,8 @@ class HuntEngine:
             result.judge_score = None
             result.is_breaking = False
             result.error = f"⚠️ Error: {str(e)}"
-            result.response = ""
+            result.response = result.response or ""
+            result.reasoning_trace = result.reasoning_trace or ""
 
         # Write result to Redis (atomic RPUSH)
         await store.append_result(session_id, result)
@@ -761,13 +726,13 @@ class HuntEngine:
         ))
 
     async def _judge_response(self, config: HuntConfig, notebook: ParsedNotebook, result: HuntResult):
-        """Judge a model response using GPT-5 with rate limiting."""
         try:
             judge = get_openai_judge_client()
 
             judge_system = config.custom_judge_system_prompt or notebook.judge_system_prompt
 
             rate_limiter = get_rate_limiter() if _rate_limiter_enabled else None
+            judge_provider = "openrouter" if "/" in (config.judge_model or "") else "openai"
 
             async def make_judge_call():
                 return await judge.judge_response(
@@ -782,7 +747,7 @@ class HuntEngine:
                 )
 
             if rate_limiter:
-                async with rate_limiter.acquire("openai"):
+                async with rate_limiter.acquire(judge_provider):
                     judge_result = await make_judge_call()
             else:
                 judge_result = await make_judge_call()
@@ -796,7 +761,7 @@ class HuntEngine:
                 logger.warning(f"Judge returned None score for Hunt {result.hunt_id}, retrying ({retry_count}/3)...")
 
                 if rate_limiter:
-                    async with rate_limiter.acquire("openai"):
+                    async with rate_limiter.acquire(judge_provider):
                         judge_result = await make_judge_call()
                 else:
                     judge_result = await make_judge_call()
@@ -806,13 +771,16 @@ class HuntEngine:
             if result.judge_score is None:
                 logger.warning(f"Judge failed after retries for Hunt {result.hunt_id}")
                 logger.warning(f"Raw Judge Output: {judge_result.get('raw_output', '')[:500]}...")
+                result.status = HuntStatus.FAILED
+                result.is_breaking = False
+                result.error = "⚠️ Judge failed to produce a score after retries"
+            else:
+                result.is_breaking = result.judge_score == 0
+                result.status = HuntStatus.COMPLETED
 
             result.judge_output = judge_result.get("raw_output", "")
             result.judge_criteria = judge_result.get("criteria", {})
             result.judge_explanation = judge_result.get("explanation", "")
-
-            result.is_breaking = result.judge_score == 0
-            result.status = HuntStatus.COMPLETED
 
             if judge_result.get("error"):
                 result.error = judge_result["error"]
@@ -829,11 +797,6 @@ class HuntEngine:
         """Get all breaking (score 0) results from a session."""
         all_results = await self._get_all_accumulated_results_async(session_id)
         return [r for r in all_results if r.is_breaking]
-
-    # Sync wrapper for backward compat
-    def get_breaking_results(self, session_id: str) -> List[HuntResult]:
-        """Sync wrapper — returns empty list. Use get_breaking_results_async."""
-        return []
 
     async def _get_all_accumulated_results_async(self, session_id: str) -> List[HuntResult]:
         """Get all accumulated results including current run (completed AND failed)."""
@@ -860,11 +823,6 @@ class HuntEngine:
 
         return selected
 
-    # Sync wrapper for backward compat
-    def get_selected_for_review(self, session_id: str, target_count: int = 4) -> List[HuntResult]:
-        """Sync wrapper — returns empty list. Use get_selected_for_review_async."""
-        return []
-
     async def export_results_async(self, session_id: str) -> List[Dict[str, Any]]:
         """Export ALL accumulated results for notebook export."""
         all_results = await self._get_all_accumulated_results_async(session_id)
@@ -884,11 +842,6 @@ class HuntEngine:
             }
             for r in all_results
         ]
-
-    # Sync wrapper for backward compat
-    def export_results(self, session_id: str) -> List[Dict[str, Any]]:
-        """Sync wrapper — returns empty list. Use export_results_async."""
-        return []
 
 
 # Singleton instance
