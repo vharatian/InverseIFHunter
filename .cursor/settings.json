@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(.env)",
+      "Read(.env.*)",
+      "Read(service_account.json)",
+      "Read(service_account*.json)",
+      "Read(config/global.yaml secrets section)",
+      "Bash(cat .env*)",
+      "Bash(cat service_account*)",
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(git push*)"
+    ]
+  }
+}
