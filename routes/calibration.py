@@ -321,7 +321,9 @@ async def judge_calibration(session_id: str, request: JudgeCalibrateRequest):
         if not effective_response_reference:
             raise HTTPException(400, "CRITICAL: Reference Answer must be VALID JSON. Error: response_reference is empty or missing")
 
-        effective_standard_response = request.standard_response if request.standard_response is not None else notebook.response or request.response_text
+        effective_standard_response = request.standard_response if request.standard_response is not None else notebook.response
+        if not effective_standard_response or not effective_standard_response.strip():
+            raise HTTPException(400, "No ideal/standard response available. Please write an ideal response before judging.")
 
         judge_result = await judge.judge_response(
             prompt=effective_prompt,
@@ -365,7 +367,9 @@ async def judge_calibration_stream(session_id: str, request: JudgeCalibrateReque
     if not effective_response_reference:
         raise HTTPException(400, "response_reference is empty or missing")
 
-    effective_standard_response = request.standard_response if request.standard_response is not None else notebook.response or request.response_text
+    effective_standard_response = request.standard_response if request.standard_response is not None else notebook.response
+    if not effective_standard_response or not effective_standard_response.strip():
+        raise HTTPException(400, "No ideal/standard response available. Please write an ideal response before judging.")
 
     async def _stream():
         try:

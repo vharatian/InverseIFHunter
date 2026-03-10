@@ -397,6 +397,11 @@ class OpenAIJudgeClient:
             error_msg = "CRITICAL: Reference Answer must be VALID JSON. Error: response_reference is empty or missing"
             logger.error(error_msg)
             raise ValueError(error_msg)
+
+        if not standard_response or not standard_response.strip():
+            error_msg = "CRITICAL: No ideal/standard response provided. Please write an ideal response before judging."
+            logger.warning(error_msg)
+            raise ValueError(error_msg)
         
         try:
             # Try to extract JSON array between [ and ]
@@ -463,7 +468,7 @@ class OpenAIJudgeClient:
                 judge_system_prompt=judge_system_prompt,
                 judge_prompt_template=judge_prompt_template,
                 model=model,
-                standard_response=standard_response or "",
+                standard_response=standard_response,
                 pass_threshold=pass_threshold,
             )
         
@@ -630,6 +635,8 @@ class OpenAIJudgeClient:
             raise ValueError("CRITICAL: Judge system prompt is empty.")
         if not response_reference or not response_reference.strip():
             raise ValueError("CRITICAL: response_reference is empty or missing")
+        if not standard_response or not standard_response.strip():
+            raise ValueError("CRITICAL: No ideal/standard response provided. Please write an ideal response before judging.")
 
         if "/" in (model or ""):
             if not self.openrouter_key:
@@ -638,7 +645,7 @@ class OpenAIJudgeClient:
                 prompt=prompt, student_response=student_response,
                 response_reference=response_reference, judge_system_prompt=judge_system_prompt,
                 judge_prompt_template=judge_prompt_template, model=model,
-                standard_response=standard_response or "", pass_threshold=pass_threshold,
+                standard_response=standard_response, pass_threshold=pass_threshold,
             ):
                 yield event
             return
@@ -648,7 +655,7 @@ class OpenAIJudgeClient:
 
         async for event in self._judge_independently_streaming(
             prompt, student_response, response_reference,
-            judge_system_prompt, model, standard_response=standard_response or "",
+            judge_system_prompt, model, standard_response=standard_response,
             pass_threshold=pass_threshold,
         ):
             yield event
@@ -747,7 +754,7 @@ class OpenAIJudgeClient:
         user_prompt = _build_criterion_prompt(
             prompt=prompt,
             student_response=student_response,
-            standard_response=standard_response or "",
+            standard_response=standard_response,
             criterion_id=c_id,
             criterion_description=desc,
         )
