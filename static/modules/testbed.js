@@ -664,14 +664,13 @@ function renderCriteriaChips(disabled) {
     const items = chips.map((text, i) => `
         <div class="tb-chip" data-chip-idx="${i}">
             <span class="tb-chip-num">C${i + 1}</span>
-            <input
+            <textarea
                 class="tb-chip-input"
-                type="text"
-                value="${escapeHtml(text)}"
+                rows="1"
                 placeholder="Criterion ${i + 1} description…"
                 data-chip-idx="${i}"
                 ${disabled ? 'disabled' : ''}
-            >
+            >${escapeHtml(text)}</textarea>
             ${disabled ? '' : `<button class="tb-chip-del" data-chip-idx="${i}" title="Remove C${i + 1}">×</button>`}
         </div>
     `).join('');
@@ -686,21 +685,27 @@ function renderCriteriaChips(disabled) {
     return `<div class="tb-chips-container" id="tbSharedChips">${items}${addBtn}</div>`;
 }
 
+function _autoResizeChip(el) {
+    el.style.height = 'auto';
+    el.style.height = el.scrollHeight + 'px';
+}
+
 function wireChipEvents() {
     const left      = getSharedLeft();
     const container = document.getElementById('tbSharedChips');
     if (!container) return;
 
-    // Input changes → persist immediately
     container.querySelectorAll('.tb-chip-input').forEach(inp => {
+        _autoResizeChip(inp);
         inp.addEventListener('input', () => {
             const idx = parseInt(inp.dataset.chipIdx, 10);
             left.criteriaChips[idx] = inp.value;
+            _autoResizeChip(inp);
             const addBtn = container.querySelector('.tb-chip-add span:last-child');
             if (addBtn) addBtn.textContent = `C${left.criteriaChips.length + 1}`;
         });
         inp.addEventListener('keydown', e => {
-            if (e.key === 'Enter') {
+            if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 document.getElementById('tbSharedChipAdd')?.click();
             }

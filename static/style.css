@@ -6679,7 +6679,7 @@ body.sidebar-visible .container.multi-turn-layout {
 }
 .tb-chip {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 0.5rem;
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
@@ -6699,6 +6699,7 @@ body.sidebar-visible .container.multi-turn-layout {
     flex-shrink: 0;
     text-transform: uppercase;
     letter-spacing: 0.02em;
+    padding-top: 0.25rem;
 }
 .tb-chip-input {
     flex: 1;
@@ -6711,6 +6712,11 @@ body.sidebar-visible .container.multi-turn-layout {
     line-height: 1.5;
     padding: 0.15rem 0;
     min-width: 0;
+    resize: none;
+    overflow: hidden;
+    word-wrap: break-word;
+    min-height: 1.5em;
+    field-sizing: content;
 }
 .tb-chip-input::placeholder { color: var(--text-muted); }
 .tb-chip-input:disabled { cursor: not-allowed; opacity: 0.5; }
@@ -6721,7 +6727,7 @@ body.sidebar-visible .container.multi-turn-layout {
     color: var(--text-muted);
     font-size: 1rem;
     line-height: 1;
-    padding: 0 0.2rem;
+    padding: 0.2rem 0.2rem 0;
     border-radius: 4px;
     flex-shrink: 0;
     transition: all var(--transition-fast);
