@@ -64,12 +64,42 @@ def _build_criterion_prompt(
     )
 
 
+def _find_json_array(text: str) -> Optional[str]:
+    """Find the outermost JSON array in text using balanced bracket matching."""
+    start = text.find('[')
+    if start == -1:
+        return None
+    depth = 0
+    in_string = False
+    escape_next = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == '\\' and in_string:
+            escape_next = True
+            continue
+        if ch == '"' and not escape_next:
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == '[':
+            depth += 1
+        elif ch == ']':
+            depth -= 1
+            if depth == 0:
+                return text[start:i + 1]
+    return None
+
+
 def _extract_criteria_list(reference: str) -> List[Dict[str, str]]:
     """Extract criteria list from reference (JSON array or plain C1: ... format). Used by OpenRouter judge."""
-    array_match = re.search(r'\[.*?\]', reference, re.DOTALL)
-    if array_match:
+    array_str = _find_json_array(reference)
+    if array_str:
         try:
-            parsed = json.loads(array_match.group(0))
+            parsed = json.loads(array_str)
             if not isinstance(parsed, list) or len(parsed) == 0:
                 raise ValueError("Reference JSON must be a non-empty array")
             normalized = []
@@ -96,204 +126,148 @@ def _extract_criteria_list(reference: str) -> List[Dict[str, str]]:
     return []
 
 
-async def _judge_via_openrouter(
-    prompt: str,
-    student_response: str,
-    response_reference: str,
-    judge_system_prompt: str,
-    judge_prompt_template: Optional[str],
-    model: str,
-    standard_response: str,
-    pass_threshold: float = 0.5,
-) -> Dict[str, Any]:
-    """Run independent judging via OpenRouter when model ID is OpenRouter-style (e.g. openai/gpt-5.2)."""
-    from services.openrouter_client import get_openrouter_client
-    criteria_list = _extract_criteria_list(response_reference)
-    if not criteria_list:
-        raise ValueError("CRITICAL: Could not extract criteria for judging. Reference must contain a valid JSON array or C1: ... format.")
-    client = get_openrouter_client()
-    if not judge_system_prompt or not judge_system_prompt.strip():
-        raise ValueError("Judge system prompt is empty. Please provide a judge system prompt before running the hunt.")
-    results = []
-    for criterion in criteria_list:
-        c_id = criterion.get("id", "?")
-        desc = criterion.get("description", "")
-        user_prompt = _build_criterion_prompt(
-            prompt=prompt,
-            student_response=student_response,
-            standard_response=standard_response,
-            criterion_id=c_id,
-            criterion_description=desc,
-        )
-        messages = [{"role": "system", "content": judge_system_prompt}, {"role": "user", "content": user_prompt}]
-        status = "MISSING"
-        reason = "after retries"
-        for attempt in range(3):
-            try:
-                response_text, _ = await client.call_model(
-                    prompt="",
-                    model=model,
-                    max_tokens=2048,
-                    stream=False,
-                    messages=messages,
-                    reasoning_budget_percent=0,
-                    temperature=0,
-                )
-                data = {}
-                if response_text:
-                    text = response_text.strip()
-                    import re as _re
-                    fence_match = _re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, _re.DOTALL)
-                    if fence_match:
-                        text = fence_match.group(1)
+def _parse_judge_json(text: str) -> dict:
+    """Parse judge response text into a dict. Handles markdown fences and extracts first JSON object."""
+    if not text:
+        return {}
+    text = text.strip()
+    fence_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, re.DOTALL)
+    if fence_match:
+        text = fence_match.group(1)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        brace = text.find("{")
+        if brace != -1:
+            depth = 0
+            for i in range(brace, len(text)):
+                if text[i] == "{": depth += 1
+                elif text[i] == "}": depth -= 1
+                if depth == 0:
                     try:
-                        data = json.loads(text)
+                        return json.loads(text[brace : i + 1])
                     except json.JSONDecodeError:
-                        brace = text.find("{")
-                        if brace != -1:
-                            depth = 0
-                            for i in range(brace, len(text)):
-                                if text[i] == "{": depth += 1
-                                elif text[i] == "}": depth -= 1
-                                if depth == 0:
-                                    try:
-                                        data = json.loads(text[brace : i + 1])
-                                    except json.JSONDecodeError:
-                                        pass
-                                    break
-                raw_status = (data.get("status") or data.get("result") or "").strip()
-                if not raw_status:
-                    logger.warning(
-                        "Judge JSON missing status/result for criterion %s (attempt %s). Keys: %s",
-                        c_id, attempt + 1, list(data.keys()) if data else "empty"
-                    )
-                    reason = "JSON missing 'status' or 'result'" + (f" (attempt {attempt + 1}/3)" if attempt < 2 else " after retries")
-                    continue
-                raw_status_upper = raw_status.upper()
-                if raw_status_upper not in ("PASS", "FAIL"):
-                    logger.warning(
-                        "Judge status not PASS/FAIL for criterion %s: %r (attempt %s)",
-                        c_id, raw_status, attempt + 1
-                    )
-                    reason = f"status value '{raw_status}' not in {{PASS, FAIL}}" + (f" (attempt {attempt + 1}/3)" if attempt < 2 else " after retries")
-                    continue
-                status = raw_status_upper
-                reason = data.get("reason") or data.get("explanation") or data.get("message") or "No reason"
-                break
-            except Exception as e:
-                logger.warning("Judge criterion %s attempt %s failed: %s", c_id, attempt + 1, e)
-                reason = f"Eval error: {str(e)}" + (f" (attempt {attempt + 1}/3)" if attempt < 2 else " after retries")
-        if status == "MISSING":
-            reason = f"⚠️ {reason}"
-        results.append({"id": c_id, "status": status, "reason": reason})
-    final_criteria = {r["id"]: r["status"] for r in results}
+                        pass
+                    break
+    return {}
+
+
+def _compute_judge_score(results: List[Dict], total: int, pass_threshold: float) -> Dict[str, Any]:
+    """Compute final score and explanation from a list of criterion results."""
     pass_count = sum(1 for r in results if r["status"] == "PASS")
-    total = len(criteria_list) or 1
-    pass_rate = pass_count / total
-    # pass_threshold 0.5: >0.5 = pass (current). pass_threshold 1.0: >=1.0 = pass (all-or-nothing)
+    fail_count = sum(1 for r in results if r["status"] != "PASS")
+    pass_rate = pass_count / (total or 1)
     score = 1 if (pass_rate >= 1.0) or (pass_threshold < 1.0 and pass_rate > pass_threshold) else 0
     sorted_results = sorted(results, key=lambda r: r["id"])
-    def _status_icon(s):
+    def _icon(s):
         if s == "PASS": return "✅"
         if s == "MISSING": return "⚠️"
         return "❌"
     criteria_lines = [
-        f"{_status_icon(r['status'])} {r['id']} ({r['status']}): {r['reason']}"
+        f"{_icon(r['status'])} {r['id']} ({r['status']}): {r['reason']}"
         for r in sorted_results
     ]
     explanation = (
         f"Independent Judging Results:\n"
-        f"- Passing Criteria: {pass_count}/{len(criteria_list)}\n\n"
+        f"- Passing Criteria: {pass_count}/{total}\n\n"
         + "\n".join(criteria_lines)
     )
-    return {"score": score, "criteria": final_criteria, "explanation": explanation, "raw_output": "Generated via OpenRouter (independent criteria judging)"}
+    final_criteria = {r["id"]: r["status"] for r in results}
+    return {"score": score, "pass_count": pass_count, "fail_count": fail_count,
+            "criteria": final_criteria, "explanation": explanation}
 
 
-async def _judge_via_openrouter_streaming(
-    prompt: str,
-    student_response: str,
-    response_reference: str,
-    judge_system_prompt: str,
-    judge_prompt_template: Optional[str],
-    model: str,
-    standard_response: str,
-    pass_threshold: float = 0.5,
-) -> AsyncGenerator[Dict[str, Any], None]:
-    """Streaming variant: yields per-criterion results as they complete."""
+async def _eval_criterion_via_openrouter(client, prompt, student_response, standard_response,
+                                          judge_system_prompt, model, criterion) -> Dict[str, str]:
+    """Evaluate a single criterion via OpenRouter with retries."""
+    c_id = criterion.get("id", "?")
+    desc = criterion.get("description", "")
+    user_prompt = _build_criterion_prompt(
+        prompt=prompt, student_response=student_response,
+        standard_response=standard_response, criterion_id=c_id, criterion_description=desc,
+    )
+    messages = [{"role": "system", "content": judge_system_prompt}, {"role": "user", "content": user_prompt}]
+    status = "MISSING"
+    reason = "after retries"
+    for attempt in range(3):
+        try:
+            response_text, _ = await client.call_model(
+                prompt="", model=model, max_tokens=2048, stream=False,
+                messages=messages, reasoning_budget_percent=0, temperature=0,
+            )
+            data = _parse_judge_json(response_text)
+            raw_status = (data.get("status") or data.get("result") or "").strip()
+            if not raw_status:
+                logger.warning("Judge JSON missing status/result for criterion %s (attempt %s). Keys: %s",
+                               c_id, attempt + 1, list(data.keys()) if data else "empty")
+                reason = "JSON missing 'status' or 'result'" + (f" (attempt {attempt + 1}/3)" if attempt < 2 else " after retries")
+                continue
+            raw_status_upper = raw_status.upper()
+            if raw_status_upper not in ("PASS", "FAIL"):
+                logger.warning("Judge status not PASS/FAIL for criterion %s: %r (attempt %s)", c_id, raw_status, attempt + 1)
+                reason = f"status value '{raw_status}' not in {{PASS, FAIL}}" + (f" (attempt {attempt + 1}/3)" if attempt < 2 else " after retries")
+                continue
+            status = raw_status_upper
+            reason = data.get("reason") or data.get("explanation") or data.get("message") or "No reason"
+            break
+        except Exception as e:
+            logger.warning("Judge criterion %s attempt %s failed: %s", c_id, attempt + 1, e)
+            reason = f"Eval error: {str(e)}" + (f" (attempt {attempt + 1}/3)" if attempt < 2 else " after retries")
+    if status == "MISSING":
+        reason = f"⚠️ {reason}"
+    return {"id": c_id, "status": status, "reason": reason}
+
+
+async def _judge_via_openrouter(
+    prompt: str, student_response: str, response_reference: str,
+    judge_system_prompt: str, judge_prompt_template: Optional[str],
+    model: str, standard_response: str, pass_threshold: float = 0.5,
+) -> Dict[str, Any]:
+    """Run independent judging via OpenRouter (parallel, all criteria at once)."""
     from services.openrouter_client import get_openrouter_client
     criteria_list = _extract_criteria_list(response_reference)
     if not criteria_list:
         raise ValueError("CRITICAL: Could not extract criteria for judging. Reference must contain a valid JSON array or C1: ... format.")
+    if not judge_system_prompt or not judge_system_prompt.strip():
+        raise ValueError("Judge system prompt is empty. Please provide a judge system prompt before running the hunt.")
+    client = get_openrouter_client()
+    tasks = [
+        _eval_criterion_via_openrouter(client, prompt, student_response, standard_response,
+                                        judge_system_prompt, model, c)
+        for c in criteria_list
+    ]
+    results = await asyncio.gather(*tasks)
+    agg = _compute_judge_score(list(results), len(criteria_list), pass_threshold)
+    return {"score": agg["score"], "criteria": agg["criteria"], "explanation": agg["explanation"],
+            "raw_output": "Generated via OpenRouter (independent criteria judging)"}
+
+
+async def _judge_via_openrouter_streaming(
+    prompt: str, student_response: str, response_reference: str,
+    judge_system_prompt: str, judge_prompt_template: Optional[str],
+    model: str, standard_response: str, pass_threshold: float = 0.5,
+) -> AsyncGenerator[Dict[str, Any], None]:
+    """Streaming variant: yields per-criterion results as they complete (parallel)."""
+    from services.openrouter_client import get_openrouter_client
+    criteria_list = _extract_criteria_list(response_reference)
+    if not criteria_list:
+        raise ValueError("CRITICAL: Could not extract criteria for judging. Reference must contain a valid JSON array or C1: ... format.")
+    if not judge_system_prompt or not judge_system_prompt.strip():
+        raise ValueError("Judge system prompt is empty.")
 
     total = len(criteria_list)
     yield {"type": "start", "total": total, "criteria_ids": [c.get("id", f"C{i+1}") for i, c in enumerate(criteria_list)]}
 
     client = get_openrouter_client()
-    if not judge_system_prompt or not judge_system_prompt.strip():
-        raise ValueError("Judge system prompt is empty.")
-
     results = []
     pass_count = 0
 
-    async def _eval_one(criterion):
-        c_id = criterion.get("id", "?")
-        desc = criterion.get("description", "")
-        user_prompt = _build_criterion_prompt(
-            prompt=prompt,
-            student_response=student_response,
-            standard_response=standard_response,
-            criterion_id=c_id,
-            criterion_description=desc,
-        )
-        messages = [{"role": "system", "content": judge_system_prompt}, {"role": "user", "content": user_prompt}]
-        status = "MISSING"
-        reason = "after retries"
-        for attempt in range(3):
-            try:
-                response_text, _ = await client.call_model(
-                    prompt="", model=model, max_tokens=2048, stream=False,
-                    messages=messages, reasoning_budget_percent=0, temperature=0,
-                )
-                data = {}
-                if response_text:
-                    text = response_text.strip()
-                    import re as _re
-                    fence_match = _re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, _re.DOTALL)
-                    if fence_match:
-                        text = fence_match.group(1)
-                    try:
-                        data = json.loads(text)
-                    except json.JSONDecodeError:
-                        brace = text.find("{")
-                        if brace != -1:
-                            depth = 0
-                            for i in range(brace, len(text)):
-                                if text[i] == "{": depth += 1
-                                elif text[i] == "}": depth -= 1
-                                if depth == 0:
-                                    try:
-                                        data = json.loads(text[brace : i + 1])
-                                    except json.JSONDecodeError:
-                                        pass
-                                    break
-                raw_status = (data.get("status") or data.get("result") or "").strip()
-                if not raw_status:
-                    reason = "JSON missing 'status' or 'result'"
-                    continue
-                raw_status_upper = raw_status.upper()
-                if raw_status_upper not in ("PASS", "FAIL"):
-                    reason = f"status value '{raw_status}' not in {{PASS, FAIL}}"
-                    continue
-                status = raw_status_upper
-                reason = data.get("reason") or data.get("explanation") or data.get("message") or "No reason"
-                break
-            except Exception as e:
-                reason = f"Eval error: {str(e)}"
-        if status == "MISSING":
-            reason = f"⚠️ {reason}"
-        return {"id": c_id, "status": status, "reason": reason}
-
-    tasks = {asyncio.ensure_future(_eval_one(c)): c for c in criteria_list}
+    tasks = {
+        asyncio.ensure_future(
+            _eval_criterion_via_openrouter(client, prompt, student_response, standard_response,
+                                            judge_system_prompt, model, c)
+        ): c for c in criteria_list
+    }
     for future in asyncio.as_completed(tasks.keys()):
         result = await future
         results.append(result)
@@ -302,18 +276,9 @@ async def _judge_via_openrouter_streaming(
         yield {"type": "criterion", "id": result["id"], "status": result["status"], "reason": result["reason"],
                "passing": pass_count, "evaluated": len(results), "total": total}
 
-    pass_rate = pass_count / (total or 1)
-    score = 1 if (pass_rate >= 1.0) or (pass_threshold < 1.0 and pass_rate > pass_threshold) else 0
-    sorted_results = sorted(results, key=lambda r: r["id"])
-    def _icon(s):
-        if s == "PASS": return "✅"
-        if s == "MISSING": return "⚠️"
-        return "❌"
-    criteria_lines = [f"{_icon(r['status'])} {r['id']} ({r['status']}): {r['reason']}" for r in sorted_results]
-    explanation = f"Independent Judging Results:\n- Passing Criteria: {pass_count}/{total}\n\n" + "\n".join(criteria_lines)
-    final_criteria = {r["id"]: r["status"] for r in results}
-    yield {"type": "done", "score": score, "passing": pass_count, "total": total,
-           "criteria": final_criteria, "explanation": explanation}
+    agg = _compute_judge_score(results, total, pass_threshold)
+    yield {"type": "done", "score": agg["score"], "passing": agg["pass_count"], "total": total,
+           "criteria": agg["criteria"], "explanation": agg["explanation"]}
 
 
 class OpenAIJudgeClient:
@@ -404,13 +369,9 @@ class OpenAIJudgeClient:
             raise ValueError(error_msg)
         
         try:
-            # Try to extract JSON array between [ and ]
-            array_match = re.search(r'\[.*?\]', response_reference, re.DOTALL)
+            json_array_str = _find_json_array(response_reference)
             
-            if array_match:
-                json_array_str = array_match.group(0)
-                
-                # Try to parse as JSON to validate
+            if json_array_str:
                 parsed = json.loads(json_array_str)
                 
                 # Must be a list/array
@@ -481,22 +442,35 @@ class OpenAIJudgeClient:
         
         return await self._judge_independently(
             prompt, student_response, response_reference,
-            judge_system_prompt, model, standard_response=standard_resp,
+            judge_system_prompt, model, standard_response=standard_response,
             pass_threshold=pass_threshold
         )
     
 
     async def test_connection(self) -> bool:
-        """Test API connection."""
-        try:
-            response = await self.client.chat.completions.create(
-                model="gpt-4o",
-                messages=[{"role": "user", "content": "test"}],
-                max_completion_tokens=5
-            )
-            return True
-        except Exception:
-            return False
+        """Test API connection. Tries OpenAI direct if available, otherwise OpenRouter."""
+        if self.client:
+            try:
+                await self.client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=[{"role": "user", "content": "test"}],
+                    max_completion_tokens=5
+                )
+                return True
+            except Exception:
+                return False
+        if self.openrouter_key:
+            try:
+                from services.openrouter_client import get_openrouter_client
+                client = get_openrouter_client()
+                response_text, _ = await client.call_model(
+                    prompt="test", model="openai/gpt-4o", max_tokens=5,
+                    stream=False, reasoning_budget_percent=0,
+                )
+                return bool(response_text)
+            except Exception:
+                return False
+        return False
 
     async def _judge_independently(
         self,
@@ -521,101 +495,29 @@ class OpenAIJudgeClient:
             logger.error(error_msg)
             raise ValueError(error_msg)
             
-        criteria_ids = [c.get('id') for c in criteria_list]
-
-        # Step 2: Evaluate each criterion independently
-        tasks = []
-        for criterion in criteria_list:
-            tasks.append(self._evaluate_single_criterion(
+        tasks = [
+            self._evaluate_single_criterion(
                 prompt, student_response, criterion, model,
                 standard_response=standard_response, judge_system_prompt=system_prompt
-            ))
-            
-        # Run in parallel
+            )
+            for criterion in criteria_list
+        ]
         results = await asyncio.gather(*tasks)
-        
-        # Step 3: Aggregate results
-        final_criteria = {}
-        passed_criteria = []  # Store passing criteria with explanations
-        failed_criteria = []
-        missing_criteria = []  # Criteria that were expected but not evaluated
-        pass_count = 0
-        
-        # Track which criteria were evaluated
-        evaluated_ids = set()
-        for res in results:
-            c_id = res['id']
-            status = res['status']
-            reason = res['reason']
-            final_criteria[c_id] = status
-            evaluated_ids.add(c_id)
-            if status == 'PASS':
-                pass_count += 1
-                passed_criteria.append(f"{c_id}: {reason}")  # Store passing criteria with explanation
-            else:
-                failed_criteria.append(f"{c_id}: {reason}")
-        
-        # Check for missing criteria (expected but not evaluated)
-        # This happens when a criterion was in the initial criteria but not in the current response_reference
-        expected_ids = {c.get('id') for c in criteria_list}
-        missing_ids = expected_ids - evaluated_ids
-        if missing_ids:
-            for c_id in missing_ids:
-                missing_criteria.append(c_id)
-                # Mark as missing (not a failure, but an error)
-                final_criteria[c_id] = "MISSING"
-        # Calculate scores
-        # pass_threshold 0.5: >0.5 = pass (50% rule). pass_threshold 1.0: >=1.0 = pass (all-or-nothing)
-        fail_count = len(failed_criteria)
-        total_count = len(criteria_list) if criteria_list else 1
-        fail_rate = fail_count / total_count
-        pass_rate = 1 - fail_rate
-        score = 1 if (pass_rate >= 1.0) or (pass_threshold < 1.0 and pass_rate > pass_threshold) else 0
-        
-        explanation = (
-            f"Independent Judging Results:\n"
-            f"- Passing Criteria: {pass_count}/{len(criteria_list)}\n"
-        )
-        if missing_criteria:
-            explanation += f"\n⚠️ Missing Criteria (not evaluated): {', '.join(missing_criteria)}\n"
-        # Build ordered per-criterion lines sorted by ID (preserve actual status: PASS, FAIL, MISSING)
-        def _icon(s):
-            if s == "PASS": return "✅"
-            if s == "MISSING": return "⚠️"
-            return "❌"
-        all_criterion_items = [
-            (c_id, "PASS", reason) for c_id, reason in
-            [(item.split(": ", 1)[0], item.split(": ", 1)[1] if ": " in item else item) for item in passed_criteria]
-        ] + [
-            (c_id, final_criteria.get(c_id, "FAIL"), reason) for c_id, reason in
-            [(item.split(": ", 1)[0], item.split(": ", 1)[1] if ": " in item else item) for item in failed_criteria]
-        ]
-        all_criterion_items.sort(key=lambda x: x[0])
-        criteria_lines = [
-            f"{_icon(status)} {c_id} ({status}): {reason}"
-            for c_id, status, reason in all_criterion_items
-        ]
-        if criteria_lines:
-            explanation += "\n" + "\n".join(criteria_lines)
-        elif not missing_criteria:
-            explanation += "\nAll criteria passed."
-        
-        # Telemetry: Log judge call completion
+        agg = _compute_judge_score(list(results), len(criteria_list), pass_threshold)
+
         if _telemetry_enabled:
             try:
                 get_telemetry().log_judge_call(
-                    model=model,
-                    start_time=_judge_start_time,
-                    score=score,
-                    success=True
+                    model=model, start_time=_judge_start_time,
+                    score=agg["score"], success=True
                 )
             except Exception:
                 pass
-            
+
         return {
-            "score": score,
-            "criteria": final_criteria,
-            "explanation": explanation,
+            "score": agg["score"],
+            "criteria": agg["criteria"],
+            "explanation": agg["explanation"],
             "raw_output": "Generated via Independent Criteria Judging"
         }
 
@@ -802,8 +704,12 @@ class OpenAIJudgeClient:
                     logger.error(f"Failed to evaluate criterion {c_id} after {max_retries} attempts: {e}")
                     return {"id": c_id, "status": "FAIL", "reason": f"Connection Error: {str(e)}"}
             except json.JSONDecodeError as e:
-                logger.error(f"JSON decode error for criterion {c_id}: {e}")
-                return {"id": c_id, "status": "FAIL", "reason": f"JSON Error: {str(e)}"}
+                if attempt < max_retries - 1:
+                    logger.warning(f"JSON decode error for criterion {c_id} (attempt {attempt + 1}/{max_retries}): {e}")
+                    await asyncio.sleep(retry_delay * (2 ** attempt))
+                else:
+                    logger.error(f"JSON decode error for criterion {c_id} after {max_retries} attempts: {e}")
+                    return {"id": c_id, "status": "FAIL", "reason": f"JSON Error: {str(e)}"}
             except Exception as e:
                 # Check if it's a connection-related error by error message
                 error_str = str(e).lower()

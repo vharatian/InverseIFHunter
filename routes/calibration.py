@@ -89,12 +89,13 @@ async def judge_reference(
             session.notebook = parsed
             await redis_store.set_notebook(session_id, parsed)
             ref = session.notebook.response_reference or ""
-            array_match = re.search(r'\[.*?\]', ref, re.DOTALL)
+            from services.openai_client import _find_json_array
+            array_str = _find_json_array(ref)
             criteria_count = 0
             criteria_ids = []
-            if array_match:
+            if array_str:
                 try:
-                    criteria_list = json.loads(array_match.group(0))
+                    criteria_list = json.loads(array_str)
                     if isinstance(criteria_list, list):
                         criteria_count = len(criteria_list)
                         criteria_ids = [item.get('id', f'C{i+1}') if isinstance(item, dict) else f'C{i+1}' 
@@ -124,10 +125,10 @@ async def judge_reference(
         
         ref_to_judge = notebook.response_reference or ""
         logger.debug(f" judge_reference - About to call judge with response_reference (first 500 chars): {ref_to_judge[:500]}...")
-        array_match = re.search(r'\[.*?\]', ref_to_judge, re.DOTALL)
-        if array_match:
+        array_str = _find_json_array(ref_to_judge)
+        if array_str:
             try:
-                criteria_list = json.loads(array_match.group(0))
+                criteria_list = json.loads(array_str)
                 if isinstance(criteria_list, list):
                     criteria_ids_in_ref = [item.get('id', f'C{i+1}') if isinstance(item, dict) else f'C{i+1}' 
                                           for i, item in enumerate(criteria_list)]
