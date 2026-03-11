@@ -51,6 +51,8 @@ export const PROVIDER_MODELS = {
         { id: 'anthropic/claude-opus-4.5', name: 'Claude Opus 4.5' },
         { id: 'anthropic/claude-opus-4.6', name: 'Claude Opus 4.6' },
         { id: 'openai/gpt-5.4', name: 'GPT-5.4' },
+        { id: 'openai/gpt-5.2', name: 'GPT-5.2' },
+        { id: 'openai/gpt-5.2-pro', name: 'GPT 5.2 Pro' },
         { id: 'openai/gpt-5.4-pro', name: 'GPT 5.4 Pro' },
         { id: 'google/gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro (Preview)' },
         { id: 'nvidia/nemotron-3-nano-30b-a3b', name: 'Nemotron-3-Nano (Fast)' },
@@ -64,6 +66,8 @@ export const PROVIDER_MODELS = {
 /** Judge models fallback when global.yaml hunt.judge_models is not set. */
 const JUDGE_MODELS_FALLBACK = [
     { id: 'openai/gpt-5.4', name: 'GPT-5.4' },
+    { id: 'openai/gpt-5.2', name: 'GPT-5.2' },
+    { id: 'openai/gpt-5.2-pro', name: 'GPT 5.2 Pro' },
     { id: 'openai/gpt-5.4-pro', name: 'GPT 5.4 Pro' },
     { id: 'anthropic/claude-opus-4.6', name: 'Claude Opus 4.6' }
 ];

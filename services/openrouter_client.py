@@ -52,6 +52,8 @@ class OpenRouterClient(BaseAPIClient):
         "anthropic/claude-sonnet-4.6": 32768,
         "openai/gpt-5.2": 32768,
         "openai/gpt-5.2-pro": 32768,
+        "openai/gpt-5.4": 32768,
+        "openai/gpt-5.4-pro": 32768,
         "google/gemini-3.1-pro-preview": 65536,
     }
     
