@@ -67,6 +67,37 @@ hunt:
       - { id: "google/gemini-3.1-pro-preview", name: "Gemini 3.1 Pro (Preview)" }
     # fireworks:
     #   - { id: "accounts/fireworks/models/qwen3-235b-a22b-thinking-2507", name: "Qwen3-235B (Thinking)" }
+  # Selection & mode config
+  selection_slots: 4                    # total responses trainer must select for review
+  min_breaking_required: 0              # "Min Breaking Hunts" dropdown minimum
+  max_breaking_required: 4              # "Min Breaking Hunts" dropdown maximum
+
+  # Hunt modes — drives threshold-based classification and selection rules.
+  # break_threshold = fraction of criteria that must FAIL for a response to count as "breaking"
+  # pass_threshold  = fraction of criteria that must PASS for a response to count as "passing"
+  modes:
+    - id: break_50
+      name: ">50% Criteria Breaking"
+      break_threshold: 0.5
+      type: breaking
+    - id: break_75
+      name: ">75% Criteria Breaking"
+      break_threshold: 0.75
+      type: breaking
+    - id: break_all
+      name: "All Criteria Breaking"
+      break_threshold: 1.0
+      type: breaking
+    - id: 1_breaking
+      name: "1 Breaking"
+      type: breaking
+      count_based: true
+      required_breaking: 1
+    - id: all_passing
+      name: "All Passing"
+      pass_threshold: 1.0
+      type: passing
+
   # Trainer "Evaluation Model" (judge) dropdown in hunt config. First entry is default.
   judge_models:
     openrouter:

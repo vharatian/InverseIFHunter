@@ -92,6 +92,35 @@ export function getJudgeModels(provider = 'openrouter') {
     return fromConfig.length > 0 ? fromConfig : JUDGE_MODELS_FALLBACK;
 }
 
+/** Hunt modes from global.yaml hunt.modes. Fallback to hardcoded defaults. */
+const HUNT_MODES_FALLBACK = [
+    { id: 'break_50', name: '>50% Criteria Breaking', break_threshold: 0.5, type: 'breaking' },
+    { id: 'break_all', name: 'All Criteria Breaking', break_threshold: 1.0, type: 'breaking' },
+    { id: '1_breaking', name: '1 Breaking', type: 'breaking', count_based: true, required_breaking: 1 },
+    { id: 'all_passing', name: 'All Passing', pass_threshold: 1.0, type: 'passing' },
+];
+
+export function getHuntModes() {
+    const fromConfig = _apiConfig?.hunt?.modes;
+    if (Array.isArray(fromConfig) && fromConfig.length > 0) return fromConfig;
+    return HUNT_MODES_FALLBACK;
+}
+
+export function getHuntModeById(modeId) {
+    return getHuntModes().find(m => m.id === modeId) || getHuntModes()[0];
+}
+
+export function getSelectionSlots() {
+    return _apiConfig?.hunt?.selection_slots ?? 4;
+}
+
+export function getBreakingRange() {
+    return {
+        min: _apiConfig?.hunt?.min_breaking_required ?? 0,
+        max: _apiConfig?.hunt?.max_breaking_required ?? 4,
+    };
+}
+
 export const MAX_HUNTS_PER_NOTEBOOK = 16;
 
 /** Admin mode password — must be set server-side via ADMIN_MODE_PASSWORD env var. */

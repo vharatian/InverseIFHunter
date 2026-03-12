@@ -8,7 +8,7 @@
  */
 
 import { elements } from './dom.js';
-import { MAX_HUNTS_PER_NOTEBOOK, getJudgeModels, getConfigValue, adminBypass } from './config.js';
+import { MAX_HUNTS_PER_NOTEBOOK, getJudgeModels, getConfigValue, adminBypass, getHuntModes, getHuntModeById, getBreakingRange } from './config.js';
 import { 
     loadHuntCount, 
     saveHuntCount, 
@@ -201,25 +201,67 @@ export function getHuntMode() {
     return sel?.value || 'break_50';
 }
 
-/** Map hunt mode to {passing_mode, pass_threshold} for backend config.
- *
- * pass_threshold controls when the judge scores a response as passing (1) vs breaking (0):
- *   0.0 → only pass_rate > 0 gives score=1  → breaking requires ALL criteria to fail
- *   0.5 → pass_rate > 0.5 gives score=1     → breaking when >50% criteria fail
- *   1.0 → only pass_rate == 1.0 gives score=1 → breaking when ANY 1 criterion fails
+/**
+ * Map hunt mode to {passing_mode, pass_threshold} for backend config.
+ * Reads mode definition from global.yaml via getHuntModeById().
+ * Conversion: code pass_threshold = 1.0 - yaml break_threshold (for breaking modes).
  */
 function getHuntModeConfig(huntMode) {
-    switch (huntMode) {
-        case 'all_passing':
-            return { passing_mode: true, pass_threshold: 1.0 };
-        case 'break_all':
-            return { passing_mode: false, pass_threshold: 0.0 };
-        case '1_breaking':
-            return { passing_mode: false, pass_threshold: 1.0 };
-        case 'break_50':
-        default:
-            return { passing_mode: false, pass_threshold: 0.5 };
+    const mode = getHuntModeById(huntMode);
+    if (mode.type === 'passing') {
+        return { passing_mode: true, pass_threshold: mode.pass_threshold ?? 1.0 };
     }
+    if (mode.count_based) {
+        return { passing_mode: false, pass_threshold: 1.0 };
+    }
+    return { passing_mode: false, pass_threshold: 1.0 - (mode.break_threshold ?? 0.5) };
+}
+
+/** Populate the hunt mode dropdown from global.yaml hunt.modes config. */
+export function initHuntModeDropdown() {
+    const sel = document.getElementById('huntModeSelect');
+    if (!sel) return;
+    const modes = getHuntModes();
+    sel.innerHTML = modes.map(m =>
+        `<option value="${m.id}">${escapeHtml(m.name)}</option>`
+    ).join('');
+    sel.addEventListener('change', () => _syncMinBreakingDropdown());
+    _syncMinBreakingDropdown();
+}
+
+/** Populate and sync the min-breaking dropdown based on selected hunt mode. */
+function _syncMinBreakingDropdown() {
+    const section = document.getElementById('minBreakingSection');
+    const sel = document.getElementById('minBreakingSelect');
+    if (!sel || !section) return;
+
+    const mode = getHuntModeById(getHuntMode());
+
+    if (mode.type === 'passing') {
+        sel.innerHTML = '<option value="0">0</option>';
+        sel.disabled = true;
+        section.style.opacity = '0.5';
+        return;
+    }
+    if (mode.count_based) {
+        const req = mode.required_breaking ?? 1;
+        sel.innerHTML = `<option value="${req}">${req}</option>`;
+        sel.disabled = true;
+        section.style.opacity = '0.5';
+        return;
+    }
+
+    section.style.opacity = '1';
+    sel.disabled = false;
+    const range = getBreakingRange();
+    sel.innerHTML = '';
+    for (let i = range.min; i <= range.max; i++) {
+        const opt = document.createElement('option');
+        opt.value = i;
+        opt.textContent = i;
+        sel.appendChild(opt);
+    }
+    sel.value = range.max;
 }
 
 export function getConfig() {
@@ -235,19 +277,22 @@ export function getConfig() {
 
     const huntMode = getHuntMode();
     const { passing_mode, pass_threshold } = getHuntModeConfig(huntMode);
+    const minBreakingSel = document.getElementById('minBreakingSelect');
+    const min_breaking_required = parseInt(minBreakingSel?.value ?? '0', 10);
 
     return {
         parallel_workers: huntCount,
-        target_breaks: huntCount, // All hunts should run (no early stop based on target)
+        target_breaks: huntCount,
         models: models,
         provider: provider,
         reasoning_budget_percent: 0.9,
-        max_retries: 3, // Hardcoded to 3 retries
+        max_retries: 3,
         judge_model: elements.judgeModel?.value || defaultJudge,
-        independent_judging: true, // Mandatory per user request
+        independent_judging: true,
         custom_judge_system_prompt: null,
         pass_threshold,
         passing_mode,
+        min_breaking_required,
     };
 }
 
@@ -805,7 +850,6 @@ function updateHuntButtonLabel() {
 export function syncHuntModeFromConfig() {
     const cfg = state.config || {};
     const passing = cfg.passing_mode === true;
-    const threshold = cfg.pass_threshold ?? 0.5;
     const huntMode = cfg.hunt_mode;
 
     let value = 'break_50';
@@ -819,6 +863,11 @@ export function syncHuntModeFromConfig() {
     if (sel && sel.value !== value) {
         sel.value = value;
         updateHuntButtonLabel();
+    }
+    _syncMinBreakingDropdown();
+    const minSel = document.getElementById('minBreakingSelect');
+    if (minSel && cfg.min_breaking_required !== undefined) {
+        minSel.value = cfg.min_breaking_required;
     }
 }
 

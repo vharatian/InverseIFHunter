@@ -23,7 +23,7 @@ import { showToast, showError, showNextBlindJudge } from './celebrations.js';
 import { hideModelLockedIndicator } from './editors.js';
 import { showMultiTurnDecision } from './multiturn.js';
 import { showAppModal } from './api.js';
-import { MIN_EXPLANATION_WORDS, getConfigValue, adminBypass } from './config.js';
+import { MIN_EXPLANATION_WORDS, getConfigValue, adminBypass, getHuntModeById, getSelectionSlots } from './config.js';
 
 // ============== Hunt Result Classification Helpers ==============
 
@@ -57,47 +57,41 @@ export function validateSelectionForMode(selectedResults, huntMode, isAdmin = fa
 
     const { breakingCount, passingCount } = countBreakingPassing(selectedResults);
     const total = selectedResults.length;
+    const slots = getSelectionSlots();
+    const mode = getHuntModeById(huntMode);
+    const minBreaking = state.config?.min_breaking_required ?? 0;
 
-    switch (huntMode) {
-        case 'all_passing':
-            if (breakingCount > 0) {
-                return { valid: false, message: 'Only passing (non-breaking) hunts can be selected in All Passing mode.' };
-            }
-            if (total === 0) {
-                return { valid: false, message: 'Select at least one passing hunt.' };
-            }
-            return { valid: true, message: `${passingCount} passing selected` };
-
-        case 'break_all':
-            if (passingCount > 0) {
-                return { valid: false, message: 'Only breaking (all-criteria-fail) hunts can be selected in All Breaking mode.' };
-            }
-            if (total === 0) {
-                return { valid: false, message: 'Select at least one breaking hunt.' };
-            }
-            return { valid: true, message: `${breakingCount} breaking selected` };
-
-        case '1_breaking':
-            if (breakingCount > 1) {
-                return { valid: false, message: 'Only 1 breaking hunt is allowed in 1 Breaking mode.' };
-            }
-            if (breakingCount === 0 && total > 0) {
-                return { valid: false, message: 'You must include the 1 breaking hunt in your selection.' };
-            }
-            return { valid: true, message: `${breakingCount} breaking, ${passingCount} passing selected` };
-
-        default: {
-            // break_50 — require exactly 4 with 4B or 3B+1P
-            if (total !== 4) {
-                return { valid: total < 4, message: `Select ${4 - total} more hunt(s). Must be exactly 4 total.` };
-            }
-            const isValid = (breakingCount === 4) || (breakingCount === 3 && passingCount === 1);
-            if (!isValid) {
-                return { valid: false, message: `Invalid combination! Must be 4 breaking OR 3 breaking + 1 passing. Current: ${breakingCount} breaking, ${passingCount} passing.` };
-            }
-            return { valid: true, message: `Valid: ${breakingCount} breaking, ${passingCount} passing` };
+    if (mode.type === 'passing') {
+        if (breakingCount > 0) {
+            return { valid: false, message: `Only passing (non-breaking) hunts can be selected in ${mode.name} mode.` };
         }
+        if (total === 0) {
+            return { valid: false, message: 'Select at least one passing hunt.' };
+        }
+        return { valid: true, message: `${passingCount} passing selected` };
     }
+
+    if (mode.count_based) {
+        const req = mode.required_breaking ?? 1;
+        if (breakingCount > req) {
+            return { valid: false, message: `Only ${req} breaking hunt(s) allowed in ${mode.name} mode.` };
+        }
+        if (breakingCount < req && total > 0) {
+            return { valid: false, message: `You must include exactly ${req} breaking hunt(s) in ${mode.name} mode.` };
+        }
+        return { valid: true, message: `${breakingCount} breaking, ${passingCount} passing selected` };
+    }
+
+    if (isAdmin && adminBypass('selection_count')) {
+        if (breakingCount >= minBreaking) return { valid: true, message: `Admin: ${breakingCount} breaking, ${passingCount} passing` };
+    }
+    if (total !== slots) {
+        return { valid: total < slots, message: `Select ${slots - total} more hunt(s). Must be exactly ${slots} total.` };
+    }
+    if (breakingCount < minBreaking) {
+        return { valid: false, message: `Need at least ${minBreaking} breaking. Current: ${breakingCount} breaking, ${passingCount} passing.` };
+    }
+    return { valid: true, message: `Valid: ${breakingCount} breaking, ${passingCount} passing` };
 }
 
 // ============== Mode-Aware Selection Instructions ==============
@@ -108,27 +102,23 @@ function renderSelectionInstructions() {
     if (!container) return;
 
     const huntMode = state.config?.hunt_mode || 'break_50';
+    const mode = getHuntModeById(huntMode);
+    const slots = getSelectionSlots();
+    const minBreaking = state.config?.min_breaking_required ?? 0;
     let instructionHtml = '';
     let validHtml = '';
 
-    switch (huntMode) {
-        case 'all_passing':
-            instructionHtml = 'Select only <strong>passing</strong> (non-breaking) hunts for review.';
-            validHtml = '<span class="valid-combo">Any number of passing hunts</span> — no breaking allowed.';
-            break;
-        case '1_breaking':
-            instructionHtml = 'Select the <strong>1 breaking</strong> hunt and any number of <strong>passing</strong> hunts.';
-            validHtml = 'Must include exactly <span class="valid-combo">1 breaking</span> hunt. Remaining can be any passing hunts.';
-            break;
-        case 'break_all':
-            instructionHtml = 'Select only <strong>breaking</strong> (all-criteria-fail) hunts for review.';
-            validHtml = '<span class="valid-combo">Any number of breaking hunts</span> — no passing allowed.';
-            break;
-        case 'break_50':
-        default:
-            instructionHtml = 'Select exactly <strong>4 responses</strong> for human review.';
-            validHtml = '<span class="valid-combo">4 breaking</span> OR <span class="valid-combo">3 breaking + 1 passing</span>';
-            break;
+    if (mode.type === 'passing') {
+        instructionHtml = `Select only <strong>passing</strong> (non-breaking) hunts for review.`;
+        validHtml = '<span class="valid-combo">Any number of passing hunts</span> — no breaking allowed.';
+    } else if (mode.count_based) {
+        const req = mode.required_breaking ?? 1;
+        instructionHtml = `Select the <strong>${req} breaking</strong> hunt(s) and any number of <strong>passing</strong> hunts.`;
+        validHtml = `Must include exactly <span class="valid-combo">${req} breaking</span> hunt(s). Remaining can be passing.`;
+    } else {
+        const remaining = slots - minBreaking;
+        instructionHtml = `Select exactly <strong>${slots} responses</strong> for human review (at least <strong>${minBreaking} breaking</strong>).`;
+        validHtml = `<span class="valid-combo">${minBreaking}+ breaking</span>${remaining > 0 ? ` + up to <span class="valid-combo">${remaining} passing</span>` : ''}`;
     }
 
     const tipContainer = document.getElementById('selectionTipContainer');
@@ -989,21 +979,21 @@ export async function fetchAllResponsesAndShowSelection(completedHunts, breaksFo
         let gateFailMessage = '';
 
         if (!_bypassSel) {
-            if (huntMode === 'all_passing') {
+            const gateMode = getHuntModeById(huntMode);
+            const minBreaking = state.config?.min_breaking_required ?? 0;
+
+            if (gateMode.type === 'passing') {
                 criteriaMet = totalPasses >= 1;
                 gateFailTitle = 'No passing responses found';
                 gateFailMessage = `You need at least 1 passing (non-breaking) response to proceed. Currently ${totalPasses} passing, ${totalBreaks} breaking. Run more hunts!`;
-            } else if (huntMode === 'break_all') {
-                criteriaMet = totalBreaks >= 1;
-                gateFailTitle = 'No breaking responses found';
-                gateFailMessage = `You need at least 1 breaking (all-criteria-fail) response to proceed. Currently ${totalBreaks} breaking, ${totalPasses} passing. Run more hunts!`;
-            } else if (huntMode === '1_breaking') {
-                criteriaMet = totalBreaks >= 1;
-                gateFailTitle = 'At least 1 breaking response is required';
-                gateFailMessage = `You need at least 1 breaking response in 1 Breaking mode. Currently ${totalBreaks} breaking, ${totalPasses} passing. Run more hunts!`;
+            } else if (gateMode.count_based) {
+                const req = gateMode.required_breaking ?? 1;
+                criteriaMet = totalBreaks >= req;
+                gateFailTitle = `At least ${req} breaking response(s) required`;
+                gateFailMessage = `You need at least ${req} breaking response(s) in ${gateMode.name} mode. Currently ${totalBreaks} breaking, ${totalPasses} passing. Run more hunts!`;
             } else {
-                criteriaMet = totalBreaks >= 3;
-                gateFailTitle = 'You need at least 3 breaking responses to continue';
+                criteriaMet = totalBreaks >= minBreaking;
+                gateFailTitle = `You need at least ${minBreaking} breaking responses to continue`;
                 gateFailMessage = `You have ${totalBreaks} right now. Run more hunts, then try again.`;
             }
         }
@@ -1019,7 +1009,6 @@ export async function fetchAllResponsesAndShowSelection(completedHunts, breaksFo
             return;
         }
         
-        // Show selection section - criteria met!
         elements.selectionSection.classList.remove('hidden');
         expandSelectionSectionCard();
         
@@ -1027,12 +1016,12 @@ export async function fetchAllResponsesAndShowSelection(completedHunts, breaksFo
         
         displaySelectionCards();
         
-        const modeHintMap = {
-            'all_passing': 'Select any number of passing hunts for review.',
-            'break_all': 'Select only breaking hunts for review.',
-            '1_breaking': 'Select the 1 breaking hunt + any passing hunts for review.',
-        };
-        const modeHint = modeHintMap[huntMode] || 'Select exactly 4 for review.';
+        const slots = getSelectionSlots();
+        const activeMode = getHuntModeById(huntMode);
+        let modeHint;
+        if (activeMode.type === 'passing') modeHint = 'Select any number of passing hunts for review.';
+        else if (activeMode.count_based) modeHint = `Select the ${activeMode.required_breaking ?? 1} breaking hunt(s) + any passing hunts.`;
+        else modeHint = `Select exactly ${slots} for review.`;
         showToast(`✅ Criteria met! ${totalBreaks} breaks, ${totalPasses} passes. ${modeHint}`, 'success');
     } catch (error) {
         console.error('Error fetching results:', error);
@@ -1520,11 +1509,11 @@ export function displaySelectionCards() {
     
     const huntMode = state.config?.hunt_mode || 'break_50';
 
-    // Sort: in all_passing mode show passing first; otherwise breaking first
+    const sortMode = getHuntModeById(huntMode);
     const sortedHunts = [...state.allResponses].sort((a, b) => {
         const aBreaking = isResultBreaking(a);
         const bBreaking = isResultBreaking(b);
-        if (huntMode === 'all_passing') {
+        if (sortMode.type === 'passing') {
             if (!aBreaking && bBreaking) return -1;
             if (aBreaking && !bBreaking) return 1;
         } else {
@@ -1682,40 +1671,36 @@ export function toggleHuntSelection(rowNumber, row) {
     const isBreaking = isResultBreaking(result);
     
     if (checkbox.checked) {
-        // Mode-specific per-item guards (block before adding to selection)
-        if (huntMode === 'all_passing' && isBreaking) {
+        const selMode = getHuntModeById(huntMode);
+        const slots = getSelectionSlots();
+
+        if (selMode.type === 'passing' && isBreaking) {
             checkbox.checked = false;
-            showToast('⚠️ Only passing (non-breaking) hunts can be selected in All Passing mode.', 'warning');
+            showToast(`⚠️ Only passing (non-breaking) hunts can be selected in ${selMode.name} mode.`, 'warning');
             return;
         }
-        if (huntMode === 'break_all' && !isBreaking) {
-            checkbox.checked = false;
-            showToast('⚠️ Only breaking (all-criteria-fail) hunts can be selected in All Breaking mode.', 'warning');
-            return;
-        }
-        if (huntMode === '1_breaking') {
+        if (selMode.count_based) {
+            const req = selMode.required_breaking ?? 1;
             const currentBreaking = state.selectedRowNumbers
                 .map(rn => state.allResponses[rn]).filter(r => r && isResultBreaking(r)).length;
-            if (isBreaking && currentBreaking >= 1) {
+            if (isBreaking && currentBreaking >= req) {
                 checkbox.checked = false;
-                showToast('⚠️ Only 1 breaking hunt is allowed in 1 Breaking mode. Unselect the current one first.', 'warning');
+                showToast(`⚠️ Only ${req} breaking hunt(s) allowed in ${selMode.name} mode. Unselect one first.`, 'warning');
                 return;
             }
         }
 
-        // break_50: fixed 4-slot selection
-        if (huntMode === 'break_50' && state.selectedRowNumbers.length >= 4) {
+        if (selMode.type === 'breaking' && !selMode.count_based && state.selectedRowNumbers.length >= slots) {
             checkbox.checked = false;
-            showToast('Maximum 4 hunts allowed. Unselect one first.', 'warning');
+            showToast(`Maximum ${slots} hunts allowed. Unselect one first.`, 'warning');
             return;
         }
-        
-        // For break_50, validate combination at exactly 4
+
         const tempSelection = [...state.selectedRowNumbers];
         if (!tempSelection.includes(rowNumber)) {
             tempSelection.push(rowNumber);
         }
-        if (huntMode === 'break_50' && tempSelection.length === 4) {
+        if (selMode.type === 'breaking' && !selMode.count_based && tempSelection.length === slots) {
             const tempResults = tempSelection.map(rn => state.allResponses[rn]).filter(r => r);
             const validation = validateSelectionForMode(tempResults, huntMode, state.adminMode);
             if (!validation.valid) {
@@ -1851,33 +1836,26 @@ export function updateSelectionCount() {
         } else if (state.adminMode && adminBypass('selection_mode_rules')) {
             statusText = `Admin: ${count} selected — any combination allowed`;
             statusColor = 'var(--text-primary)';
-        } else if (huntMode === 'all_passing') {
-            statusText = validation.valid
-                ? `✅ ${passingCount} passing hunt${passingCount !== 1 ? 's' : ''} selected`
-                : `❌ ${validation.message}`;
-            statusColor = validation.valid ? 'var(--success)' : 'var(--danger)';
-        } else if (huntMode === 'break_all') {
-            statusText = validation.valid
-                ? `✅ ${breakingCount} breaking hunt${breakingCount !== 1 ? 's' : ''} selected`
-                : `❌ ${validation.message}`;
-            statusColor = validation.valid ? 'var(--success)' : 'var(--danger)';
-        } else if (huntMode === '1_breaking') {
-            const needsBreak = breakingCount === 0;
-            statusText = needsBreak
-                ? `⚠️ ${passingCount} passing selected — must include the 1 breaking hunt`
-                : `✅ ${breakingCount} breaking, ${passingCount} passing selected`;
-            statusColor = needsBreak ? 'var(--warning)' : 'var(--success)';
-        } else if (count < 4) {
-            statusText = `Selected: ${count}/4 hunts (${breakingCount} breaking, ${passingCount} passing) — Select ${4 - count} more`;
-            statusColor = 'var(--text-primary)';
-        } else if (count === 4) {
-            statusText = validation.valid
-                ? `✅ Valid: ${breakingCount} breaking, ${passingCount} passing`
-                : `❌ ${validation.message}`;
-            statusColor = validation.valid ? 'var(--success)' : 'var(--danger)';
         } else {
-            statusText = `Too many selected: ${count}/4`;
-            statusColor = 'var(--danger)';
+            const countMode = getHuntModeById(huntMode);
+            const countSlots = getSelectionSlots();
+            if (countMode.type === 'passing' || (countMode.type === 'breaking' && countMode.count_based)) {
+                statusText = validation.valid
+                    ? `✅ ${breakingCount} breaking, ${passingCount} passing selected`
+                    : `❌ ${validation.message}`;
+                statusColor = validation.valid ? 'var(--success)' : 'var(--danger)';
+            } else if (count < countSlots) {
+                statusText = `Selected: ${count}/${countSlots} hunts (${breakingCount} breaking, ${passingCount} passing) — Select ${countSlots - count} more`;
+                statusColor = 'var(--text-primary)';
+            } else if (count === countSlots) {
+                statusText = validation.valid
+                    ? `✅ Valid: ${breakingCount} breaking, ${passingCount} passing`
+                    : `❌ ${validation.message}`;
+                statusColor = validation.valid ? 'var(--success)' : 'var(--danger)';
+            } else {
+                statusText = `Too many selected: ${count}/${countSlots}`;
+                statusColor = 'var(--danger)';
+            }
         }
         
         elements.selectionCount.textContent = statusText;
@@ -1888,12 +1866,14 @@ export function updateSelectionCount() {
     let shouldEnable = false;
     if (state.adminMode && adminBypass('selection_count')) {
         shouldEnable = count >= 1;
-    } else if (huntMode === 'all_passing' || huntMode === 'break_all') {
-        shouldEnable = count >= 1 && validation.valid;
-    } else if (huntMode === '1_breaking') {
-        shouldEnable = count >= 1 && breakingCount === 1 && validation.valid;
     } else {
-        shouldEnable = count === 4 && validation.valid;
+        const enableMode = getHuntModeById(huntMode);
+        const enableSlots = getSelectionSlots();
+        if (enableMode.type === 'passing' || enableMode.count_based) {
+            shouldEnable = count >= 1 && validation.valid;
+        } else {
+            shouldEnable = count === enableSlots && validation.valid;
+        }
     }
 
     const confirmBtn = document.getElementById('confirmSelectionBtn') || elements.confirmSelectionBtn;
@@ -1919,9 +1899,10 @@ export async function confirmSelection() {
     const huntMode = state.config?.hunt_mode || 'break_50';
 
     const _bypassSelCount = state.adminMode && adminBypass('selection_count');
-    // break_50 requires exactly 4; other modes are flexible
-    if (!_bypassSelCount && huntMode === 'break_50' && selectedResults.length !== 4) {
-        showToast(`❌ Must select exactly 4 hunts. Currently selected: ${selectedResults.length}`, 'error');
+    const saveMode = getHuntModeById(huntMode);
+    const saveSlots = getSelectionSlots();
+    if (!_bypassSelCount && saveMode.type === 'breaking' && !saveMode.count_based && selectedResults.length !== saveSlots) {
+        showToast(`❌ Must select exactly ${saveSlots} hunts. Currently selected: ${selectedResults.length}`, 'error');
         return;
     }
     if (_bypassSelCount && selectedResults.length < 1) {
