@@ -317,6 +317,7 @@ export function showMultiTurnDecision() {
     const nextTurnSpan = document.getElementById('decisionNextTurn');
     if (nextTurnSpan) nextTurnSpan.textContent = state.currentTurn + 1;
 
+    const huntMode = state.config?.hunt_mode || 'break_50';
     const decMode = getHuntModeById(huntMode);
     const decMinBreaking = state.config?.min_breaking_required ?? 0;
     const decSlots = state.config?.selection_slots ?? 4;
@@ -344,7 +345,6 @@ export function showMultiTurnDecision() {
     }
 
     // --- Review Readiness Check ---
-    const huntMode = state.config?.hunt_mode || 'break_50';
     const _bypassSelRules = state.adminMode && adminBypass('selection_mode_rules');
     let canReview = _bypassSelRules;
     let readinessMsg = '';
