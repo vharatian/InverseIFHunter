@@ -366,8 +366,9 @@ export async function startHunt() {
     // If we call getConfig() after, it reads the modified (lower) values.
     state.config = getConfig();
 
-    // Persist the raw hunt mode string for selection-stage logic
     state.config.hunt_mode = getHuntMode();
+
+    lockHuntMode();
 
     // Increment hunt count immediately (before the hunt starts)
     // This will update UI but we already captured the config
@@ -871,24 +872,36 @@ export function syncHuntModeFromConfig() {
     }
 }
 
-/** Lock the hunt mode dropdown so it cannot be changed during the session. */
+/** Lock hunt mode and min-breaking dropdowns after first hunt.
+ *  Admin mode: only lock min-breaking, keep hunt mode flexible. */
 export function lockHuntMode() {
-    const sel = document.getElementById('huntModeSelect');
-    if (sel) {
-        sel.disabled = true;
-        sel.title = 'Hunt mode is locked after the first hunt. Reload the notebook to change.';
+    const modeSel = document.getElementById('huntModeSelect');
+    const minSel = document.getElementById('minBreakingSelect');
+    const minSection = document.getElementById('minBreakingSection');
+
+    if (!state.adminMode) {
+        if (modeSel) {
+            modeSel.disabled = true;
+            modeSel.title = 'Hunt mode is locked after the first hunt. Reload the notebook to change.';
+        }
     }
+    if (minSel) {
+        minSel.disabled = true;
+        minSel.title = 'Min breaking is locked after the first hunt.';
+    }
+    if (minSection) minSection.style.opacity = '0.5';
     state._huntModeLocked = true;
 }
 
-/** Unlock the hunt mode dropdown (e.g. on fresh notebook load). */
+/** Unlock hunt mode and min-breaking dropdowns (e.g. on fresh notebook load). */
 export function unlockHuntMode() {
-    const sel = document.getElementById('huntModeSelect');
-    if (sel) {
-        sel.disabled = false;
-        sel.title = '';
+    const modeSel = document.getElementById('huntModeSelect');
+    if (modeSel) {
+        modeSel.disabled = false;
+        modeSel.title = '';
     }
     state._huntModeLocked = false;
+    _syncMinBreakingDropdown();
 }
 
 const DEFAULT_PARALLEL_HUNTS = 4;
