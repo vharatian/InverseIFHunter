@@ -10,6 +10,7 @@ import { elements } from './dom.js';
 import { state, getCumulativeStats } from './state.js';
 import { displayBreakingResults } from './results.js';
 import { renderInsightTip, getUserFriendlyError, escapeHtml } from './utils.js';
+import { getHuntModeById } from './config.js';
 
 // ============== Celebration Effects Engine ==============
 // Lightweight canvas particle engine for spark/firework effects
@@ -377,21 +378,31 @@ export function showFinalResults() {
     document.getElementById('summaryTotal').textContent = totalHunts;
     document.getElementById('summaryBreaks').textContent = breaksFound;
     
-    // Show summary tip
-    renderInsightTip('summaryTipContainer', 'summary', { type: breaksFound >= 3 ? 'success' : undefined });
-    
+    const huntMode = state.config?.hunt_mode || 'break_50';
+    const celMode = getHuntModeById(huntMode);
+    const celMinBreaking = state.config?.min_breaking_required ?? 0;
+    let celMet;
+    if (celMode.type === 'passing' || celMinBreaking === 0) {
+        celMet = (totalHunts - breaksFound) >= 1;
+    } else if (celMode.count_based) {
+        celMet = breaksFound >= (celMode.required_breaking ?? 1);
+    } else {
+        celMet = breaksFound >= celMinBreaking;
+    }
+
+    renderInsightTip('summaryTipContainer', 'summary', { type: celMet ? 'success' : undefined });
+
     const successRate = totalHunts > 0 ? Math.round((breaksFound / totalHunts) * 100) : 0;
     document.getElementById('summarySuccess').textContent = `${successRate}% (${breaksFound}/${totalHunts} breaks)`;
-    document.getElementById('summaryMet').textContent = breaksFound >= 3 ? 'Yes' : 'No';
-    
-    // Populate breaking results
+    document.getElementById('summaryMet').textContent = celMet ? '✅ Yes' : '❌ No';
+
     displayBreakingResults();
-    
+
     showToast(
-        breaksFound >= 3
-            ? `Found ${breaksFound} model breaking responses.` 
+        celMet
+            ? `Found ${breaksFound} breaking responses. Criteria met!`
             : `Review complete. Found ${breaksFound} breaks.`,
-        breaksFound >= 3 ? 'success' : 'info'
+        celMet ? 'success' : 'info'
     );
 }
 

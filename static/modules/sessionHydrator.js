@@ -7,7 +7,7 @@
 import { state } from './state.js';
 import { elements } from './dom.js';
 import { escapeHtml } from './utils.js';
-import { adminBypass } from './config.js';
+import { adminBypass, getSelectionSlots, getHuntModeById } from './config.js';
 import { refreshReviewSync } from './reviewSync.js';
 import { populatePreviewTabs, parseCriteria, validateModelReferenceAndCriteria } from './notebook.js';
 import {
@@ -266,7 +266,12 @@ function _hydrateResultsSection(allResults) {
 
     state.humanReviews = normalizedReviews;
     state.selectedRowNumbers = [...selectedRows].sort((a, b) => a - b);
-    if (state.selectedRowNumbers.length >= 4) {
+    const hydrateMode = getHuntModeById(state.config?.hunt_mode || 'break_50');
+    const hydrateSlots = getSelectionSlots();
+    const hydrateMinBreaking = state.config?.min_breaking_required ?? 0;
+    const hydrateRequired = (hydrateMode.type === 'passing' || hydrateMode.count_based || hydrateMinBreaking === 0)
+        ? 1 : hydrateSlots;
+    if (state.selectedRowNumbers.length >= hydrateRequired) {
         state.selectionConfirmed = true;
     }
 

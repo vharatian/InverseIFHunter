@@ -980,7 +980,17 @@ export async function fetchAllResponsesAndShowSelection(completedHunts, breaksFo
         
         const successRate = cumulative.totalHunts > 0 ? Math.round((cumulative.totalBreaks / cumulative.totalHunts) * 100) : 0;
         document.getElementById('summarySuccess').textContent = `${successRate}% (${cumulative.totalBreaks}/${cumulative.totalHunts} breaks)`;
-        document.getElementById('summaryMet').textContent = cumulative.totalBreaks >= 3 ? '✅ Yes' : '❌ No';
+        const summaryMinBreaking = state.config?.min_breaking_required ?? 0;
+        const summaryMode = getHuntModeById(huntMode);
+        let criteriaMet_display;
+        if (summaryMode.type === 'passing' || summaryMinBreaking === 0) {
+            criteriaMet_display = cumulative.totalPasses >= 1;
+        } else if (summaryMode.count_based) {
+            criteriaMet_display = cumulative.totalBreaks >= (summaryMode.required_breaking ?? 1);
+        } else {
+            criteriaMet_display = cumulative.totalBreaks >= summaryMinBreaking;
+        }
+        document.getElementById('summaryMet').textContent = criteriaMet_display ? '✅ Yes' : '❌ No';
         
         // VALIDATION: Gate logic depends on hunt mode
         const _bypassSel = state.adminMode && adminBypass('selection_mode_rules');

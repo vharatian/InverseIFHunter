@@ -24,7 +24,7 @@ import { validatePromptLength } from './editors.js';
 // It uses showCalibrationPanel internally, so no import needed if it's in the same file.
 // It uses startHunt (for calibration).
 import { updateHuntLimitUI, resetHuntNumberToDefault } from './hunt.js';
-import { getConfigValue, adminBypass } from './config.js';
+import { getConfigValue, adminBypass, getHuntModeById } from './config.js';
 // This circular dependency is fine as long as they are not used at top-level.
 // startHunt is called inside handleCalibrationGenerate -> fine.
 // showMultiTurnDecision is called inside handleHuntComplete -> fine.
@@ -318,21 +318,22 @@ export function showMultiTurnDecision() {
     let readinessMsg = '';
 
     if (!_bypassSelRules) {
-        if (huntMode === 'all_passing') {
+        const reviewMode = getHuntModeById(huntMode);
+        const minBreaking = state.config?.min_breaking_required ?? 0;
+
+        if (reviewMode.type === 'passing') {
             canReview = passes >= 1;
-            if (!canReview) readinessMsg = `Need at least 1 passing response (currently ${passes}). Run more hunts!`;
-        } else if (huntMode === 'break_all') {
-            canReview = breaks >= 1;
-            if (!canReview) readinessMsg = `Need at least 1 breaking response (currently ${breaks}). Run more hunts!`;
-        } else if (huntMode === '1_breaking') {
-            canReview = breaks >= 1;
-            if (!canReview) readinessMsg = `Need at least 1 breaking response (currently ${breaks}). Run more hunts!`;
+            if (!canReview) readinessMsg = `Need at least 1 passing response in ${reviewMode.name} mode (currently ${passes}). Run more hunts!`;
+        } else if (reviewMode.count_based) {
+            const req = reviewMode.required_breaking ?? 1;
+            canReview = breaks >= req;
+            if (!canReview) readinessMsg = `Need at least ${req} breaking response(s) in ${reviewMode.name} mode (currently ${breaks}). Run more hunts!`;
+        } else if (minBreaking === 0) {
+            canReview = passes >= 1;
+            if (!canReview) readinessMsg = `Min Breaking is 0 — need at least 1 passing response (currently ${passes}). Run more hunts!`;
         } else {
-            canReview = (breaks >= 4) || (breaks >= 3 && passes >= 1);
-            if (!canReview) {
-                if (breaks < 3) readinessMsg = `Need at least 3 breaking responses (currently ${breaks}). Run more hunts!`;
-                else readinessMsg = `Have 3 breaking but need at least 1 passing response (currently ${passes}). Run more hunts, or get 1 more breaking for 4 total.`;
-            }
+            canReview = breaks >= minBreaking;
+            if (!canReview) readinessMsg = `Need at least ${minBreaking} breaking in ${reviewMode.name} mode (currently ${breaks}). Run more hunts!`;
         }
     }
 
