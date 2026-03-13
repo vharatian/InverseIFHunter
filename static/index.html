@@ -583,9 +583,9 @@
                         <div class="decision-fork">
                             <!-- Destructive: End & Review (left, smaller, outline) -->
                             <div class="decision-card destructive">
-                                <div class="decision-card-heading">Found a Breaking Response?</div>
-                                <div class="decision-card-desc">
-                                    End the session. Select 4 responses for human review and save to notebook.
+                                <div class="decision-card-heading" id="decisionEndHeading">Found a Breaking Response?</div>
+                                <div class="decision-card-desc" id="decisionEndDesc">
+                                    End the session. Select responses for human review and save to notebook.
                                 </div>
                                 <button class="btn-destructive-outline" id="markBreakingBtn">
                                     End &amp; Review
@@ -594,8 +594,8 @@
 
                             <!-- Primary: Continue (right, larger, solid) -->
                             <div class="decision-card primary">
-                                <div class="decision-card-heading">No Breaking Yet?</div>
-                                <div class="decision-card-desc">
+                                <div class="decision-card-heading" id="decisionContinueHeading">No Breaking Yet?</div>
+                                <div class="decision-card-desc" id="decisionContinueDesc">
                                     Pick a passing response and write the next turn's prompt and criteria.
                                 </div>
                                 <button class="btn-continue-primary" id="continueToNextTurnBtn">

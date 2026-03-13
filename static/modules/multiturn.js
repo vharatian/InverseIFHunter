@@ -303,14 +303,46 @@ export function showMultiTurnDecision() {
     const turnColor = getTurnColor(state.currentTurn);
     
     const passingMode = state.config?.passing_mode === true;
+    const minBrk = state.config?.min_breaking_required ?? 0;
     if (turnStat) turnStat.innerHTML = `<span class="turn-badge ${getTurnColorClass(state.currentTurn)}">Turn ${state.currentTurn}</span> Complete`;
     if (huntStat) huntStat.textContent = `${hunts} hunts`;
-    if (breakStat) breakStat.innerHTML = passingMode ? `${passes} pass${passes !== 1 ? 'es' : ''} found` : `${breaks} break${breaks !== 1 ? 's' : ''} found`;
+    if (breakStat) {
+        if (passingMode || minBrk === 0) {
+            breakStat.innerHTML = `${passes} pass${passes !== 1 ? 'es' : ''} found`;
+        } else {
+            breakStat.innerHTML = `${breaks} break${breaks !== 1 ? 's' : ''} found`;
+        }
+    }
     
-    // Update "Continue to Turn X" button text
     const nextTurnSpan = document.getElementById('decisionNextTurn');
     if (nextTurnSpan) nextTurnSpan.textContent = state.currentTurn + 1;
-    
+
+    const decMode = getHuntModeById(huntMode);
+    const decMinBreaking = state.config?.min_breaking_required ?? 0;
+    const decSlots = state.config?.selection_slots ?? 4;
+    const endHeading = document.getElementById('decisionEndHeading');
+    const endDesc = document.getElementById('decisionEndDesc');
+    const contHeading = document.getElementById('decisionContinueHeading');
+    const contDesc = document.getElementById('decisionContinueDesc');
+
+    if (decMode.type === 'passing' || decMinBreaking === 0) {
+        if (endHeading) endHeading.textContent = 'Found Passing Responses?';
+        if (endDesc) endDesc.textContent = 'End the session. Select passing responses for human review and save to notebook.';
+        if (contHeading) contHeading.textContent = 'No Passing Yet?';
+        if (contDesc) contDesc.textContent = "Pick a response and write the next turn's prompt and criteria.";
+    } else if (decMode.count_based) {
+        const req = decMode.required_breaking ?? 1;
+        if (endHeading) endHeading.textContent = `Found ${req} Breaking Response${req > 1 ? 's' : ''}?`;
+        if (endDesc) endDesc.textContent = `End the session. Select ${req} breaking + passing responses for review.`;
+        if (contHeading) contHeading.textContent = 'No Breaking Yet?';
+        if (contDesc) contDesc.textContent = "Pick a passing response and write the next turn's prompt and criteria.";
+    } else {
+        if (endHeading) endHeading.textContent = 'Found Breaking Responses?';
+        if (endDesc) endDesc.textContent = `End the session. Select ${decSlots} responses (at least ${decMinBreaking} breaking) for review.`;
+        if (contHeading) contHeading.textContent = 'No Breaking Yet?';
+        if (contDesc) contDesc.textContent = "Pick a passing response and write the next turn's prompt and criteria.";
+    }
+
     // --- Review Readiness Check ---
     const huntMode = state.config?.hunt_mode || 'break_50';
     const _bypassSelRules = state.adminMode && adminBypass('selection_mode_rules');
