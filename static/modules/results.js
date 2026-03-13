@@ -82,6 +82,16 @@ export function validateSelectionForMode(selectedResults, huntMode, isAdmin = fa
         return { valid: true, message: `${breakingCount} breaking, ${passingCount} passing selected` };
     }
 
+    if (minBreaking === 0) {
+        if (breakingCount > 0) {
+            return { valid: false, message: 'Min Breaking is 0 — only passing (non-breaking) hunts can be selected.' };
+        }
+        if (total === 0) {
+            return { valid: false, message: 'Select at least one passing hunt.' };
+        }
+        return { valid: true, message: `${passingCount} passing selected` };
+    }
+
     if (isAdmin && adminBypass('selection_count')) {
         if (breakingCount >= minBreaking) return { valid: true, message: `Admin: ${breakingCount} breaking, ${passingCount} passing` };
     }
@@ -108,7 +118,7 @@ function renderSelectionInstructions() {
     let instructionHtml = '';
     let validHtml = '';
 
-    if (mode.type === 'passing') {
+    if (mode.type === 'passing' || (mode.type === 'breaking' && !mode.count_based && minBreaking === 0)) {
         instructionHtml = `Select only <strong>passing</strong> (non-breaking) hunts for review.`;
         validHtml = '<span class="valid-combo">Any number of passing hunts</span> — no breaking allowed.';
     } else if (mode.count_based) {
@@ -991,6 +1001,10 @@ export async function fetchAllResponsesAndShowSelection(completedHunts, breaksFo
                 criteriaMet = totalBreaks >= req;
                 gateFailTitle = `At least ${req} breaking response(s) required`;
                 gateFailMessage = `You need at least ${req} breaking response(s) in ${gateMode.name} mode. Currently ${totalBreaks} breaking, ${totalPasses} passing. Run more hunts!`;
+            } else if (minBreaking === 0) {
+                criteriaMet = totalPasses >= 1;
+                gateFailTitle = 'No passing responses found';
+                gateFailMessage = `Min Breaking is 0 — you need at least 1 passing response. Currently ${totalPasses} passing, ${totalBreaks} breaking. Run more hunts!`;
             } else {
                 criteriaMet = totalBreaks >= minBreaking;
                 gateFailTitle = `You need at least ${minBreaking} breaking responses to continue`;
@@ -1674,9 +1688,11 @@ export function toggleHuntSelection(rowNumber, row) {
         const selMode = getHuntModeById(huntMode);
         const slots = getSelectionSlots();
 
-        if (selMode.type === 'passing' && isBreaking) {
+        const selMinBreaking = state.config?.min_breaking_required ?? 0;
+
+        if ((selMode.type === 'passing' || (selMode.type === 'breaking' && !selMode.count_based && selMinBreaking === 0)) && isBreaking) {
             checkbox.checked = false;
-            showToast(`⚠️ Only passing (non-breaking) hunts can be selected in ${selMode.name} mode.`, 'warning');
+            showToast('⚠️ Only passing (non-breaking) hunts can be selected.', 'warning');
             return;
         }
         if (selMode.count_based) {
@@ -1839,7 +1855,8 @@ export function updateSelectionCount() {
         } else {
             const countMode = getHuntModeById(huntMode);
             const countSlots = getSelectionSlots();
-            if (countMode.type === 'passing' || (countMode.type === 'breaking' && countMode.count_based)) {
+            const countMinBreaking = state.config?.min_breaking_required ?? 0;
+            if (countMode.type === 'passing' || countMode.count_based || (countMode.type === 'breaking' && countMinBreaking === 0)) {
                 statusText = validation.valid
                     ? `✅ ${breakingCount} breaking, ${passingCount} passing selected`
                     : `❌ ${validation.message}`;
@@ -1869,7 +1886,8 @@ export function updateSelectionCount() {
     } else {
         const enableMode = getHuntModeById(huntMode);
         const enableSlots = getSelectionSlots();
-        if (enableMode.type === 'passing' || enableMode.count_based) {
+        const enableMinBreaking = state.config?.min_breaking_required ?? 0;
+        if (enableMode.type === 'passing' || enableMode.count_based || enableMinBreaking === 0) {
             shouldEnable = count >= 1 && validation.valid;
         } else {
             shouldEnable = count === enableSlots && validation.valid;
@@ -1901,7 +1919,8 @@ export async function confirmSelection() {
     const _bypassSelCount = state.adminMode && adminBypass('selection_count');
     const saveMode = getHuntModeById(huntMode);
     const saveSlots = getSelectionSlots();
-    if (!_bypassSelCount && saveMode.type === 'breaking' && !saveMode.count_based && selectedResults.length !== saveSlots) {
+    const saveMinBreaking = state.config?.min_breaking_required ?? 0;
+    if (!_bypassSelCount && saveMode.type === 'breaking' && !saveMode.count_based && saveMinBreaking > 0 && selectedResults.length !== saveSlots) {
         showToast(`❌ Must select exactly ${saveSlots} hunts. Currently selected: ${selectedResults.length}`, 'error');
         return;
     }
