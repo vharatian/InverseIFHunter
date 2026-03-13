@@ -84,22 +84,22 @@ export function validateSelectionForMode(selectedResults, huntMode, isAdmin = fa
 
     if (minBreaking === 0) {
         if (breakingCount > 0) {
-            return { valid: false, message: 'Min Breaking is 0 — only passing (non-breaking) hunts can be selected.' };
+            return { valid: false, message: `${mode.name} mode with Min Breaking 0 — only passing hunts can be selected.` };
         }
         if (total === 0) {
             return { valid: false, message: 'Select at least one passing hunt.' };
         }
-        return { valid: true, message: `${passingCount} passing selected` };
+        return { valid: true, message: `${passingCount} passing selected (Min Breaking 0)` };
     }
 
     if (isAdmin && adminBypass('selection_count')) {
         if (breakingCount >= minBreaking) return { valid: true, message: `Admin: ${breakingCount} breaking, ${passingCount} passing` };
     }
     if (total !== slots) {
-        return { valid: total < slots, message: `Select ${slots - total} more hunt(s). Must be exactly ${slots} total.` };
+        return { valid: total < slots, message: `Select ${slots - total} more hunt(s). ${mode.name} requires exactly ${slots} total.` };
     }
     if (breakingCount < minBreaking) {
-        return { valid: false, message: `Need at least ${minBreaking} breaking. Current: ${breakingCount} breaking, ${passingCount} passing.` };
+        return { valid: false, message: `Need at least ${minBreaking} breaking in ${mode.name} mode. Current: ${breakingCount} breaking, ${passingCount} passing.` };
     }
     return { valid: true, message: `Valid: ${breakingCount} breaking, ${passingCount} passing` };
 }
@@ -1004,11 +1004,11 @@ export async function fetchAllResponsesAndShowSelection(completedHunts, breaksFo
             } else if (minBreaking === 0) {
                 criteriaMet = totalPasses >= 1;
                 gateFailTitle = 'No passing responses found';
-                gateFailMessage = `Min Breaking is 0 — you need at least 1 passing response. Currently ${totalPasses} passing, ${totalBreaks} breaking. Run more hunts!`;
+                gateFailMessage = `You need at least 1 passing response to proceed (Min Breaking is 0). Currently ${totalPasses} passing, ${totalBreaks} breaking. Run more hunts!`;
             } else {
                 criteriaMet = totalBreaks >= minBreaking;
                 gateFailTitle = `You need at least ${minBreaking} breaking responses to continue`;
-                gateFailMessage = `You have ${totalBreaks} right now. Run more hunts, then try again.`;
+                gateFailMessage = `${gateMode.name} mode with Min Breaking ${minBreaking}. You have ${totalBreaks} breaking right now. Run more hunts, then try again.`;
             }
         }
         
@@ -1032,10 +1032,11 @@ export async function fetchAllResponsesAndShowSelection(completedHunts, breaksFo
         
         const slots = getSelectionSlots();
         const activeMode = getHuntModeById(huntMode);
+        const hintMinBreaking = state.config?.min_breaking_required ?? 0;
         let modeHint;
-        if (activeMode.type === 'passing') modeHint = 'Select any number of passing hunts for review.';
+        if (activeMode.type === 'passing' || hintMinBreaking === 0) modeHint = 'Select passing hunts for review.';
         else if (activeMode.count_based) modeHint = `Select the ${activeMode.required_breaking ?? 1} breaking hunt(s) + any passing hunts.`;
-        else modeHint = `Select exactly ${slots} for review.`;
+        else modeHint = `Select exactly ${slots} (at least ${hintMinBreaking} breaking).`;
         showToast(`✅ Criteria met! ${totalBreaks} breaks, ${totalPasses} passes. ${modeHint}`, 'success');
     } catch (error) {
         console.error('Error fetching results:', error);
@@ -1690,9 +1691,14 @@ export function toggleHuntSelection(rowNumber, row) {
 
         const selMinBreaking = state.config?.min_breaking_required ?? 0;
 
-        if ((selMode.type === 'passing' || (selMode.type === 'breaking' && !selMode.count_based && selMinBreaking === 0)) && isBreaking) {
+        if (selMode.type === 'passing' && isBreaking) {
             checkbox.checked = false;
-            showToast('⚠️ Only passing (non-breaking) hunts can be selected.', 'warning');
+            showToast(`⚠️ Only passing hunts can be selected in ${selMode.name} mode.`, 'warning');
+            return;
+        }
+        if (selMode.type === 'breaking' && !selMode.count_based && selMinBreaking === 0 && isBreaking) {
+            checkbox.checked = false;
+            showToast(`⚠️ Min Breaking is 0 — only passing hunts can be selected.`, 'warning');
             return;
         }
         if (selMode.count_based) {
