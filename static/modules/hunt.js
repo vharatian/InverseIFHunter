@@ -26,6 +26,7 @@ import {
 } from './results.js';
 import { showMultiTurnDecision, updateTurnAwareUI } from './multiturn.js';
 import { syncActiveRunToNotebook } from './testbed.js';
+import { playHuntStart } from './sounds.js';
 
 
 
@@ -456,6 +457,7 @@ export async function startHunt() {
     // Server sends id: and retry: 500 with each event.
     // Browser's native EventSource auto-reconnects with Last-Event-ID header.
     // Server replays missed events from Redis Stream on reconnect.
+    playHuntStart();
     const seenEventIds = new Set();  // Dedup replayed events
     
     const eventSource = new EventSource(`/api/hunt-stream/${state.sessionId}`);

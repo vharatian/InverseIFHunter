@@ -32,6 +32,7 @@ import {
     hideModelLockedIndicator
 } from './editors.js';
 import { showAppModal, showPasswordPrompt } from './api.js';
+import { playFetchSuccess, playFetchError, playFinalSubmission, playFinalSubmissionError } from './sounds.js';
 import { activateAdminMode } from './adminMode.js';
 import { runQualityCheckOverlay } from './qualityCheckOverlay.js';
 import { renderQCPersistentSection } from './qcPersistentSection.js';
@@ -551,9 +552,11 @@ export async function fetchFromUrl(forceNew = false) {
         }
 
         handleNotebookLoaded(data, true);
+        playFetchSuccess();
         
     } catch (error) {
         console.error('Error fetching notebook:', error);
+        playFetchError();
         showError(error, { operation: 'Fetch notebook', retry: fetchFromUrl });
     } finally {
         if (elements.fetchUrlBtn) {
@@ -1401,6 +1404,7 @@ export async function submitToColab() {
             throw new Error(result.message || 'Progressive save failed');
         }
 
+        playFinalSubmission();
         showToast(`✅ Submitted to Colab! (${cells.length} cells saved)`, 'success');
         triggerColabConfetti();
 
@@ -1409,6 +1413,7 @@ export async function submitToColab() {
 
     } catch (error) {
         console.error('submitToColab error:', error);
+        playFinalSubmissionError();
         showError(error, { operation: 'Submit to Colab', retry: () => submitToColab() });
         btn.disabled = false;
         btn.textContent = originalText;

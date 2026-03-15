@@ -16,6 +16,7 @@ import { escapeHtml } from './utils.js';
 import { showToast } from './celebrations.js';
 import { parseCriteria, validateModelReferenceAndCriteria, progressiveSaveToColab } from './notebook.js';
 import { parseCriteriaToJSON } from './utils.js';
+import { playJudgeSuccess, playJudgeError } from './sounds.js';
 
 const DEFAULT_JUDGE_SYSTEM_PROMPT = `Your role is that of a meticulous instruction-following grading teacher. Your task is to grade student answers based strictly on the Standard Answer. You must evaluate whether the student completely fulfills the requirement. You will be provide one requirement
 
@@ -2335,9 +2336,13 @@ async function saveRunToTurn() {
         _finalizeSavePreviewModal(isPassing, left.idealResponse || '', judgeData);
 
         if (isPassing) {
+            playJudgeSuccess();
             showToast('Ideal response verified — continue to hunt when ready', 'success');
+        } else {
+            playJudgeError();
         }
     } catch (err) {
+        playJudgeError();
         document.getElementById('spmStreamOverlay')?.remove();
         showSaveValidationModal({
             type: 'error',

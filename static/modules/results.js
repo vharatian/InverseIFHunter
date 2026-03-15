@@ -24,6 +24,7 @@ import { hideModelLockedIndicator } from './editors.js';
 import { showMultiTurnDecision } from './multiturn.js';
 import { showAppModal } from './api.js';
 import { MIN_EXPLANATION_WORDS, getConfigValue, adminBypass, getHuntModeById, getSelectionSlots } from './config.js';
+import { playHuntComplete, playHuntCompleteEmpty } from './sounds.js';
 
 // ============== Hunt Result Classification Helpers ==============
 
@@ -855,6 +856,12 @@ export function handleHuntComplete(data) {
     }
     
     const { completed_hunts, breaks_found } = data;
+
+    if (breaks_found > 0) {
+        playHuntComplete();
+    } else {
+        playHuntCompleteEmpty();
+    }
     
     // NOTE: totalHuntsCount is now the single source of truth (already incremented before hunt started)
     // No need to update accumulatedHuntOffset separately

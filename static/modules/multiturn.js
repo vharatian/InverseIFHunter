@@ -21,6 +21,7 @@ import { fetchAllResponses, fetchAllResponsesAndShowSelection } from './results.
 import { renderPriorConversationBanner, enableNavTestbedButton, resetTestbed, showTestbed } from './testbed.js';
 import { progressiveSaveToColab } from './notebook.js';
 import { validatePromptLength } from './editors.js';
+import { playEndTask, playEndTaskError, playNextTurn, playNextTurnError } from './sounds.js';
 // It uses showCalibrationPanel internally, so no import needed if it's in the same file.
 // It uses startHunt (for calibration).
 import { updateHuntLimitUI, resetHuntNumberToDefault } from './hunt.js';
@@ -597,6 +598,7 @@ export async function handleMarkBreaking() {
         
         const data = await response.json();
         state.isMultiTurn = data.is_multi_turn;
+        playEndTask();
         
         // Hide multi-turn section
         document.getElementById('multiTurnSection').classList.add('hidden');
@@ -611,6 +613,7 @@ export async function handleMarkBreaking() {
         
     } catch (error) {
         console.error('Error marking breaking:', error);
+        playEndTaskError();
         showError(error, { operation: `Turn ${state.currentTurn} — Mark breaking` });
     }
 }
@@ -620,6 +623,7 @@ export async function handleMarkBreaking() {
  * Shows the response picker for selecting a passing response.
  */
 export async function handleContinueToNextTurn() {
+    playNextTurn();
     // Hide decision panel, show response picker
     document.getElementById('multiTurnDecisionPanel').classList.add('hidden');
     const picker = document.getElementById('goodResponsePicker');
