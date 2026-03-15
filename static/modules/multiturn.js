@@ -796,8 +796,11 @@ async function _applyTurnAdvance(apiData, selectedResp, completedPrompt, complet
         { role: 'assistant', content: selectedResp.response }
     );
 
-    const judgeModelEl = document.getElementById('judgeModel');
+    const judgeModelEl   = document.getElementById('judgeModel');
     const judgeModelName = judgeModelEl?.options?.[judgeModelEl.selectedIndex]?.text || judgeModelEl?.value || '';
+
+    const _huntModelId  = state.config.models?.[0] || '';
+    const _huntModeId   = state.config.hunt_mode   || '';
 
     state.turns.push({
         turnNumber: state.currentTurn - 1,
@@ -809,6 +812,11 @@ async function _applyTurnAdvance(apiData, selectedResp, completedPrompt, complet
         huntCount: state.huntsThisTurn || state.allResponses.length,
         judge_system_prompt: state.notebook?.judge_system_prompt || '',
         judgeModel: judgeModelName,
+        huntModelId:   _huntModelId,
+        huntModelName: getModelDisplayName(_huntModelId),
+        judgeModelId:  state.config.judge_model || '',
+        huntModeId:    _huntModeId,
+        huntModeName:  getHuntModeById(_huntModeId)?.name || _huntModeId,
         judgeResult: {
             score: selectedResp.judge_score,
             criteria: selectedResp.judge_criteria || {},

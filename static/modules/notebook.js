@@ -9,7 +9,7 @@
 
 import { elements } from './dom.js';
 import { state } from './state.js';
-import { PROVIDER_MODELS, ADMIN_MODE_PASSWORD, getConfigValue, fetchConfigFromAPI, adminBypass } from './config.js';
+import { PROVIDER_MODELS, ADMIN_MODE_PASSWORD, getConfigValue, fetchConfigFromAPI, adminBypass, getHuntModeById } from './config.js';
 import { 
     escapeHtml, 
     loadHuntCount, 
@@ -1395,8 +1395,74 @@ export async function submitToColab() {
             cells.push({ heading: `reasoning_trace_${slotNum}`, content: _slotReasoningTrace(result) });
         });
 
-        // Number of attempts
-        cells.push({ heading: `Turn-${breakingTurnNum}: Number of Attempts Made`, content: String(totalAttempts) });
+        // ── Hunt metadata cells ────────────────────────────────────────────────
+        // Collect config for every completed turn (previous + current breaking turn).
+        // If all turns share the same hunt model, judge model, and hunt mode → save
+        // flat (no prefix). Otherwise save per-turn with Turn_N_ prefix.
+
+        const _curHuntModelId  = state.config.models?.[0] || '';
+        const _curJudgeModelId = state.config.judge_model  || '';
+        const _curHuntModeId   = state.config.hunt_mode    || '';
+
+        const _allTurnConfigs = [
+            ...state.turns.map(t => ({
+                turnNumber:    t.turnNumber,
+                huntModelId:   t.huntModelId   || '',
+                huntModelName: t.huntModelName || getModelDisplayName(t.huntModelId || ''),
+                judgeModelId:  t.judgeModelId  || '',
+                judgeModelName:t.judgeModel    || getModelDisplayName(t.judgeModelId || ''),
+                huntModeId:    t.huntModeId    || '',
+                huntModeName:  t.huntModeName  || t.huntModeId || '',
+                results:       t.results       || [],
+                huntCount:     t.huntCount     || (t.results || []).length,
+            })),
+            {
+                turnNumber:    breakingTurnNum,
+                huntModelId:   _curHuntModelId,
+                huntModelName: getModelDisplayName(_curHuntModelId),
+                judgeModelId:  _curJudgeModelId,
+                judgeModelName:getModelDisplayName(_curJudgeModelId),
+                huntModeId:    _curHuntModeId,
+                huntModeName:  getHuntModeById(_curHuntModeId)?.name || _curHuntModeId,
+                results:       state.allResponses,
+                huntCount:     validResponseCount,
+            },
+        ];
+
+        const _calcPassRate = (results) => {
+            const total   = (results || []).length;
+            if (total === 0) return '0% (0/0)';
+            const passing = results.filter(r => {
+                const s = r.judge_score ?? r.score ?? null;
+                return s !== null && Number(s) > 0;
+            }).length;
+            return `${Math.round((passing / total) * 100)}% (${passing}/${total})`;
+        };
+
+        const _allSame = _allTurnConfigs.length <= 1 || _allTurnConfigs.every(t =>
+            t.huntModelId  === _allTurnConfigs[0].huntModelId  &&
+            t.judgeModelId === _allTurnConfigs[0].judgeModelId &&
+            t.huntModeId   === _allTurnConfigs[0].huntModeId
+        );
+
+        if (_allSame) {
+            const _cfg         = _allTurnConfigs[0];
+            const _allResults  = _allTurnConfigs.flatMap(t => t.results || []);
+            cells.push({ heading: 'Total_Hunts',  content: String(totalAttempts) });
+            cells.push({ heading: 'Pass_Rate',    content: _calcPassRate(_allResults) });
+            cells.push({ heading: 'Hunt_Mode',    content: _cfg.huntModeName });
+            cells.push({ heading: 'Hunt_Model',   content: _cfg.huntModelName });
+            cells.push({ heading: 'Judge_Model',  content: _cfg.judgeModelName });
+        } else {
+            _allTurnConfigs.forEach(t => {
+                const _p = `Turn_${t.turnNumber}_`;
+                cells.push({ heading: `${_p}Total_Hunts`,  content: String(t.huntCount) });
+                cells.push({ heading: `${_p}Pass_Rate`,    content: _calcPassRate(t.results) });
+                cells.push({ heading: `${_p}Hunt_Mode`,    content: t.huntModeName });
+                cells.push({ heading: `${_p}Hunt_Model`,   content: t.huntModelName });
+                cells.push({ heading: `${_p}Judge_Model`,  content: t.judgeModelName });
+            });
+        }
 
         const result = await progressiveSaveToColab(cells);
 
