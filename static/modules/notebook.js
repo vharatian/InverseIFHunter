@@ -1190,12 +1190,26 @@ function _slotLlmJudge(result) {
     const llmScore = result.judge_score !== undefined && result.judge_score !== null
         ? result.judge_score : '(n/a)';
     const llmCriteria = result.judge_criteria || {};
-    const llmExplanation = result.judge_explanation || '(no explanation)';
+
     if (Object.keys(llmCriteria).length > 0) {
-        lines.push(`**Criteria Grades:**\n\`\`\`json\n${JSON.stringify(llmCriteria, null, 2)}\n\`\`\``);
+        // Sort criteria keys naturally (C1, C2, ... C10) before serialising
+        const sortedCriteria = Object.fromEntries(
+            Object.entries(llmCriteria).sort(([a], [b]) =>
+                a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
+            )
+        );
+        lines.push(`**Criteria Grades:**\n\`\`\`json\n${JSON.stringify(sortedCriteria, null, 2)}\n\`\`\``);
     }
+
     lines.push(`\n**Score:** ${llmScore}`);
-    lines.push(`\n**Explanation:**\n${llmExplanation}`);
+
+    // Ensure each criterion line gets its own paragraph in Colab markdown
+    // (single \n isn't enough — Colab needs \n\n for visible line breaks)
+    const rawExplanation = result.judge_explanation || '(no explanation)';
+    const formattedExplanation = rawExplanation
+        .replace(/\n(❌|✅|⚠️)/g, '\n\n$1');
+
+    lines.push(`\n**Explanation:**\n${formattedExplanation}`);
     return lines.join('\n');
 }
 

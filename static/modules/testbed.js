@@ -695,7 +695,7 @@ function renderCriteriaChips(disabled) {
         <span>${countLabel}</span>
     </div>`;
 
-    return `<div class="tb-chips-container" id="tbSharedChips">${items}${addBtn}</div>${countBadge}`;
+    return `<div class="tb-chips-container" id="tbSharedChips">${items}${addBtn}${countBadge}</div>`;
 }
 
 function _autoResizeChip(el) {
