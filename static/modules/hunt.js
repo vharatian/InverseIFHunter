@@ -28,6 +28,37 @@ import { showMultiTurnDecision, updateTurnAwareUI } from './multiturn.js';
 import { syncActiveRunToNotebook } from './testbed.js';
 import { playHuntStart } from './sounds.js';
 
+// ── Hunt timer & aurora — purely visual, no logic impact ──────────────────
+let _huntTimerInterval = null;
+let _huntTimerStart    = null;
+
+function _startHuntTimer() {
+    const el = document.getElementById('huntElapsedTimer');
+    if (!el) return;
+    _huntTimerStart = Date.now();
+    el.textContent = '0:00';
+    el.classList.add('visible');
+    el.classList.remove('frozen');
+    _huntTimerInterval = setInterval(() => {
+        if (!state.isHunting) {
+            clearInterval(_huntTimerInterval);
+            _huntTimerInterval = null;
+            el.classList.add('frozen');
+            return;
+        }
+        const secs = Math.floor((Date.now() - _huntTimerStart) / 1000);
+        const m = Math.floor(secs / 60);
+        const s = secs % 60;
+        el.textContent = `${m}:${String(s).padStart(2, '0')}`;
+    }, 500);
+}
+
+function _activateAurora() {
+    const canvas = document.getElementById('auroraCanvas');
+    if (!canvas) return;
+    canvas.classList.remove('complete');
+    canvas.classList.add('hunting');
+}
 
 
 // ============== Hunt Limit Functions ==============
@@ -458,6 +489,8 @@ export async function startHunt() {
     // Browser's native EventSource auto-reconnects with Last-Event-ID header.
     // Server replays missed events from Redis Stream on reconnect.
     playHuntStart();
+    _startHuntTimer();
+    _activateAurora();
     const seenEventIds = new Set();  // Dedup replayed events
     
     const eventSource = new EventSource(`/api/hunt-stream/${state.sessionId}`);

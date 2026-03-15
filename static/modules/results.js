@@ -862,6 +862,14 @@ export function handleHuntComplete(data) {
     } else {
         playHuntCompleteEmpty();
     }
+
+    // Aurora: flash green on complete then fade out
+    const _aurora = document.getElementById('auroraCanvas');
+    if (_aurora) {
+        _aurora.classList.remove('hunting');
+        _aurora.classList.add('complete');
+        setTimeout(() => _aurora.classList.remove('complete'), 2500);
+    }
     
     // NOTE: totalHuntsCount is now the single source of truth (already incremented before hunt started)
     // No need to update accumulatedHuntOffset separately

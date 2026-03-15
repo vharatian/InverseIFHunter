@@ -683,12 +683,37 @@ function renderCriteriaChips(disabled) {
             <span>C${nextNum}</span>
         </button>`;
 
-    return `<div class="tb-chips-container" id="tbSharedChips">${items}${addBtn}</div>`;
+    const count     = chips.filter(c => c.trim()).length;
+    const MIN       = 3;
+    const countOk   = count >= MIN;
+    const countClass = countOk ? 'count-ok' : (count > 0 ? 'count-warn' : '');
+    const countLabel = countOk
+        ? `${count} criteria ✓`
+        : `${count} / ${MIN} minimum`;
+    const countBadge = `<div class="tb-criteria-count ${countClass}" id="tbCriteriaCount">
+        <span class="tb-criteria-count-dot"></span>
+        <span>${countLabel}</span>
+    </div>`;
+
+    return `<div class="tb-chips-container" id="tbSharedChips">${items}${addBtn}</div>${countBadge}`;
 }
 
 function _autoResizeChip(el) {
     el.style.height = 'auto';
     el.style.height = el.scrollHeight + 'px';
+}
+
+function _updateCriteriaCount() {
+    const badge = document.getElementById('tbCriteriaCount');
+    if (!badge) return;
+    const chips = getSharedLeft().criteriaChips;
+    const count = chips.filter(c => c.trim()).length;
+    const MIN   = 3;
+    const ok    = count >= MIN;
+    badge.className = `tb-criteria-count ${ok ? 'count-ok' : (count > 0 ? 'count-warn' : '')}`;
+    badge.querySelector('span:last-child').textContent = ok
+        ? `${count} criteria ✓`
+        : `${count} / ${MIN} minimum`;
 }
 
 function wireChipEvents() {
@@ -704,6 +729,7 @@ function wireChipEvents() {
             _autoResizeChip(inp);
             const addBtn = container.querySelector('.tb-chip-add span:last-child');
             if (addBtn) addBtn.textContent = `C${left.criteriaChips.length + 1}`;
+            _updateCriteriaCount();
         });
         inp.addEventListener('keydown', e => {
             if (e.key === 'Enter' && !e.shiftKey) {

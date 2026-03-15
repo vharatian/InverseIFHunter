@@ -7806,3 +7806,177 @@ body.sidebar-visible .container.multi-turn-layout {
     color: var(--text-muted);
     font-style: italic;
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   AURORA AMBIENT BACKGROUND
+   Fixed overlay, pointer-events: none — purely decorative.
+   Activated via #auroraCanvas.hunting, brief green flash via .complete.
+───────────────────────────────────────────────────────────────────────────── */
+
+#auroraCanvas {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    overflow: hidden;
+    opacity: 0;
+    transition: opacity 1.8s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#auroraCanvas.hunting {
+    opacity: 1;
+}
+
+#auroraCanvas.complete {
+    opacity: 1;
+    animation: aurora-complete-fade 2.4s ease forwards;
+}
+
+@keyframes aurora-complete-fade {
+    0%   { opacity: 1; }
+    40%  { opacity: 0.85; }
+    100% { opacity: 0; }
+}
+
+.aurora-blob {
+    position: absolute;
+    border-radius: 50%;
+    will-change: transform;
+}
+
+/* Blob 1 — warm amber, top-left drift */
+.aurora-blob-1 {
+    width: 700px;
+    height: 700px;
+    background: radial-gradient(circle at 40% 40%, rgba(255, 149, 0, 0.18) 0%, transparent 65%);
+    top: -180px;
+    left: -160px;
+    animation: aurora-drift-1 28s ease-in-out infinite;
+}
+
+/* Blob 2 — soft purple, bottom-right drift */
+.aurora-blob-2 {
+    width: 580px;
+    height: 580px;
+    background: radial-gradient(circle at 60% 60%, rgba(191, 90, 242, 0.12) 0%, transparent 65%);
+    bottom: -120px;
+    right: -120px;
+    animation: aurora-drift-2 34s ease-in-out infinite;
+}
+
+/* Blob 3 — ember orange, center slow pulse */
+.aurora-blob-3 {
+    width: 480px;
+    height: 480px;
+    background: radial-gradient(circle at 50% 50%, rgba(255, 107, 53, 0.10) 0%, transparent 65%);
+    top: 35%;
+    left: 38%;
+    transform: translate(-50%, -50%);
+    animation: aurora-drift-3 22s ease-in-out infinite;
+}
+
+/* On complete — green tint overlaid via filter on canvas */
+#auroraCanvas.complete .aurora-blob-1 {
+    background: radial-gradient(circle at 40% 40%, rgba(48, 209, 88, 0.20) 0%, transparent 65%);
+}
+#auroraCanvas.complete .aurora-blob-2 {
+    background: radial-gradient(circle at 60% 60%, rgba(52, 170, 220, 0.14) 0%, transparent 65%);
+}
+#auroraCanvas.complete .aurora-blob-3 {
+    background: radial-gradient(circle at 50% 50%, rgba(48, 209, 88, 0.12) 0%, transparent 65%);
+}
+
+@keyframes aurora-drift-1 {
+    0%   { transform: translate(0px,   0px)   scale(1.00); }
+    25%  { transform: translate(90px,  60px)  scale(1.08); }
+    50%  { transform: translate(40px,  130px) scale(0.96); }
+    75%  { transform: translate(-50px, 70px)  scale(1.04); }
+    100% { transform: translate(0px,   0px)   scale(1.00); }
+}
+
+@keyframes aurora-drift-2 {
+    0%   { transform: translate(0px,    0px)   scale(1.00); }
+    30%  { transform: translate(-80px, -50px)  scale(1.06); }
+    60%  { transform: translate(60px,  -90px)  scale(0.97); }
+    85%  { transform: translate(-30px,  40px)  scale(1.03); }
+    100% { transform: translate(0px,    0px)   scale(1.00); }
+}
+
+@keyframes aurora-drift-3 {
+    0%   { transform: translate(-50%, -50%) scale(1.00) rotate(0deg);   }
+    33%  { transform: translate(-50%, -50%) scale(1.15) rotate(12deg);  }
+    66%  { transform: translate(-50%, -50%) scale(0.92) rotate(-8deg);  }
+    100% { transform: translate(-50%, -50%) scale(1.00) rotate(0deg);   }
+}
+
+/* Light theme — slightly more opaque since white bg needs more contrast */
+[data-theme="light"] .aurora-blob-1 {
+    background: radial-gradient(circle at 40% 40%, rgba(255, 149, 0, 0.10) 0%, transparent 65%);
+}
+[data-theme="light"] .aurora-blob-2 {
+    background: radial-gradient(circle at 60% 60%, rgba(191, 90, 242, 0.07) 0%, transparent 65%);
+}
+[data-theme="light"] .aurora-blob-3 {
+    background: radial-gradient(circle at 50% 50%, rgba(255, 107, 53, 0.06) 0%, transparent 65%);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   HUNT ELAPSED TIMER
+───────────────────────────────────────────────────────────────────────────── */
+
+.hunt-elapsed-timer {
+    display: none;
+    font-size: 0.75rem;
+    font-variant-numeric: tabular-nums;
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 1px 7px;
+    margin-left: 8px;
+    letter-spacing: 0.02em;
+    vertical-align: middle;
+    transition: color 0.3s ease;
+}
+
+.hunt-elapsed-timer.visible {
+    display: inline-block;
+}
+
+.hunt-elapsed-timer.frozen {
+    color: var(--text-secondary);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   CRITERIA COUNT LIVE BADGE
+───────────────────────────────────────────────────────────────────────────── */
+
+.tb-criteria-count {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 6px;
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    transition: color 0.25s ease;
+    user-select: none;
+}
+
+.tb-criteria-count.count-ok {
+    color: var(--success);
+}
+
+.tb-criteria-count.count-warn {
+    color: var(--warning);
+}
+
+.tb-criteria-count-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    flex-shrink: 0;
+    transition: background 0.25s ease;
+}

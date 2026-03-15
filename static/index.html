@@ -17,6 +17,12 @@
 </head>
 
 <body>
+<!-- Aurora ambient background — purely visual, no interaction -->
+<div id="auroraCanvas" aria-hidden="true">
+    <div class="aurora-blob aurora-blob-1"></div>
+    <div class="aurora-blob aurora-blob-2"></div>
+    <div class="aurora-blob aurora-blob-3"></div>
+</div>
     <!-- Mobile: Desktop-only message -->
     <div id="mobileOnlyMessage" class="mobile-only-overlay hidden" style="display: none; position: fixed; inset: 0; z-index: 99999; background: var(--bg-primary, #0f0f0f); color: var(--text-primary, #fff); flex-direction: column; align-items: center; justify-content: center; padding: 2rem; text-align: center;">
         <div style="font-size: 3rem; margin-bottom: 1rem;">
@@ -489,6 +495,7 @@
                         <div class="status" id="huntStatus">
                             <span class="status-dot running"></span>
                             <span id="statusText">Running...</span>
+                            <span id="huntElapsedTimer" class="hunt-elapsed-timer"></span>
                         </div>
                     </div>
 
