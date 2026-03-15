@@ -113,6 +113,66 @@ let runs        = [];
 let activeRunId = null;
 let runCounter  = 0;
 
+// ── Copy button helpers ───────────────────────────────────────────────────
+const _COPY_SVG  = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
+const _CHECK_SVG = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
+
+function _tbCopyBtn(src, title, runId) {
+    const runAttr = runId != null ? ` data-copy-run="${runId}"` : '';
+    return `<button class="tb-copy-btn" data-copy-src="${src}" type="button" title="${title}" tabindex="-1"${runAttr}>${_COPY_SVG}</button>`;
+}
+
+function _handleTbCopy(e) {
+    const btn = e.target.closest('.tb-copy-btn');
+    if (!btn) return;
+    e.stopPropagation();
+    e.preventDefault();
+
+    const src   = btn.dataset.copySrc;
+    const runId = btn.dataset.copyRun;
+    let text    = '';
+
+    if (src === 'tbSharedPrompt') {
+        text = document.getElementById('tbSharedPrompt')?.value || getSharedLeft().prompt || '';
+    } else if (src === 'tbSharedIdeal') {
+        text = document.getElementById('tbSharedIdeal')?.value || getSharedLeft().idealResponse || '';
+    } else if (src === 'tbSharedReasoning') {
+        text = document.getElementById('tbSharedReasoning')?.value || getSharedLeft().modelReasoning || '';
+    } else if (src === 'criteria') {
+        const chips = getSharedLeft().criteriaChips || [];
+        text = chips.filter(c => c.trim()).map((c, i) => `C${i + 1}: ${c}`).join('\n');
+    } else if (src === 'tbSharedJudge') {
+        text = document.getElementById('tbSharedJudge')?.value || getSharedLeft().judgePrompt || '';
+    } else if (src === 'response' && runId) {
+        const run = runs.find(r => r.id === runId);
+        text = run?.response || '';
+    } else if (src === 'reasoning' && runId) {
+        const run = runs.find(r => r.id === runId);
+        text = run?.reasoningTrace || '';
+    }
+
+    if (!text.trim()) return;
+
+    const _flash = () => {
+        btn.innerHTML = _CHECK_SVG;
+        btn.classList.add('tb-copy-done');
+        setTimeout(() => { btn.innerHTML = _COPY_SVG; btn.classList.remove('tb-copy-done'); }, 1500);
+    };
+
+    if (navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(text).then(_flash).catch(() => {});
+    } else {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.cssText = 'position:fixed;top:-999px;left:-999px;opacity:0;';
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); } catch (_) {}
+        ta.remove();
+        _flash();
+    }
+}
+
 /**
  * @typedef {Object} Run — right-panel only
  * @property {string}   id
@@ -914,6 +974,7 @@ function renderActiveTab() {
 
     const reasoningSection = hasReasoning
         ? `<div class="tb-reasoning-section">
+               <div class="tb-reasoning-hdr">
                <button class="tb-reasoning-collapse-btn" id="tbReasoningCollapseBtn-${run.id}" type="button">
                    <span class="tb-reasoning-collapse-icon">▶</span>
                    <span>Model Reasoning</span>
@@ -923,6 +984,8 @@ function renderActiveTab() {
                        ? `<span class="tb-edit-toggle tb-edit-active tb-reasoning-edit-toggle" id="tbReasoningEditToggle-${run.id}" title="View rendered">👁 View</span>`
                        : `<span class="tb-edit-toggle tb-reasoning-edit-toggle" id="tbReasoningEditToggle-${run.id}" title="Edit reasoning">✏️ Edit</span>`}
                </button>
+               ${_tbCopyBtn('reasoning', 'Copy model reasoning', run.id)}
+               </div>
                <div class="tb-collapsible-body tb-collapsed tb-reasoning-body" id="tbReasoningBody-${run.id}">
                    ${isEditingReas
                        ? `<textarea
@@ -952,7 +1015,10 @@ function renderActiveTab() {
 
                 <!-- Prompt -->
                 <div class="tb-field">
-                    <label class="tb-label" for="tbSharedPrompt">Prompt</label>
+                    <div class="tb-label-row">
+                        <label class="tb-label" for="tbSharedPrompt">Prompt</label>
+                        ${_tbCopyBtn('tbSharedPrompt', 'Copy prompt')}
+                    </div>
                     <textarea
                         class="tb-textarea tb-textarea-prompt tb-autogrow"
                         id="tbSharedPrompt"
@@ -964,11 +1030,14 @@ function renderActiveTab() {
 
                 <!-- Ideal Response (collapsible) -->
                 <div class="tb-field tb-field-collapsible">
+                    <div class="tb-collapsible-hdr">
                     <button class="tb-judge-collapse-btn" id="tbIdealCollapseBtn" type="button">
                         <span class="tb-judge-collapse-icon">${left.idealResponse ? '▼' : '▶'}</span>
                         <span>Ideal Response</span>
                         <span class="tb-judge-collapse-hint">${left.idealResponse ? 'click to collapse' : 'click to expand / edit'}</span>
                     </button>
+                    ${_tbCopyBtn('tbSharedIdeal', 'Copy ideal response')}
+                    </div>
                     <div class="tb-collapsible-body ${left.idealResponse ? '' : 'tb-collapsed'}" id="tbSharedIdealBody">
                         <textarea
                             class="tb-textarea tb-textarea-judge"
@@ -981,11 +1050,14 @@ function renderActiveTab() {
 
                 <!-- Model Reasoning (collapsible) -->
                 <div class="tb-field tb-field-collapsible">
+                    <div class="tb-collapsible-hdr">
                     <button class="tb-judge-collapse-btn" id="tbModelReasoningCollapseBtn" type="button">
                         <span class="tb-judge-collapse-icon">${left.modelReasoning ? '▼' : '▶'}</span>
                         <span>Model Reasoning</span>
                         <span class="tb-judge-collapse-hint">${left.modelReasoning ? 'click to collapse' : 'click to expand / edit'}</span>
                     </button>
+                    ${_tbCopyBtn('tbSharedReasoning', 'Copy model reasoning')}
+                    </div>
                     <div class="tb-collapsible-body ${left.modelReasoning ? '' : 'tb-collapsed'}" id="tbSharedReasoningBody">
                         <textarea
                             class="tb-textarea tb-textarea-judge"
@@ -998,17 +1070,23 @@ function renderActiveTab() {
 
                 <!-- Criteria chips -->
                 <div class="tb-field">
-                    <label class="tb-label">Criteria</label>
+                    <div class="tb-label-row">
+                        <label class="tb-label">Criteria</label>
+                        ${_tbCopyBtn('criteria', 'Copy criteria (C1: ..., C2: ...)')}
+                    </div>
                     ${renderCriteriaChips(false)}
                 </div>
 
                 <!-- Judge System Prompt (collapsible, default pre-filled) -->
                 <div class="tb-field tb-field-collapsible">
+                    <div class="tb-collapsible-hdr">
                     <button class="tb-judge-collapse-btn" id="tbJudgeCollapseBtn" type="button">
                         <span class="tb-judge-collapse-icon">▶</span>
                         <span>Judge System Prompt</span>
                         <span class="tb-judge-collapse-hint">click to expand / edit</span>
                     </button>
+                    ${_tbCopyBtn('tbSharedJudge', 'Copy judge system prompt')}
+                    </div>
                     <div class="tb-collapsible-body tb-collapsed" id="tbSharedJudgeBody">
                         <textarea
                             class="tb-textarea tb-textarea-judge"
@@ -1046,6 +1124,7 @@ function renderActiveTab() {
                 <div class="tb-panel-header">
                     <span class="tb-panel-icon">🤖</span>
                     <span class="tb-panel-title">Model Response</span>
+                    ${_tbCopyBtn('response', 'Copy model response', run.id)}
 
                     <!-- Model & Judge Model dropdowns inline in header -->
                     <div class="tb-header-dropdowns">
@@ -2471,5 +2550,11 @@ export function initTestbed() {
     if (btn && !btn.disabled && !btn._testbedWired) {
         btn._testbedWired = true;
         btn.addEventListener('click', () => showTestbed());
+    }
+
+    // Delegated listener for all copy buttons — wired once at init
+    if (!document._tbCopyWired) {
+        document._tbCopyWired = true;
+        document.addEventListener('click', _handleTbCopy, true);
     }
 }

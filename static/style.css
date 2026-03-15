@@ -7921,6 +7921,71 @@ body.sidebar-visible .container.multi-turn-layout {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
+   TESTBED COPY BUTTONS
+───────────────────────────────────────────────────────────────────────────── */
+
+/* Flex row: label + copy button */
+.tb-label-row {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-bottom: 0.35rem;
+}
+.tb-label-row .tb-label {
+    margin-bottom: 0;
+}
+
+/* Flex row: collapsible collapse-btn + copy button */
+.tb-collapsible-hdr {
+    display: flex;
+    align-items: stretch;
+    gap: 5px;
+}
+.tb-collapsible-hdr .tb-judge-collapse-btn {
+    flex: 1;
+    min-width: 0;
+}
+
+/* Flex row: reasoning collapse-btn + copy button */
+.tb-reasoning-hdr {
+    display: flex;
+    align-items: stretch;
+    gap: 5px;
+}
+.tb-reasoning-hdr .tb-reasoning-collapse-btn {
+    flex: 1;
+    min-width: 0;
+}
+
+/* The copy button itself */
+.tb-copy-btn {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: color var(--transition-fast), background var(--transition-fast), border-color var(--transition-fast);
+    line-height: 1;
+}
+.tb-copy-btn:hover {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+    border-color: var(--border);
+}
+.tb-copy-btn.tb-copy-done {
+    color: var(--success);
+    background: var(--success-bg);
+    border-color: var(--success);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
    HUNT ELAPSED TIMER
 ───────────────────────────────────────────────────────────────────────────── */
 
