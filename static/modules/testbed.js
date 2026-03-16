@@ -113,6 +113,29 @@ let runs        = [];
 let activeRunId = null;
 let runCounter  = 0;
 
+// ── Judge-result cache ────────────────────────────────────────────────────
+// Stores the last successful judge run so re-clicking the button with
+// unchanged content shows the result instantly (no API call).
+// Cleared on resetTestbed() and on notebook reload.
+let _judgeCache = null;
+// { key, isPassing, idealResponse, judgeData, criteriaEvents, judgeModelName }
+
+function _judgeContentKey(left) {
+    const judgeModelId = document.getElementById('judgeModel')?.value || '';
+    return [
+        (left.prompt || '').trim(),
+        (left.idealResponse || '').trim(),
+        chipsToJson(left.criteriaChips || []) || chipsToString(left.criteriaChips || []),
+        (left.judgePrompt || '').trim(),
+        judgeModelId,
+    ].join('\x00');
+}
+
+function _getJudgeModelName() {
+    const sel = document.getElementById('judgeModel');
+    return sel?.options?.[sel.selectedIndex]?.text || sel?.value || '';
+}
+
 // ── Copy button helpers ───────────────────────────────────────────────────
 const _COPY_SVG  = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
 const _CHECK_SVG = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
@@ -1749,17 +1772,23 @@ function _finalizeStreamingJudge(run, event) {
     scoreEl.innerHTML = `<span class="tb-verdict ${verdictCls}">${verdict}</span> <span class="tb-overall-score">${event.passing}/${event.total} Passing</span>`;
 }
 
-function _showStreamingSavePreviewModal(idealResponse) {
+function _showStreamingSavePreviewModal(idealResponse, judgeModelName = '') {
     document.getElementById('spmStreamOverlay')?.remove();
     const overlay = document.createElement('div');
     overlay.id = 'spmStreamOverlay';
     overlay.className = 'tb-confirm-overlay';
     overlay.setAttribute('aria-modal', 'true');
     overlay.setAttribute('role', 'dialog');
+    const modelSubtitle = judgeModelName
+        ? `<div id="spmJudgeModelLine" style="font-size:0.77rem;color:var(--text-muted);margin-top:0.2rem;font-weight:400;">Using ${escapeHtml(judgeModelName)}</div>`
+        : '';
     overlay.innerHTML = `
         <div class="tb-confirm-box" style="max-width: 640px; max-height: 90vh; display: flex; flex-direction: column;">
-            <div class="tb-confirm-title" id="spmStreamTitle" style="margin-bottom: 0.5rem;">
-                <span class="tb-spinner" style="width:18px;height:18px;"></span> Evaluating Criteria…
+            <div style="margin-bottom: 0.5rem;">
+                <div class="tb-confirm-title" id="spmStreamTitle">
+                    <span class="tb-spinner" style="width:18px;height:18px;"></span> Evaluating Criteria…
+                </div>
+                ${modelSubtitle}
             </div>
             <div style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 1rem;">
                 <div>
@@ -1850,6 +1879,59 @@ function _finalizeSavePreviewModal(isPassing, idealResponse, judgeData) {
     overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
 }
 
+/**
+ * Show the judge result modal from cache — no API call.
+ * Reuses _showStreamingSavePreviewModal + _finalizeSavePreviewModal,
+ * then injects a "Judge Again" button before the standard actions.
+ */
+function _showCachedJudgeModal(cache) {
+    _showStreamingSavePreviewModal(cache.idealResponse || '', cache.judgeModelName);
+
+    // Populate all criteria at once (sorted by ID for consistency)
+    const sorted = [...cache.criteriaEvents].sort((a, b) =>
+        a.id.localeCompare(b.id, undefined, { numeric: true, sensitivity: 'base' })
+    );
+    sorted.forEach(ev => _appendSpmCriterion(ev));
+
+    // Set final header (not loading)
+    const passingCount = sorted.filter(e => e.status === 'PASS').length;
+    _updateSpmJudgeHeader(passingCount, sorted.length, false);
+
+    // Add "cached" badge to title
+    const titleEl = document.getElementById('spmStreamTitle');
+    if (titleEl) {
+        const badge = document.createElement('span');
+        badge.style.cssText = 'margin-left:0.55rem;font-size:0.7rem;font-weight:500;color:var(--text-muted);background:var(--bg-tertiary);border:1px solid var(--border);border-radius:4px;padding:1px 6px;vertical-align:middle;';
+        badge.textContent = 'cached';
+        titleEl.appendChild(badge);
+    }
+
+    // Update model subtitle to show "Judged with …" instead of "Using …"
+    const modelLine = document.getElementById('spmJudgeModelLine');
+    if (modelLine && cache.judgeModelName) {
+        modelLine.textContent = `Judged with ${cache.judgeModelName}`;
+    }
+
+    // Wire standard Continue / Fix buttons
+    _finalizeSavePreviewModal(cache.isPassing, cache.idealResponse, cache.judgeData);
+
+    // Prepend "↺ Judge Again" button
+    const actionsEl = document.getElementById('spmStreamActions');
+    const overlay   = document.getElementById('spmStreamOverlay');
+    if (actionsEl && overlay) {
+        const againBtn = document.createElement('button');
+        againBtn.className   = 'tb-confirm-cancel';
+        againBtn.id          = 'spmJudgeAgainBtn';
+        againBtn.textContent = 'Judge Again';
+        actionsEl.insertBefore(againBtn, actionsEl.firstChild);
+        againBtn.addEventListener('click', () => {
+            overlay.remove();
+            _judgeCache = null;  // force fresh run
+            saveRunToTurn();
+        });
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Notebook Preview Fullscreen Overlay (post-commit, read-only)
 // Inspired by Notion/Linear: doc-style centered layout, airy, smooth
@@ -1926,7 +2008,7 @@ export function showNotebookPreview(run) {
             </div>
             <div class="nbp-nav-actions">
                 <button class="nbp-btn-ghost" id="nbpEditBtn">← Edit in Testbed</button>
-                <button class="nbp-btn-primary" id="nbpContinueBtn">Continue to Hunt →</button>
+                <button class="nbp-btn-primary" id="nbpContinueBtn">Continue to Hunt</button>
             </div>
         </nav>
 
@@ -2071,6 +2153,7 @@ export function resetTestbed() {
     _previewDismissed = false;
     _savedCurrentTurnEdits = null;
     _activeTurnTabKey = 'current';
+    _judgeCache       = null;
     const bar     = getTabBarEl();
     const content = getTabContentEl();
     if (bar)     bar.innerHTML     = '';
@@ -2264,6 +2347,21 @@ async function saveRunToTurn() {
     persistTabEdits();
     const left = getSharedLeft();
 
+    // ── Cache check: if nothing changed since last judge run, show result instantly ──
+    const _cacheKey        = _judgeContentKey(left);
+    const _judgeModelName  = _getJudgeModelName();
+    if (_judgeCache && _judgeCache.key === _cacheKey) {
+        if (saveBtn) {
+            saveBtn.disabled = false;
+            const label = (state.currentTurn || 1) === 1 ? 'Judge Ideal Response and Continue' : `Save to Turn ${state.currentTurn}`;
+            const span = document.getElementById('testbedSaveBtnLabel');
+            if (span) span.textContent = label;
+            else saveBtn.innerHTML = `<span id="testbedSaveBtnLabel">${label}</span>`;
+        }
+        _showCachedJudgeModal(_judgeCache);
+        return;
+    }
+
     // Sync to state (use JSON for criteria to match Colab/backend format)
     const criteriaJson = chipsToJson(left.criteriaChips || []);
     if (!state.notebook) state.notebook = {};
@@ -2384,12 +2482,13 @@ async function saveRunToTurn() {
             throw new Error(err.detail || err.message || 'Judge failed');
         }
 
-        _showStreamingSavePreviewModal(left.idealResponse || '');
+        _showStreamingSavePreviewModal(left.idealResponse || '', _judgeModelName);
 
         const reader = judgeRes.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
         let streamPassing = 0, streamTotal = 0;
+        const _criteriaEventsThisRun = [];
 
         while (true) {
             const { done, value } = await reader.read();
@@ -2408,6 +2507,7 @@ async function saveRunToTurn() {
                 }
                 if (event.type === 'criterion') {
                     streamPassing = event.passing;
+                    _criteriaEventsThisRun.push(event);
                     _appendSpmCriterion(event);
                     _updateSpmJudgeHeader(event.passing, event.total, true);
                 }
@@ -2429,6 +2529,16 @@ async function saveRunToTurn() {
         if (isPassing && !bypass) {
             state.referenceValidated = true;
         }
+
+        // Save result to cache so repeated clicks skip the API call
+        _judgeCache = {
+            key:            _cacheKey,
+            isPassing,
+            idealResponse:  left.idealResponse || '',
+            judgeData,
+            criteriaEvents: _criteriaEventsThisRun,
+            judgeModelName: _judgeModelName,
+        };
 
         // 4. Finalize Save Preview modal with action buttons
         validateModelReferenceAndCriteria(criteriaForValidation);
