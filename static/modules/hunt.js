@@ -1059,14 +1059,13 @@ export function initHuntConfigUI() {
         document.querySelectorAll('#providerSegment .hc-seg-btn').forEach(b =>
             b.classList.toggle('active', b.dataset.value === val)
         );
-        updateModelOptions();  // from editors.js — imported in app.js; call via dispatchEvent instead
         elements.providerSelect?.dispatchEvent(new Event('change'));
     });
 
     // ── Model pill grid ───────────────────────────────────────────────────
     document.getElementById('modelPillGrid')?.addEventListener('click', e => {
         const pill = e.target.closest('.hc-pill');
-        if (!pill || elements.modelSelect?.disabled) return;
+        if (!pill || elements.modelSelect?.disabled || pill.classList.contains('hc-pill-disabled')) return;
         if (elements.modelSelect) elements.modelSelect.value = pill.dataset.value;
         document.querySelectorAll('#modelPillGrid .hc-pill').forEach(p =>
             p.classList.toggle('active', p.dataset.value === pill.dataset.value)
