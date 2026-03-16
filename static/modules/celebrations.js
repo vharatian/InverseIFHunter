@@ -185,17 +185,17 @@ export function triggerColabConfetti() {
 export function showToast(message, type = 'info') {
     const toast = document.createElement('div');
     toast.className = `alert alert-${type === 'info' ? 'warning' : type} fade-in`;
-    toast.style.marginBottom = '0.5rem';
+    toast.style.cssText += 'pointer-events: auto; white-space: nowrap;';
     toast.innerHTML = `
         <span>${type === 'success' ? '✅' : type === 'error' ? '❌' : 'ℹ️'}</span>
         <span>${message}</span>
     `;
-    
+
     elements.toastContainer.appendChild(toast);
-    
+
     setTimeout(() => {
         toast.style.opacity = '0';
-        toast.style.transform = 'translateX(20px)';
+        toast.style.transform = 'translateY(-8px)';
         setTimeout(() => toast.remove(), 300);
     }, 4000);
 }
@@ -209,7 +209,7 @@ export function showToast(message, type = 'info') {
 export function showToastWithRetry(message, hint, onRetry) {
     const toast = document.createElement('div');
     toast.className = 'alert alert-error fade-in toast-with-retry';
-    toast.style.marginBottom = '0.5rem';
+    toast.style.cssText += 'pointer-events: auto; white-space: nowrap;';
     toast.innerHTML = `
         <span>❌</span>
         <div class="toast-retry-content">

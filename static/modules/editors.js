@@ -154,18 +154,33 @@ function _rebuildModelPills() {
     const grid = document.getElementById('modelPillGrid');
     const sel  = elements.modelSelect;
     if (!grid || !sel) return;
+
+    const isFireworks = (elements.providerSelect?.value || 'openrouter') === 'fireworks';
+
+    // When Fireworks is selected, auto-switch to Qwen if current model isn't compatible
+    if (isFireworks && !sel.value.includes('qwen')) {
+        const qwenOpt = Array.from(sel.options).find(o => o.value.includes('qwen'));
+        if (qwenOpt) {
+            sel.value = qwenOpt.value;
+            state.config.models = [qwenOpt.value];
+        }
+    }
+
     grid.innerHTML = '';
     Array.from(sel.options).forEach(opt => {
         const pill = document.createElement('button');
-        pill.type        = 'button';
-        pill.className   = 'hc-pill';
+        pill.type          = 'button';
+        pill.className     = 'hc-pill';
         pill.dataset.value = opt.value;
-        pill.textContent = opt.text;
-        if (opt.value === sel.value) pill.classList.add('active');
+        pill.textContent   = opt.text;
+        const unavailable  = isFireworks && !opt.value.includes('qwen');
+        if (unavailable)          pill.classList.add('hc-pill-disabled');
+        if (opt.value === sel.value && !unavailable) pill.classList.add('active');
         grid.appendChild(pill);
     });
+
     if (sel.disabled) grid.classList.add('hc-locked');
-    else grid.classList.remove('hc-locked');
+    else              grid.classList.remove('hc-locked');
 }
 
 function populateJudgeModelDropdown() {
