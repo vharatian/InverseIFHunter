@@ -301,15 +301,6 @@ function _syncMinBreakingDropdown() {
         _syncStepper(0);
         return;
     }
-    if (mode.count_based) {
-        const req = mode.required_breaking ?? 1;
-        sel.innerHTML = `<option value="${req}">${req}</option>`;
-        sel.disabled = true;
-        section.style.opacity = '0.5';
-        document.getElementById('minBreakingStepper')?.classList.add('hc-locked');
-        _syncStepper(req);
-        return;
-    }
     document.getElementById('minBreakingStepper')?.classList.remove('hc-locked');
 
     section.style.opacity = '1';
