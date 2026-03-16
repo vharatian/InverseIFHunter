@@ -407,8 +407,12 @@
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
                                     API Provider
                                 </div>
-                                <select id="providerSelect" class="hunt-config-select">
-                                    <option value="openrouter">OpenRouter</option>
+                                <div class="hc-seg" id="providerSegment">
+                                    <button class="hc-seg-btn active" type="button" data-value="openrouter">OpenRouter</button>
+                                    <button class="hc-seg-btn" type="button" data-value="fireworks">Fireworks AI</button>
+                                </div>
+                                <select id="providerSelect" style="display:none">
+                                    <option value="openrouter" selected>OpenRouter</option>
                                     <option value="fireworks">Fireworks AI</option>
                                 </select>
                             </div>
@@ -419,13 +423,8 @@
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 8v4l2 2"/></svg>
                                     Hunt Model
                                 </div>
-                                <select id="modelSelect" class="hunt-config-select">
-                                    <option value="nvidia/nemotron-3-nano-30b-a3b">Nemotron-3-Nano (Fast)</option>
-                                    <option value="qwen/qwen3-235b-a22b-thinking-2507">Qwen3-235B (Thinking)</option>
-                                    <option value="anthropic/claude-sonnet-4.5">Claude Sonnet 4.5</option>
-                                    <option value="anthropic/claude-opus-4.5">Claude Opus 4.5</option>
-                                    <option value="anthropic/claude-opus-4.6">Claude Opus 4.6</option>
-                                </select>
+                                <div class="hc-pill-grid" id="modelPillGrid"></div>
+                                <select id="modelSelect" style="display:none"></select>
                                 <small id="modelLockedIndicator" class="model-locked-hint hidden"
                                     style="display: none; color: var(--warning); font-size: 0.8rem; margin-top: 0.25rem;">
                                     🔒 Locked to <strong id="modelLockedName">-</strong> (from notebook metadata)
@@ -438,30 +437,35 @@
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
                                     Evaluation Model
                                 </div>
-                                <select id="judgeModel" class="hunt-config-select" disabled>
+                                <div class="hc-pill-grid hc-pill-grid-sm" id="judgePillGrid"></div>
+                                <select id="judgeModel" style="display:none" disabled>
                                     <option value="openai/gpt-5.2">GPT-5.2</option>
                                 </select>
                             </div>
                         </div>
 
-                        <!-- Hunt Mode -->
-                        <div style="display: flex; gap: 1.75rem; align-items: flex-end;">
-                            <div class="hunt-config-section hunt-mode-section" style="flex: 0 1 220px;">
+                        <!-- Hunt Mode + Min Breaking -->
+                        <div style="display: flex; gap: 1.75rem; align-items: flex-start; flex-wrap: wrap;">
+                            <div class="hunt-config-section hunt-mode-section" style="flex: 1 1 auto; min-width: 0;">
                                 <div class="hunt-config-section-label">
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
                                     Hunt Mode
                                 </div>
-                                <select id="huntModeSelect" class="hunt-config-select">
-                                </select>
+                                <div class="hc-pill-row" id="huntModePills"></div>
+                                <select id="huntModeSelect" style="display:none"></select>
                             </div>
 
-                            <div class="hunt-config-section" id="minBreakingSection" style="flex: 0 0 auto; align-items: center; text-align: center;">
+                            <div class="hunt-config-section" id="minBreakingSection" style="flex: 0 0 auto;">
                                 <div class="hunt-config-section-label" style="white-space: nowrap; justify-content: center;">
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="M12 8v4l3 3"/></svg>
                                     Min Breaking Hunt(s)
                                 </div>
-                                <select id="minBreakingSelect" class="hunt-config-select" style="width: 100%;">
-                                </select>
+                                <div class="hc-stepper" id="minBreakingStepper">
+                                    <button class="hc-step-btn" id="minBreakingDec" type="button">−</button>
+                                    <span class="hc-step-val" id="minBreakingVal">4</span>
+                                    <button class="hc-step-btn" id="minBreakingInc" type="button">+</button>
+                                </div>
+                                <select id="minBreakingSelect" style="display:none"></select>
                             </div>
                         </div>
                     </div>

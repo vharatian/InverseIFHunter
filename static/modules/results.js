@@ -854,6 +854,8 @@ export function handleHuntComplete(data) {
         elements.providerSelect.disabled = false;
         elements.providerSelect.title = '';
     }
+    document.getElementById('modelPillGrid')?.classList.remove('hc-locked');
+    document.getElementById('providerSegment')?.classList.remove('hc-locked');
     
     const { completed_hunts, breaks_found } = data;
 
@@ -1189,6 +1191,8 @@ export function clearPreviousResults() {
         elements.providerSelect.disabled = false;
         elements.providerSelect.title = '';
     }
+    document.getElementById('modelPillGrid')?.classList.remove('hc-locked');
+    document.getElementById('providerSegment')?.classList.remove('hc-locked');
     
     // Hide progress, results, selection, and summary sections
     elements.progressSection?.classList.add('hidden');

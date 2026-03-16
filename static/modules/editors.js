@@ -145,8 +145,27 @@ export function updateModelOptions(skipDefaultSelection = false) {
     if (!skipDefaultSelection && elements.modelSelect.value) {
         state.config.models = [elements.modelSelect.value];
     }
-    
+
     populateJudgeModelDropdown();
+    _rebuildModelPills();
+}
+
+function _rebuildModelPills() {
+    const grid = document.getElementById('modelPillGrid');
+    const sel  = elements.modelSelect;
+    if (!grid || !sel) return;
+    grid.innerHTML = '';
+    Array.from(sel.options).forEach(opt => {
+        const pill = document.createElement('button');
+        pill.type        = 'button';
+        pill.className   = 'hc-pill';
+        pill.dataset.value = opt.value;
+        pill.textContent = opt.text;
+        if (opt.value === sel.value) pill.classList.add('active');
+        grid.appendChild(pill);
+    });
+    if (sel.disabled) grid.classList.add('hc-locked');
+    else grid.classList.remove('hc-locked');
 }
 
 function populateJudgeModelDropdown() {
@@ -165,4 +184,21 @@ function populateJudgeModelDropdown() {
     });
     if (!sel.value && list.length > 0) sel.value = list[0].id;
     sel.disabled = false;
+    _rebuildJudgePills();
+}
+
+function _rebuildJudgePills() {
+    const grid = document.getElementById('judgePillGrid');
+    const sel  = document.getElementById('judgeModel');
+    if (!grid || !sel) return;
+    grid.innerHTML = '';
+    Array.from(sel.options).forEach(opt => {
+        const pill = document.createElement('button');
+        pill.type          = 'button';
+        pill.className     = 'hc-pill';
+        pill.dataset.value = opt.value;
+        pill.textContent   = opt.text;
+        if (opt.value === sel.value) pill.classList.add('active');
+        grid.appendChild(pill);
+    });
 }

@@ -258,7 +258,31 @@ export function initHuntModeDropdown() {
         `<option value="${m.id}">${escapeHtml(m.name)}</option>`
     ).join('');
     sel.addEventListener('change', () => _syncMinBreakingDropdown());
+    _buildHuntModePills();
     _syncMinBreakingDropdown();
+}
+
+function _modeDescription(mode) {
+    if (mode.type === 'passing') return 'Passes all criteria';
+    if (mode.count_based) return `At least ${mode.required_breaking ?? 1} criterion fails`;
+    const pct = Math.round((mode.break_threshold ?? 0.5) * 100);
+    return `Fails more than ${pct}% of criteria`;
+}
+
+function _buildHuntModePills() {
+    const container = document.getElementById('huntModePills');
+    const sel = document.getElementById('huntModeSelect');
+    if (!container || !sel) return;
+    container.innerHTML = '';
+    getHuntModes().forEach(mode => {
+        const pill = document.createElement('button');
+        pill.type          = 'button';
+        pill.className     = 'hc-pill';
+        pill.dataset.value = mode.id;
+        pill.innerHTML     = `${escapeHtml(mode.name)}<span class="hc-tooltip">${escapeHtml(_modeDescription(mode))}</span>`;
+        if (mode.id === sel.value) pill.classList.add('active');
+        container.appendChild(pill);
+    });
 }
 
 /** Populate and sync the min-breaking dropdown based on selected hunt mode. */
@@ -273,6 +297,8 @@ function _syncMinBreakingDropdown() {
         sel.innerHTML = '<option value="0">0</option>';
         sel.disabled = true;
         section.style.opacity = '0.5';
+        document.getElementById('minBreakingStepper')?.classList.add('hc-locked');
+        _syncStepper(0);
         return;
     }
     if (mode.count_based) {
@@ -280,8 +306,11 @@ function _syncMinBreakingDropdown() {
         sel.innerHTML = `<option value="${req}">${req}</option>`;
         sel.disabled = true;
         section.style.opacity = '0.5';
+        document.getElementById('minBreakingStepper')?.classList.add('hc-locked');
+        _syncStepper(req);
         return;
     }
+    document.getElementById('minBreakingStepper')?.classList.remove('hc-locked');
 
     section.style.opacity = '1';
     sel.disabled = false;
@@ -294,6 +323,20 @@ function _syncMinBreakingDropdown() {
         sel.appendChild(opt);
     }
     sel.value = range.max;
+    _syncStepper(range.max, range);
+}
+
+function _syncStepper(currentVal, range) {
+    const r   = range || getBreakingRange();
+    const val = document.getElementById('minBreakingVal');
+    const dec = document.getElementById('minBreakingDec');
+    const inc = document.getElementById('minBreakingInc');
+    const stp = document.getElementById('minBreakingStepper');
+    if (!stp) return;
+    const v = parseInt(currentVal ?? r.max, 10);
+    if (val) val.textContent = v;
+    if (dec) dec.disabled = v <= r.min;
+    if (inc) inc.disabled = v >= r.max;
 }
 
 export function getConfig() {
@@ -425,6 +468,8 @@ export async function startHunt() {
         elements.providerSelect.disabled = true;
         elements.providerSelect.title = 'Provider selection locked during hunt. Refresh page to change.';
     }
+    document.getElementById('modelPillGrid')?.classList.add('hc-locked');
+    document.getElementById('providerSegment')?.classList.add('hc-locked');
     
     // Hide upload and config sections during hunt
     document.querySelector('.section')?.classList.add('hidden'); // Hide upload section
@@ -900,10 +945,14 @@ export function syncHuntModeFromConfig() {
         sel.value = value;
         updateHuntButtonLabel();
     }
+    document.querySelectorAll('#huntModePills .hc-pill').forEach(p =>
+        p.classList.toggle('active', p.dataset.value === value)
+    );
     _syncMinBreakingDropdown();
     const minSel = document.getElementById('minBreakingSelect');
     if (minSel && cfg.min_breaking_required !== undefined) {
         minSel.value = cfg.min_breaking_required;
+        _syncStepper(cfg.min_breaking_required);
     }
 }
 
@@ -919,12 +968,14 @@ export function lockHuntMode() {
             modeSel.disabled = true;
             modeSel.title = 'Hunt mode is locked after the first hunt. Reload the notebook to change.';
         }
+        document.getElementById('huntModePills')?.classList.add('hc-locked');
     }
     if (minSel) {
         minSel.disabled = true;
         minSel.title = 'Min breaking is locked after the first hunt.';
     }
     if (minSection) minSection.style.opacity = '0.5';
+    document.getElementById('minBreakingStepper')?.classList.add('hc-locked');
     state._huntModeLocked = true;
 }
 
@@ -935,6 +986,7 @@ export function unlockHuntMode() {
         modeSel.disabled = false;
         modeSel.title = '';
     }
+    document.getElementById('huntModePills')?.classList.remove('hc-locked');
     state._huntModeLocked = false;
     _syncMinBreakingDropdown();
 }
@@ -989,4 +1041,74 @@ export function initHuntNumberControls() {
         huntModeSel.addEventListener('change', updateHuntButtonLabel);
     }
     updateHuntButtonLabel();
+}
+
+/**
+ * Wire all new hunt config UI controls (segmented control, pill grids, stepper).
+ * Called once after initHuntModeDropdown + updateModelOptions have run.
+ * All controls write to the existing hidden <select> elements so getConfig()
+ * and all downstream logic stay completely unchanged.
+ */
+export function initHuntConfigUI() {
+    // ── Provider segmented control ────────────────────────────────────────
+    document.getElementById('providerSegment')?.addEventListener('click', e => {
+        const btn = e.target.closest('.hc-seg-btn');
+        if (!btn || elements.providerSelect?.disabled) return;
+        const val = btn.dataset.value;
+        if (elements.providerSelect) elements.providerSelect.value = val;
+        document.querySelectorAll('#providerSegment .hc-seg-btn').forEach(b =>
+            b.classList.toggle('active', b.dataset.value === val)
+        );
+        updateModelOptions();  // from editors.js — imported in app.js; call via dispatchEvent instead
+        elements.providerSelect?.dispatchEvent(new Event('change'));
+    });
+
+    // ── Model pill grid ───────────────────────────────────────────────────
+    document.getElementById('modelPillGrid')?.addEventListener('click', e => {
+        const pill = e.target.closest('.hc-pill');
+        if (!pill || elements.modelSelect?.disabled) return;
+        if (elements.modelSelect) elements.modelSelect.value = pill.dataset.value;
+        document.querySelectorAll('#modelPillGrid .hc-pill').forEach(p =>
+            p.classList.toggle('active', p.dataset.value === pill.dataset.value)
+        );
+        elements.modelSelect?.dispatchEvent(new Event('change'));
+    });
+
+    // ── Judge pill grid ───────────────────────────────────────────────────
+    document.getElementById('judgePillGrid')?.addEventListener('click', e => {
+        const pill = e.target.closest('.hc-pill');
+        if (!pill) return;
+        const judgeEl = document.getElementById('judgeModel');
+        if (!judgeEl) return;
+        judgeEl.value = pill.dataset.value;
+        document.querySelectorAll('#judgePillGrid .hc-pill').forEach(p =>
+            p.classList.toggle('active', p.dataset.value === pill.dataset.value)
+        );
+    });
+
+    // ── Hunt mode pill row ────────────────────────────────────────────────
+    document.getElementById('huntModePills')?.addEventListener('click', e => {
+        const pill = e.target.closest('.hc-pill');
+        if (!pill) return;
+        const modeSel = document.getElementById('huntModeSelect');
+        if (!modeSel || modeSel.disabled) return;
+        modeSel.value = pill.dataset.value;
+        document.querySelectorAll('#huntModePills .hc-pill').forEach(p =>
+            p.classList.toggle('active', p.dataset.value === pill.dataset.value)
+        );
+        modeSel.dispatchEvent(new Event('change'));
+    });
+
+    // ── Min breaking stepper ──────────────────────────────────────────────
+    document.getElementById('minBreakingDec')?.addEventListener('click', () => _stepMinBreaking(-1));
+    document.getElementById('minBreakingInc')?.addEventListener('click', () => _stepMinBreaking(+1));
+}
+
+function _stepMinBreaking(delta) {
+    const sel = document.getElementById('minBreakingSelect');
+    if (!sel || sel.disabled) return;
+    const range = getBreakingRange();
+    const next  = Math.max(range.min, Math.min(range.max, parseInt(sel.value ?? range.max, 10) + delta));
+    sel.value = next;
+    _syncStepper(next, range);
 }

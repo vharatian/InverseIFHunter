@@ -16,7 +16,7 @@ import { initTrainerRegistration, startHeartbeat } from './modules/auth.js';
 import { initVersionCheck, showAppModal } from './modules/api.js';
 
 // Feature Modules
-import { initHuntNumberControls, initHuntModeDropdown, startHunt } from './modules/hunt.js';
+import { initHuntNumberControls, initHuntModeDropdown, initHuntConfigUI, startHunt } from './modules/hunt.js';
 import { 
     initFileUpload,
     fetchFromUrl, 
@@ -84,6 +84,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         initFileUpload();
         initHuntModeDropdown();
         initHuntNumberControls();
+        initHuntConfigUI();
         initSlideoutResize();
         initCalibrationListeners();
         initTestbed();
