@@ -266,7 +266,7 @@ function _modeDescription(mode) {
     if (mode.type === 'passing') return 'Passes all criteria';
     if (mode.count_based) return `At least ${mode.required_breaking ?? 1} criterion fails`;
     const pct = Math.round((mode.break_threshold ?? 0.5) * 100);
-    return `Fails more than ${pct}% of criteria`;
+    return pct >= 100 ? 'Fails all criteria' : `Fails more than ${pct}% of criteria`;
 }
 
 function _buildHuntModePills() {
