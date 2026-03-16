@@ -773,9 +773,8 @@ export function submitGradingReview(huntId, result, slotIndex, rowNumber) {
         }
     }
     
-    // Update review progress and check if all reviews are now complete
+    // Update review progress — this is the single source of truth for counter + button state
     updateReviewProgress();
-    checkAllReviewsComplete();
     
     showToast(`Review for Slot ${slotIndex + 1} submitted!`, 'success');
     
@@ -2124,6 +2123,11 @@ export function updateReviewProgress() {
     
     // Enable reveal button only when all selected reviews are complete — always enable in admin mode
     const allComplete = reviewCount >= selectedCount && selectedCount > 0;
+
+    // Add pulse to reveal button on the exact tick all reviews are first completed
+    if (allComplete && !state.llmRevealed && elements.revealLLMBtn) {
+        elements.revealLLMBtn.classList.add('pulse');
+    }
     
     const _bypassReveal = state.adminMode && adminBypass('all_grades_before_reveal');
     if (elements.revealLLMBtn) {
@@ -2339,9 +2343,12 @@ export function createResultCard(result, slotIndex, rowNumber) {
     const isFailed = score === 0;
     const slotNum = slotIndex !== undefined ? slotIndex + 1 : result.hunt_id;
     
-    // Check if this slot has been reviewed
+    // Check if this slot has been reviewed — use row_N key (matches updateReviewProgress counter)
+    // with huntId.submitted as fallback for legacy paths
     const huntId = result.hunt_id;
-    const isReviewed = state.humanReviews && state.humanReviews[huntId] && state.humanReviews[huntId].submitted;
+    const rowKey  = rowNumber !== undefined && rowNumber !== null ? `row_${rowNumber}` : null;
+    const isReviewed = (rowKey && state.humanReviews?.[rowKey])
+        || (state.humanReviews?.[huntId]?.submitted === true);
     
     if (isReviewed) {
         card.classList.add('reviewed');
@@ -2825,11 +2832,8 @@ export function checkAllReviewsComplete() {
     if (reviewCount >= totalSlots && totalSlots >= 1) {
         showToast(`All ${totalSlots} review(s) complete! Ready to export.`, 'success');
         if (elements.revealLLMBtn) {
-            elements.revealLLMBtn.disabled = false;
-            elements.revealLLMBtn.style.opacity = '1';
             elements.revealLLMBtn.classList.add('pulse');
         }
-        updateReviewProgress();
         import('./reviewSync.js').then(({ refreshReviewSync }) => {
             refreshReviewSync(state.sessionId);
         }).catch(() => {});
