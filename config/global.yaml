@@ -88,11 +88,12 @@ hunt:
       name: "All Criteria Breaking"
       break_threshold: 1.0
       type: breaking
-    - id: 1_breaking
-      name: "1 Breaking"
-      type: breaking
-      count_based: true
-      required_breaking: 1
+    # 1 Breaking mode temporarily removed (confusing — re-enable when needed)
+    # - id: 1_breaking
+    #   name: "1 Breaking"
+    #   type: breaking
+    #   count_based: true
+    #   required_breaking: 1
     - id: all_passing
       name: "All Passing"
       pass_threshold: 1.0

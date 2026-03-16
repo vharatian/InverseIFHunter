@@ -738,18 +738,20 @@
                         <div
                             style="display: flex; justify-content: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem;">
                             <button class="btn btn-primary btn-lg" id="revealLLMBtnBottom" disabled>
-                                👁️ Show AI Evaluation
+                                Show AI Evaluation
                             </button>
-                            <button class="btn btn-primary btn-lg" id="proceedToQCBtn" disabled style="opacity: 0.5;">
-                                ✓ Proceed to Quality Check
+                            <!-- Proceed to Quality Check — hidden for now, functionality preserved -->
+                            <button class="btn btn-primary btn-lg" id="proceedToQCBtn" disabled style="opacity: 0.5; display: none;">
+                                Proceed to Quality Check
                             </button>
                             <button class="btn btn-success btn-lg" id="submitColabBtn" disabled style="opacity: 0.5;" title="Reveal AI Evaluation first to enable">
-                                💾 Submit to Colab
+                                Submit to Colab
                             </button>
                         </div>
 
                         <!-- Review sync: submit for review / resubmit, status, reviewer feedback -->
-                        <div id="reviewSyncBlock" class="review-sync-block hidden">
+                        <!-- Hidden for now — functionality preserved for future use -->
+                        <div id="reviewSyncBlock" class="review-sync-block hidden" style="display: none !important;">
                             <div id="reviewSyncStatus" class="review-sync-status"></div>
                             <div id="reviewSyncFeedback" class="review-sync-feedback hidden"></div>
                             <div id="reviewSyncActions" class="review-sync-actions"></div>
@@ -757,7 +759,7 @@
 
                         <!-- Progress/Status Message -->
                         <p id="bottomInstructions" style="margin: 0; color: var(--text-muted); font-size: 0.9rem;">
-                            Complete all 4 human reviews → Show AI Evaluation → Proceed to Quality Check → Submit for Review
+                            Complete all human reviews → Show AI Evaluation → Submit to Colab
                         </p>
                     </div>
 
