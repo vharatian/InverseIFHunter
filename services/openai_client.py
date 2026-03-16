@@ -157,7 +157,12 @@ def _compute_judge_score(results: List[Dict], total: int, pass_threshold: float)
     pass_count = sum(1 for r in results if r["status"] == "PASS")
     fail_count = sum(1 for r in results if r["status"] != "PASS")
     pass_rate = pass_count / (total or 1)
-    score = 1 if (pass_rate >= 1.0) or (pass_threshold < 1.0 and pass_rate > pass_threshold) else 0
+    # Use >= for non-zero thresholds (boundary fix: exactly at threshold = PASS, not BREAK).
+    # All Breaking (pass_threshold=0): any passing = score 1, so keep strict >.
+    if pass_threshold > 0:
+        score = 1 if pass_rate >= pass_threshold else 0
+    else:
+        score = 1 if pass_rate > 0 else 0
     sorted_results = sorted(results, key=lambda r: r["id"])
     def _icon(s):
         if s == "PASS": return "✅"

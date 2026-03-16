@@ -52,8 +52,13 @@ def classify_sample(
             "missing_count": missing_count,
         }
 
-    # Pass rule: same as openai_client — pass if pass_rate > pass_threshold, or >= 1.0 when threshold == 1.0
-    passed = (pass_rate >= 1.0) or (pass_threshold < 1.0 and pass_rate > pass_threshold)
+    # Pass rule: >= for non-zero thresholds so the boundary is correct.
+    # e.g. >50% Breaking (pass_threshold=0.5): exactly 50% passing should NOT break.
+    # All Breaking (pass_threshold=0.0): any criterion passing = PASS, so use strict >.
+    if pass_threshold > 0:
+        passed = pass_rate >= pass_threshold
+    else:
+        passed = pass_rate > 0  # All Breaking: break only when ALL criteria fail
 
     if break_mode == "no_break":
         # In no_break mode we care about "did it break?" — not passing = breaking

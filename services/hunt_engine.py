@@ -664,6 +664,17 @@ class HuntEngine:
                 # Step 2: Judge the response
                 await self._judge_response(config, notebook, result)
 
+                # Step 3: Classify using classify_sample so MISSING → ERROR (not BREAK)
+                _pass_threshold = 1.0 if getattr(config, "passing_mode", False) else getattr(config, "pass_threshold", 0.5)
+                _break_mode     = getattr(config, "break_mode", "ratio")
+                classified = classify_sample(
+                    result.judge_criteria or {},
+                    _break_mode,
+                    _pass_threshold,
+                )
+                result.sample_label = classified["label"]
+                result.is_breaking  = result.sample_label == "BREAK"
+
         except Exception as e:
             result.status = HuntStatus.FAILED
             result.judge_score = None
