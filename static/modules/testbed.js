@@ -1897,14 +1897,6 @@ function _showCachedJudgeModal(cache) {
     const passingCount = sorted.filter(e => e.status === 'PASS').length;
     _updateSpmJudgeHeader(passingCount, sorted.length, false);
 
-    // Add "cached" badge to title
-    const titleEl = document.getElementById('spmStreamTitle');
-    if (titleEl) {
-        const badge = document.createElement('span');
-        badge.style.cssText = 'margin-left:0.55rem;font-size:0.7rem;font-weight:500;color:var(--text-muted);background:var(--bg-tertiary);border:1px solid var(--border);border-radius:4px;padding:1px 6px;vertical-align:middle;';
-        badge.textContent = 'cached';
-        titleEl.appendChild(badge);
-    }
 
     // Update model subtitle to show "Judged with …" instead of "Using …"
     const modelLine = document.getElementById('spmJudgeModelLine');
