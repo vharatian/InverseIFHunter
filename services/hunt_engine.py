@@ -725,6 +725,7 @@ class HuntEngine:
                 "status": result.status.value,
                 "score": result.judge_score,
                 "is_breaking": result.is_breaking,
+                "sample_label": result.sample_label,
                 "error": result.error,
                 "response": result.response,
                 "reasoning_trace": result.reasoning_trace,

@@ -186,9 +186,15 @@ def _parse_judge_json(text: str) -> dict:
 
 
 def _compute_judge_score(results: List[Dict], total: int, pass_threshold: float) -> Dict[str, Any]:
-    """Compute final score and explanation from a list of criterion results."""
+    """Compute final score and explanation from a list of criterion results.
+
+    MISSING criteria are counted separately — they are NOT lumped into fail_count.
+    pass_rate is still computed against the full total (conservative: unevaluated
+    criteria don't automatically pass).
+    """
     pass_count = sum(1 for r in results if r["status"] == "PASS")
-    fail_count = sum(1 for r in results if r["status"] != "PASS")
+    fail_count = sum(1 for r in results if r["status"] == "FAIL")
+    missing_count = sum(1 for r in results if r["status"] not in ("PASS", "FAIL"))
     pass_rate = pass_count / (total or 1)
     # Use >= for non-zero thresholds (boundary fix: exactly at threshold = PASS, not BREAK).
     # All Breaking (pass_threshold=0): any passing = score 1, so keep strict >.
@@ -212,7 +218,8 @@ def _compute_judge_score(results: List[Dict], total: int, pass_threshold: float)
     )
     final_criteria = {r["id"]: r["status"] for r in results}
     return {"score": score, "pass_count": pass_count, "fail_count": fail_count,
-            "criteria": final_criteria, "explanation": explanation}
+            "missing_count": missing_count, "criteria": final_criteria,
+            "explanation": explanation}
 
 
 async def _eval_criterion_via_openrouter(client, prompt, student_response, standard_response,
@@ -640,27 +647,9 @@ class OpenAIJudgeClient:
                    "reason": result["reason"], "passing": pass_count,
                    "evaluated": len(results), "total": total}
 
-        fail_count = sum(1 for r in results if r["status"] != "PASS")
-        pass_rate = pass_count / (total or 1)
-        score = 1 if (pass_rate >= 1.0) or (pass_threshold < 1.0 and pass_rate > pass_threshold) else 0
-
-        final_criteria = {r["id"]: r["status"] for r in results}
-        sorted_results = sorted(results, key=lambda r: r["id"])
-        def _icon(s):
-            if s == "PASS": return "✅"
-            if s == "MISSING": return "⚠️"
-            return "❌"
-        criteria_lines = [
-            f"{_icon(r['status'])} {r['id']} ({r['status']}): {r['reason']}"
-            for r in sorted_results
-        ]
-        explanation = (
-            f"Independent Judging Results:\n"
-            f"- Passing Criteria: {pass_count}/{total}\n\n"
-            + "\n".join(criteria_lines)
-        )
-        yield {"type": "done", "score": score, "passing": pass_count, "total": total,
-               "criteria": final_criteria, "explanation": explanation}
+        agg = _compute_judge_score(results, total, pass_threshold)
+        yield {"type": "done", "score": agg["score"], "passing": agg["pass_count"], "total": total,
+               "criteria": agg["criteria"], "explanation": agg["explanation"]}
 
     async def _extract_criteria(self, reference: str, model: str) -> List[Dict[str, str]]:
         """

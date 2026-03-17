@@ -787,7 +787,7 @@ export function handleHuntProgress(data) {
 }
 
 export function handleHuntResult(data) {
-    const { hunt_id, status, score, is_breaking, error, completed, total, breaks, response, model } = data;
+    const { hunt_id, status, score, is_breaking, sample_label, error, completed, total, breaks, response, model } = data;
     
     // hunt_id from backend is already globally unique (no offset calculation needed)
     const globalRowNum = hunt_id;
@@ -834,7 +834,11 @@ export function handleHuntResult(data) {
             // Breaking mode: score 0 = wanted (green), score 1 = not wanted (red)
             // Passing mode: score 1 = wanted (green), score 0 = not wanted (red)
             const passingMode = state.config?.passing_mode === true;
-            if (score !== null && score !== undefined) {
+            if (sample_label === 'ERROR') {
+                row.querySelector('.score-cell').innerHTML = `
+                    <span class="score-badge" style="background: var(--warning-bg); color: var(--warning);" title="Missing criteria — score unreliable">⚠️</span>
+                `;
+            } else if (score !== null && score !== undefined) {
                 const wanted = passingMode ? score === 1 : score === 0;
                 row.querySelector('.score-cell').innerHTML = `
                     <span class="score-badge score-${score}" title="${passingMode ? (score === 1 ? 'Pass' : 'Fail') : (score === 0 ? 'Break' : 'Pass')}">
@@ -842,7 +846,6 @@ export function handleHuntResult(data) {
                     </span>
                 `;
             } else {
-                // Score is null - display warning
                 row.querySelector('.score-cell').innerHTML = `
                     <span class="score-badge" style="background: var(--warning-bg); color: var(--warning);">?</span>
                 `;
@@ -855,6 +858,8 @@ export function handleHuntResult(data) {
         if (resultCell) {
             if (error) {
                 resultCell.textContent = error.substring(0, 50) + '...';
+            } else if (sample_label === 'ERROR') {
+                resultCell.innerHTML = `<span style="color: var(--warning);">Missing criteria</span>`;
             } else if (passingMode && score === 1) {
                 resultCell.textContent = 'Passing';
             } else if (is_breaking) {
