@@ -121,7 +121,8 @@ let _judgeCache = null;
 // { key, isPassing, idealResponse, judgeData, criteriaEvents, judgeModelName }
 
 function _judgeContentKey(left) {
-    const judgeModelId = document.getElementById('judgeModel')?.value || '';
+    const run = getActiveRun();
+    const judgeModelId = run?.judgeModel || '';
     return [
         (left.prompt || '').trim(),
         (left.idealResponse || '').trim(),
@@ -132,8 +133,9 @@ function _judgeContentKey(left) {
 }
 
 function _getJudgeModelName() {
-    const sel = document.getElementById('judgeModel');
-    return sel?.options?.[sel.selectedIndex]?.text || sel?.value || '';
+    const run = getActiveRun();
+    const id  = run?.judgeModel || '';
+    return getJudgeModels().find(m => m.id === id)?.name || id;
 }
 
 // ── Copy button helpers ───────────────────────────────────────────────────
@@ -2464,7 +2466,15 @@ async function saveRunToTurn() {
         const bypass = getConfigValue('bypass_hunt_criteria', false);
         let judgeData = { criteria: {}, explanation: '', score: 0 };
 
-        const judgeRes = await fetch(`/api/judge-reference-stream/${state.sessionId}?skip_colab_refresh=true`, { method: 'POST' });
+        const _activeRunJudgeModel = getActiveRun()?.judgeModel || '';
+        if (!_activeRunJudgeModel) {
+            showSaveValidationModal({ type: 'error', title: 'No Judge Model', message: 'Please select a judge model in the testbed tab before judging.' });
+            return;
+        }
+        const judgeRes = await fetch(
+            `/api/judge-reference-stream/${state.sessionId}?skip_colab_refresh=true&judge_model=${encodeURIComponent(_activeRunJudgeModel)}`,
+            { method: 'POST' }
+        );
         if (!judgeRes.ok) {
             if (judgeRes.status === 404) {
                 showSaveValidationModal({ type: 'error', title: 'Session Expired', message: 'Please reload the notebook from Colab.' });

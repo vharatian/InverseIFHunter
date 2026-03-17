@@ -403,6 +403,7 @@ async def judge_calibration_stream(session_id: str, request: JudgeCalibrateReque
 async def judge_reference_stream(
     session_id: str,
     skip_colab_refresh: bool = Query(False),
+    judge_model: str = Query(...),  # always required — never falls back to session config
 ):
     """SSE streaming version of judge-reference. Yields per-criterion results as they complete."""
     session = await _get_validated_session(session_id)
@@ -434,9 +435,6 @@ async def judge_reference_stream(
 
     from services.openai_client import get_openai_judge_client
     judge = get_openai_judge_client()
-    judge_model = getattr(session.config, "judge_model", None)
-    if not judge_model:
-        raise HTTPException(400, "No judge model selected. Please select a judge model before judging.")
 
     async def _stream():
         try:
