@@ -158,7 +158,7 @@ export const INSIGHT_TIPS = {
     ],
     // During hunting
     hunting: [
-        { text: 'The judge evaluates each criterion independently. A response can pass 4 out of 5 criteria and still break on the last one.', icon: '⏳' },
+        { text: 'The judge evaluates each criterion independently. A response can pass 4 out of 5 criteria and still break on the last one.', icon: '' },
         { text: 'Each hunt is a fresh generation — the model doesn\'t remember previous attempts. Every try is independent.', icon: '🔬' },
         { text: 'If you\'re getting all passes, consider tightening your criteria wording or adding a formatting constraint.', icon: '📈' },
     ],
@@ -171,7 +171,7 @@ export const INSIGHT_TIPS = {
     // Selection tips
     selection: [
         { text: 'Pick responses where the model <strong>confidently gave wrong output</strong> — these are the most valuable for training.', icon: '✅' },
-        { text: 'A mix of <strong>3 breaking + 1 passing</strong> gives reviewers contrast to see exactly where the model\'s boundary is.', icon: '⚖️' },
+        { text: 'A mix of <strong>3 breaking + 1 passing</strong> gives reviewers contrast to see exactly where the model\'s boundary is.', icon: '' },
     ],
     // Multi-turn decision
     multiTurn: [

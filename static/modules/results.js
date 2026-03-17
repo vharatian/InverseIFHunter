@@ -62,6 +62,40 @@ export function countBreakingPassing(results) {
 }
 
 /**
+ * SINGLE display helper for hunt result status.
+ * Every UI component should call this instead of inline score/emoji logic.
+ *
+ * @param {object} result - Hunt result with sample_label, judge_score, etc.
+ * @param {boolean} passingMode - true if hunt mode is "all passing"
+ * @returns {{ label: string, cssClass: string, wanted: boolean }}
+ *   label:    "Break" | "Pass" | "Missing Criteria"
+ *   cssClass: "break" | "pass" | "warning"
+ *   wanted:   true if this outcome is the desired one for the current mode
+ */
+export function getStatusDisplay(result, passingMode = false) {
+    if (isResultError(result)) {
+        return { label: 'Missing Criteria', cssClass: 'warning', wanted: false };
+    }
+    const breaking = isResultBreaking(result);
+    if (breaking) {
+        return { label: 'Break', cssClass: 'break', wanted: !passingMode };
+    }
+    return { label: 'Pass', cssClass: 'pass', wanted: !!passingMode };
+}
+
+/**
+ * Display helper for a single criterion status (PASS / FAIL / MISSING).
+ * @param {string} status - "PASS", "FAIL", or "MISSING"
+ * @returns {{ marker: string, cssClass: string, color: string }}
+ */
+export function getCriterionDisplay(status) {
+    const s = (status || '').toUpperCase();
+    if (s === 'PASS')    return { marker: 'PASS',    cssClass: 'pass',    color: 'var(--success, #22c55e)' };
+    if (s === 'MISSING') return { marker: 'MISSING', cssClass: 'warning', color: 'var(--warning, #f59e0b)' };
+    return                       { marker: 'FAIL',    cssClass: 'fail',    color: 'var(--danger, #ef4444)' };
+}
+
+/**
  * Validate a selection of hunts against the current hunt mode's rules.
  * Returns { valid: boolean, message: string }.
  */
@@ -358,7 +392,7 @@ export function openSelectionDetailSlideout(rowNumber, result) {
     }
     
     if (scoreEl) {
-        const displayScore = judgeScore !== null ? judgeScore : (score !== null ? score : '-');
+        const displayScore = result.judge_score !== null ? result.judge_score : (result.score !== null ? result.score : '-');
         scoreEl.textContent = displayScore;
         scoreEl.className = 'response-slideout-meta-value';
         if (displayScore !== '-') {
@@ -451,7 +485,7 @@ export function openGradingSlideout(result, slotIndex, rowNumber) {
         ${isReadOnly ? `
         <!-- Locked Banner -->
         <div class="grading-locked-banner">
-            <span style="font-size: 1.2rem;">🔒</span>
+            <span style="font-weight: 700;">Locked</span>
             <span style="color: var(--warning); font-weight: 600;">Reviews are locked - View only mode</span>
         </div>
         ` : ''}
@@ -461,12 +495,12 @@ export function openGradingSlideout(result, slotIndex, rowNumber) {
             <!-- Left: Model Response (always visible while grading) -->
             <div class="grading-split-left">
                 <div class="grading-section">
-                    <div class="grading-section-title">📄 Model Response</div>
+                    <div class="grading-section-title">Model Response</div>
                     <div class="grading-response-box grading-response-scroll">${escapeHtml(responseText)}</div>
                 </div>
                 <div class="grading-section">
                     <button class="reasoning-toggle-btn" style="width: 100%; padding: 0.75rem; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font-weight: 600; color: var(--text-primary); display: flex; align-items: center; justify-content: space-between;">
-                        <span>🧠 Model Reasoning (Reference)</span>
+                        <span>Model Reasoning (Reference)</span>
                         <span class="reasoning-arrow">▼</span>
                     </button>
                     <div class="reasoning-content" style="display: none; margin-top: 0.75rem;">
@@ -485,7 +519,7 @@ export function openGradingSlideout(result, slotIndex, rowNumber) {
                     const slotComment = entry ? (entry.comment || '').trim() : '';
                     if (!slotComment) return '';
                     return `<div class="slot-reviewer-feedback grading-section" style="margin-top: 1rem; padding: 0.75rem 1rem; background: var(--bg-tertiary); border-radius: 8px; border-left: 3px solid var(--accent-primary);">
-                        <div class="grading-section-title" style="font-size: 0.9rem;">📋 Reviewer feedback for slot ${slotNum}</div>
+                        <div class="grading-section-title" style="font-size: 0.9rem;">Reviewer feedback for slot ${slotNum}</div>
                         <div style="font-size: 0.9rem; line-height: 1.5; white-space: pre-wrap;">${escapeHtml(slotComment)}</div>
                     </div>`;
                 })()}
@@ -496,7 +530,7 @@ export function openGradingSlideout(result, slotIndex, rowNumber) {
             <!-- Right: Grading criteria + explanation -->
             <div class="grading-split-right">
                 <div class="grading-section">
-                    <div class="grading-section-title">✅ Grade Each Criterion ${isReadOnly ? '<span style="color: var(--warning); font-size: 0.8rem;">(Locked)</span>' : ''}</div>
+                    <div class="grading-section-title">Grade Each Criterion ${isReadOnly ? '<span style="color: var(--warning); font-size: 0.8rem;">(Locked)</span>' : ''}</div>
                     <div class="grading-criteria-list" data-hunt-id="${huntId}">
                         ${(state.criteria || []).map(c => {
                             const existingGrade = existingGrades[c.id];
@@ -508,10 +542,10 @@ export function openGradingSlideout(result, slotIndex, rowNumber) {
                                     <span class="grading-criterion-text">${escapeHtml(c.criteria)}</span>
                                     <div class="grading-criterion-buttons" style="${disabledStyle}">
                                         <button class="grading-btn grading-btn-pass ${passActive}" data-hunt-id="${huntId}" data-criterion="${c.id}" ${disabledAttr}>
-                                            ✅ Pass
+                                            Pass
                                         </button>
                                         <button class="grading-btn grading-btn-fail ${failActive}" data-hunt-id="${huntId}" data-criterion="${c.id}" ${disabledAttr}>
-                                            ❌ Fail
+                                            Fail
                                         </button>
                                     </div>
                                 </div>
@@ -520,7 +554,7 @@ export function openGradingSlideout(result, slotIndex, rowNumber) {
                     </div>
                 </div>
                 <div class="grading-section">
-                    <div class="grading-section-title">📝 Explanation ${isReadOnly ? '<span style="color: var(--warning); font-size: 0.8rem;">(Locked)</span>' : ''}${!isReadOnly ? '<span class="autosave-status autosave-saved" data-field="grading-' + huntId + '" style="margin-left: 0.25rem;">✓ Saved</span>' : ''}</div>
+                    <div class="grading-section-title">Explanation ${isReadOnly ? '<span style="color: var(--warning); font-size: 0.8rem;">(Locked)</span>' : ''}${!isReadOnly ? '<span class="autosave-status autosave-saved" data-field="grading-' + huntId + '" style="margin-left: 0.25rem;">Saved</span>' : ''}</div>
                     <textarea class="grading-notes-textarea" data-hunt-id="${huntId}" 
                         placeholder="Explain your grading decisions (minimum ${MIN_EXPLANATION_WORDS} words required)..." ${disabledAttr} style="${textareaStyle}">${escapeHtml(existingNotes)}</textarea>
                     ${isReadOnly ? '' : `
@@ -530,21 +564,21 @@ export function openGradingSlideout(result, slotIndex, rowNumber) {
                 <div class="grading-section">
                     ${isReadOnly ? `
                         <div style="padding: 0.75rem 1rem; background: var(--bg-tertiary); border-radius: 8px; text-align: center; color: var(--text-muted);">
-                            🔒 Review submitted and locked
+                            Review submitted and locked
                         </div>
                     ` : `
                         <button class="btn btn-primary grading-submit-btn" data-hunt-id="${huntId}" data-slot-index="${slotIndex}" data-row-number="${rowNumber}" disabled style="opacity: 0.7;">
-                            ✅ Submit Review
+                            Submit Review
                         </button>
                     `}
                     <div class="grading-status" data-hunt-id="${huntId}"></div>
                 </div>
                 <!-- LLM Judge Section (Hidden until revealed) -->
                 <div class="llm-judge-section grading-section" data-hunt-id="${huntId}" style="display: ${state.llmRevealed ? 'block' : 'none'}; margin-top: 1.5rem; padding: 1.5rem; background: var(--bg-tertiary); border-radius: 12px; border: 2px solid var(--accent-primary);">
-            <div class="grading-section-title" style="color: var(--accent-primary);">🤖 LLM Judge Result</div>
+            <div class="grading-section-title" style="color: var(--accent-primary);">LLM Judge Result</div>
             <div style="margin-top: 0.75rem;">
                 <span class="score-badge score-${result.judge_score || 0}" style="padding: 0.5rem 1rem;">
-                    ${result.judge_score === 0 ? '🟢' : '🔴'} Score: ${result.judge_score ?? '-'}
+                    Score: ${result.judge_score ?? '-'} <span style="color: ${isResultBreaking(result) ? 'var(--success)' : 'var(--danger)'};">(${isResultBreaking(result) ? 'BREAK' : 'PASS'})</span>
                 </span>
             </div>
             ${result.judge_explanation ? `
@@ -773,7 +807,7 @@ export function submitGradingReview(huntId, result, slotIndex, rowNumber) {
     // Update status in slideout
     const statusEl = document.querySelector(`.grading-status[data-hunt-id="${huntId}"]`);
     if (statusEl) {
-        statusEl.innerHTML = '<span style="color: var(--success);">✅ Review Submitted!</span>';
+        statusEl.innerHTML = '<span style="color: var(--success);">Review Submitted!</span>';
     }
     
     // Update the compact card
@@ -782,12 +816,12 @@ export function submitGradingReview(huntId, result, slotIndex, rowNumber) {
         card.classList.add('reviewed');
         const statusDiv = card.querySelector('.slot-compact-status');
         if (statusDiv) {
-            statusDiv.textContent = '✅ Review Submitted';
+            statusDiv.textContent = 'Review Submitted';
             statusDiv.classList.add('reviewed');
         }
         const btn = card.querySelector('.slot-open-btn');
         if (btn) {
-            btn.textContent = '📝 Edit';
+            btn.textContent = 'Edit';
         }
     }
     
@@ -1024,7 +1058,7 @@ export async function fetchAllResponsesAndShowSelection(completedHunts, breaksFo
         } else {
             criteriaMet_display = cumulative.totalBreaks >= summaryMinBreaking;
         }
-        document.getElementById('summaryMet').textContent = criteriaMet_display ? '✅ Yes' : '❌ No';
+        document.getElementById('summaryMet').textContent = criteriaMet_display ? 'Yes' : 'No';
         
         // VALIDATION: Gate logic depends on hunt mode
         const _bypassSel = state.adminMode && adminBypass('selection_mode_rules');
@@ -1081,7 +1115,7 @@ export async function fetchAllResponsesAndShowSelection(completedHunts, breaksFo
         if (activeMode.type === 'passing' || hintMinBreaking === 0) modeHint = 'Select passing hunts for review.';
         else if (activeMode.count_based) modeHint = `Select the ${activeMode.required_breaking ?? 1} breaking hunt(s) + any passing hunts.`;
         else modeHint = `Select exactly ${slots} (at least ${hintMinBreaking} breaking).`;
-        showToast(`✅ Criteria met! ${totalBreaks} breaks, ${totalPasses} passes. ${modeHint}`, 'success');
+        showToast(`Criteria met! ${totalBreaks} breaks, ${totalPasses} passes. ${modeHint}`, 'success');
     } catch (error) {
         console.error('Error fetching results:', error);
         showError(error, { operation: 'Fetch results' });
@@ -1309,7 +1343,6 @@ export function formatLLMCriteria(criteria, fullExplanation) {
     // Build HTML for each criterion
     const criteriaHtml = Object.entries(criteria).map(([key, value]) => {
         const isPassing = String(value).toUpperCase() === 'PASS';
-        const statusEmoji = isPassing ? '✅' : '❌';
         const statusText = isPassing ? 'PASS' : 'FAIL';
         const statusColor = isPassing ? 'var(--success)' : 'var(--danger)';
         const explanation = criteriaExplanations[key] || '';
@@ -1321,7 +1354,7 @@ export function formatLLMCriteria(criteria, fullExplanation) {
         return `
             <div style="display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0.5rem; padding: 0.5rem; margin-bottom: 0.5rem; background: var(--bg-primary); border-radius: 6px; border-left: 3px solid ${statusColor};">
                 <span style="font-weight: 600; min-width: 35px;">${key}:</span>
-                <span style="color: ${statusColor}; font-weight: 600;">${statusEmoji} ${statusText}</span>
+                <span style="color: ${statusColor}; font-weight: 600;">${statusText}</span>
                 ${criteriaText ? `<span style="flex: 1; font-size: 0.85rem; color: var(--text-secondary); word-break: break-word;">(${escapeHtml(criteriaText)})</span>` : ''}
                 ${explanation ? `<div style="width: 100%; margin-top: 0.25rem; padding-left: 40px; font-size: 0.85rem; color: var(--text-muted);">${escapeHtml(explanation)}</div>` : ''}
             </div>
@@ -1358,12 +1391,12 @@ function renderJudgeExplanation(explanationText) {
             summaryHtml = `<div style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.6rem;">${escapeHtml(line)}</div>`;
 
         // Warning line
-        } else if (line.startsWith('⚠️') || line.toLowerCase().startsWith('missing criteria')) {
+        } else if (line.startsWith('[MISSING]') || line.toLowerCase().startsWith('missing criteria')) {
             otherHtml += `<div style="font-size: 0.82rem; color: var(--warning, #f59e0b); margin-top: 0.4rem;">${escapeHtml(line)}</div>`;
 
-        // Criterion line: "✅ C1 (PASS): reason" or "❌ C2 (FAIL): reason"
-        } else if (line.startsWith('✅') || line.startsWith('❌')) {
-            const isPassing = line.startsWith('✅');
+        // Criterion line: "[PASS] C1 (PASS): reason" or "[FAIL] C2 (FAIL): reason"
+        } else if (line.startsWith('[PASS]') || line.startsWith('[FAIL]') || line.startsWith('[MISSING]')) {
+            const isPassing = line.startsWith('[PASS]');
             const statusColor = isPassing ? 'var(--success, #22c55e)' : 'var(--danger, #ef4444)';
             const colonIdx = line.indexOf('): ');
             let badge, reason;
@@ -1424,21 +1457,20 @@ export function formatJudgeCriteriaDisplay(criteria) {
         const isPassing = statusUpper === 'PASS';
         const isMissing = statusUpper === 'MISSING';
         
-        let statusEmoji, statusText, statusColor, bgColor;
+        let statusMarker, statusText, statusColor, bgColor;
         
         if (isMissing) {
-            // Missing criteria = warning/error (not a failure)
-            statusEmoji = '⚠️';
+            statusMarker = '[MISSING]';
             statusText = 'MISSING';
             statusColor = 'var(--warning)';
             bgColor = 'var(--warning-bg)';
         } else if (isPassing) {
-            statusEmoji = '✅';
+            statusMarker = '[PASS]';
             statusText = 'PASS';
             statusColor = 'var(--success)';
             bgColor = 'var(--bg-tertiary)';
         } else {
-            statusEmoji = '❌';
+            statusMarker = '[FAIL]';
             statusText = 'FAIL';
             statusColor = 'var(--danger)';
             bgColor = 'var(--bg-tertiary)';
@@ -1458,7 +1490,7 @@ export function formatJudgeCriteriaDisplay(criteria) {
         return `
             <div style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem; margin: 0.25rem 0; background: ${bgColor}; border-radius: 6px; border-left: 3px solid ${statusColor};">
                 <span style="font-weight: 600; min-width: 35px;">${key}:</span>
-                <span style="color: ${statusColor}; font-weight: 600;">${statusEmoji} ${statusText}</span>
+                <span style="color: ${statusColor}; font-weight: 600;">${statusMarker} ${statusText}</span>
                 ${criteriaText ? `<span style="flex: 1; font-size: 0.85rem; color: var(--text-secondary);">${escapeHtml(criteriaText)}</span>` : ''}
                 ${warningMsg}
             </div>
@@ -1619,7 +1651,7 @@ export function displaySelectionCards() {
             </td>
             <td class="col-status">
                 <span class="status-badge ${isBreaking ? 'break' : 'pass'}">
-                    ${isBreaking ? '✅ BREAK' : '❌ PASS'}
+                    ${isBreaking ? 'BREAK' : 'PASS'}
                 </span>
             </td>
             <td class="col-hunt">
@@ -1724,7 +1756,7 @@ export function toggleHuntSelection(rowNumber, row) {
     
     const result = state.allResponses[rowNumber];
     if (!result) {
-        console.error(`❌ CRITICAL: No result found at row number ${rowNumber}`);
+        console.error(`CRITICAL: No result found at row number ${rowNumber}`);
         return;
     }
     
@@ -1739,12 +1771,12 @@ export function toggleHuntSelection(rowNumber, row) {
 
         if (selMode.type === 'passing' && isBreaking) {
             checkbox.checked = false;
-            showToast(`⚠️ Only passing hunts can be selected in ${selMode.name} mode.`, 'warning');
+            showToast(`Only passing hunts can be selected in ${selMode.name} mode.`, 'warning');
             return;
         }
         if (selMode.type === 'breaking' && !selMode.count_based && selMinBreaking === 0 && isBreaking) {
             checkbox.checked = false;
-            showToast(`⚠️ Min Breaking is 0 — only passing hunts can be selected.`, 'warning');
+            showToast(`Min Breaking is 0 — only passing hunts can be selected.`, 'warning');
             return;
         }
         if (selMode.count_based) {
@@ -1753,7 +1785,7 @@ export function toggleHuntSelection(rowNumber, row) {
                 .map(rn => state.allResponses[rn]).filter(r => r && isResultBreaking(r)).length;
             if (isBreaking && currentBreaking >= req) {
                 checkbox.checked = false;
-                showToast(`⚠️ Only ${req} breaking hunt(s) allowed in ${selMode.name} mode. Unselect one first.`, 'warning');
+                showToast(`Only ${req} breaking hunt(s) allowed in ${selMode.name} mode. Unselect one first.`, 'warning');
                 return;
             }
         }
@@ -1773,7 +1805,7 @@ export function toggleHuntSelection(rowNumber, row) {
             const validation = validateSelectionForMode(tempResults, huntMode, state.adminMode);
             if (!validation.valid) {
                 checkbox.checked = false;
-                showToast(`❌ ${validation.message}`, 'error');
+                showToast(`${validation.message}`, 'error');
                 return;
             }
         }
@@ -1846,7 +1878,6 @@ export function toggleDetailsRow(rowNumber, row, result) {
                 <td colspan="7" style="padding: 0;">
                     <div style="padding: 1.5rem; background: var(--bg-secondary);">
                         <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;">
-                            <span style="font-size: 1.1rem;">📄</span>
                             <h3 style="margin: 0; font-size: 1rem; font-weight: 600; color: var(--text-primary);">
                                 Model Response - Hunt #${rowNumber + 1}
                             </h3>
@@ -1890,7 +1921,7 @@ export function updateSelectionCount() {
     const validation = validateSelectionForMode(selectedResults, huntMode, state.adminMode);
     
     if (selectedResults.length !== count) {
-        console.error(`❌ CRITICAL: Expected ${count} results but found ${selectedResults.length}`);
+        console.error(`CRITICAL: Expected ${count} results but found ${selectedResults.length}`);
         console.error('   Selected row numbers:', state.selectedRowNumbers);
         console.error('   allResponses length:', state.allResponses.length);
     }
@@ -1910,16 +1941,16 @@ export function updateSelectionCount() {
             const countMinBreaking = state.config?.min_breaking_required ?? 0;
             if (countMode.type === 'passing' || countMode.count_based || (countMode.type === 'breaking' && countMinBreaking === 0)) {
                 statusText = validation.valid
-                    ? `✅ ${breakingCount} breaking, ${passingCount} passing selected`
-                    : `❌ ${validation.message}`;
+                    ? `${breakingCount} breaking, ${passingCount} passing selected`
+                    : `${validation.message}`;
                 statusColor = validation.valid ? 'var(--success)' : 'var(--danger)';
             } else if (count < countSlots) {
                 statusText = `Selected: ${count}/${countSlots} hunts (${breakingCount} breaking, ${passingCount} passing) — Select ${countSlots - count} more`;
                 statusColor = 'var(--text-primary)';
             } else if (count === countSlots) {
                 statusText = validation.valid
-                    ? `✅ Valid: ${breakingCount} breaking, ${passingCount} passing`
-                    : `❌ ${validation.message}`;
+                    ? `Valid: ${breakingCount} breaking, ${passingCount} passing`
+                    : `${validation.message}`;
                 statusColor = validation.valid ? 'var(--success)' : 'var(--danger)';
             } else {
                 statusText = `Too many selected: ${count}/${countSlots}`;
@@ -1973,7 +2004,7 @@ export async function confirmSelection() {
     const saveSlots = getSelectionSlots();
     const saveMinBreaking = state.config?.min_breaking_required ?? 0;
     if (!_bypassSelCount && saveMode.type === 'breaking' && !saveMode.count_based && saveMinBreaking > 0 && selectedResults.length !== saveSlots) {
-        showToast(`❌ Must select exactly ${saveSlots} hunts. Currently selected: ${selectedResults.length}`, 'error');
+        showToast(`Must select exactly ${saveSlots} hunts. Currently selected: ${selectedResults.length}`, 'error');
         return;
     }
     if (_bypassSelCount && selectedResults.length < 1) {
@@ -1984,7 +2015,7 @@ export async function confirmSelection() {
     // Mode-aware validation
     const validation = validateSelectionForMode(selectedResults, huntMode, state.adminMode);
     if (!validation.valid) {
-        showToast(`❌ ${validation.message}`, 'error');
+        showToast(`${validation.message}`, 'error');
         return;
     }
 
@@ -2157,10 +2188,10 @@ export function updateReviewProgress() {
             elements.revealLLMBtn.style.opacity = (!allComplete || state.llmRevealed) ? '0.5' : '1';
         }
         if (state.llmRevealed) {
-            elements.revealLLMBtn.textContent = '✅ AI Evaluation Shown';
+            elements.revealLLMBtn.textContent = 'AI Evaluation Shown';
             elements.revealLLMBtn.disabled = true;
         } else if (allComplete || _bypassReveal) {
-            elements.revealLLMBtn.textContent = '👁️ Show AI Evaluation';
+            elements.revealLLMBtn.textContent = 'Show AI Evaluation';
             if (_bypassReveal) elements.revealLLMBtn.disabled = false;
         }
     }
@@ -2188,10 +2219,10 @@ export function updateReviewProgress() {
     // Update top instructions
     if (elements.reviewInstructions) {
         if (state.llmRevealed) {
-            elements.reviewInstructions.textContent = '✅ Reviews locked. Scroll down to save.';
+            elements.reviewInstructions.textContent = 'Reviews locked. Scroll down to save.';
             elements.reviewInstructions.style.color = 'var(--success)';
         } else if (reviewCount >= 4) {
-            elements.reviewInstructions.textContent = '✅ All reviews complete! Scroll down to show AI evaluation.';
+            elements.reviewInstructions.textContent = 'All reviews complete! Scroll down to show AI evaluation.';
             elements.reviewInstructions.style.color = 'var(--success)';
         } else {
             elements.reviewInstructions.textContent = `Complete all 4 human reviews, then scroll down to show AI evaluation and save.`;
@@ -2201,10 +2232,10 @@ export function updateReviewProgress() {
     // Update bottom instructions
     if (elements.bottomInstructions) {
         if (state.llmRevealed) {
-            elements.bottomInstructions.textContent = '✅ AI Evaluation shown. Click "Proceed to Quality Check" (runs below), then Save.';
+            elements.bottomInstructions.textContent = 'AI Evaluation shown. Click "Proceed to Quality Check" (runs below), then Save.';
             elements.bottomInstructions.style.color = 'var(--success)';
         } else if (reviewCount >= 4) {
-            elements.bottomInstructions.textContent = '✅ All reviews complete! Click "Show AI Evaluation" → then "Proceed to Quality Check".';
+            elements.bottomInstructions.textContent = 'All reviews complete! Click "Show AI Evaluation" → then "Proceed to Quality Check".';
             elements.bottomInstructions.style.color = 'var(--success)';
         } else {
             elements.bottomInstructions.textContent = `Complete all 4 human reviews → Show AI Evaluation → Proceed to Quality Check → Save`;
@@ -2279,7 +2310,7 @@ export async function revealLLMJudgments() {
         // Add locked indicator
         const lockIndicator = document.createElement('div');
         lockIndicator.style.cssText = 'padding: 0.5rem; background: var(--warning); color: black; border-radius: 4px; margin-top: 0.5rem; text-align: center; font-weight: 600;';
-        lockIndicator.textContent = '🔒 Review Locked';
+        lockIndicator.textContent = 'Review Locked';
         section.appendChild(lockIndicator);
     });
     
@@ -2312,7 +2343,7 @@ export async function revealLLMJudgments() {
     // Update progress display
     updateReviewProgress();
     
-    showToast('👁️ LLM Judgments revealed! Click any slot to view details. Reviews are locked.', 'success');
+    showToast('LLM Judgments revealed! Click any slot to view details. Reviews are locked.', 'success');
 }
 
 export async function displayBreakingResults() {
@@ -2333,7 +2364,7 @@ export async function displayBreakingResults() {
         // Show summary of selected responses
         const summaryHtml = `
             <div style="margin-bottom: 1rem; padding: 0.75rem; background: var(--bg-tertiary); border-radius: 8px;">
-                <strong>📋 Human Review Selection:</strong> 
+                <strong>Human Review Selection:</strong> 
                 ${data.summary.failed_count} failed (score 0) + ${data.summary.passed_count} passed (score 1+)
             </div>
         `;
@@ -2377,12 +2408,12 @@ export function createResultCard(result, slotIndex, rowNumber) {
         <div class="slot-compact-info">
             <div class="slot-compact-model">${modelDisplay}</div>
             <div class="slot-compact-status ${isReviewed ? 'reviewed' : ''}">
-                ${isReviewed ? '✅ Review Submitted' : `${isFailed ? '🟢 BREAK' : '🔴 PASS'} - Click to Review`}
+                ${isReviewed ? 'Review Submitted' : `<span style="color: ${isFailed ? 'var(--success)' : 'var(--danger)'};">${isFailed ? 'BREAK' : 'PASS'}</span> - Click to Review`}
             </div>
         </div>
         <div class="slot-compact-action">
             <button class="slot-open-btn">
-                ${isReviewed ? '📝 Edit' : '⚖️ Grade'}
+                ${isReviewed ? 'Edit' : 'Grade'}
             </button>
         </div>
     `;
@@ -2406,7 +2437,8 @@ export function createResultCardFull(result, slotIndex, rowNumber) {
     const modelDisplay = getModelDisplayName(result.model);
     const score = result.judge_score ?? 0;
     const isFailed = score === 0;
-    const scoreEmoji = isFailed ? '🟢' : '🔴';
+    const scoreLabel = isFailed ? 'BREAK' : 'PASS';
+    const scoreColor = isFailed ? 'var(--success)' : 'var(--danger)';
     const scoreClass = isFailed ? 'score-0' : 'score-1';
     const responseText = result.response || 'No response available';
     const slotNum = slotIndex !== undefined ? slotIndex + 1 : result.hunt_id;
@@ -2452,7 +2484,7 @@ export function createResultCardFull(result, slotIndex, rowNumber) {
                 <!-- Left Panel: Response (Larger, Scrollable) -->
                 <div class="slot-response-panel">
                             <label style="font-weight: 600; display: block; margin-bottom: 0.75rem; color: var(--text-primary);">
-                        📄 Model Response (${modelDisplay}_${slotNum}):
+                        Model Response (${modelDisplay}_${slotNum}):
                             </label>
                     <div class="code-block response-content" style="white-space: pre-wrap; line-height: 1.6; font-size: 0.9rem; max-height: 600px; overflow-y: auto;">${escapeHtml(responseText)}</div>
                     </div>
@@ -2462,7 +2494,7 @@ export function createResultCardFull(result, slotIndex, rowNumber) {
                     <!-- Grade Section (Top) -->
                     <div class="slot-grade-section">
                             <label style="font-weight: 600; display: block; margin-bottom: 1rem; color: var(--text-primary);">
-                            ✅ Grading Basis - Per Criterion:
+                            Grading Basis - Per Criterion:
                             </label>
                         <div class="criteria-grading" data-hunt-id="${result.hunt_id}" style="max-height: 400px; overflow-y: auto;">
                     ${(state.criteria || []).map(c => `
@@ -2471,10 +2503,10 @@ export function createResultCardFull(result, slotIndex, rowNumber) {
                                         <span style="flex: 1; font-size: 0.9rem; color: var(--text-secondary); word-break: break-word; min-width: 200px; line-height: 1.5;">${escapeHtml(c.criteria)}</span>
                                         <div class="criterion-buttons" style="display: flex; gap: 0.5rem; flex-shrink: 0;">
                                             <button class="btn btn-small criterion-pass" data-hunt-id="${result.hunt_id}" data-criterion="${c.id}" style="padding: 0.5rem 1rem; font-size: 0.85rem; font-weight: 600; background: transparent; border: 2px solid var(--success); color: var(--success); border-radius: 6px; transition: all var(--transition-fast);">
-                                                ✅ PASS
+                                                PASS
                                             </button>
                                             <button class="btn btn-small criterion-fail" data-hunt-id="${result.hunt_id}" data-criterion="${c.id}" style="padding: 0.5rem 1rem; font-size: 0.85rem; font-weight: 600; background: transparent; border: 2px solid var(--danger); color: var(--danger); border-radius: 6px; transition: all var(--transition-fast);">
-                                                ❌ FAIL
+                                                FAIL
                                             </button>
                             </div>
                         </div>
@@ -2485,7 +2517,7 @@ export function createResultCardFull(result, slotIndex, rowNumber) {
                     <!-- Explanation Section (Bottom) -->
                     <div class="slot-explanation-section">
                             <label style="font-weight: 600; display: block; margin-bottom: 0.75rem; color: var(--text-primary);">
-                                📝 Human Review (human_judge_${slotNum}):
+                                Human Review (human_judge_${slotNum}):
                             </label>
                             
                             <div style="margin-bottom: 1rem;">
@@ -2497,7 +2529,7 @@ export function createResultCardFull(result, slotIndex, rowNumber) {
                 </div>
                 
                             <button class="btn btn-primary submit-human-review-btn" data-hunt-id="${result.hunt_id}" disabled style="width: 100%; padding: 0.875rem; font-weight: 600; font-size: 0.95rem; border-radius: 8px; opacity: 0.7;">
-                                ✅ Submit Human Review
+                                Submit Human Review
                             </button>
                             <div class="human-review-status" data-hunt-id="${result.hunt_id}" style="margin-top: 0.75rem; font-size: 0.85rem; color: var(--text-muted); text-align: center;"></div>
                         </div>
@@ -2507,7 +2539,7 @@ export function createResultCardFull(result, slotIndex, rowNumber) {
             <!-- Reasoning Section (Collapsible, Reference Only) -->
             <div class="slot-reasoning-section" style="margin-top: 1.5rem;">
                 <button class="reasoning-toggle-btn" style="width: 100%; padding: 0.75rem; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font-weight: 600; color: var(--text-primary); display: flex; align-items: center; justify-content: space-between; transition: all var(--transition-fast);">
-                    <span>🧠 Model Reasoning Trace (Reference Only)</span>
+                    <span>Model Reasoning Trace (Reference Only)</span>
                     <span class="reasoning-toggle-arrow">▼</span>
                 </button>
                 <div class="reasoning-content" style="display: none; margin-top: 1rem; padding: 1rem; background: var(--bg-tertiary); border-radius: 8px; border: 1px solid var(--border);">
@@ -2517,7 +2549,7 @@ export function createResultCardFull(result, slotIndex, rowNumber) {
                     </div>
                 ` : `
                                 <div style="padding: 1.5rem; background: var(--bg-primary); border-radius: 8px; border: 1px dashed var(--border); color: var(--text-muted); font-style: italic; text-align: center;">
-                                    ⚠️ No reasoning trace available.<br>
+                                    No reasoning trace available.<br>
                                     <span style="font-size: 0.85rem;">The model either doesn't support chain-of-thought reasoning, or the reasoning was empty for this response.</span>
                     </div>
                 `}
@@ -2528,21 +2560,21 @@ export function createResultCardFull(result, slotIndex, rowNumber) {
             <div class="llm-judge-section" data-hunt-id="${result.hunt_id}" style="margin-top: 1.5rem; display: none;" data-llm-judge='${llmJudgeData.replace(/'/g, "&#39;")}'>
                 <div style="padding: 1.5rem; background: var(--bg-tertiary); border-radius: 12px; border: 2px solid var(--accent-primary);">
                     <label style="font-weight: 600; display: block; margin-bottom: 1rem; color: var(--accent-primary); font-size: 1.05rem;">
-                        🤖 LLM Judge (llm_judge_${slotNum}):
+                        LLM Judge (llm_judge_${slotNum}):
                     </label>
                     <div class="llm-judge-score" style="margin-bottom: 1rem;">
-                        <span class="score-badge ${scoreClass}" style="font-size: 1rem; padding: 0.5rem 1rem;">${scoreEmoji} Score: ${score}</span>
+                        <span class="score-badge ${scoreClass}" style="font-size: 1rem; padding: 0.5rem 1rem; color: ${scoreColor};">Score: ${score} (${scoreLabel})</span>
                     </div>
                     
                     <!-- Criteria Breakdown -->
                     <div class="llm-criteria-breakdown" style="margin-bottom: 1rem;">
-                        <label style="font-weight: 500; font-size: 0.9rem; display: block; margin-bottom: 0.75rem; color: var(--text-secondary);">📋 Grading Basis:</label>
+                        <label style="font-weight: 500; font-size: 0.9rem; display: block; margin-bottom: 0.75rem; color: var(--text-secondary);">Grading Basis:</label>
                         ${formatLLMCriteria(result.judge_criteria, result.judge_explanation)}
                     </div>
                     
                       <!-- Full Explanation -->
                       <div class="llm-judge-explanation" style="font-size: 0.9rem; background: var(--bg-card); padding: 1rem; border-radius: 8px; line-height: 1.6;">
-                          <label style="font-weight: 500; display: block; margin-bottom: 0.75rem; color: var(--text-primary);">📝 Full Explanation:</label>
+                          <label style="font-weight: 500; display: block; margin-bottom: 0.75rem; color: var(--text-primary);">Full Explanation:</label>
                           ${renderJudgeExplanation(result.judge_explanation)}
                       </div>
                 </div>
@@ -2627,7 +2659,7 @@ export function createResultCardFull(result, slotIndex, rowNumber) {
         updateReviewSubmitButtonState();
         if (submitBtn && submitBtn.disabled && submitBtn.textContent.includes('Submitted')) {
             submitBtn.disabled = false;
-            submitBtn.textContent = '✅ Submit Human Review';
+            submitBtn.textContent = 'Submit Human Review';
             submitBtn.style.background = '';
             updateReviewSubmitButtonState();
         }
@@ -2649,7 +2681,7 @@ export function createResultCardFull(result, slotIndex, rowNumber) {
             btn.addEventListener('click', () => {
                 if (submitBtn && submitBtn.disabled && submitBtn.textContent.includes('Submitted')) {
                     submitBtn.disabled = false;
-                    submitBtn.textContent = '✅ Submit Human Review';
+                    submitBtn.textContent = 'Submit Human Review';
                     submitBtn.style.background = '';
                 } else if (submitBtn) {
                     submitBtn.disabled = false;
@@ -2686,11 +2718,11 @@ export function handleHumanReview(huntId, judgment, card, slotNum) {
     
     if (judgment === 'pass') {
         passBtn.classList.add('active');
-        statusEl.innerHTML = '✅ Marked as <strong>PASS</strong>';
+        statusEl.innerHTML = 'Marked as <strong>PASS</strong>';
         statusEl.style.color = 'var(--success)';
     } else {
         failBtn.classList.add('active');
-        statusEl.innerHTML = '❌ Marked as <strong>FAIL</strong>';
+        statusEl.innerHTML = 'Marked as <strong>FAIL</strong>';
         statusEl.style.color = 'var(--danger)';
     }
     
@@ -2704,7 +2736,7 @@ export function handleHumanReview(huntId, judgment, card, slotNum) {
     if (revealBtn) {
         revealBtn.disabled = false;
         revealBtn.style.opacity = '1';
-        revealBtn.textContent = '👁️ Reveal LLM Judge';
+        revealBtn.textContent = 'Reveal LLM Judge';
     } else {
         console.error('Could not find reveal button for hunt', huntId);
     }
@@ -2753,7 +2785,7 @@ export async function submitHumanReview(huntId, card, slotNum, rowNumber) {
     const totalCriteria = Object.keys(grading).length;
     const passCount = Object.values(grading).filter(v => v.toUpperCase() === 'PASS').length;
     const passRate = totalCriteria > 0 ? passCount / totalCriteria : 0;
-    const overallJudgment = (passRate >= 1.0) || (passThreshold < 1.0 && passRate > passThreshold) ? 'pass' : 'fail';
+    const overallJudgment = (passRate >= 1.0) || (passThreshold < 1.0 && passRate >= passThreshold) ? 'pass' : 'fail';
     
     // Store human review in state with slot info and criteria
     // Use row number as key to ensure uniqueness across runs
@@ -2771,12 +2803,12 @@ export async function submitHumanReview(huntId, card, slotNum, rowNumber) {
     // Update UI
     const submitBtn = card.querySelector('.submit-human-review-btn');
     submitBtn.disabled = true;
-    submitBtn.textContent = overallJudgment === 'pass' ? '✅ Submitted: PASS' : '❌ Submitted: FAIL';
+    submitBtn.textContent = overallJudgment === 'pass' ? 'Submitted: PASS' : 'Submitted: FAIL';
     submitBtn.style.background = overallJudgment === 'pass' ? 'var(--success)' : 'var(--danger)';
     
     // Show detailed status (v is already uppercase 'PASS' or 'FAIL' from line 2264)
     const gradingDisplay = Object.entries(grading).map(([k, v]) => 
-        `${k}: ${v.toUpperCase() === 'PASS' ? '✅' : '❌'}`
+        `${k}: ${v.toUpperCase() === 'PASS' ? 'PASS' : 'FAIL'}`
     ).join(' | ');
     statusEl.innerHTML = `<strong>${overallJudgment.toUpperCase()}</strong> - ${gradingDisplay}`;
     statusEl.style.color = overallJudgment === 'pass' ? 'var(--success)' : 'var(--danger)';

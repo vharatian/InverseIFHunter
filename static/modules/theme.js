@@ -31,7 +31,7 @@ export function toggleTheme() {
  * @param {string} theme - 'dark' or 'light'
  */
 export function updateThemeIcon(theme) {
-    elements.themeToggle.textContent = theme === 'dark' ? '🌙' : '☀️';
+    elements.themeToggle.textContent = theme === 'dark' ? 'Dark' : 'Light';
 }
 
 /**

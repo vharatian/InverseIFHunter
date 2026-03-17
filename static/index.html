@@ -275,7 +275,7 @@
                                     <input type="url" id="colabUrlInput"
                                         placeholder="https://colab.research.google.com/drive/..." class="url-input">
                                     <button type="button" id="fetchUrlBtn" class="btn btn-secondary fetch-btn-cute">
-                                        📥 Fetch
+                                        Fetch
                                     </button>
                                 </div>
                                 <small style="color: var(--text-muted); margin-top: 0.5rem; display: block;">
@@ -427,7 +427,7 @@
                                 <select id="modelSelect" style="display:none"></select>
                                 <small id="modelLockedIndicator" class="model-locked-hint hidden"
                                     style="display: none; color: var(--warning); font-size: 0.8rem; margin-top: 0.25rem;">
-                                    🔒 Locked to <strong id="modelLockedName">-</strong> (from notebook metadata)
+                                    Locked to <strong id="modelLockedName">-</strong> (from notebook metadata)
                                 </small>
                             </div>
 
@@ -587,7 +587,7 @@
 
                         <!-- Review readiness warning (shown when not enough results) -->
                         <div id="reviewReadinessWarning" class="review-readiness-warning hidden">
-                            ⚠️ Need more hunt results to proceed to review.
+                            Need more hunt results to proceed to review.
                         </div>
 
                         <!-- Two-card asymmetric fork -->
@@ -656,7 +656,7 @@
                         </div>
 
                         <button class="btn btn-primary btn-lg" id="startNextTurnBtn" style="width: 100%;">
-                            🚀 Start Turn <span id="startNextTurnNumber">2</span> Hunt
+                            Start Turn <span id="startNextTurnNumber">2</span> Hunt
                         </button>
                     </div>
                 </div>
@@ -690,7 +690,7 @@
                     <div class="selection-footer">
                         <div id="selectionCount" class="selection-count">Selected: 0 / 4</div>
                         <button class="btn btn-primary btn-lg" id="confirmSelectionBtn" disabled>
-                            ✅ Confirm & Start Review
+                            Confirm & Start Review
                         </button>
                     </div>
                     </div><!-- /.collapsible-card-body -->
@@ -763,7 +763,7 @@
                     <div id="qcPersistentParent" class="qc-persistent-parent"></div>
 
                     <div id="noBreaksMessage" class="empty-state hidden">
-                        <div class="empty-state-icon">🎉</div>
+                        <div class="empty-state-icon"></div>
                         <p>No breaking responses found. The model held strong!</p>
                     </div>
                     <div id="resultsTipContainer"></div>
@@ -810,7 +810,7 @@
         <div class="modal-backdrop"></div>
         <div class="modal-content">
             <div class="modal-header">
-                <h3>🧑‍⚖️ Human Judgment Required</h3>
+                <h3>Human Judgment Required</h3>
                 <span class="modal-subtitle">Judge this response before seeing LLM results</span>
             </div>
 
@@ -829,10 +829,10 @@
                     </p>
                     <div class="judge-buttons">
                         <button class="btn btn-success btn-lg" id="humanJudgePass">
-                            ✅ PASS (Score 1)
+                            PASS (Score 1)
                         </button>
                         <button class="btn btn-danger btn-lg" id="humanJudgeFail">
-                            ❌ FAIL (Score 0)
+                            FAIL (Score 0)
                         </button>
                         <button class="btn btn-secondary" id="humanJudgeSkip">
                             Skip
@@ -871,7 +871,6 @@
         <div class="slideout-resize-handle" id="responseSlideoutResizeHandle" title="Drag to resize"></div>
         <div class="response-slideout-header">
             <div class="response-slideout-title">
-                <span>📄</span>
                 <span id="slideoutTitle">Hunt #1 Response</span>
             </div>
             <button class="response-slideout-close" id="slideoutCloseBtn" title="Close">&times;</button>

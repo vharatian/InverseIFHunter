@@ -246,7 +246,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         
         
     } catch (error) {
-        console.error('❌ Initialization failed:', error);
+        console.error('Initialization failed:', error);
         showError(error, { operation: 'App initialization' });
     }
 });
@@ -427,10 +427,10 @@ async function restoreSession() {
             const container = document.getElementById('mainContainer');
             if (container) container.classList.remove('multi-turn-layout');
 
-            showToast('🔄 Session found! Please reload the notebook to continue.', 'info');
+            showToast('Session found! Please reload the notebook to continue.', 'info');
         } else if (response.status === 404) {
             localStorage.removeItem('modelHunter_sessionId');
-            showToast('⚠️ Previous session expired. Please load a new notebook.', 'warning');
+            showToast('Previous session expired. Please load a new notebook.', 'warning');
         }
     } catch (error) {
         console.error('Error restoring session:', error);

@@ -399,16 +399,16 @@ function closeRun(id) {
 
 /**
  * Parse judge explanation to extract per-criterion (id, status, explanation).
- * Backend format: "✅ C1 (PASS): reason" or "❌ C2 (FAIL): reason"
+ * Backend format: "[PASS] C1 (PASS): reason" or "[FAIL] C2 (FAIL): reason" or "[MISSING] C3 (MISSING): reason"
  */
 function parseJudgeExplanation(explanation, criteria) {
     const byId = {};
     const lines = (explanation || '').split('\n');
-    const lineRe = /[✅❌]\s+(C\d+)\s+\((PASS|FAIL)\):\s*(.*)/i;
+    const lineRe = /\[(PASS|FAIL|MISSING)\]\s+(C\d+)\s+\((PASS|FAIL|MISSING)\):\s*(.*)/i;
     for (const line of lines) {
         const m = line.match(lineRe);
         if (m) {
-            byId[m[1]] = { id: m[1], status: m[2].toUpperCase(), explanation: m[3].trim() };
+            byId[m[2]] = { id: m[2], status: m[3].toUpperCase(), explanation: m[4].trim() };
         }
     }
     // Add any criteria from API not found in parsed explanation
@@ -525,7 +525,7 @@ function showSavePreviewModal(opts) {
     const criteriaHtml = parsed.map(({ id, status, explanation: expl }) => {
         const isPass = status === 'PASS';
         const isMissing = status === 'MISSING';
-        const icon = isMissing ? '⚠️' : isPass ? '✅' : '❌';
+        const icon = isMissing ? '[MISSING]' : isPass ? '[PASS]' : '[FAIL]';
         const statusColor = isMissing ? 'var(--warning)' : isPass ? 'var(--success)' : 'var(--danger)';
         return `
             <div style="margin-bottom: 0.75rem; padding: 0.75rem; background: var(--bg-primary); border-radius: 8px; border-left: 4px solid ${statusColor};">
@@ -544,7 +544,7 @@ function showSavePreviewModal(opts) {
     overlay.innerHTML = `
         <div class="tb-confirm-box" style="max-width: 640px; max-height: 90vh; display: flex; flex-direction: column;">
             <div class="tb-confirm-title" style="margin-bottom: 0.5rem;">
-                ${isPassing ? '✅ Ideal Response Verified' : '⚠️ Criteria Not Passed'}
+                ${isPassing ? 'Ideal Response Verified' : 'Criteria Not Passed'}
             </div>
             <div style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 1rem;">
                 <div>
@@ -613,7 +613,7 @@ function showSaveValidationModal(opts) {
     overlay.setAttribute('aria-modal', 'true');
     overlay.setAttribute('role', 'dialog');
     overlay.setAttribute('aria-labelledby', 'tb-validation-title');
-    const icon = opts.type === 'error' ? '❌' : opts.type === 'criteria_fail' ? '⚠️' : '⚠️';
+    const icon = opts.type === 'error' ? '!' : opts.type === 'criteria_fail' ? '!' : '!';
     overlay.innerHTML = `
         <div class="tb-confirm-box" style="max-width: 480px;">
             <div class="tb-confirm-icon">${icon}</div>
@@ -640,7 +640,7 @@ function confirmCloseRun(run) {
     overlay.className = 'tb-confirm-overlay';
     overlay.innerHTML = `
         <div class="tb-confirm-box">
-            <div class="tb-confirm-icon">⚠️</div>
+            <div class="tb-confirm-icon">!</div>
             <div class="tb-confirm-title">Close Run ${run.number}?</div>
             <div class="tb-confirm-msg">
                 Once closed, <strong>Run ${run.number}</strong> and all its generated content
@@ -666,8 +666,8 @@ function confirmCloseRun(run) {
 
 function statusIcon(status) {
     switch (status) {
-        case 'generating': return `<span class="tb-status-icon tb-spin"  title="Generating…">⏳</span>`;
-        case 'judging':    return `<span class="tb-status-icon tb-pulse" title="Judging…">⚖️</span>`;
+        case 'generating': return `<span class="tb-status-icon tb-spin"  title="Generating...">...</span>`;
+        case 'judging':    return `<span class="tb-status-icon tb-pulse" title="Judging...">...</span>`;
         case 'done':
         case 'judged':     return `<span class="tb-status-icon" style="color:var(--success)" title="Done">✓</span>`;
         case 'error':      return `<span class="tb-status-icon tb-error" title="Error">✗</span>`;
@@ -773,7 +773,7 @@ function renderCriteriaChips(disabled) {
     const countOk   = count >= MIN;
     const countClass = countOk ? 'count-ok' : (count > 0 ? 'count-warn' : '');
     const countLabel = countOk
-        ? `${count} criteria ✓`
+        ? `${count} criteria`
         : `${count} / ${MIN} minimum`;
     const countBadge = `<div class="tb-criteria-count ${countClass}" id="tbCriteriaCount">
         <span class="tb-criteria-count-dot"></span>
@@ -797,7 +797,7 @@ function _updateCriteriaCount() {
     const ok    = count >= MIN;
     badge.className = `tb-criteria-count ${ok ? 'count-ok' : (count > 0 ? 'count-warn' : '')}`;
     badge.querySelector('span:last-child').textContent = ok
-        ? `${count} criteria ✓`
+        ? `${count} criteria`
         : `${count} / ${MIN} minimum`;
 }
 
@@ -881,7 +881,7 @@ function renderJudgeResult(run) {
     const criteriaCards = parsed.map(({ id, status, explanation: expl }) => {
         const isPass   = status === 'PASS';
         const isMissing = status === 'MISSING';
-        const icon     = isMissing ? '⚠️' : isPass ? '✅' : '❌';
+        const icon     = isMissing ? '[MISSING]' : isPass ? '[PASS]' : '[FAIL]';
         const color    = isMissing ? 'var(--warning, #f59e0b)' : isPass ? 'var(--success, #22c55e)' : 'var(--danger, #ef4444)';
         return `<div style="margin-bottom: 0.5rem; padding: 0.65rem 0.75rem; background: var(--bg-primary); border-radius: 8px; border-left: 4px solid ${color};">
             <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: ${expl ? '0.25rem' : '0'};">
@@ -1006,8 +1006,8 @@ function renderActiveTab() {
                    <span class="tb-reasoning-badge">${run.reasoningTrace.length.toLocaleString()} chars</span>
                    <span class="tb-reasoning-collapse-hint">click to expand</span>
                    ${isEditingReas
-                       ? `<span class="tb-edit-toggle tb-edit-active tb-reasoning-edit-toggle" id="tbReasoningEditToggle-${run.id}" title="View rendered">👁 View</span>`
-                       : `<span class="tb-edit-toggle tb-reasoning-edit-toggle" id="tbReasoningEditToggle-${run.id}" title="Edit reasoning">✏️ Edit</span>`}
+                       ? `<span class="tb-edit-toggle tb-edit-active tb-reasoning-edit-toggle" id="tbReasoningEditToggle-${run.id}" title="View rendered">View</span>`
+                       : `<span class="tb-edit-toggle tb-reasoning-edit-toggle" id="tbReasoningEditToggle-${run.id}" title="Edit reasoning">Edit</span>`}
                </button>
                ${_tbCopyBtn('reasoning', 'Copy model reasoning', run.id)}
                </div>
@@ -1033,7 +1033,7 @@ function renderActiveTab() {
             <div class="tb-left-scroll">
 
                 <div class="tb-panel-header">
-                    <span class="tb-panel-icon">✏️</span>
+                    <span class="tb-panel-icon"></span>
                     <span class="tb-panel-title">Prompt &amp; Settings</span>
                     <span class="tb-panel-note">Shared across all runs</span>
                 </div>
@@ -1147,7 +1147,7 @@ function renderActiveTab() {
 
             <div class="tb-right-header">
                 <div class="tb-panel-header">
-                    <span class="tb-panel-icon">🤖</span>
+                    <span class="tb-panel-icon"></span>
                     <span class="tb-panel-title">Model Response</span>
                     ${_tbCopyBtn('response', 'Copy model response', run.id)}
 
@@ -1169,7 +1169,7 @@ function renderActiveTab() {
 
                     ${hasResponse
                         ? `<button class="tb-edit-toggle ${isEditing ? 'tb-edit-active' : ''}" id="tbEditToggle-${run.id}" title="${isEditing ? 'View rendered' : 'Edit response'}">
-                               ${isEditing ? '👁 View' : '✏️ Edit'}
+                               ${isEditing ? 'View' : 'Edit'}
                            </button>`
                         : ''}
                     ${run.status !== 'idle'
@@ -1196,7 +1196,7 @@ function renderActiveTab() {
                         ${isBusy || !hasResponse ? 'disabled' : ''}
                         title="${!hasResponse ? 'Generate a response first' : 'Judge this response against your criteria'}"
                     >
-                        ${isJudging ? `<span class="tb-btn-spinner"></span> Judging with ${getJudgeModels().find(m => m.id === run.judgeModel)?.name || 'judge'}…` : '⚖️ Judge Model Response'}
+                        ${isJudging ? `<span class="tb-btn-spinner"></span> Judging with ${getJudgeModels().find(m => m.id === run.judgeModel)?.name || 'judge'}…` : 'Judge Model Response'}
                     </button>
                     <button
                         class="btn btn-secondary tb-regen-btn"
@@ -1749,7 +1749,7 @@ function _appendStreamingCriterion(run, event) {
     if (!body) return;
     const isPass   = event.status === 'PASS';
     const isMissing = event.status === 'MISSING';
-    const icon     = isMissing ? '⚠️' : isPass ? '✅' : '❌';
+    const icon     = isMissing ? '[MISSING]' : isPass ? '[PASS]' : '[FAIL]';
     const color    = isMissing ? 'var(--warning, #f59e0b)' : isPass ? 'var(--success, #22c55e)' : 'var(--danger, #ef4444)';
     const card = document.createElement('div');
     card.className = 'tb-criterion-enter';
@@ -1820,7 +1820,7 @@ function _updateSpmJudgeHeader(passing, total, isLoading) {
     const titleEl = document.getElementById('spmStreamTitle');
     if (titleEl && !isLoading) {
         const allPass = passing === total && total > 0;
-        titleEl.textContent = allPass ? '✅ Ideal Response Verified' : '⚠️ Criteria Not Passed';
+        titleEl.textContent = allPass ? 'Ideal Response Verified' : 'Criteria Not Passed';
     }
 }
 
@@ -1829,7 +1829,7 @@ function _appendSpmCriterion(event) {
     if (!body) return;
     const isPass = event.status === 'PASS';
     const isMissing = event.status === 'MISSING';
-    const icon = isMissing ? '⚠️' : isPass ? '✅' : '❌';
+    const icon = isMissing ? '[MISSING]' : isPass ? '[PASS]' : '[FAIL]';
     const statusColor = isMissing ? 'var(--warning, #f59e0b)' : isPass ? 'var(--success, #22c55e)' : 'var(--danger, #ef4444)';
     const card = document.createElement('div');
     card.className = 'tb-criterion-enter';
@@ -2633,7 +2633,7 @@ export function renderPriorConversationBanner() {
     container.className = 'pcb-banner' + (isCollapsed ? ' pcb-collapsed' : '');
     container.innerHTML = `
         <div class="pcb-header" id="pcbToggle">
-            <span class="pcb-icon">💬</span>
+            <span class="pcb-icon"></span>
             <span class="pcb-title">Prior Conversation (${turns.length} turn${turns.length > 1 ? 's' : ''})</span>
             <span class="pcb-chevron">${isCollapsed ? '▶' : '▼'}</span>
         </div>

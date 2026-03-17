@@ -153,7 +153,7 @@ function _restoreSectionVisibility() {
         const uploadHeaderText = document.getElementById('uploadHeaderText');
         if (uploadBody) uploadBody.classList.add('collapsed');
         if (uploadChevron) uploadChevron.classList.add('collapsed');
-        if (uploadHeaderText) uploadHeaderText.textContent = 'Notebook Loaded ✓';
+        if (uploadHeaderText) uploadHeaderText.textContent = 'Notebook Loaded';
 
         // Show config section (prompt, criteria, hunt config)
         if (elements.configSection) elements.configSection.classList.remove('hidden');

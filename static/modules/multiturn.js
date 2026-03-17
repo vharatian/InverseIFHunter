@@ -48,7 +48,7 @@ export function activateTurnTab(turnNumber) {
     if (tabBar) {
         const tabs = tabBar.querySelectorAll('button');
         tabs.forEach(tab => {
-            // Tab text is like "Turn 1 ✓" or "Turn 2 (current)"
+            // Tab text is like "Turn 1" or "Turn 2 (current)"
             const match = tab.textContent.match(/Turn\s+(\d+)/);
             if (match && parseInt(match[1]) === turnNumber) {
                 tab.click();  // Programmatically click to trigger the render
@@ -102,7 +102,7 @@ export function renderJourneyBar() {
         
         if (step.status === 'completed') {
             circle.style.background = color;
-            circle.innerHTML = '&#10003;';
+            circle.textContent = step.turnNumber;
         } else if (step.status === 'active') {
             circle.style.background = color;
             circle.textContent = step.turnNumber;
@@ -172,7 +172,7 @@ export function renderConversationThread() {
             </div>
             <div class="thread-prompt-preview">${escapeHtml((t.prompt || '').substring(0, 80))}</div>
             ${t.selectedResponse ? `<div class="thread-response-preview" style="border-left-color:${color};">${escapeHtml(t.selectedResponse.substring(0, 80))}</div>` : ''}
-            <div class="thread-status done">&#10003; ${turnHuntCount} hunts</div>
+            <div class="thread-status done">${turnHuntCount} hunts</div>
         `;
         
         node.addEventListener('click', () => {
@@ -382,7 +382,7 @@ export function showMultiTurnDecision() {
             markBreakingBtn.title = readinessMsg;
         }
         if (reviewWarning) {
-            reviewWarning.innerHTML = `<span style="margin-right: 0.5rem;">⚠️</span>${readinessMsg}`;
+            reviewWarning.innerHTML = `<span style="margin-right: 0.5rem;">!</span>${readinessMsg}`;
             reviewWarning.classList.remove('hidden');
         }
     }
@@ -457,7 +457,7 @@ export function renderTurnHistoryTabs() {
             white-space: nowrap;
             transition: all 0.2s;
         `;
-        tab.textContent = `Turn ${turn.turnNumber} ✓`;
+        tab.textContent = `Turn ${turn.turnNumber}`;
         
         tab.addEventListener('mouseenter', () => {
             if (!tab.classList.contains('active-turn-tab')) {
@@ -516,7 +516,7 @@ export function renderTurnContent(container, turn) {
         html += `<span style="font-size: 0.8rem; color: var(--text-muted);">${turn.results.length} hunts &mdash; ${breaks} breaks, ${passes} passes</span>`;
     }
     if (turn.selectedResponse) {
-        html += `<span style="padding: 0.2rem 0.6rem; border-radius: 999px; font-size: 0.75rem; background: rgba(16, 185, 129, 0.15); color: var(--success, #10b981);">Response selected ✓</span>`;
+        html += `<span style="padding: 0.2rem 0.6rem; border-radius: 999px; font-size: 0.75rem; background: rgba(16, 185, 129, 0.15); color: var(--success, #10b981);">Response selected</span>`;
     }
     html += `</div>`;
     
@@ -549,8 +549,11 @@ export function renderTurnContent(container, turn) {
         
         html += `<div style="margin-bottom: 1rem;">`;
         html += `<div style="font-weight: 700; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 0.4rem;">Auto-Judge Result for Selected Response <span style="font-weight:400;text-transform:none;letter-spacing:0;">(judged by ${escapeHtml(judgeModelName)})</span></div>`;
-        html += `<div style="padding: 0.75rem; background: var(--bg-tertiary); border-radius: 8px; border-left: 3px solid ${score > 0 ? 'var(--success, #10b981)' : 'var(--danger, #ef4444)'}; font-size: 0.9rem;">`;
-        html += `<div style="font-weight: 600; margin-bottom: 0.5rem;">Score: ${score} ${score > 0 ? '(PASS)' : '(BREAK)'}</div>`;
+        const jr = turn.judgeResult;
+        const jrPassing = isResultPassing(jr);
+        const jrBreaking = isResultBreaking(jr);
+        html += `<div style="padding: 0.75rem; background: var(--bg-tertiary); border-radius: 8px; border-left: 3px solid ${jrPassing ? 'var(--success, #10b981)' : jrBreaking ? 'var(--danger, #ef4444)' : 'var(--warning, #f59e0b)'}; font-size: 0.9rem;">`;
+        html += `<div style="font-weight: 600; margin-bottom: 0.5rem;">Score: ${score} ${jrPassing ? '(PASS)' : jrBreaking ? '(BREAK)' : '(Missing Criteria)'}</div>`;
         
         if (Object.keys(criteria).length > 0) {
             html += `<div style="margin-bottom: 0.5rem;">`;
@@ -663,7 +666,8 @@ export async function handleContinueToNextTurn() {
     
     state.allResponses.forEach((r, idx) => {
         const score = r.judge_score ?? r.score ?? '?';
-        const isPassing = score > 0;
+        const isPassing = isResultPassing(r);
+        const isError = isResultError(r);
         const modelDisplay = getModelDisplayName(r.model);
         const displayNum = idx + 1;
         
@@ -680,11 +684,13 @@ export async function handleContinueToNextTurn() {
         }
         
         const card = document.createElement('div');
+        const cardBorder = isError ? 'var(--warning, #f59e0b)' : (isPassing ? 'var(--success, #10b981)' : 'var(--danger, #ef4444)');
+        const cardBg = isError ? 'rgba(245, 158, 11, 0.04)' : (isPassing ? 'rgba(16, 185, 129, 0.04)' : 'rgba(239, 68, 68, 0.04)');
         card.style.cssText = `
             padding: 0.75rem 1rem;
             border-radius: 8px;
-            border: 1.5px solid ${isPassing ? 'var(--success, #10b981)' : 'var(--danger, #ef4444)'};
-            background: ${isPassing ? 'rgba(16, 185, 129, 0.04)' : 'rgba(239, 68, 68, 0.04)'};
+            border: 1.5px solid ${cardBorder};
+            background: ${cardBg};
             cursor: pointer;
             transition: all 0.2s;
         `;
@@ -692,11 +698,13 @@ export async function handleContinueToNextTurn() {
         card.addEventListener('mouseleave', () => { card.style.transform = ''; card.style.boxShadow = ''; });
         
         // Show FULL response content (scrollable) — display turn-local number
+        const scoreLabel = isError ? '(Missing Criteria)' : (isPassing ? '(PASS)' : '(BREAK)');
+        const scoreColor = isError ? 'var(--warning, #f59e0b)' : (isPassing ? 'var(--success, #10b981)' : 'var(--danger, #ef4444)');
         card.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
                 <span style="font-weight: 600;">Hunt #${displayNum} — ${modelDisplay}</span>
-                <span style="font-weight: 700; color: ${isPassing ? 'var(--success, #10b981)' : 'var(--danger, #ef4444)'};">
-                    Score: ${score} ${isPassing ? '(PASS)' : '(BREAK)'}
+                <span style="font-weight: 700; color: ${scoreColor};">
+                    Score: ${score} ${scoreLabel}
                 </span>
             </div>
             ${criteriaBadgesHtml}

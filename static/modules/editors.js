@@ -78,7 +78,7 @@ export function showModelMismatchWarning(selectedModel, metadataModel) {
     warning.className = 'model-mismatch-warning';
     warning.innerHTML = `
         <div style="background: var(--danger-bg, #fee2e2); border: 2px solid var(--danger, #ef4444); border-radius: 8px; padding: 12px; margin-top: 8px;">
-            <strong style="color: var(--danger, #ef4444);">⛔ MODEL MISMATCH - HUNT BLOCKED</strong><br><br>
+            <strong style="color: var(--danger, #ef4444);">MODEL MISMATCH - HUNT BLOCKED</strong><br><br>
             <strong>Required (from metadata):</strong> ${metadataModel}<br>
             <strong>Currently selected:</strong> ${selectedModel}<br><br>
             <em>Select the correct model to enable hunting.</em>
@@ -96,7 +96,7 @@ export function showModelMismatchWarning(selectedModel, metadataModel) {
     }
     
     if (!(state.adminMode && adminBypass('model_mismatch_warning'))) {
-        showToast('⛔ Model mismatch! Select the correct model to hunt.', 'error');
+        showToast('Model mismatch! Select the correct model to hunt.', 'error');
     }
 }
 

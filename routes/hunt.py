@@ -130,7 +130,7 @@ async def get_review_results(session_id: str):
         "count": len(results),
         "results": [r.model_dump() for r in results],
         "summary": {
-            "failed_count": len([r for r in results if r.judge_score == 0]),
-            "passed_count": len([r for r in results if r.judge_score >= 1])
+            "failed_count": len([r for r in results if r.sample_label == "BREAK"]),
+            "passed_count": len([r for r in results if r.sample_label == "PASS"])
         }
     }

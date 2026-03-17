@@ -48,11 +48,11 @@ function _showUpdateIndicator() {
 
     btn.addEventListener('click', async () => {
         const confirmed = await showAppModal({
-            title: '🔄 New Update Available',
+            title: 'New Update Available',
             message:
                 'A new version of Model Hunter is ready.\n\n' +
                 'Refreshing will reload the app and any unsaved progress will be lost.\n\n' +
-                '💡 Tip: If you are in the middle of a task, finish and submit it first. ' +
+                'Tip: If you are in the middle of a task, finish and submit it first. ' +
                 'Update before starting your next task, not during one.',
             buttons: [
                 { label: 'Not Now', primary: false, value: false },

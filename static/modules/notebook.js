@@ -44,7 +44,7 @@ function _appendNbStreamCriterion(containerId, event) {
     if (!body) return;
     const isPass = event.status === 'PASS';
     const isMissing = event.status === 'MISSING';
-    const icon = isMissing ? '⚠️' : isPass ? '✅' : '❌';
+    const icon = isMissing ? '[MISSING]' : isPass ? '[PASS]' : '[FAIL]';
     const color = isMissing ? 'var(--warning, #f59e0b)' : isPass ? 'var(--success, #22c55e)' : 'var(--danger, #ef4444)';
     const card = document.createElement('div');
     card.className = 'tb-criterion-enter';
@@ -148,7 +148,7 @@ export async function runProceedToQualityCheck() {
     const btn = document.getElementById('proceedToQCBtn');
     if (btn) {
         btn.disabled = true;
-        btn.textContent = '⏳ Running QC…';
+        btn.textContent = 'Running QC...';
     }
 
     try {
@@ -169,7 +169,7 @@ export async function runProceedToQualityCheck() {
     } finally {
         if (btn) {
             btn.disabled = false;
-            btn.textContent = '✓ Proceed to Quality Check';
+            btn.textContent = 'Proceed to Quality Check';
         }
     }
 }
@@ -397,7 +397,7 @@ export function initFileUpload() {
                 if (retryBtn) {
                     setupFetchButton();
                 } else {
-                    console.error('❌ Fetch button still not found after retry');
+                    console.error('Fetch button still not found after retry');
                 }
             }, 100);
         }
@@ -516,7 +516,7 @@ export async function fetchFromUrl(forceNew = false) {
     try {
         showToast('Fetching notebook from URL...', 'info');
         elements.fetchUrlBtn.disabled = true;
-        elements.fetchUrlBtn.textContent = '⏳ Fetching...';
+        elements.fetchUrlBtn.textContent = 'Fetching...';
         
         const trainerInfo = getTrainerInfo();
         const response = await fetch('/api/fetch-notebook', {
@@ -561,7 +561,7 @@ export async function fetchFromUrl(forceNew = false) {
     } finally {
         if (elements.fetchUrlBtn) {
             elements.fetchUrlBtn.disabled = false;
-            elements.fetchUrlBtn.textContent = '📥 Fetch';
+            elements.fetchUrlBtn.textContent = 'Fetch';
         }
     }
 }
@@ -572,7 +572,7 @@ export async function createNotebook() {
     const title = titleInput?.value?.trim() || 'Trainer Notebook';
 
     try {
-        if (btn) { btn.disabled = true; btn.textContent = '⏳ Creating...'; }
+        if (btn) { btn.disabled = true; btn.textContent = 'Creating...'; }
         showToast('Creating notebook in Google Drive...', 'info');
 
         const trainerInfo = getTrainerInfo();
@@ -693,7 +693,7 @@ export function handleNotebookLoaded(data, isUrl = false, overrideUrl = null) {
         uploadChevron.classList.add('collapsed');
     }
     if (uploadHeaderText) {
-        uploadHeaderText.textContent = 'Notebook Loaded ✓';
+        uploadHeaderText.textContent = 'Notebook Loaded';
     }
     
     // Config section is shown after testbed "Use as Ideal Response" commit
@@ -729,7 +729,7 @@ export function handleNotebookLoaded(data, isUrl = false, overrideUrl = null) {
             if (modelPrefix) {
                 modelSource = 'metadata';
             } else {
-                console.warn(`⚠️ Model value in metadata was empty after cleaning: "${rawModel}"`);
+                console.warn(`Model value in metadata was empty after cleaning: "${rawModel}"`);
             }
         } else {
         }
@@ -745,7 +745,7 @@ export function handleNotebookLoaded(data, isUrl = false, overrideUrl = null) {
     // Warn if there's a conflict between metadata and model_slots
     if (modelSource === 'metadata' && data.notebook.model_prefix && 
         modelPrefix.toLowerCase() !== data.notebook.model_prefix.toLowerCase()) {
-        console.warn(`⚠️ CONFLICT: Metadata says "${modelPrefix}" but model_slots say "${data.notebook.model_prefix}". Using metadata (PRIORITY).`);
+        console.warn(`CONFLICT: Metadata says "${modelPrefix}" but model_slots say "${data.notebook.model_prefix}". Using metadata (PRIORITY).`);
     }
     
     // If still no model, check if default should be used
@@ -781,7 +781,7 @@ export function handleNotebookLoaded(data, isUrl = false, overrideUrl = null) {
             modelId = 'anthropic/claude-opus-4.5';
             provider = 'openrouter';
         } else {
-            console.warn(`⚠️ Unknown model prefix: "${modelPrefix}". Will use default (Qwen).`);
+            console.warn(`Unknown model prefix: "${modelPrefix}". Will use default (Qwen).`);
             // Default to Qwen if unknown
             modelId = 'qwen/qwen3-235b-a22b-thinking-2507';
             provider = 'openrouter';
@@ -800,7 +800,7 @@ export function handleNotebookLoaded(data, isUrl = false, overrideUrl = null) {
             elements.modelSelect.value = modelId;
             showToast(`Model preselected: ${modelPrefix}`, 'info');
         } else {
-            console.warn('⚠️ Provider or model select elements not found');
+            console.warn('Provider or model select elements not found');
         }
     } else {
         // No model detected - use default (Qwen)
@@ -981,7 +981,7 @@ export async function saveToDrive() {
     
     // ===== VALIDATION: Check if diversity check was already passed at confirmation =====
     if (!(state.adminMode && adminBypass('diversity_check')) && !state.diversityCheckPassed) {
-        console.warn('⚠️ Diversity check not passed at confirmation. This should not happen if user confirmed selection properly.');
+        console.warn('Diversity check not passed at confirmation. This should not happen if user confirmed selection properly.');
         showToast('Diversity check was not completed. Please confirm your selection again.', 'error');
         return;
     }
@@ -995,7 +995,7 @@ export async function saveToDrive() {
     }
     const originalText = btn.textContent;
     btn.disabled = true;
-    btn.textContent = '⏳ Saving...';
+    btn.textContent = 'Saving...';
     
     try {
         // Convert row-based review keys back to hunt_id-based keys for backend compatibility
@@ -1077,7 +1077,7 @@ export async function saveToDrive() {
         // If original_notebook_json is missing, try to fetch it from the backend session storage
         let originalNotebookJson = state.originalNotebookJson;
         if (!originalNotebookJson && state.sessionId) {
-            console.warn('⚠️ originalNotebookJson missing, attempting to fetch from session storage...');
+            console.warn('originalNotebookJson missing, attempting to fetch from session storage...');
             try {
                 const response = await fetch(`/api/get-original-notebook/${state.sessionId}`);
                 if (response.ok) {
@@ -1149,8 +1149,8 @@ export async function saveToDrive() {
         const result = await response.json();
         
         const successMessage = missingReviews.length > 0
-            ? `✅ Saved to Google Drive! (Note: ${missingReviews.length} hunt(s) saved without reviews)`
-            : '✅ Successfully saved to Colab notebook!';
+            ? `Saved to Google Drive! (Note: ${missingReviews.length} hunt(s) saved without reviews)`
+            : 'Successfully saved to Colab notebook!';
         
         showToast(successMessage, missingReviews.length > 0 ? 'warning' : 'success');
         triggerColabConfetti();
@@ -1207,7 +1207,7 @@ function _slotLlmJudge(result) {
     // (single \n isn't enough — Colab needs \n\n for visible line breaks)
     const rawExplanation = result.judge_explanation || '(no explanation)';
     const formattedExplanation = rawExplanation
-        .replace(/\n(❌|✅|⚠️)/g, '\n\n$1');
+        .replace(/\n(\[FAIL\]|\[PASS\]|\[MISSING\])/g, '\n\n$1');
 
     lines.push(`\n**Explanation:**\n${formattedExplanation}`);
     return lines.join('\n');
@@ -1377,7 +1377,7 @@ export async function submitToColab() {
 
     const originalText = btn.textContent;
     btn.disabled = true;
-    btn.textContent = '⏳ Saving...';
+    btn.textContent = 'Saving...';
 
     try {
         const cells = [];
@@ -1485,10 +1485,10 @@ export async function submitToColab() {
         }
 
         playFinalSubmission();
-        showToast(`✅ Submitted to Colab! (${cells.length} cells saved)`, 'success');
+        showToast(`Submitted to Colab! (${cells.length} cells saved)`, 'success');
         triggerColabConfetti();
 
-        btn.textContent = '✅ Submitted';
+        btn.textContent = 'Submitted';
         btn.disabled = true;
 
     } catch (error) {
@@ -1582,7 +1582,7 @@ export function updateAdminModeIndicator(on) {
 export function displayMetadata(metadata) {
     
     if (!elements.metadataSidebar || !elements.metadataGrid) {
-        console.error('❌ Metadata sidebar elements not found!', {
+        console.error('Metadata sidebar elements not found!', {
             sidebar: !!elements.metadataSidebar,
             grid: !!elements.metadataGrid
         });
@@ -1594,7 +1594,7 @@ export function displayMetadata(metadata) {
     
     // Don't return early if metadata is empty - still try to display what we can
     if (!metadata || (typeof metadata === 'object' && Object.keys(metadata).length === 0)) {
-        console.warn('⚠️ No metadata to display or empty object, but will still try to show sidebar if elements exist');
+        console.warn('No metadata to display or empty object, but will still try to show sidebar if elements exist');
         // Don't return - continue to try to display fields
     }
     
@@ -1663,33 +1663,33 @@ export function displayMetadata(metadata) {
     const fields = [
         { 
             keys: ['Task ID', 'Task ID:', 'task id', 'TaskID'], 
-            icon: '🆔', 
+            icon: '', 
             label: 'Task ID',
             badge: true 
         },
         { 
             keys: ['Domain', 'Domain:', 'domain'], 
-            icon: '🌐', 
+            icon: '', 
             label: 'Domain' 
         },
         { 
             keys: ['Use Case', 'Use Case:', 'use case', 'UseCase'], 
-            icon: '💼', 
+            icon: '', 
             label: 'Use Case' 
         },
         { 
             keys: ['L1 Taxonomy', 'L1 Taxonomy:', 'l1 taxonomy', 'L1Taxonomy'], 
-            icon: '📚', 
+            icon: '', 
             label: 'L1 Taxonomy' 
         },
         { 
             keys: ['User Prompt Length', 'User Prompt length', 'User Prompt Length:', 'user prompt length'], 
-            icon: '📏', 
+            icon: '', 
             label: 'User Prompt Length' 
         },
         { 
             keys: ['Model', 'Model:', 'model'], 
-            icon: '🤖', 
+            icon: '', 
             label: 'Model' 
         }
     ];
@@ -1768,7 +1768,7 @@ export function displayMetadata(metadata) {
             badge.title = 'Click to copy';
             badge.addEventListener('click', () => {
                 navigator.clipboard.writeText(displayValue);
-                showToast('✅ Copied to clipboard!', 'success');
+                showToast('Copied to clipboard!', 'success');
             });
             valueDiv.appendChild(badge);
         } else {
@@ -1794,14 +1794,14 @@ export function displayMetadata(metadata) {
             elements.metadataSidebar.classList.remove('collapsed');
             document.body.classList.add('sidebar-visible');
         } else {
-            console.error('❌ Metadata sidebar element not found!');
+            console.error('Metadata sidebar element not found!');
         }
     } else {
         if (elements.metadataSidebar) {
             elements.metadataSidebar.style.display = 'none';
             elements.metadataSidebar.classList.remove('collapsed');
             document.body.classList.remove('sidebar-visible');
-            console.warn('⚠️ No metadata items to display, hiding sidebar');
+            console.warn('No metadata items to display, hiding sidebar');
         }
     }
 }
@@ -1819,7 +1819,7 @@ function _populateTaskInfoChip(fields, getValue) {
     grid.innerHTML = '';
 
     // Field icon map
-    const icons = { 'Task ID': '🆔', 'Domain': '🌐', 'Use Case': '💼', 'L1 Taxonomy': '📚', 'User Prompt Length': '📏', 'Model': '🤖' };
+    const icons = { 'Task ID': '', 'Domain': '', 'Use Case': '', 'L1 Taxonomy': '', 'User Prompt Length': '', 'Model': '' };
 
     fields.forEach(field => {
         const value = getValue(field.keys);
@@ -1846,7 +1846,7 @@ function _populateTaskInfoChip(fields, getValue) {
             badge.addEventListener('click', async () => {
                 if (value && value !== 'N/A') {
                     navigator.clipboard.writeText(value);
-                    showToast('✅ Copied Task ID!', 'success');
+                    showToast('Copied Task ID!', 'success');
                 }
             });
             valueEl.appendChild(badge);
@@ -1894,7 +1894,7 @@ export async function saveCell(cellType) {
     
     // Validate prompt length if saving prompt
     if (cellType === 'prompt' && !validatePromptLength()) {
-        showToast('⚠️ Cannot save: Prompt length is outside the required range', 'error');
+        showToast('Cannot save: Prompt length is outside the required range', 'error');
         return;
     }
     
@@ -1915,7 +1915,7 @@ export async function saveCell(cellType) {
         case 'response_reference':
             content = (nb.response_reference || '').trim();
             if (!content) {
-                showToast('⚠️ Please ensure Model Reference is in valid format', 'error');
+                showToast('Please ensure Model Reference is in valid format', 'error');
                 return;
             }
             cellHeading = 'response_reference';
@@ -1950,7 +1950,7 @@ export async function saveCell(cellType) {
         
         if (btn) {
             btn.disabled = true;
-            btn.textContent = '💾 Saving...';
+            btn.textContent = 'Saving...';
         }
         
         const response = await fetch(`/api/update-notebook-cell/${state.sessionId}`, {
@@ -1968,7 +1968,7 @@ export async function saveCell(cellType) {
         }
         
         const data = await response.json();
-        showToast(`✅ ${cellType} saved to Colab!`, 'success');
+        showToast(`${cellType} saved to Colab!`, 'success');
         
         // Mark as saved
         state.unsavedChanges[cellType === 'response_reference' ? 'modelRef' : cellType] = false;
@@ -1988,16 +1988,16 @@ export async function saveCell(cellType) {
         let originalText = '';
         if (cellType === 'prompt') {
             btn = elements.savePromptBtn;
-            originalText = '💾 Save Prompt';
+            originalText = 'Save Prompt';
         } else if (cellType === 'response') {
             btn = elements.saveResponseBtn;
-            originalText = '💾 Save Response';
+            originalText = 'Save Response';
         } else if (cellType === 'response_reference') {
             btn = elements.saveModelRefBtn;
-            originalText = '💾 Save Criteria';
+            originalText = 'Save Criteria';
         } else if (cellType === 'judge_system_prompt') {
             btn = elements.saveJudgeBtn;
-            originalText = '💾 Save Judge';
+            originalText = 'Save Judge';
         }
         
         if (btn) {
@@ -2017,7 +2017,7 @@ export async function saveAllCells() {
     
     // Validate prompt length (skip validation in multi-turn — turn 2+ prompts don't have metadata length constraints)
     if (!state.isMultiTurn && !validatePromptLength()) {
-        showToast('⚠️ Cannot save: Prompt length is outside the required range', 'error');
+        showToast('Cannot save: Prompt length is outside the required range', 'error');
         return;
     }
     
@@ -2049,7 +2049,7 @@ export async function saveAllCells() {
     try {
         if (elements.saveAllBtn) {
             elements.saveAllBtn.disabled = true;
-            elements.saveAllBtn.textContent = '💾 Saving…';
+            elements.saveAllBtn.textContent = 'Saving...';
         }
         
         const response = await fetch(`/api/update-notebook-cells/${state.sessionId}`, {
@@ -2064,7 +2064,7 @@ export async function saveAllCells() {
         }
         
         const data = await response.json();
-        showToast(`✅ All changes saved to Colab! (${cellsToSave.length} cells)`, 'success');
+        showToast(`All changes saved to Colab! (${cellsToSave.length} cells)`, 'success');
         
         // Mark all as saved
         Object.keys(state.unsavedChanges).forEach(key => {
@@ -2087,7 +2087,7 @@ export async function saveAllCells() {
     } finally {
         if (elements.saveAllBtn) {
             elements.saveAllBtn.disabled = false;
-            elements.saveAllBtn.textContent = '💾 Save All & Judge';
+            elements.saveAllBtn.textContent = 'Save All & Judge';
         }
     }
 }
@@ -2118,7 +2118,7 @@ export function validateModelReferenceAndCriteria(responseReference) {
         if (elements.modelrefPreview) {
             elements.modelrefPreview.innerHTML = `
                 <div style="color: var(--danger); margin-bottom: 1rem; padding: 0.75rem; background: var(--danger-bg); border-radius: 8px;">
-                    <strong>❌ Invalid JSON Format</strong><br>
+                    <strong>Invalid JSON Format</strong><br>
                     ${escapeHtml(jsonValidation.error)}
                 </div>
                 <pre style="white-space: pre-wrap; word-break: break-word;">${escapeHtml(responseReference || 'No content')}</pre>
@@ -2158,7 +2158,7 @@ export function validateModelReferenceAndCriteria(responseReference) {
         if (elements.modelrefPreview) {
             elements.modelrefPreview.innerHTML = `
                 <div style="color: var(--warning); margin-bottom: 1rem; padding: 0.75rem; background: var(--warning-bg); border-radius: 8px;">
-                    <strong>⚠️ Missing Criteria</strong><br>
+                    <strong>Missing Criteria</strong><br>
                     The following criteria from the original notebook are missing from Model Reference:<br>
                     ${missingList}
                 </div>
@@ -2169,7 +2169,7 @@ export function validateModelReferenceAndCriteria(responseReference) {
             elements.startHuntBtn.disabled = false;
             elements.startHuntBtn.title = '';
         }
-        showToast(`⚠️ Missing criteria: ${missingCriteriaIds.join(', ')}`, 'warning');
+        showToast(`Missing criteria: ${missingCriteriaIds.join(', ')}`, 'warning');
         return;
     }
     
@@ -2437,7 +2437,7 @@ export async function saveAndJudgeResponse() {
         return;
     }
     if (currentCriteria.length < 3) {
-        showToast(`❌ Minimum 3 criteria required. Currently have ${currentCriteria.length}. Please add more criteria before saving.`, 'error');
+        showToast(`Minimum 3 criteria required. Currently have ${currentCriteria.length}. Please add more criteria before saving.`, 'error');
         return;
     }
     
@@ -2458,7 +2458,7 @@ export async function saveAndJudgeResponse() {
     
     try {
         btn.disabled = true;
-        btn.textContent = '💾 Saving...';
+        btn.textContent = 'Saving...';
         // Don't hide result div - keep response editor visible
         if (resultDiv) {
             resultDiv.innerHTML = '';
@@ -2480,14 +2480,14 @@ export async function saveAndJudgeResponse() {
         // CRITICAL: Update originalNotebookJson so snapshot saves include this cell
         updateOriginalNotebookWithCell('response', newResponse);
         
-        showToast('✅ Saved to Colab!', 'success');
-        btn.textContent = '⚖️ Judging...';
+        showToast('Saved to Colab!', 'success');
+        btn.textContent = 'Judging...';
 
         // Step 2: Judge via streaming SSE
         const judgeResponse = await fetch(`/api/judge-reference-stream/${state.sessionId}`, { method: 'POST' });
         if (!judgeResponse.ok) {
             if (judgeResponse.status === 404) {
-                showToast('⚠️ Session expired. Please reload the notebook.', 'error');
+                showToast('Session expired. Please reload the notebook.', 'error');
                 throw new Error('Session not found. Please reload the notebook from Colab.');
             }
             const error = await judgeResponse.json().catch(() => ({}));
@@ -2554,7 +2554,7 @@ export async function saveAndJudgeResponse() {
             lbl.previousElementSibling?.remove();
             const sc = isPassing ? 'var(--success,#22c55e)' : 'var(--danger,#ef4444)';
             lbl.style.color = sc;
-            lbl.textContent = `${isPassing ? '✅' : '❌'} Score: ${finalEvent.score ?? 0} — ${finalEvent.passing || 0}/${finalEvent.total || 0} Passing`;
+            lbl.textContent = `Score: ${finalEvent.score ?? 0} — ${finalEvent.passing || 0}/${finalEvent.total || 0} Passing`;
             if (resultDiv) {
                 const container = resultDiv.querySelector('div');
                 if (container) container.style.borderColor = sc;
@@ -2576,7 +2576,7 @@ export async function saveAndJudgeResponse() {
         if (elements.startHuntBtn) elements.startHuntBtn.disabled = false;
     } finally {
         btn.disabled = false;
-        btn.textContent = '💾 Save & Verify';
+        btn.textContent = 'Save & Verify';
     }
 }
 
@@ -2613,9 +2613,9 @@ export async function judgeReferenceResponse() {
     const missingBeforeJudge = [...initialCriteriaIds].filter(id => !currentCriteriaIds.has(id));
     
     if (currentCriteria.length < 3) {
-        showToast(`❌ Minimum 3 criteria required. Currently have ${currentCriteria.length}.`, 'error');
+        showToast(`Minimum 3 criteria required. Currently have ${currentCriteria.length}.`, 'error');
         if (elements.referenceJudgeResult) {
-            elements.referenceJudgeResult.innerHTML = `<div style="padding:1rem;background:var(--bg-primary);border:2px solid var(--warning);border-radius:8px;color:var(--text-secondary);">⚠️ Minimum 3 Criteria Required. You have ${currentCriteria.length}.</div>`;
+            elements.referenceJudgeResult.innerHTML = `<div style="padding:1rem;background:var(--bg-primary);border:2px solid var(--warning);border-radius:8px;color:var(--text-secondary);">Minimum 3 Criteria Required. You have ${currentCriteria.length}.</div>`;
             elements.referenceJudgeResult.classList.remove('hidden');
         }
         return;
@@ -2623,9 +2623,9 @@ export async function judgeReferenceResponse() {
     
     if (missingBeforeJudge.length > 0) {
         const missingIds = missingBeforeJudge.join(', ');
-        showToast(`❌ Missing criteria: ${missingIds}`, 'error');
+        showToast(`Missing criteria: ${missingIds}`, 'error');
         if (elements.referenceJudgeResult) {
-            elements.referenceJudgeResult.innerHTML = `<div style="padding:1rem;background:var(--bg-primary);border:2px solid var(--warning);border-radius:8px;color:var(--text-secondary);">⚠️ Missing criteria from original: ${missingIds}</div>`;
+            elements.referenceJudgeResult.innerHTML = `<div style="padding:1rem;background:var(--bg-primary);border:2px solid var(--warning);border-radius:8px;color:var(--text-secondary);">Missing criteria from original: ${missingIds}</div>`;
             elements.referenceJudgeResult.classList.remove('hidden');
         }
         return;
@@ -2637,7 +2637,7 @@ export async function judgeReferenceResponse() {
     try {
         if (btn) {
             btn.disabled = true;
-            btn.textContent = '⏳ Judging...';
+            btn.textContent = 'Judging...';
         }
         if (resultDiv) {
             resultDiv.innerHTML = '';
@@ -2647,7 +2647,7 @@ export async function judgeReferenceResponse() {
         const response = await fetch(`/api/judge-reference-stream/${state.sessionId}`, { method: 'POST' });
         if (!response.ok) {
             if (response.status === 404) {
-                showToast('⚠️ Session expired. Please reload notebook.', 'error');
+                showToast('Session expired. Please reload notebook.', 'error');
                 throw new Error('Session not found');
             }
             const error = await response.json().catch(() => ({}));
@@ -2724,7 +2724,7 @@ export async function judgeReferenceResponse() {
             lbl.previousElementSibling?.remove();
             const sc = missing.length > 0 ? 'var(--warning)' : (isPassing ? 'var(--success,#22c55e)' : 'var(--danger,#ef4444)');
             lbl.style.color = sc;
-            lbl.innerHTML = `<span class="score-badge ${isPassing ? 'score-1' : 'score-0'}">${isPassing ? '✅' : '❌'} Score: ${finalEvent.score ?? 0}</span> ${escapeHtml(statusMsg)}`;
+            lbl.innerHTML = `<span class="score-badge ${isPassing ? 'score-1' : 'score-0'}">Score: ${finalEvent.score ?? 0}</span> ${escapeHtml(statusMsg)}`;
             if (resultDiv) {
                 const container = resultDiv.querySelector('div');
                 if (container) container.style.borderColor = sc;
@@ -2737,7 +2737,7 @@ export async function judgeReferenceResponse() {
                 const explEl = document.createElement('div');
                 explEl.style.marginTop = '0.75rem';
                 explEl.innerHTML = `
-                    <label style="font-weight: 600; font-size: 0.9rem;">📝 Judge Explanation:</label>
+                    <label style="font-weight: 600; font-size: 0.9rem;">Judge Explanation:</label>
                     <p style="margin-top: 0.25rem; font-size: 0.9rem; color: var(--text-secondary); white-space: pre-wrap;">${escapeHtml(finalEvent.explanation || 'No explanation')}</p>`;
                 mainContainer.appendChild(explEl);
             }
@@ -2758,8 +2758,8 @@ export async function judgeReferenceResponse() {
     } finally {
         if (btn) {
             btn.disabled = false;
-            if (btn.id === 'judgeBeforeHuntBtn') btn.textContent = '⚖️ Check Ideal Response';
-            else if (btn.id === 'judgeReferenceBtn') btn.textContent = '⚖️ Judge Only';
+            if (btn.id === 'judgeBeforeHuntBtn') btn.textContent = 'Check Ideal Response';
+            else if (btn.id === 'judgeReferenceBtn') btn.textContent = 'Judge Only';
         }
     }
 }
@@ -2783,7 +2783,7 @@ export async function saveResponseOnly() {
     
     try {
         btn.disabled = true;
-        btn.textContent = '💾 Saving...';
+        btn.textContent = 'Saving...';
         
         const saveResponse = await fetch(`/api/update-response/${state.sessionId}`, {
             method: 'POST',
@@ -2796,13 +2796,13 @@ export async function saveResponseOnly() {
         }
         
         updateOriginalNotebookWithCell('response', newResponse);
-        showToast('✅ Saved to Colab!', 'success');
+        showToast('Saved to Colab!', 'success');
         
     } catch (error) {
         showError(error, { operation: 'Operation' });
     } finally {
         btn.disabled = false;
-        btn.textContent = '💾 Save Response';
+        btn.textContent = 'Save Response';
     }
 }
 

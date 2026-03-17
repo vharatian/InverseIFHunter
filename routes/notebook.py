@@ -776,7 +776,7 @@ async def save_snapshot(request: Request):
         # Validate snapshot
         is_valid, error_msg, snapshot = snapshot_service.validate_snapshot(body)
         if not is_valid:
-            logger.error(f"❌ Snapshot validation failed: {error_msg}")
+            logger.error(f"Snapshot validation failed: {error_msg}")
             raise HTTPException(400, f"Invalid snapshot: {error_msg}")
         
         # Normalize snapshot
@@ -790,7 +790,7 @@ async def save_snapshot(request: Request):
         if not file_id:
             raise HTTPException(400, "Could not determine file_id from snapshot")
         
-        logger.info(f"📝 Received snapshot for file_id {file_id}")
+        logger.info(f"Received snapshot for file_id {file_id}")
         logger.info(f"   - Timestamp: {datetime.now().isoformat()}")
         logger.info(f"   - Results: {len(snapshot.selected_results)} (order preserved)")
         
@@ -819,7 +819,7 @@ async def save_snapshot(request: Request):
             
             selected_valid_count = count_valid_responses(results)
             total_hunts_ran = snapshot.total_hunts_ran
-            logger.info(f"📊 Total hunts ran: {total_hunts_ran} (selected: {selected_valid_count} valid of {len(results)} sent)")
+            logger.info(f"Total hunts ran: {total_hunts_ran} (selected: {selected_valid_count} valid of {len(results)} sent)")
             
             is_multi_turn = (
                 snapshot.metadata and 
@@ -830,7 +830,7 @@ async def save_snapshot(request: Request):
             if is_multi_turn:
                 turns_data = snapshot.metadata.get('turns', [])
                 conversation_history = snapshot.metadata.get('conversation_history', [])
-                logger.info(f"📝 Multi-turn export: {len(turns_data)} turns")
+                logger.info(f"Multi-turn export: {len(turns_data)} turns")
                 
                 modified_content = notebook_parser.export_multi_turn_notebook(
                     original_content=original_content,
@@ -869,7 +869,7 @@ async def save_snapshot(request: Request):
         if not result.get("success"):
             raise HTTPException(500, result.get("error", "Write failed"))
         
-        logger.info(f"✅ Successfully saved snapshot to file_id {file_id}")
+        logger.info(f"Successfully saved snapshot to file_id {file_id}")
         
         _log_telemetry_safe("task_completed", {
             "session_id": snapshot.session_id if hasattr(snapshot, 'session_id') else None,
@@ -890,7 +890,7 @@ async def save_snapshot(request: Request):
         raise HTTPException(500, "Google Drive dependencies not installed")
     except Exception as e:
         import traceback
-        logger.error(f"❌ Snapshot save error: {str(e)}", exc_info=True)
+        logger.error(f"Snapshot save error: {str(e)}", exc_info=True)
         traceback.print_exc()
         raise HTTPException(500, f"Snapshot save failed: {str(e)}")
 
@@ -927,7 +927,7 @@ async def write_notebook(request: Request):
             raise HTTPException(500, "Failed to update file on Google Drive")
 
         cells = notebook_json.get("cells", [])
-        logger.info(f"✅ write-notebook: wrote {len(cells)} cells to file_id {file_id}")
+        logger.info(f"write-notebook: wrote {len(cells)} cells to file_id {file_id}")
         return {"success": True, "file_id": file_id, "cells_written": len(cells)}
 
     except HTTPException:
@@ -935,7 +935,7 @@ async def write_notebook(request: Request):
     except ImportError:
         raise HTTPException(500, "Google Drive dependencies not installed")
     except Exception as e:
-        logger.error(f"❌ write-notebook error: {str(e)}", exc_info=True)
+        logger.error(f"write-notebook error: {str(e)}", exc_info=True)
         raise HTTPException(500, f"Write failed: {str(e)}")
 
 

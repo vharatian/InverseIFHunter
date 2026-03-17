@@ -186,10 +186,7 @@ export function showToast(message, type = 'info') {
     const toast = document.createElement('div');
     toast.className = `alert alert-${type === 'info' ? 'warning' : type} fade-in`;
     toast.style.cssText += 'pointer-events: auto; white-space: nowrap;';
-    toast.innerHTML = `
-        <span>${type === 'success' ? '✅' : type === 'error' ? '❌' : 'ℹ️'}</span>
-        <span>${message}</span>
-    `;
+    toast.innerHTML = `<span>${message}</span>`;
 
     elements.toastContainer.appendChild(toast);
 
@@ -211,7 +208,6 @@ export function showToastWithRetry(message, hint, onRetry) {
     toast.className = 'alert alert-error fade-in toast-with-retry';
     toast.style.cssText += 'pointer-events: auto; white-space: nowrap;';
     toast.innerHTML = `
-        <span>❌</span>
         <div class="toast-retry-content">
             <span>${escapeHtml(message)}</span>
             ${hint ? `<span class="toast-hint">${escapeHtml(hint)}</span>` : ''}
@@ -300,14 +296,17 @@ export function handleHumanJudgment(humanScore) {
     // Reveal LLM judgment
     const llmScore = result.score;
     const isMatch = humanScore === llmScore;
+    const passingMode = state.config?.passing_mode === true;
     
-    elements.humanJudgeResult.textContent = humanScore === 0 ? '❌ FAIL (0)' : '✅ PASS (1)';
-    elements.humanJudgeResult.style.color = humanScore === 0 ? 'var(--success)' : 'var(--danger)';
+    const humanWanted = passingMode ? humanScore === 1 : humanScore === 0;
+    elements.humanJudgeResult.textContent = humanScore === 0 ? 'FAIL (0)' : 'PASS (1)';
+    elements.humanJudgeResult.style.color = humanWanted ? 'var(--success)' : 'var(--danger)';
     
-    elements.llmJudgeResult.textContent = llmScore === 0 ? '❌ FAIL (0)' : llmScore === 1 ? '✅ PASS (1)' : '? Unknown';
-    elements.llmJudgeResult.style.color = llmScore === 0 ? 'var(--success)' : 'var(--danger)';
+    const llmWanted = passingMode ? llmScore === 1 : llmScore === 0;
+    elements.llmJudgeResult.textContent = llmScore === 0 ? 'FAIL (0)' : llmScore === 1 ? 'PASS (1)' : '? Unknown';
+    elements.llmJudgeResult.style.color = llmWanted ? 'var(--success)' : 'var(--danger)';
     
-    elements.judgeMatch.textContent = isMatch ? '✅ Match!' : '❌ Disagree';
+    elements.judgeMatch.textContent = isMatch ? 'Match!' : 'Disagree';
     elements.judgeMatch.className = `comparison-value ${isMatch ? 'match' : 'no-match'}`;
     
     // Update table row with actual score now
@@ -328,12 +327,9 @@ export function updateRowWithScore(huntId, result) {
         <span class="score-badge" style="background: var(--success-bg); color: var(--success);">Reviewed</span>
     `;
     
-    // Update score (keep score emojis per user request)
     if (score !== null && score !== undefined) {
         row.querySelector('.score-cell').innerHTML = `
-            <span class="score-badge score-${score}">
-                ${score === 0 ? '✅ 0' : '❌ 1'}
-            </span>
+            <span class="score-badge score-${score}">${score}</span>
         `;
     }
     
@@ -394,7 +390,7 @@ export function showFinalResults() {
 
     const successRate = totalHunts > 0 ? Math.round((breaksFound / totalHunts) * 100) : 0;
     document.getElementById('summarySuccess').textContent = `${successRate}% (${breaksFound}/${totalHunts} breaks)`;
-    document.getElementById('summaryMet').textContent = celMet ? '✅ Yes' : '❌ No';
+    document.getElementById('summaryMet').textContent = celMet ? 'Yes' : 'No';
 
     displayBreakingResults();
 

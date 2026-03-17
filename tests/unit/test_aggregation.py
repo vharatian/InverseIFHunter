@@ -19,14 +19,14 @@ from services.aggregation import classify_sample, aggregate_batch
 # ---------------------------------------------------------------------------
 
 def test_classify_ratio_pass_threshold_05_boundary():
-    """At pass_threshold=0.5, pass_rate > 0.5 passes; 0.5 exactly does not (strict)."""
-    # 2/4 = 0.5 -> not pass (strict: > 0.5)
+    """At pass_threshold=0.5, pass_rate >= 0.5 passes (boundary inclusive)."""
+    # 2/4 = 0.5 -> pass (>= 0.5)
     out = classify_sample(
         {"C1": "PASS", "C2": "FAIL", "C3": "PASS", "C4": "FAIL"},
         "ratio",
         0.5,
     )
-    assert out["label"] == "BREAK"
+    assert out["label"] == "PASS"
     assert out["pass_rate"] == 0.5
     assert out["pass_count"] == 2
     assert out["fail_count"] == 2

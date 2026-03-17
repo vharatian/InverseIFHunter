@@ -93,7 +93,7 @@ class SnapshotService:
             if not snapshot.file_id and not snapshot.url:
                 return False, "Either file_id or url must be provided", None
             
-            logger.info(f"✅ Snapshot validated successfully: {len(snapshot.selected_results)} results")
+            logger.info(f"Snapshot validated successfully: {len(snapshot.selected_results)} results")
             return True, None, snapshot
             
         except ValidationError as e:
@@ -144,7 +144,7 @@ class SnapshotService:
             metadata=snapshot.metadata
         )
         
-        logger.info(f"✅ Snapshot normalized: {len(normalized_results)} results (order preserved)")
+        logger.info(f"Snapshot normalized: {len(normalized_results)} results (order preserved)")
         return normalized
     
     async def queue_write(self, file_id: str, snapshot: NotebookSnapshot) -> bool:
@@ -160,12 +160,12 @@ class SnapshotService:
         
         # Check if queue is full
         if queue.full():
-            logger.warning(f"⚠️ Write queue for file_id {file_id} is full ({self.max_queue_size} items)")
+            logger.warning(f"Write queue for file_id {file_id} is full ({self.max_queue_size} items)")
             return False
         
         # Add to queue
         await queue.put(snapshot)
-        logger.info(f"📝 Queued write for file_id {file_id} (queue size: {queue.qsize()})")
+        logger.info(f"Queued write for file_id {file_id} (queue size: {queue.qsize()})")
         return True
     
     async def process_write_queue(self, file_id: str, write_func: callable) -> Dict[str, Any]:
@@ -194,7 +194,7 @@ class SnapshotService:
             snapshot = await queue.get()
             
             try:
-                logger.info(f"🔄 Processing write for file_id {file_id} (queue remaining: {queue.qsize()})")
+                logger.info(f"Processing write for file_id {file_id} (queue remaining: {queue.qsize()})")
                 
                 # Log snapshot details
                 logger.info(f"   - Results: {len(snapshot.selected_results)} (order preserved)")
@@ -204,12 +204,12 @@ class SnapshotService:
                 # Execute write
                 result = await write_func(file_id, snapshot)
                 
-                logger.info(f"✅ Successfully wrote to file_id {file_id}")
+                logger.info(f"Successfully wrote to file_id {file_id}")
                 return {"success": True, "result": result}
                 
             except Exception as e:
                 error_msg = f"Write failed for file_id {file_id}: {str(e)}"
-                logger.error(f"❌ {error_msg}", exc_info=True)
+                logger.error(f"{error_msg}", exc_info=True)
                 return {"success": False, "error": error_msg}
     
 

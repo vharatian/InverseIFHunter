@@ -137,7 +137,7 @@ export function updateHuntLimitUI() {
             if (remaining === 0) {
                 indicator.innerHTML = `
                     <span style="color: var(--danger); font-weight: 600;">
-                        ⛔ Turn limit reached (${thisTurn}/${MAX_HUNTS_PER_NOTEBOOK} this turn)
+                        Turn limit reached (${thisTurn}/${MAX_HUNTS_PER_NOTEBOOK} this turn)
                     </span>
                     <br>
                     <span style="color: var(--text-muted); font-size: 0.8rem;">
@@ -148,14 +148,14 @@ export function updateHuntLimitUI() {
             } else if (remaining <= 4) {
                 indicator.innerHTML = `
                     <span style="color: var(--warning);">
-                        ⚠️ ${remaining} hunts remaining this turn${turnLabel} (${thisTurn}/${MAX_HUNTS_PER_NOTEBOOK})
+                        ${remaining} hunts remaining this turn${turnLabel} (${thisTurn}/${MAX_HUNTS_PER_NOTEBOOK})
                     </span>
                     ${totalGlobal > thisTurn ? `<br><span style="color: var(--text-muted); font-size: 0.75rem;">${totalGlobal} total across all turns</span>` : ''}
                 `;
             } else {
                 indicator.innerHTML = `
                     <span style="color: var(--text-muted);">
-                        📊 ${thisTurn}/${MAX_HUNTS_PER_NOTEBOOK} hunts this turn${turnLabel}
+                        ${thisTurn}/${MAX_HUNTS_PER_NOTEBOOK} hunts this turn${turnLabel}
                     </span>
                     ${totalGlobal > thisTurn ? `<br><span style="color: var(--text-muted); font-size: 0.75rem;">${totalGlobal} total across all turns</span>` : ''}
                 `;
@@ -182,7 +182,7 @@ function showHuntWarningDialog(remainingAfter) {
         overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:center;justify-content:center;';
         overlay.innerHTML = `
             <div style="background:var(--bg-secondary,#1e1e2e);border-radius:12px;padding:1.5rem 2rem;max-width:420px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.3);border:1px solid var(--border,#333);">
-                <div style="font-size:1.5rem;text-align:center;margin-bottom:0.75rem;">⚠️</div>
+                <div style="font-size:1.5rem;text-align:center;margin-bottom:0.75rem;">!</div>
                 <div style="font-weight:700;font-size:1.05rem;text-align:center;margin-bottom:0.75rem;color:var(--warning,#f59e0b);">
                     Hunt Limit Warning
                 </div>
@@ -206,7 +206,7 @@ function showHuntWarningDialog(remainingAfter) {
 export function showHuntLimitReachedError() {
     const turnLabel = state.currentTurn > 1 ? ` for Turn ${state.currentTurn}` : '';
     showToast(
-        `⛔ Maximum ${MAX_HUNTS_PER_NOTEBOOK} hunts reached${turnLabel}. ` +
+        `Maximum ${MAX_HUNTS_PER_NOTEBOOK} hunts reached${turnLabel}. ` +
         `Continue to the next turn or end the session.`,
         'error'
     );
@@ -379,7 +379,7 @@ export async function startHunt() {
     // MANDATORY: Empty prompt check — no bypass (admin or normal)
     const promptText = (state.notebook?.prompt ?? '').trim();
     if (!promptText) {
-        showToast('❌ Prompt cannot be empty. Please enter a prompt before starting the hunt.', 'error');
+        showToast('Prompt cannot be empty. Please enter a prompt before starting the hunt.', 'error');
         return;
     }
     
@@ -406,7 +406,7 @@ export async function startHunt() {
             return;
         } else {
             showToast(
-                `⚠️ Only ${remaining} hunts remaining${turnCtx}. Reduce hunt count to ${remaining} or less.`,
+                `Only ${remaining} hunts remaining${turnCtx}. Reduce hunt count to ${remaining} or less.`,
                 'warning'
             );
             return;
@@ -836,13 +836,12 @@ export function handleHuntResult(data) {
             const passingMode = state.config?.passing_mode === true;
             if (sample_label === 'ERROR') {
                 row.querySelector('.score-cell').innerHTML = `
-                    <span class="score-badge" style="background: var(--warning-bg); color: var(--warning);" title="Missing criteria — score unreliable">⚠️</span>
+                    <span class="score-badge" style="background: var(--warning-bg); color: var(--warning);" title="Missing criteria — score unreliable">!</span>
                 `;
             } else if (score !== null && score !== undefined) {
-                const wanted = passingMode ? score === 1 : score === 0;
                 row.querySelector('.score-cell').innerHTML = `
                     <span class="score-badge score-${score}" title="${passingMode ? (score === 1 ? 'Pass' : 'Fail') : (score === 0 ? 'Break' : 'Pass')}">
-                        ${wanted ? '✅' : '❌'} ${score}
+                        ${score}
                     </span>
                 `;
             } else {

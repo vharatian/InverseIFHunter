@@ -204,9 +204,9 @@ def _compute_judge_score(results: List[Dict], total: int, pass_threshold: float)
         score = 1 if pass_rate > 0 else 0
     sorted_results = sorted(results, key=lambda r: r["id"])
     def _icon(s):
-        if s == "PASS": return "✅"
-        if s == "MISSING": return "⚠️"
-        return "❌"
+        if s == "PASS": return "[PASS]"
+        if s == "MISSING": return "[MISSING]"
+        return "[FAIL]"
     criteria_lines = [
         f"{_icon(r['status'])} {r['id']} ({r['status']}): {r['reason']}"
         for r in sorted_results
@@ -259,7 +259,7 @@ async def _eval_criterion_via_openrouter(client, prompt, student_response, stand
             logger.warning("Judge criterion %s attempt %s failed: %s", c_id, attempt + 1, e)
             reason = f"Eval error: {str(e)}" + (f" (attempt {attempt + 1}/3)" if attempt < 2 else " after retries")
     if status == "MISSING":
-        reason = f"⚠️ {reason}"
+        reason = f"[MISSING] {reason}"
     return {"id": c_id, "status": status, "reason": reason}
 
 
@@ -715,7 +715,7 @@ class OpenAIJudgeClient:
                     )
                     status = "MISSING"
                     raw_reason = (data.get("reason") or data.get("explanation") or data.get("message") or "").strip()
-                    reason = f"⚠️ JSON structure missing: expected 'status' or 'result' key" + (f". Judge said: {raw_reason}" if raw_reason else "")
+                    reason = f"[MISSING] JSON structure missing: expected 'status' or 'result' key" + (f". Judge said: {raw_reason}" if raw_reason else "")
                 else:
                     status = raw_status.upper()
                     reason = data.get("reason") or data.get("explanation") or data.get("message") or "No reason"

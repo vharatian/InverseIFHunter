@@ -334,7 +334,7 @@ class HuntEngine:
                 result.judge_score = None
                 result.is_breaking = False
                 result.sample_label = "ERROR"
-                result.error = f"⚠️ Model failed: {error}"
+                result.error = f"Model failed: {error}"
                 result.response = ""
                 result.reasoning_trace = reasoning or ""
                 return result
@@ -343,7 +343,7 @@ class HuntEngine:
                 result.judge_score = None
                 result.is_breaking = False
                 result.sample_label = "ERROR"
-                result.error = "⚠️ Model returned empty response"
+                result.error = "Model returned empty response"
                 result.response = ""
                 result.reasoning_trace = reasoning or ""
                 return result
@@ -372,7 +372,7 @@ class HuntEngine:
             result.status = HuntStatus.COMPLETED
         except Exception as e:
             result.status = HuntStatus.FAILED
-            result.error = f"⚠️ Error: {str(e)}"
+            result.error = f"Error: {str(e)}"
             result.sample_label = "ERROR"
             result.is_breaking = False
         return result
@@ -641,14 +641,14 @@ class HuntEngine:
                 hint = ""
                 if "404" in str(error):
                     hint = f" (model '{model}' may not exist — check OpenRouter/Fireworks model IDs)"
-                result.error = f"⚠️ Model failed after {config.max_retries} tries: {error}{hint}"
+                result.error = f"Model failed after {config.max_retries} tries: {error}{hint}"
                 result.response = ""
                 result.reasoning_trace = reasoning or ""
             elif not response or not response.strip():
                 result.status = HuntStatus.FAILED
                 result.judge_score = None
                 result.is_breaking = False
-                result.error = "⚠️ Model returned empty response (possible timeout or token limit exceeded)"
+                result.error = "Model returned empty response (possible timeout or token limit exceeded)"
                 result.response = ""
                 result.reasoning_trace = reasoning or ""
             else:
@@ -679,7 +679,7 @@ class HuntEngine:
             result.status = HuntStatus.FAILED
             result.judge_score = None
             result.is_breaking = False
-            result.error = f"⚠️ Error: {str(e)}"
+            result.error = f"Error: {str(e)}"
             result.response = result.response or ""
             result.reasoning_trace = result.reasoning_trace or ""
 
@@ -785,7 +785,7 @@ class HuntEngine:
                 logger.warning(f"Raw Judge Output: {judge_result.get('raw_output', '')[:500]}...")
                 result.status = HuntStatus.FAILED
                 result.is_breaking = False
-                result.error = "⚠️ Judge failed to produce a score after retries"
+                result.error = "Judge failed to produce a score after retries"
             else:
                 result.status = HuntStatus.COMPLETED
 
@@ -823,8 +823,8 @@ class HuntEngine:
         all_results = await self._get_all_accumulated_results_async(session_id)
 
         completed = [r for r in all_results if r.status == HuntStatus.COMPLETED and r.judge_score is not None]
-        failed = [r for r in completed if r.judge_score == 0]
-        passed = [r for r in completed if r.judge_score >= 1]
+        failed = [r for r in completed if r.sample_label == "BREAK"]
+        passed = [r for r in completed if r.sample_label == "PASS"]
 
         selected = []
         selected.extend(failed[:target_count])

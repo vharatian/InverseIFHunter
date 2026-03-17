@@ -111,30 +111,30 @@ logger.info("Loading routes...")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    logger.info("🔥 Model Hunter starting up...")
+    logger.info("Model Hunter starting up...")
     
     try:
         stats = await redis_store.get_stats()
-        logger.info(f"📦 Redis session store: {stats['status']} ({stats['active_sessions']} active sessions)")
+        logger.info(f"Redis session store: {stats['status']} ({stats['active_sessions']} active sessions)")
     except Exception as e:
-        logger.warning(f"⚠️ Redis session store initialization: {e}")
+        logger.warning(f"Redis session store initialization: {e}")
     
     if _rate_limiter_enabled:
         try:
             limiter = get_rate_limiter()
             stats = limiter.get_stats()
-            logger.info(f"🚦 Rate limiter initialized with limits: {stats['limits']}")
+            logger.info(f"Rate limiter initialized with limits: {stats['limits']}")
         except Exception as e:
-            logger.warning(f"⚠️ Rate limiter initialization: {e}")
+            logger.warning(f"Rate limiter initialization: {e}")
     
     from services.hunt_worker import run_worker_loop
     worker_task = asyncio.create_task(run_worker_loop())
-    logger.info("🏗️ Hunt worker started")
+    logger.info("Hunt worker started")
 
     yield
 
     # Shutdown
-    logger.info("🛑 Model Hunter shutting down...")
+    logger.info("Model Hunter shutting down...")
     worker_task.cancel()
     try:
         await worker_task
