@@ -715,14 +715,17 @@ export async function handleContinueToNextTurn() {
         list.appendChild(card);
     });
 
-    // Add "Skip — No Response Selected" button at the bottom
+    // Add "Skip Selecting" button at the bottom
+    const skipWrap = document.createElement('div');
+    skipWrap.style.cssText = 'display: flex; justify-content: flex-end; margin-top: 0.75rem;';
     const skipBtn = document.createElement('button');
     skipBtn.className = 'btn btn-secondary';
-    skipBtn.style.cssText = 'width: 100%; margin-top: 0.75rem; padding: 0.65rem; font-size: 0.88rem; border: 1.5px dashed var(--border); background: transparent; color: var(--text-muted); cursor: pointer;';
-    skipBtn.textContent = 'Skip — No Response Selected';
+    skipBtn.style.cssText = 'padding: 0.45rem 1rem; font-size: 0.85rem; border: 1px solid var(--border); background: transparent; color: var(--text-muted); border-radius: 6px; cursor: pointer;';
+    skipBtn.textContent = 'Skip Selecting';
     skipBtn.title = 'Advance to the next turn without selecting a response';
     skipBtn.addEventListener('click', () => skipAndAdvanceToNextTurn());
-    list.appendChild(skipBtn);
+    skipWrap.appendChild(skipBtn);
+    list.appendChild(skipWrap);
 
     // Scroll picker into view so options are visible
     picker.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
