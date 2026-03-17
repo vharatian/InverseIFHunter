@@ -127,28 +127,61 @@ def _extract_criteria_list(reference: str) -> List[Dict[str, str]]:
 
 
 def _parse_judge_json(text: str) -> dict:
-    """Parse judge response text into a dict. Handles markdown fences and extracts first JSON object."""
+    """Parse judge response text into a dict.
+
+    Handles markdown fences and multiple JSON objects.  When a model
+    "reconsiders" mid-response it may emit a first-draft JSON followed by
+    a corrected one.  We return the **last** valid JSON object so the
+    model's final answer wins.
+    """
     if not text:
         return {}
     text = text.strip()
-    fence_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, re.DOTALL)
-    if fence_match:
-        text = fence_match.group(1)
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        brace = text.find("{")
-        if brace != -1:
+
+    # Strip markdown code fences (keep all inner content — there may be
+    # multiple fenced blocks).
+    stripped = re.sub(r'```(?:json)?\s*', '', text)
+    stripped = re.sub(r'```', '', stripped)
+
+    # Collect every top-level { … } via balanced-brace scan.
+    candidates = []
+    i = 0
+    while i < len(stripped):
+        if stripped[i] == '{':
             depth = 0
-            for i in range(brace, len(text)):
-                if text[i] == "{": depth += 1
-                elif text[i] == "}": depth -= 1
-                if depth == 0:
-                    try:
-                        return json.loads(text[brace : i + 1])
-                    except json.JSONDecodeError:
-                        pass
-                    break
+            in_string = False
+            escape_next = False
+            for j in range(i, len(stripped)):
+                ch = stripped[j]
+                if escape_next:
+                    escape_next = False
+                    continue
+                if ch == '\\' and in_string:
+                    escape_next = True
+                    continue
+                if ch == '"' and not escape_next:
+                    in_string = not in_string
+                    continue
+                if in_string:
+                    continue
+                if ch == '{':
+                    depth += 1
+                elif ch == '}':
+                    depth -= 1
+                    if depth == 0:
+                        try:
+                            candidates.append(json.loads(stripped[i:j + 1]))
+                        except json.JSONDecodeError:
+                            pass
+                        i = j + 1
+                        break
+            else:
+                break
+        else:
+            i += 1
+
+    if candidates:
+        return candidates[-1]
     return {}
 
 
