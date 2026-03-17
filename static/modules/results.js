@@ -27,26 +27,38 @@ import { MIN_EXPLANATION_WORDS, getConfigValue, adminBypass, getHuntModeById, ge
 import { playHuntComplete, playHuntCompleteEmpty } from './sounds.js';
 
 // ============== Hunt Result Classification Helpers ==============
+// SINGLE SOURCE OF TRUTH for break/pass/error classification on the frontend.
+// Uses sample_label (set by classify_sample in the backend) when available,
+// falls back to is_breaking / raw scores for backwards compatibility.
 
-/** Check if a hunt result is breaking (score === 0). */
+/** Check if a hunt result is breaking. */
 export function isResultBreaking(result) {
-    const judgeScore = result.judge_score !== undefined && result.judge_score !== null ? Number(result.judge_score) : null;
-    const score = result.score !== undefined && result.score !== null ? Number(result.score) : null;
-    return (judgeScore !== null && judgeScore === 0) || (score !== null && score === 0);
+    if (result.sample_label) return result.sample_label === 'BREAK';
+    if (result.is_breaking === true) return true;
+    const s = result.judge_score ?? result.score;
+    return s !== null && s !== undefined && Number(s) === 0;
 }
 
-/** Check if a hunt result is passing (score > 0). */
+/** Check if a hunt result is passing. */
 export function isResultPassing(result) {
-    const judgeScore = result.judge_score !== undefined && result.judge_score !== null ? Number(result.judge_score) : null;
-    const score = result.score !== undefined && result.score !== null ? Number(result.score) : null;
-    return (judgeScore !== null && judgeScore > 0) || (score !== null && score > 0);
+    if (result.sample_label) return result.sample_label === 'PASS';
+    if (result.is_breaking === true) return false;
+    const s = result.judge_score ?? result.score;
+    return s !== null && s !== undefined && Number(s) > 0;
 }
 
-/** Count breaking and passing results in an array. */
+/** Check if a hunt result has missing/error criteria (unreliable score). */
+export function isResultError(result) {
+    if (result.sample_label) return result.sample_label === 'ERROR';
+    return false;
+}
+
+/** Count breaking, passing, and error results in an array. */
 export function countBreakingPassing(results) {
     const breakingCount = results.filter(isResultBreaking).length;
     const passingCount = results.filter(isResultPassing).length;
-    return { breakingCount, passingCount };
+    const errorCount = results.filter(isResultError).length;
+    return { breakingCount, passingCount, errorCount };
 }
 
 /**
@@ -257,12 +269,14 @@ export function openResponseSlideout(rowNum) {
     }
     
     if (scoreEl) {
-        if (data.score !== null && data.score !== undefined) {
-            scoreEl.textContent = data.score === 0 ? 'BREAKING' : 'PASSING';
+        if (data.sample_label === 'ERROR') {
+            scoreEl.textContent = 'MISSING CRITERIA';
             scoreEl.className = 'response-slideout-meta-value';
-            // Score 0 = breaking = GOOD for hunt = 'pass' styling
-            // Score 1-4 = passing = BAD for hunt = 'fail' styling
-            scoreEl.classList.add(data.score === 0 ? 'pass' : 'fail');
+            scoreEl.style.color = 'var(--warning)';
+        } else if (data.score !== null && data.score !== undefined) {
+            scoreEl.textContent = isResultBreaking(data) ? 'BREAKING' : 'PASSING';
+            scoreEl.className = 'response-slideout-meta-value';
+            scoreEl.classList.add(isResultBreaking(data) ? 'pass' : 'fail');
         } else {
             scoreEl.textContent = '-';
             scoreEl.className = 'response-slideout-meta-value';
@@ -319,10 +333,8 @@ export function openSelectionDetailSlideout(rowNumber, result) {
         return;
     }
     
-    // Determine if breaking
-    const judgeScore = result.judge_score !== undefined && result.judge_score !== null ? Number(result.judge_score) : null;
-    const score = result.score !== undefined && result.score !== null ? Number(result.score) : null;
-    const isBreaking = (judgeScore !== null && judgeScore === 0) || (score !== null && score === 0);
+    const breaking = isResultBreaking(result);
+    const error = isResultError(result);
     
     // Update slide-out content
     if (titleEl) {
@@ -334,9 +346,15 @@ export function openSelectionDetailSlideout(rowNumber, result) {
     }
     
     if (statusEl) {
-        statusEl.textContent = isBreaking ? 'BREAK' : 'PASS';
-        statusEl.className = 'response-slideout-meta-value';
-        statusEl.classList.add(isBreaking ? 'pass' : 'fail');
+        if (error) {
+            statusEl.textContent = 'MISSING CRITERIA';
+            statusEl.className = 'response-slideout-meta-value';
+            statusEl.style.color = 'var(--warning)';
+        } else {
+            statusEl.textContent = breaking ? 'BREAK' : 'PASS';
+            statusEl.className = 'response-slideout-meta-value';
+            statusEl.classList.add(breaking ? 'pass' : 'fail');
+        }
     }
     
     if (scoreEl) {

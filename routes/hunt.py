@@ -105,7 +105,7 @@ async def get_all_results(session_id: str):
         _log_telemetry_safe("results_viewed", {
             "session_id": session_id,
             "total_results": len(merged_results),
-            "breaking_results": sum(1 for r in merged_results if r.judge_score == 0),
+            "breaking_results": sum(1 for r in merged_results if r.sample_label == "BREAK"),
             "accumulated_count": len(all_accumulated)
         })
 

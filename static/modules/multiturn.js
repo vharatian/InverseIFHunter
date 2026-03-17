@@ -17,7 +17,7 @@ import {
     getModelDisplayName
 } from './utils.js';
 import { showToast, showError } from './celebrations.js';
-import { fetchAllResponses, fetchAllResponsesAndShowSelection } from './results.js';
+import { fetchAllResponses, fetchAllResponsesAndShowSelection, isResultBreaking, isResultPassing, isResultError } from './results.js';
 import { renderPriorConversationBanner, enableNavTestbedButton, resetTestbed, showTestbed } from './testbed.js';
 import { progressiveSaveToColab } from './notebook.js';
 import { validatePromptLength } from './editors.js';
@@ -293,11 +293,8 @@ export function showMultiTurnDecision() {
     
     // Populate decision summary stats
     const hunts = state.allResponses?.length || 0;
-    const breaks = (state.allResponses || []).filter(r => (r.judge_score === 0 || r.score === 0)).length;
-    const passes = (state.allResponses || []).filter(r => {
-        const s = r.judge_score !== undefined && r.judge_score !== null ? Number(r.judge_score) : (r.score !== undefined && r.score !== null ? Number(r.score) : null);
-        return s !== null && s > 0;
-    }).length;
+    const breaks = (state.allResponses || []).filter(isResultBreaking).length;
+    const passes = (state.allResponses || []).filter(isResultPassing).length;
     const turnStat = document.getElementById('decisionTurnStat');
     const huntStat = document.getElementById('decisionHuntStat');
     const breakStat = document.getElementById('decisionBreakStat');
@@ -506,13 +503,8 @@ export function renderTurnHistoryTabs() {
  */
 export function renderTurnContent(container, turn) {
     // Count breaks/passes in results
-    const breaks = (turn.results || []).filter(r => 
-        (r.judge_score === 0 || r.score === 0)
-    ).length;
-    const passes = (turn.results || []).filter(r => {
-        const s = r.judge_score ?? r.score;
-        return s !== null && s !== undefined && s > 0;
-    }).length;
+    const breaks = (turn.results || []).filter(isResultBreaking).length;
+    const passes = (turn.results || []).filter(isResultPassing).length;
     
     let html = '';
     
@@ -608,7 +600,7 @@ export async function handleMarkBreaking() {
         
         // Proceed to standard selection flow
         const completedHunts = state.allResponses.length;
-        const breaksFound = state.allResponses.filter(r => (r.judge_score === 0 || r.score === 0)).length;
+        const breaksFound = state.allResponses.filter(isResultBreaking).length;
         fetchAllResponsesAndShowSelection(completedHunts, breaksFound);
         
     } catch (error) {

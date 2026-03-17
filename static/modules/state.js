@@ -109,28 +109,31 @@ export function resetTurnState() {
 
 /**
  * Compute cumulative hunt statistics across ALL completed turns + current turn.
- * Returns { totalHunts, totalBreaks } 
+ * Returns { totalHunts, totalBreaks }
+ * 
+ * Uses sample_label / is_breaking (set by classify_sample) — never raw scores.
+ * MISSING criteria → sample_label "ERROR" → not counted as break.
  */
 export function getCumulativeStats() {
-    // Previous turns — use huntCount (total initiated) if available, fall back to results.length (completed only)
     let prevHunts = 0;
     let prevBreaks = 0;
     if (state.turns && state.turns.length > 0) {
         state.turns.forEach(t => {
             const results = t.results || [];
             prevHunts += t.huntCount || results.length;
-            prevBreaks += results.filter(r => r.is_breaking).length;
+            prevBreaks += results.filter(r => {
+                if (r.sample_label) return r.sample_label === 'BREAK';
+                return r.is_breaking === true;
+            }).length;
         });
     }
-    
-    // Current turn — use huntsThisTurn (total initiated) for count, allResponses for break detection
+
     const currentHunts = state.huntsThisTurn || state.allResponses.length;
     const currentBreaks = state.allResponses.filter(r => {
-        const judgeScore = r.judge_score !== undefined && r.judge_score !== null ? Number(r.judge_score) : null;
-        const score = r.score !== undefined && r.score !== null ? Number(r.score) : null;
-        return (judgeScore !== null && judgeScore === 0) || (score !== null && score === 0) || r.is_breaking === true;
+        if (r.sample_label) return r.sample_label === 'BREAK';
+        return r.is_breaking === true;
     }).length;
-    
+
     return {
         totalHunts: prevHunts + currentHunts,
         totalBreaks: prevBreaks + currentBreaks

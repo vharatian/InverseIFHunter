@@ -787,7 +787,6 @@ class HuntEngine:
                 result.is_breaking = False
                 result.error = "⚠️ Judge failed to produce a score after retries"
             else:
-                result.is_breaking = result.judge_score == 0
                 result.status = HuntStatus.COMPLETED
 
             result.judge_output = judge_result.get("raw_output", "")

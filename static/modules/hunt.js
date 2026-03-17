@@ -882,6 +882,7 @@ export function handleHuntResult(data) {
                 status: status || 'pending',
                 score: score,
                 is_breaking: is_breaking,
+                sample_label: sample_label || null,
                 response: responseText || (error ? `Error: ${error}` : '(No response)'),
                 error: error
             };
