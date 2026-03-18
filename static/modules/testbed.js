@@ -2303,8 +2303,8 @@ function renderSaveFooter() {
 
     footer.classList.remove('hidden');
 
-    // Button label: "Judge Ideal Response and Continue" for Turn 1, "Save to Turn N" for Turn 2+
-    const labelText = (state.currentTurn || 1) === 1 ? 'Judge Ideal Response and Continue' : `Save to Turn ${state.currentTurn}`;
+    // Button label: "Judge Ideal Response and Continue" for Turn 1, "Save to Turn N and Continue" for Turn 2+
+    const labelText = (state.currentTurn || 1) === 1 ? 'Judge Ideal Response and Continue' : `Save to Turn ${state.currentTurn} and Continue`;
     const saveBtn0 = document.getElementById('testbedSaveBtn');
     if (saveBtn0) {
         const span = document.getElementById('testbedSaveBtnLabel');
@@ -2347,7 +2347,7 @@ async function saveRunToTurn() {
     if (_judgeCache && _judgeCache.key === _cacheKey) {
         if (saveBtn) {
             saveBtn.disabled = false;
-            const label = (state.currentTurn || 1) === 1 ? 'Judge Ideal Response and Continue' : `Save to Turn ${state.currentTurn}`;
+            const label = (state.currentTurn || 1) === 1 ? 'Judge Ideal Response and Continue' : `Save to Turn ${state.currentTurn} and Continue`;
             const span = document.getElementById('testbedSaveBtnLabel');
             if (span) span.textContent = label;
             else saveBtn.innerHTML = `<span id="testbedSaveBtnLabel">${label}</span>`;
@@ -2570,7 +2570,7 @@ async function saveRunToTurn() {
     } finally {
         if (saveBtn) {
             saveBtn.disabled = false;
-            const label = (state.currentTurn || 1) === 1 ? 'Judge Ideal Response and Continue' : `Save to Turn ${state.currentTurn}`;
+            const label = (state.currentTurn || 1) === 1 ? 'Judge Ideal Response and Continue' : `Save to Turn ${state.currentTurn} and Continue`;
             const span = document.getElementById('testbedSaveBtnLabel');
             if (span) {
                 span.textContent = label;

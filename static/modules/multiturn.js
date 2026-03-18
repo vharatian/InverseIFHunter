@@ -715,27 +715,34 @@ export async function handleContinueToNextTurn() {
         list.appendChild(card);
     });
 
-    // Add "Skip Selecting" button at the bottom
-    const skipWrap = document.createElement('div');
-    skipWrap.style.cssText = 'display: flex; justify-content: flex-end; margin-top: 0.75rem;';
-    const skipBtn = document.createElement('button');
-    skipBtn.className = 'btn btn-secondary';
-    skipBtn.style.cssText = 'padding: 0.45rem 1rem; font-size: 0.85rem; border: 1px solid var(--border); background: transparent; color: var(--text-muted); border-radius: 6px; cursor: pointer;';
-    skipBtn.textContent = 'Skip Selecting';
-    skipBtn.title = 'Advance to the next turn without selecting a response';
-    skipBtn.addEventListener('click', () => skipAndAdvanceToNextTurn());
-    skipWrap.appendChild(skipBtn);
-    list.appendChild(skipWrap);
+    // Add "Use Ideal Response" button at the bottom
+    const idealWrap = document.createElement('div');
+    idealWrap.style.cssText = 'display: flex; justify-content: flex-end; margin-top: 0.75rem;';
+    const idealBtn = document.createElement('button');
+    idealBtn.className = 'btn btn-secondary';
+    idealBtn.style.cssText = 'padding: 0.45rem 1rem; font-size: 0.85rem; border: 1px solid var(--border); background: transparent; color: var(--text-muted); border-radius: 6px; cursor: pointer;';
+    idealBtn.textContent = 'Use Ideal Response';
+    idealBtn.title = 'Use your ideal response from the testbed as the conversation response for this turn';
+    idealBtn.addEventListener('click', () => useIdealResponseAndAdvance());
+    idealWrap.appendChild(idealBtn);
+    list.appendChild(idealWrap);
 
     // Scroll picker into view so options are visible
     picker.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 /**
- * Advance to next turn without selecting any response.
+ * Advance to next turn using the ideal response from the testbed
+ * instead of a model-generated response.
  */
-async function skipAndAdvanceToNextTurn() {
-    showToast(`Advancing to Turn ${state.currentTurn + 1} without selecting a response...`, 'info');
+async function useIdealResponseAndAdvance() {
+    const idealResponse = (state.notebook?.response || '').trim();
+    if (!idealResponse) {
+        showToast('No ideal response found. Write an ideal response in the testbed first.', 'error');
+        return;
+    }
+
+    showToast(`Advancing to Turn ${state.currentTurn + 1} using ideal response...`, 'info');
 
     const { prompt: currentPrompt, criteria: currentCriteria } = _readPromptAndCriteriaFromDOM();
 
@@ -745,6 +752,7 @@ async function skipAndAdvanceToNextTurn() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 selected_hunt_id: null,
+                ideal_response: idealResponse,
                 next_prompt: currentPrompt,
                 next_criteria: currentCriteria,
                 current_prompt: currentPrompt,
@@ -759,22 +767,22 @@ async function skipAndAdvanceToNextTurn() {
 
         const data = await res.json();
 
-        const noResp = {
-            response: 'No response selected',
+        const idealResp = {
+            response: idealResponse,
             hunt_id: null,
             judge_score: null,
             judge_criteria: {},
             judge_explanation: ''
         };
 
-        await _applyTurnAdvance(data, noResp, currentPrompt, currentCriteria, {
+        await _applyTurnAdvance(data, idealResp, currentPrompt, currentCriteria, {
             prompt: currentPrompt,
             response_reference: currentCriteria,
-            response: 'No response selected',
+            response: idealResponse,
         });
 
     } catch (error) {
-        console.error('Error advancing turn (skip):', error);
+        console.error('Error advancing turn (ideal response):', error);
         showError(error, { operation: 'Advance turn (skip)' });
     }
 }

@@ -24,6 +24,7 @@ router = APIRouter(prefix="/api", tags=["multiturn"])
 class AdvanceTurnRequest(BaseModel):
     """Request to advance to the next turn in a multi-turn session."""
     selected_hunt_id: Optional[int] = None   # Hunt ID of the "good" response (None = no response selected)
+    ideal_response: Optional[str] = None     # Ideal response text (used when selected_hunt_id is None)
     next_prompt: Optional[str] = ""          # Optional — set later via full editor (selectGoodResponse flow)
     next_criteria: Optional[str] = ""        # Optional — set later via full editor
     next_judge_prompt: Optional[str] = None  # Optional judge system prompt for next turn
@@ -43,9 +44,9 @@ async def advance_turn(session_id: str, request: AdvanceTurnRequest):
     """
     session = await _get_validated_session(session_id)
     
-    # Find the selected response from current results (optional — may be None)
+    # Find the selected response: either a model-generated hunt result or the ideal response
     selected_result = None
-    selected_response_text = "No response selected"
+    selected_response_text = ""
     if request.selected_hunt_id is not None:
         all_results = session.all_results + session.results
         for r in all_results:
@@ -59,6 +60,10 @@ async def advance_turn(session_id: str, request: AdvanceTurnRequest):
         if not selected_result.response:
             raise HTTPException(400, f"Hunt ID {request.selected_hunt_id} has no response")
         selected_response_text = selected_result.response
+    elif request.ideal_response and request.ideal_response.strip():
+        selected_response_text = request.ideal_response.strip()
+    else:
+        raise HTTPException(400, "Either select a hunt response or provide an ideal response to advance.")
     
     current_turn = session.current_turn
     
