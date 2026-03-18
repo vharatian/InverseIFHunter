@@ -8,7 +8,7 @@
  */
 
 import { elements } from './dom.js';
-import { MAX_HUNTS_PER_NOTEBOOK, getJudgeModels, getConfigValue, adminBypass, getHuntModes, getHuntModeById, getBreakingRange } from './config.js';
+import { MAX_HUNTS_PER_NOTEBOOK, getJudgeModels, getConfigValue, adminBypass, getHuntModes, getHuntModeById, getBreakingRange, getProviderModels } from './config.js';
 import { 
     loadHuntCount, 
     saveHuntCount, 
@@ -92,7 +92,8 @@ export function updateHuntLimitUI() {
     const totalGlobal = state.totalHuntsCount;
     
     const numberInput = document.getElementById('parallelWorkers');
-    const maxAllowed = Math.min(6, remaining);
+    const parallelMax = getConfigValue('parallel_workers_max', 6);
+    const maxAllowed = Math.min(parallelMax, remaining);
     
     if (numberInput) {
         const val = parseInt(numberInput.value) || 4;
@@ -331,7 +332,9 @@ function _syncStepper(currentVal, range) {
 }
 
 export function getConfig() {
-    const model = elements.modelSelect?.value || 'qwen/qwen3-235b-a22b-thinking-2507';
+    const providerModels = getProviderModels();
+    const defaultModel = (providerModels?.openrouter?.[0]?.id) || (Array.isArray(providerModels) ? providerModels[0]?.id : null) || 'qwen/qwen3-235b-a22b-thinking-2507';
+    const model = elements.modelSelect?.value || defaultModel;
     const huntCount = parseInt(elements.parallelWorkers.value) || 4;
     
     // Create array with same model for all hunts
@@ -413,10 +416,11 @@ export async function startHunt() {
         }
     }
     
-    // WARNING: Show confirmation when hunts will cross 12 this turn (only 4 remaining)
+    // WARNING: Show confirmation when hunts approach the per-turn limit
     if (!(state.adminMode && adminBypass('hunt_limit_warning'))) {
         const projectedTotal = state.huntsThisTurn + requestedHunts;
-        if (projectedTotal > 12) {
+        const huntWarningThreshold = MAX_HUNTS_PER_NOTEBOOK - 4;
+        if (projectedTotal > huntWarningThreshold) {
             const remainingAfter = MAX_HUNTS_PER_NOTEBOOK - projectedTotal;
             const confirmed = await showHuntWarningDialog(remainingAfter);
             if (!confirmed) return;
@@ -486,11 +490,16 @@ export async function startHunt() {
         if (liveJsp)    cells.push({ cell_type: 'judge_system_prompt', content: liveJsp });
 
         if (cells.length > 0) {
-            await fetch(`/api/update-notebook-cells/${state.sessionId}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ cells, session_only: true })
-            });
+            try {
+                const cellResp = await fetch(`/api/update-notebook-cells/${state.sessionId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ cells, session_only: true })
+                });
+                if (!cellResp.ok) console.warn(`Failed to sync notebook cells: ${cellResp.status}`);
+            } catch (e) {
+                console.warn('Failed to sync notebook cells:', e.message);
+            }
         }
     }
 
@@ -499,11 +508,26 @@ export async function startHunt() {
         ...state.config,
         hunt_offset: huntOffset  // Tell backend where to start hunt_ids
     };
-    await fetch(`/api/update-config/${state.sessionId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(configWithOffset)
-    });
+    try {
+        const cfgResp = await fetch(`/api/update-config/${state.sessionId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(configWithOffset)
+        });
+        if (!cfgResp.ok) {
+            showToast(`Failed to update hunt config: ${cfgResp.status}`, 'error');
+            state.isHunting = false;
+            elements.startHuntBtn.classList.remove('loading');
+            elements.startHuntBtn.disabled = false;
+            return;
+        }
+    } catch (e) {
+        showToast(`Failed to update hunt config: ${e.message}`, 'error');
+        state.isHunting = false;
+        elements.startHuntBtn.classList.remove('loading');
+        elements.startHuntBtn.disabled = false;
+        return;
+    }
     
     // Show progress section (centered) and reset it
     elements.progressSection.classList.remove('hidden');
@@ -1016,7 +1040,8 @@ export function initHuntNumberControls() {
     if (!numberInput) return;
     
     function updateValue(value) {
-        const val = Math.max(1, Math.min(6, parseInt(value) || DEFAULT_PARALLEL_HUNTS));
+        const pMax = getConfigValue('parallel_workers_max', 6);
+        const val = Math.max(1, Math.min(pMax, parseInt(value) || DEFAULT_PARALLEL_HUNTS));
         numberInput.value = val;
         _syncPresetButtonActive(val);
     }

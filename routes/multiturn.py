@@ -42,6 +42,19 @@ async def advance_turn(session_id: str, request: AdvanceTurnRequest):
     builds conversation history, and prepares the session for
     the next turn with new prompt and criteria.
     """
+    # Redis lock prevents concurrent advance-turn (e.g. double-click that bypasses frontend guard)
+    r = await redis_store.get_redis()
+    lock_key = f"mh:lock:advance:{session_id}"
+    acquired = await r.set(lock_key, "1", nx=True, ex=10)
+    if not acquired:
+        raise HTTPException(409, "Turn advance already in progress. Please wait.")
+    try:
+        return await _do_advance_turn(session_id, request)
+    finally:
+        await r.delete(lock_key)
+
+
+async def _do_advance_turn(session_id: str, request: AdvanceTurnRequest):
     session = await _get_validated_session(session_id)
     
     # Find the selected response: either a model-generated hunt result or the ideal response

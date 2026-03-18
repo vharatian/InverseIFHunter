@@ -18,7 +18,7 @@ import {
 } from './utils.js';
 import { showToast, showError } from './celebrations.js';
 import { fetchAllResponses, fetchAllResponsesAndShowSelection, isResultBreaking, isResultPassing, isResultError } from './results.js';
-import { renderPriorConversationBanner, enableNavTestbedButton, resetTestbed, showTestbed } from './testbed.js';
+import { renderPriorConversationBanner, enableNavTestbedButton, resetTestbed, showTestbed, syncActiveRunToNotebook } from './testbed.js';
 import { progressiveSaveToColab } from './notebook.js';
 import { validatePromptLength } from './editors.js';
 import { playEndTask, playEndTaskError, playNextTurn, playNextTurnError } from './sounds.js';
@@ -731,11 +731,16 @@ export async function handleContinueToNextTurn() {
     picker.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
+let _advancingTurn = false;
+
 /**
  * Advance to next turn using the ideal response from the testbed
  * instead of a model-generated response.
  */
 async function useIdealResponseAndAdvance() {
+    if (_advancingTurn) return;
+    _advancingTurn = true;
+    syncActiveRunToNotebook();
     const idealResponse = (state.notebook?.response || '').trim();
     if (!idealResponse) {
         showToast('No ideal response found. Write an ideal response in the testbed first.', 'error');
@@ -783,7 +788,9 @@ async function useIdealResponseAndAdvance() {
 
     } catch (error) {
         console.error('Error advancing turn (ideal response):', error);
-        showError(error, { operation: 'Advance turn (skip)' });
+        showError(error, { operation: 'Advance turn (ideal response)' });
+    } finally {
+        _advancingTurn = false;
     }
 }
 
@@ -926,6 +933,8 @@ function _readPromptAndCriteriaFromDOM() {
  * Select a good response to carry forward to the next turn.
  */
 export async function selectGoodResponse(response) {
+    if (_advancingTurn) return;
+    _advancingTurn = true;
     state._selectedGoodResponse = response;
 
     const cards = document.querySelectorAll('#goodResponseList > div');
@@ -972,6 +981,8 @@ export async function selectGoodResponse(response) {
         console.error('Error advancing turn:', error);
         showError(error, { operation: 'Advance turn' });
         cards.forEach(card => { card.style.opacity = '1'; card.style.pointerEvents = 'auto'; });
+    } finally {
+        _advancingTurn = false;
     }
 }
 

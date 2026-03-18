@@ -177,10 +177,15 @@ async def generate_single(session_id: str, request: GenerateSingleRequest | None
         if request and request.provider is not None
         else getattr(session.config, 'provider', 'openrouter')
     )
+    try:
+        from agentic_reviewer.config_loader import get_config_value
+        _default_model = (get_config_value("hunt.provider_models.openrouter") or [{}])[0].get("id", "qwen/qwen3-235b-a22b-thinking-2507")
+    except Exception:
+        _default_model = "qwen/qwen3-235b-a22b-thinking-2507"
     model = (
         request.model
         if request and request.model is not None
-        else (session.config.models[0] if session.config.models else "qwen/qwen3-235b-a22b-thinking-2507")
+        else (session.config.models[0] if session.config.models else _default_model)
     )
     conversation_history = session.config.conversation_history or []
 
@@ -238,9 +243,14 @@ async def generate_single_stream(session_id: str, request: GenerateSingleRequest
         request.provider if request and request.provider is not None
         else getattr(session.config, 'provider', 'openrouter')
     )
+    try:
+        from agentic_reviewer.config_loader import get_config_value
+        _default_model_stream = (get_config_value("hunt.provider_models.openrouter") or [{}])[0].get("id", "qwen/qwen3-235b-a22b-thinking-2507")
+    except Exception:
+        _default_model_stream = "qwen/qwen3-235b-a22b-thinking-2507"
     model = (
         request.model if request and request.model is not None
-        else (session.config.models[0] if session.config.models else "qwen/qwen3-235b-a22b-thinking-2507")
+        else (session.config.models[0] if session.config.models else _default_model_stream)
     )
     conversation_history = session.config.conversation_history or []
 

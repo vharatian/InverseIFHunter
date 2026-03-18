@@ -21,7 +21,7 @@ import {
 } from './utils.js';
 import { showToast, showError, showNextBlindJudge } from './celebrations.js';
 import { hideModelLockedIndicator } from './editors.js';
-import { showMultiTurnDecision } from './multiturn.js';
+import { showMultiTurnDecision, updateTurnAwareUI } from './multiturn.js';
 import { showAppModal } from './api.js';
 import { MIN_EXPLANATION_WORDS, getConfigValue, adminBypass, getHuntModeById, getSelectionSlots } from './config.js';
 import { playHuntComplete, playHuntCompleteEmpty } from './sounds.js';
@@ -1011,6 +1011,7 @@ export async function fetchAllResponsesAndShowSelection(completedHunts, breaksFo
     try {
         // Fetch all results from the session
         const response = await fetch(`/api/results/${state.sessionId}`);
+        if (!response.ok) throw new Error(`Failed to fetch results: ${response.status}`);
         const data = await response.json();
         
         // Filter out results from previous turns, then accumulate current turn
@@ -2350,6 +2351,7 @@ export async function displayBreakingResults() {
     try {
         // Use new review-results endpoint that selects 4 responses
         const response = await fetch(`/api/review-results/${state.sessionId}`);
+        if (!response.ok) throw new Error(`Failed to fetch review results: ${response.status}`);
         const data = await response.json();
         
         elements.breakingResults.innerHTML = '';
@@ -2426,274 +2428,9 @@ export function createResultCard(result, slotIndex, rowNumber) {
     return card;
 }
 
-// Legacy createResultCard function for full expandable card (keeping for reference)
+// createResultCardFull removed — was dead code. Stub delegates to createResultCard.
 export function createResultCardFull(result, slotIndex, rowNumber) {
-    const card = document.createElement('div');
-    card.className = 'expandable-card';
-    card.dataset.huntId = result.hunt_id;
-    card.dataset.slotIndex = slotIndex || 0;
-    card.dataset.rowNumber = rowNumber !== undefined ? rowNumber : null;
-    
-    const modelDisplay = getModelDisplayName(result.model);
-    const score = result.judge_score ?? 0;
-    const isFailed = score === 0;
-    const scoreLabel = isFailed ? 'BREAK' : 'PASS';
-    const scoreColor = isFailed ? 'var(--success)' : 'var(--danger)';
-    const scoreClass = isFailed ? 'score-0' : 'score-1';
-    const responseText = result.response || 'No response available';
-    const slotNum = slotIndex !== undefined ? slotIndex + 1 : result.hunt_id;
-    
-    // Frontend deduplication: hide trace if similar to response
-    let reasoningTrace = result.reasoning_trace || '';
-    const responseClean = responseText.trim().toLowerCase();
-    const traceClean = reasoningTrace.trim().toLowerCase();
-    
-    // Check for duplicates in UI only - export still gets full trace
-    // Only hide if trace is EXACTLY the same as response (not if one contains the other)
-    // This is less aggressive - thinking models often have reasoning that overlaps with response
-    if (reasoningTrace && traceClean.length > 0) {
-        const isExactDuplicate = traceClean === responseClean;
-        if (isExactDuplicate) {
-            reasoningTrace = ''; // Hide from UI only
-        } else {
-        }
-    } else if (!reasoningTrace) {
-    }
-    
-    // Store LLM judge data as JSON in data attribute
-    const llmJudgeData = JSON.stringify({
-        score: result.judge_score,
-        criteria: result.judge_criteria || {},
-        explanation: result.judge_explanation || '',
-        output: result.judge_output || ''
-    });
-    
-    card.innerHTML = `
-        <div class="expandable-header">
-            <div class="flex items-center gap-1">
-                <span class="slot-badge" style="background: var(--accent-primary); color: white; padding: 0.25rem 0.5rem; border-radius: 4px; font-weight: 600;">Slot ${slotNum}</span>
-                <span style="margin-left: 0.5rem; color: var(--text-secondary);">
-                    ${modelDisplay}
-                </span>
-            </div>
-            <span class="expandable-arrow">▼</span>
-        </div>
-        <div class="expandable-content">
-            <!-- Split-Panel Layout -->
-            <div class="slot-split-container" data-hunt-id="${result.hunt_id}">
-                <!-- Left Panel: Response (Larger, Scrollable) -->
-                <div class="slot-response-panel">
-                            <label style="font-weight: 600; display: block; margin-bottom: 0.75rem; color: var(--text-primary);">
-                        Model Response (${modelDisplay}_${slotNum}):
-                            </label>
-                    <div class="code-block response-content" style="white-space: pre-wrap; line-height: 1.6; font-size: 0.9rem; max-height: 600px; overflow-y: auto;">${escapeHtml(responseText)}</div>
-                    </div>
-                    
-                <!-- Right Panel: Grade + Explanation -->
-                <div class="slot-grading-panel">
-                    <!-- Grade Section (Top) -->
-                    <div class="slot-grade-section">
-                            <label style="font-weight: 600; display: block; margin-bottom: 1rem; color: var(--text-primary);">
-                            Grading Basis - Per Criterion:
-                            </label>
-                        <div class="criteria-grading" data-hunt-id="${result.hunt_id}" style="max-height: 400px; overflow-y: auto;">
-                    ${(state.criteria || []).map(c => `
-                                    <div class="criterion-row" data-criterion-id="${c.id}" style="display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0.75rem; padding: 1rem; margin-bottom: 0.75rem; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border); transition: all var(--transition-fast);">
-                                        <span style="font-weight: 700; min-width: 40px; font-size: 1rem; color: var(--accent-primary);">${c.id}:</span>
-                                        <span style="flex: 1; font-size: 0.9rem; color: var(--text-secondary); word-break: break-word; min-width: 200px; line-height: 1.5;">${escapeHtml(c.criteria)}</span>
-                                        <div class="criterion-buttons" style="display: flex; gap: 0.5rem; flex-shrink: 0;">
-                                            <button class="btn btn-small criterion-pass" data-hunt-id="${result.hunt_id}" data-criterion="${c.id}" style="padding: 0.5rem 1rem; font-size: 0.85rem; font-weight: 600; background: transparent; border: 2px solid var(--success); color: var(--success); border-radius: 6px; transition: all var(--transition-fast);">
-                                                PASS
-                                            </button>
-                                            <button class="btn btn-small criterion-fail" data-hunt-id="${result.hunt_id}" data-criterion="${c.id}" style="padding: 0.5rem 1rem; font-size: 0.85rem; font-weight: 600; background: transparent; border: 2px solid var(--danger); color: var(--danger); border-radius: 6px; transition: all var(--transition-fast);">
-                                                FAIL
-                                            </button>
-                            </div>
-                        </div>
-                    `).join('')}
-                        </div>
-                </div>
-                
-                    <!-- Explanation Section (Bottom) -->
-                    <div class="slot-explanation-section">
-                            <label style="font-weight: 600; display: block; margin-bottom: 0.75rem; color: var(--text-primary);">
-                                Human Review (human_judge_${slotNum}):
-                            </label>
-                            
-                            <div style="margin-bottom: 1rem;">
-                                <label style="font-weight: 500; font-size: 0.9rem; display: block; margin-bottom: 0.5rem; color: var(--text-secondary);">
-                                    Explanation:
-                                </label>
-                            <textarea class="human-review-notes" data-hunt-id="${result.hunt_id}" placeholder="Explain your grading decisions (which criteria failed and why)..." style="width: 100%; min-height: 150px; padding: 0.75rem; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-primary); color: var(--text-primary); font-size: 0.9rem; resize: vertical; font-family: inherit; line-height: 1.5;"></textarea>
-                                <div class="human-review-word-count" data-hunt-id="${result.hunt_id}" style="margin-top: 0.35rem; font-size: 0.8rem; color: var(--text-muted);">${getWordCountLabel(0)}</div>
-                </div>
-                
-                            <button class="btn btn-primary submit-human-review-btn" data-hunt-id="${result.hunt_id}" disabled style="width: 100%; padding: 0.875rem; font-weight: 600; font-size: 0.95rem; border-radius: 8px; opacity: 0.7;">
-                                Submit Human Review
-                            </button>
-                            <div class="human-review-status" data-hunt-id="${result.hunt_id}" style="margin-top: 0.75rem; font-size: 0.85rem; color: var(--text-muted); text-align: center;"></div>
-                        </div>
-                    </div>
-            </div>
-            
-            <!-- Reasoning Section (Collapsible, Reference Only) -->
-            <div class="slot-reasoning-section" style="margin-top: 1.5rem;">
-                <button class="reasoning-toggle-btn" style="width: 100%; padding: 0.75rem; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font-weight: 600; color: var(--text-primary); display: flex; align-items: center; justify-content: space-between; transition: all var(--transition-fast);">
-                    <span>Model Reasoning Trace (Reference Only)</span>
-                    <span class="reasoning-toggle-arrow">▼</span>
-                </button>
-                <div class="reasoning-content" style="display: none; margin-top: 1rem; padding: 1rem; background: var(--bg-tertiary); border-radius: 8px; border: 1px solid var(--border);">
-                ${reasoningTrace ? `
-                                <div class="code-block" style="font-size: 0.85rem; background: var(--bg-primary); white-space: pre-wrap; line-height: 1.6; max-height: 400px; overflow-y: auto; padding: 1rem; border-radius: 8px;">
-                        ${escapeHtml(reasoningTrace)}
-                    </div>
-                ` : `
-                                <div style="padding: 1.5rem; background: var(--bg-primary); border-radius: 8px; border: 1px dashed var(--border); color: var(--text-muted); font-style: italic; text-align: center;">
-                                    No reasoning trace available.<br>
-                                    <span style="font-size: 0.85rem;">The model either doesn't support chain-of-thought reasoning, or the reasoning was empty for this response.</span>
-                    </div>
-                `}
-                </div>
-            </div>
-            
-            <!-- LLM Judge Section - Hidden until human submits -->
-            <div class="llm-judge-section" data-hunt-id="${result.hunt_id}" style="margin-top: 1.5rem; display: none;" data-llm-judge='${llmJudgeData.replace(/'/g, "&#39;")}'>
-                <div style="padding: 1.5rem; background: var(--bg-tertiary); border-radius: 12px; border: 2px solid var(--accent-primary);">
-                    <label style="font-weight: 600; display: block; margin-bottom: 1rem; color: var(--accent-primary); font-size: 1.05rem;">
-                        LLM Judge (llm_judge_${slotNum}):
-                    </label>
-                    <div class="llm-judge-score" style="margin-bottom: 1rem;">
-                        <span class="score-badge ${scoreClass}" style="font-size: 1rem; padding: 0.5rem 1rem; color: ${scoreColor};">Score: ${score} (${scoreLabel})</span>
-                    </div>
-                    
-                    <!-- Criteria Breakdown -->
-                    <div class="llm-criteria-breakdown" style="margin-bottom: 1rem;">
-                        <label style="font-weight: 500; font-size: 0.9rem; display: block; margin-bottom: 0.75rem; color: var(--text-secondary);">Grading Basis:</label>
-                        ${formatLLMCriteria(result.judge_criteria, result.judge_explanation)}
-                    </div>
-                    
-                      <!-- Full Explanation -->
-                      <div class="llm-judge-explanation" style="font-size: 0.9rem; background: var(--bg-card); padding: 1rem; border-radius: 8px; line-height: 1.6;">
-                          <label style="font-weight: 500; display: block; margin-bottom: 0.75rem; color: var(--text-primary);">Full Explanation:</label>
-                          ${renderJudgeExplanation(result.judge_explanation)}
-                      </div>
-                </div>
-            </div>
-        </div>
-    `;
-    
-    // Toggle expand
-    card.querySelector('.expandable-header').addEventListener('click', () => {
-        card.classList.toggle('open');
-    });
-    
-    // Reasoning toggle functionality
-    const reasoningToggle = card.querySelector('.reasoning-toggle-btn');
-    const reasoningContent = card.querySelector('.reasoning-content');
-    const reasoningArrow = card.querySelector('.reasoning-toggle-arrow');
-    
-    if (reasoningToggle && reasoningContent) {
-        reasoningToggle.addEventListener('click', (e) => {
-                e.stopPropagation(); // Prevent card toggle
-            const isHidden = reasoningContent.style.display === 'none';
-            reasoningContent.style.display = isHidden ? 'block' : 'none';
-            reasoningArrow.textContent = isHidden ? '▲' : '▼';
-            reasoningToggle.style.borderBottomLeftRadius = isHidden ? '0' : '8px';
-            reasoningToggle.style.borderBottomRightRadius = isHidden ? '0' : '8px';
-        });
-    }
-    
-    const submitBtn = card.querySelector('.submit-human-review-btn');
-    const notesTextarea = card.querySelector('.human-review-notes');
-    const wordCountEl = card.querySelector('.human-review-word-count');
-    const criteriaGradingEl = card.querySelector('.criteria-grading[data-hunt-id="' + result.hunt_id + '"]');
-    
-    function updateReviewSubmitButtonState() {
-        const notes = notesTextarea ? (notesTextarea.value || '').trim() : '';
-        const words = countWords(notes);
-        if (wordCountEl) {
-            wordCountEl.textContent = getWordCountLabel(words);
-            wordCountEl.style.color = words >= MIN_EXPLANATION_WORDS ? 'var(--success)' : 'var(--text-muted)';
-        }
-        const rows = criteriaGradingEl ? criteriaGradingEl.querySelectorAll('.criterion-row') : [];
-        const allGraded = rows.length > 0 && Array.from(rows).every(row => row.dataset.grade);
-        const canSubmit = allGraded && words >= MIN_EXPLANATION_WORDS;
-        if (submitBtn && !submitBtn.textContent.includes('Submitted')) {
-            submitBtn.disabled = !canSubmit;
-            submitBtn.style.opacity = canSubmit ? '1' : '0.7';
-        }
-    }
-    
-    // Criterion pass/fail button handlers
-    card.querySelectorAll('.criterion-pass').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const row = btn.closest('.criterion-row');
-            row.querySelector('.criterion-pass').classList.add('active');
-            row.querySelector('.criterion-pass').style.background = 'var(--success)';
-            row.querySelector('.criterion-pass').style.color = 'white';
-            row.querySelector('.criterion-fail').classList.remove('active');
-            row.querySelector('.criterion-fail').style.background = 'transparent';
-            row.querySelector('.criterion-fail').style.color = 'var(--danger)';
-            row.dataset.grade = 'pass';
-            updateReviewSubmitButtonState();
-        });
-    });
-    
-    card.querySelectorAll('.criterion-fail').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const row = btn.closest('.criterion-row');
-            row.querySelector('.criterion-fail').classList.add('active');
-            row.querySelector('.criterion-fail').style.background = 'var(--danger)';
-            row.querySelector('.criterion-fail').style.color = 'white';
-            row.querySelector('.criterion-pass').classList.remove('active');
-            row.querySelector('.criterion-pass').style.background = 'transparent';
-            row.querySelector('.criterion-pass').style.color = 'var(--success)';
-            row.dataset.grade = 'fail';
-            updateReviewSubmitButtonState();
-        });
-    });
-    
-    notesTextarea.addEventListener('input', () => {
-        updateReviewSubmitButtonState();
-        if (submitBtn && submitBtn.disabled && submitBtn.textContent.includes('Submitted')) {
-            submitBtn.disabled = false;
-            submitBtn.textContent = 'Submit Human Review';
-            submitBtn.style.background = '';
-            updateReviewSubmitButtonState();
-        }
-    });
-    
-    card.querySelector('.submit-human-review-btn').addEventListener('click', (e) => {
-        e.stopPropagation();
-        const rowNum = card.dataset.rowNumber !== null && card.dataset.rowNumber !== undefined
-            ? Number(card.dataset.rowNumber)
-            : null;
-        submitHumanReview(result.hunt_id, card, slotNum, rowNum);
-    });
-    
-    // Also re-enable on any criteria button click if already submitted
-    // (Note: Criteria buttons already enable submit button in their handlers above)
-    const criteriaRows = card.querySelectorAll('.criteria-rating-row');
-    criteriaRows.forEach(row => {
-        row.querySelectorAll('.criteria-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                if (submitBtn && submitBtn.disabled && submitBtn.textContent.includes('Submitted')) {
-                    submitBtn.disabled = false;
-                    submitBtn.textContent = 'Submit Human Review';
-                    submitBtn.style.background = '';
-                } else if (submitBtn) {
-                    submitBtn.disabled = false;
-                    submitBtn.style.opacity = '1';
-                }
-            });
-        });
-    });
-    
-    // Per-card reveal button removed - using main Reveal button at top
-    
-    return card;
+    return createResultCard(result, slotIndex, rowNumber);
 }
 
 export function handleHumanReview(huntId, judgment, card, slotNum) {
