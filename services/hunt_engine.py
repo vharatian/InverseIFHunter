@@ -41,8 +41,8 @@ from models.schemas import (
     ParsedNotebook,
     TurnData
 )
-from services.openrouter_client import get_openrouter_client
-from services.openai_client import get_openai_judge_client
+from providers.openrouter import get_openrouter_client
+from providers.openai_client import get_openai_judge_client
 from services.aggregation import classify_sample, aggregate_batch
 import services.redis_session as store
 import services.event_stream as events
@@ -298,7 +298,7 @@ class HuntEngine:
                 data={"step": "model_thinking", "message": "Model thinking"}
             ))
             if provider == 'fireworks':
-                from services.fireworks_client import get_fireworks_client
+                from providers.fireworks import get_fireworks_client
                 client = get_fireworks_client()
                 if rate_limiter:
                     async with rate_limiter.acquire("fireworks"):
@@ -596,7 +596,7 @@ class HuntEngine:
             ))
 
             if provider == 'fireworks':
-                from services.fireworks_client import get_fireworks_client
+                from providers.fireworks import get_fireworks_client
                 client = get_fireworks_client()
                 if rate_limiter:
                     async with rate_limiter.acquire("fireworks"):

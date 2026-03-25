@@ -17,7 +17,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from services.notebook_parser import notebook_parser
-from storage.session_storage import get_session_storage
+from services.pg_session import get_session_metadata_pg
 from helpers.shared import _get_validated_session, _format_judge_result
 import services.redis_session as redis_store
 
@@ -59,9 +59,11 @@ async def judge_reference(
     # would OVERWRITE these with the original Turn 1 data.
     # When skip_colab_refresh=True (e.g. from testbed after save), session
     # was just updated via update-notebook-cells — Colab may be stale.
-    storage = get_session_storage(session_id)
+    meta = await get_session_metadata_pg(session_id)
+    url = (meta.get("url") or meta.get("colab_url") or "").strip()
+    storage = {"url": url} if url else {}
     old_ref = session.notebook.response_reference[:100] if session.notebook.response_reference else "empty"
-    
+
     if skip_colab_refresh or session.current_turn > 1:
         reason = "skip_colab_refresh (testbed)" if skip_colab_refresh else f"Turn {session.current_turn}"
         logger.info(f"Session {session_id}: {reason} — skipping Colab re-fetch "
@@ -89,7 +91,7 @@ async def judge_reference(
             session.notebook = parsed
             await redis_store.set_notebook(session_id, parsed)
             ref = session.notebook.response_reference or ""
-            from services.openai_client import _find_json_array
+            from providers.openai_client import _find_json_array
             array_str = _find_json_array(ref)
             criteria_count = 0
             criteria_ids = []
@@ -120,7 +122,7 @@ async def judge_reference(
         raise HTTPException(400, "No expected response available in notebook - add a **[response]** cell")
     
     try:
-        from services.openai_client import get_openai_judge_client
+        from providers.openai_client import get_openai_judge_client
         judge = get_openai_judge_client()
         
         ref_to_judge = notebook.response_reference or ""
@@ -193,10 +195,10 @@ async def generate_single(session_id: str, request: GenerateSingleRequest | None
         messages_kwarg = {"messages": conversation_history} if conversation_history else {}
 
         if provider == 'fireworks':
-            from services.fireworks_client import get_fireworks_client
+            from providers.fireworks import get_fireworks_client
             client = get_fireworks_client()
         else:
-            from services.openrouter_client import get_openrouter_client
+            from providers.openrouter import get_openrouter_client
             client = get_openrouter_client()
 
         response_text, reasoning, error = await client.call_with_retry(
@@ -259,7 +261,7 @@ async def generate_single_stream(session_id: str, request: GenerateSingleRequest
             messages_kwarg = conversation_history if conversation_history else None
 
             if provider == 'fireworks':
-                from services.fireworks_client import get_fireworks_client
+                from providers.fireworks import get_fireworks_client
                 client = get_fireworks_client()
                 response_text, reasoning, error = await client.call_with_retry(
                     prompt=prompt, model=model,
@@ -272,7 +274,7 @@ async def generate_single_stream(session_id: str, request: GenerateSingleRequest
                     yield f"event: chunk\ndata: {json.dumps({'type': 'content', 'text': response_text})}\n\n"
                 yield f"event: done\ndata: {json.dumps({'type': 'done', 'response': response_text or '', 'reasoning': reasoning or '', 'model': model, 'provider': provider})}\n\n"
             else:
-                from services.openrouter_client import get_openrouter_client
+                from providers.openrouter import get_openrouter_client
                 client = get_openrouter_client()
                 rbp = session.config.reasoning_budget_percent if provider != 'fireworks' else 0.9
                 async for chunk in client.stream_model_chunks(
@@ -320,7 +322,7 @@ async def judge_calibration(session_id: str, request: JudgeCalibrateRequest):
         raise HTTPException(400, "No response text provided to judge")
 
     try:
-        from services.openai_client import get_openai_judge_client
+        from providers.openai_client import get_openai_judge_client
         judge = get_openai_judge_client()
 
         judge_model = request.judge_model or getattr(session.config, "judge_model", None)
@@ -370,7 +372,7 @@ async def judge_calibration_stream(session_id: str, request: JudgeCalibrateReque
     if not request.response_text:
         raise HTTPException(400, "No response text provided to judge")
 
-    from services.openai_client import get_openai_judge_client
+    from providers.openai_client import get_openai_judge_client
     judge = get_openai_judge_client()
 
     judge_model = request.judge_model or getattr(session.config, "judge_model", None)
@@ -418,7 +420,9 @@ async def judge_reference_stream(
     """SSE streaming version of judge-reference. Yields per-criterion results as they complete."""
     session = await _get_validated_session(session_id)
 
-    storage = get_session_storage(session_id)
+    meta = await get_session_metadata_pg(session_id)
+    url = (meta.get("url") or meta.get("colab_url") or "").strip()
+    storage = {"url": url} if url else {}
     if skip_colab_refresh or session.current_turn > 1:
         pass
     elif storage and "url" in storage:
@@ -443,7 +447,7 @@ async def judge_reference_stream(
     if not notebook.response:
         raise HTTPException(400, "No expected response available in notebook")
 
-    from services.openai_client import get_openai_judge_client
+    from providers.openai_client import get_openai_judge_client
     judge = get_openai_judge_client()
 
     async def _stream():

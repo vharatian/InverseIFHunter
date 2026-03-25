@@ -9,8 +9,6 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from agentic_reviewer.llm_client import call_model_sync, call_model_streaming, parse_pass_fail
-
 logger = logging.getLogger(__name__)
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent.parent / "config" / "agentic_rules.yaml"
@@ -74,6 +72,8 @@ def run_council(
     and returns the final pass/fail. Otherwise uses majority or unanimity.
     """
     from agentic_reviewer.config_loader import get_agentic_council
+    from providers.openrouter import call_model_sync, parse_pass_fail
+
     path = config_path if config_path and config_path.exists() else None
     council_config = get_agentic_council(path)
     models = _get_enabled_models(council_config)
@@ -152,6 +152,8 @@ def run_council_streaming(
       ("complete", passed, votes)
     """
     from agentic_reviewer.config_loader import get_agentic_council
+    from providers.openrouter import call_model_streaming, call_model_sync, parse_pass_fail
+
     path = config_path if config_path and config_path.exists() else None
     council_config = get_agentic_council(path)
     models = _get_enabled_models(council_config)

@@ -269,7 +269,7 @@ async def _judge_via_openrouter(
     model: str, standard_response: str, pass_threshold: float = 0.5,
 ) -> Dict[str, Any]:
     """Run independent judging via OpenRouter (parallel, all criteria at once)."""
-    from services.openrouter_client import get_openrouter_client
+    from providers.openrouter import get_openrouter_client
     criteria_list = _extract_criteria_list(response_reference)
     if not criteria_list:
         raise ValueError("CRITICAL: Could not extract criteria for judging. Reference must contain a valid JSON array or C1: ... format.")
@@ -293,7 +293,7 @@ async def _judge_via_openrouter_streaming(
     model: str, standard_response: str, pass_threshold: float = 0.5,
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """Streaming variant: yields per-criterion results as they complete (parallel)."""
-    from services.openrouter_client import get_openrouter_client
+    from providers.openrouter import get_openrouter_client
     criteria_list = _extract_criteria_list(response_reference)
     if not criteria_list:
         raise ValueError("CRITICAL: Could not extract criteria for judging. Reference must contain a valid JSON array or C1: ... format.")
@@ -506,7 +506,7 @@ class OpenAIJudgeClient:
                 return False
         if self.openrouter_key:
             try:
-                from services.openrouter_client import get_openrouter_client
+                from providers.openrouter import get_openrouter_client
                 client = get_openrouter_client()
                 response_text, _ = await client.call_model(
                     prompt="test", model="openai/gpt-4o", max_tokens=5,

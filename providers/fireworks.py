@@ -15,7 +15,7 @@ import logging
 from typing import Tuple, Optional, Dict, Any
 from dotenv import load_dotenv
 
-from services.base_client import BaseAPIClient
+from providers.base import BaseAPIClient
 
 logger = logging.getLogger(__name__)
 

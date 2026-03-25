@@ -235,7 +235,7 @@ def run_agent_sync(session_dict: Dict[str, Any]) -> Dict[str, Any]:
     review_text = ""
     llm_error = None
     try:
-        from agentic_reviewer.llm_client import call_model_sync
+        from providers.openrouter import call_model_sync
         review_text, err = call_model_sync(prompt, model, max_tokens=max_tokens, timeout=timeout)
         if err:
             llm_error = err

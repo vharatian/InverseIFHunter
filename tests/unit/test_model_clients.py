@@ -11,8 +11,8 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from services.openrouter_client import OpenRouterClient
-from services.fireworks_client import FireworksClient
+from providers.openrouter import OpenRouterClient
+from providers.fireworks import FireworksClient
 
 
 # ---------------------------------------------------------------------------
