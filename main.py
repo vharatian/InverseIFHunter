@@ -163,6 +163,12 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+from middleware.trace_id import TraceIdMiddleware
+from middleware.error_handler import global_exception_handler
+
+app.add_middleware(TraceIdMiddleware)
+app.add_exception_handler(Exception, global_exception_handler)
+
 # Import and include all route modules
 from routes.trainer import router as trainer_router
 from routes.session import router as session_router
