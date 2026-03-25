@@ -21,6 +21,7 @@ google-auth-oauthlib>=1.2.0
 # PostgreSQL + ORM
 sqlalchemy[asyncio]>=2.0
 asyncpg>=0.29.0
+greenlet>=3.0
 alembic>=1.13
 
 # Task queue (replaces custom hunt_worker loop)
