@@ -1,7 +1,7 @@
 /**
  * hunt.js — Hunt Execution, SSE Progress, Hunt Limits
  * 
- * Handles hunt configuration, execution via SSE, progress tracking,
+ * Handles hunt configuration, execution via Phoenix Channel (SSE fallback), progress tracking,
  * hunt limit enforcement, and response fetching.
  * 
  * Dependencies: config.js, utils.js, state.js, dom.js, results.js
@@ -27,6 +27,7 @@ import {
 import { showMultiTurnDecision, updateTurnAwareUI } from './multiturn.js';
 import { syncActiveRunToNotebook } from './testbed.js';
 import { playHuntStart } from './sounds.js';
+import { connectHuntChannel, disconnectHuntChannel } from './huntChannel.js';
 
 // ── Hunt timer & aurora — purely visual, no logic impact ──────────────────
 let _huntTimerInterval = null;
@@ -544,137 +545,47 @@ export async function startHunt() {
     // Scroll to progress section
     elements.progressSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
     
-    // Start SSE stream with auto-reconnection via Redis Streams
-    // Server sends id: and retry: 500 with each event.
-    // Browser's native EventSource auto-reconnects with Last-Event-ID header.
-    // Server replays missed events from Redis Stream on reconnect.
+    // Live updates: WebSocket (Phoenix) when Elixir edge is present; else SSE on /api/hunt-stream/
     playHuntStart();
     _startHuntTimer();
     _activateAurora();
-    const seenEventIds = new Set();  // Dedup replayed events
-    
-    const eventSource = new EventSource(`/api/hunt-stream/${state.sessionId}`);
-    
-    eventSource.onmessage = (event) => {
-    };
-    
-    // Dedup helper — returns true if this event was already processed
-    function isDuplicate(event) {
-        if (event.lastEventId && seenEventIds.has(event.lastEventId)) {
-            return true;
-        }
-        if (event.lastEventId) {
-            seenEventIds.add(event.lastEventId);
-        }
-        return false;
-    }
-    
-    eventSource.addEventListener('start', (event) => {
-        if (isDuplicate(event)) return;
-        const data = JSON.parse(event.data);
-    });
-    
-    eventSource.addEventListener('hunt_start', (event) => {
-        if (isDuplicate(event)) return;
-        const data = JSON.parse(event.data);
+
+    const trainerEmail = state.trainerEmail || '';
+    connectHuntChannel(state.sessionId, trainerEmail, {
+      onHuntStart: (data) => {
         updateTableRow(data.hunt_id, { status: 'running', model: data.model });
-    });
-    
-    eventSource.addEventListener('hunt_progress', (event) => {
-        if (isDuplicate(event)) return;
-        const data = JSON.parse(event.data);
+      },
+      onHuntProgress: (data) => {
         handleHuntProgress(data);
-    });
-    
-    eventSource.addEventListener('hunt_result', (event) => {
-        if (isDuplicate(event)) return;
-        const data = JSON.parse(event.data);
+      },
+      onHuntResult: (data) => {
         handleHuntResult(data);
-    });
-    
-    eventSource.addEventListener('early_stop', (event) => {
-        if (isDuplicate(event)) return;
-        const data = JSON.parse(event.data);
+      },
+      onEarlyStop: (data) => {
         showToast(data.reason, 'info');
-    });
-    
-    eventSource.addEventListener('complete', (event) => {
-        if (isDuplicate(event)) return;
-        const data = JSON.parse(event.data);
+      },
+      onComplete: (data) => {
         handleHuntComplete(data);
-        eventSource.close();
-    });
-    
-    eventSource.addEventListener('error', (event) => {
+      },
+      onError: (data) => {
         if (state.isHunting) {
-            // EventSource may auto-reconnect, but if it enters CLOSED state
-            // (e.g., 502 from nginx during deploy), we must reconnect manually.
-            if (eventSource.readyState === EventSource.CLOSED) {
-                eventSource.close();
-                // Reconnect after brief delay — server will replay missed events
-                setTimeout(() => {
-                    if (state.isHunting) {
-                        const newSource = new EventSource(`/api/hunt-stream/${state.sessionId}`);
-                        // Re-attach all event listeners to the new source
-                        newSource.addEventListener('hunt_result', (e) => {
-                            if (isDuplicate(e)) return;
-                            handleHuntResult(JSON.parse(e.data));
-                        });
-                        newSource.addEventListener('hunt_progress', (e) => {
-                            if (isDuplicate(e)) return;
-                            handleHuntProgress(JSON.parse(e.data));
-                        });
-                        newSource.addEventListener('hunt_start', (e) => {
-                            if (isDuplicate(e)) return;
-                            updateTableRow(JSON.parse(e.data).hunt_id, { status: 'running', model: JSON.parse(e.data).model });
-                        });
-                        newSource.addEventListener('complete', (e) => {
-                            if (isDuplicate(e)) return;
-                            handleHuntComplete(JSON.parse(e.data));
-                            newSource.close();
-                        });
-                        newSource.addEventListener('error', () => {
-                            // If still hunting and closed again, try once more after longer delay
-                            if (state.isHunting && newSource.readyState === EventSource.CLOSED) {
-                                setTimeout(() => {
-                                    if (state.isHunting) {
-                                        // Final fallback: poll for results
-                                        fetch(`/api/results/${state.sessionId}`)
-                                            .then(r => r.ok ? r.json() : Promise.reject())
-                                            .then(data => {
-                                                if (data.results && data.results.length > 0) {
-                                                    showToast(`Recovered ${data.results.length} results after reconnect.`, 'info');
-                                                    fetchAllResponses().then(() => showMultiTurnDecision());
-                                                    state.isHunting = false;
-                                                }
-                                            }).catch(() => {});
-                                    }
-                                }, 5000);
-                            }
-                        });
-                        newSource.addEventListener('ping', () => {});
-                    }
-                }, 2000);
-            } else {
-                // CONNECTING state — EventSource is auto-reconnecting, let it
-            }
-        } else {
-            eventSource.close();
-            fetch(`/api/results/${state.sessionId}`)
-                .then(resp => resp.ok ? resp.json() : Promise.reject('not ok'))
-                .then(recoveryData => {
-                    const recoveredCount = (recoveryData.results || []).length;
-                    if (recoveredCount > 0) {
-                        showToast(`Recovered ${recoveredCount} results.`, 'info');
-                        fetchAllResponses().then(() => showMultiTurnDecision());
-                    }
-                })
-                .catch(() => {});
+          fetch(`/api/results/${state.sessionId}`)
+            .then(r => r.ok ? r.json() : Promise.reject())
+            .then(recoveryData => {
+              if (recoveryData.results && recoveryData.results.length > 0) {
+                showToast(`Recovered ${recoveryData.results.length} results.`, 'info');
+                fetchAllResponses().then(() => showMultiTurnDecision());
+                state.isHunting = false;
+              }
+            })
+            .catch(() => {});
         }
-    });
-    
-    eventSource.addEventListener('ping', () => {
-        // Keepalive, ignore
+      },
+      onReconnect: () => {
+        if (state.isHunting) {
+          showToast('Reconnecting to live updates...', 'info');
+        }
+      }
     });
 }
 
