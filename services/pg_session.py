@@ -102,13 +102,18 @@ async def load_session_pg(session_id: str) -> Optional[HuntSession]:
         for r in result_rows.scalars():
             try:
                 hr = HuntResult(
+                    hunt_id=r.hunt_id,
                     model=r.model,
-                    provider=r.provider,
-                    prompt=r.prompt,
-                    response=r.response,
-                    scores=r.scores or {},
+                    status=HuntStatus(r.status) if r.status else HuntStatus.PENDING,
+                    response=r.response or "",
+                    reasoning_trace=r.reasoning_trace or "",
+                    judge_score=r.judge_score,
+                    judge_output=r.judge_output or "",
                     judge_criteria=r.judge_criteria or {},
-                    duration_ms=r.duration_ms,
+                    judge_explanation=r.judge_explanation or "",
+                    error=r.error,
+                    is_breaking=r.is_breaking or False,
+                    sample_label=r.sample_label,
                 )
                 hunt_results.append(hr)
             except Exception:
@@ -118,6 +123,50 @@ async def load_session_pg(session_id: str) -> Optional[HuntSession]:
         fields["all_results"] = hunt_results
 
         return HuntSession(**fields)
+
+
+async def append_result_pg(session_id: str, result) -> None:
+    """Write a single hunt result to PostgreSQL. Fire-and-forget — never raises."""
+    try:
+        async with get_db() as db:
+            await db.execute(
+                text("""
+                    INSERT INTO hunt_results (
+                        session_id, hunt_id, model, provider, status,
+                        prompt, response, reasoning_trace,
+                        judge_score, judge_output, judge_explanation,
+                        judge_criteria, scores, error,
+                        is_breaking, sample_label, duration_ms
+                    ) VALUES (
+                        :session_id, :hunt_id, :model, :provider, :status,
+                        :prompt, :response, :reasoning_trace,
+                        :judge_score, :judge_output, :judge_explanation,
+                        CAST(:judge_criteria AS jsonb), CAST(:scores AS jsonb), :error,
+                        :is_breaking, :sample_label, :duration_ms
+                    )
+                """),
+                {
+                    "session_id": session_id,
+                    "hunt_id": getattr(result, "hunt_id", 0),
+                    "model": getattr(result, "model", "unknown"),
+                    "provider": getattr(result, "provider", "unknown"),
+                    "status": result.status.value if hasattr(result.status, "value") else str(getattr(result, "status", "pending")),
+                    "prompt": getattr(result, "prompt", None),
+                    "response": getattr(result, "response", None),
+                    "reasoning_trace": getattr(result, "reasoning_trace", None),
+                    "judge_score": getattr(result, "judge_score", None),
+                    "judge_output": getattr(result, "judge_output", None),
+                    "judge_explanation": getattr(result, "judge_explanation", None),
+                    "judge_criteria": json.dumps(getattr(result, "judge_criteria", {}) or {}, default=str),
+                    "scores": json.dumps(getattr(result, "scores", {}) or {}, default=str),
+                    "error": getattr(result, "error", None),
+                    "is_breaking": getattr(result, "is_breaking", False),
+                    "sample_label": str(result.sample_label) if getattr(result, "sample_label", None) else None,
+                    "duration_ms": getattr(result, "duration_ms", None),
+                },
+            )
+    except Exception as e:
+        logger.error(f"append_result_pg failed for session {session_id}: {e}")
 
 
 async def delete_session_pg(session_id: str) -> bool:

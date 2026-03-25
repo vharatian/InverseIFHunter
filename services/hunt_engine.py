@@ -24,6 +24,14 @@ try:
 except ImportError:
     _telemetry_enabled = False
 
+# PostgreSQL result persistence - wrapped to never fail
+async def _persist_result_pg(session_id: str, result) -> None:
+    try:
+        from services.pg_session import append_result_pg
+        await append_result_pg(session_id, result)
+    except Exception as e:
+        logger.debug("PG result persist failed (non-fatal): %s", e)
+
 # Rate limiter import - wrapped to never fail
 try:
     from services.rate_limiter import get_rate_limiter
@@ -395,6 +403,7 @@ class HuntEngine:
         results_sorted = sorted(results, key=lambda r: r.hunt_id)
         for result in results_sorted:
             await store.append_result(session_id, result)
+            asyncio.create_task(_persist_result_pg(session_id, result))
             completed = await store.incr_completed_hunts(session_id)
             if result.sample_label == "BREAK":
                 await store.incr_breaks_found(session_id)
@@ -683,8 +692,9 @@ class HuntEngine:
             result.response = result.response or ""
             result.reasoning_trace = result.reasoning_trace or ""
 
-        # Write result to Redis (atomic RPUSH)
+        # Write result to Redis (atomic RPUSH) + PostgreSQL (durable)
         await store.append_result(session_id, result)
+        asyncio.create_task(_persist_result_pg(session_id, result))
 
         # Update counters atomically in Redis (no locks needed)
         completed = await store.incr_completed_hunts(session_id)
