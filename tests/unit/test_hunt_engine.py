@@ -268,10 +268,10 @@ class TestHuntPersistence:
         """_persist_session should be callable with session_id, session, storage."""
         from helpers.shared import _persist_session
 
-        with patch("helpers.shared.save_session_storage") as mock_save:
-            mock_save.return_value = None
+        with patch("helpers.shared.save_session_pg", new_callable=AsyncMock) as mock_pg:
+            mock_pg.return_value = None
             await _persist_session("test-001", single_turn_session)
-            mock_save.assert_called_once()
+            mock_pg.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------

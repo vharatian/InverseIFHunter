@@ -26,10 +26,10 @@ from pydantic import BaseModel
 
 from models.schemas import HuntConfig, ParsedNotebook
 from services.notebook_parser import notebook_parser
+from services.alignment import build_alignment_export_payload
 from services.hunt_engine import hunt_engine
 from services.snapshot_service import snapshot_service, NotebookSnapshot
-from storage.session_storage import save_session_storage, get_session_storage
-from storage.sqlite_store import save_session as sqlite_save, load_session as sqlite_load, update_field as sqlite_update
+from services.pg_session import save_session_pg, merge_session_metadata_pg, get_session_metadata_pg
 from storage.trainer_registry import register_or_update_trainer
 from helpers.notebook_helpers import HEADING_MAP, _update_session_notebook_field
 import services.redis_session as redis_store
@@ -136,25 +136,20 @@ async def upload_notebook(request: Request, file: UploadFile = File(...), force_
             "trainer_name": trainer_name or None
         })
         
-        # Store original content and session data for export
-        session_dump = session.model_dump()
-        save_session_storage(session.session_id, {
-            "original_content": content_str,
-            "filename": file.filename,
-            "url": None,
-            "session_data": session_dump,
-            **trainer_info
-        })
-
-        # Write-through to SQLite (permanent store)
         try:
-            sqlite_save(session.session_id, {
-                "notebook_data": session_dump.get("notebook"),
-                "config": session_dump.get("config"),
-                "trainer_email": trainer_email or None,
-            })
+            await save_session_pg(session)
+            await merge_session_metadata_pg(
+                session.session_id,
+                {
+                    "original_content": content_str,
+                    "filename": file.filename,
+                    "url": None,
+                    "colab_url": None,
+                    **trainer_info,
+                },
+            )
         except Exception:
-            logger.exception(f"SQLite write-through failed for upload {session.session_id}")
+            logger.exception(f"PostgreSQL persist failed for upload {session.session_id}")
         
         # Extract model prefix from metadata or model slots
         model_prefix = notebook_parser.extract_model_prefix(parsed)
@@ -233,26 +228,20 @@ async def fetch_notebook(http_request: Request, request: NotebookURLRequest):
             "trainer_name": trainer_name or None
         })
         
-        # Store with trainer info
-        session_dump = session.model_dump()
-        save_session_storage(session.session_id, {
-            "original_content": content_str,
-            "filename": parsed.filename,
-            "url": request.url,
-            "session_data": session_dump,
-            **trainer_info
-        })
-
-        # Write-through to SQLite (permanent store)
         try:
-            sqlite_save(session.session_id, {
-                "colab_url": request.url,
-                "notebook_data": session_dump.get("notebook"),
-                "config": session_dump.get("config"),
-                "trainer_email": trainer_email or None,
-            })
+            await save_session_pg(session)
+            await merge_session_metadata_pg(
+                session.session_id,
+                {
+                    "original_content": content_str,
+                    "filename": parsed.filename,
+                    "url": request.url,
+                    "colab_url": request.url,
+                    **trainer_info,
+                },
+            )
         except Exception:
-            logger.exception(f"SQLite write-through failed for fetch {session.session_id}")
+            logger.exception(f"PostgreSQL persist failed for fetch {session.session_id}")
         
         # Extract model prefix from metadata or model slots
         model_prefix = notebook_parser.extract_model_prefix(parsed)
@@ -335,24 +324,20 @@ async def create_notebook(http_request: Request, request: CreateNotebookRequest)
             "trainer_email": trainer_email or None,
         })
 
-        session_dump = session.model_dump()
-        save_session_storage(session.session_id, {
-            "original_content": content_str,
-            "filename": parsed.filename,
-            "url": notebook_url,
-            "session_data": session_dump,
-            **trainer_info
-        })
-
         try:
-            sqlite_save(session.session_id, {
-                "colab_url": notebook_url,
-                "notebook_data": session_dump.get("notebook"),
-                "config": session_dump.get("config"),
-                "trainer_email": trainer_email or None,
-            })
+            await save_session_pg(session)
+            await merge_session_metadata_pg(
+                session.session_id,
+                {
+                    "original_content": content_str,
+                    "filename": parsed.filename,
+                    "url": notebook_url,
+                    "colab_url": notebook_url,
+                    **trainer_info,
+                },
+            )
         except Exception:
-            logger.exception(f"SQLite write-through failed for create {session.session_id}")
+            logger.exception(f"PostgreSQL persist failed for create {session.session_id}")
 
         model_prefix = notebook_parser.extract_model_prefix(parsed)
 
@@ -406,8 +391,8 @@ async def warmup_connections(background_tasks: BackgroundTasks):
 async def update_response(session_id: str, request: UpdateResponseRequest):
     """Update the [response] section in the notebook and save to Colab (if URL available)."""
     session = await _get_validated_session(session_id)
-    storage, has_url = _get_storage_with_url(session_id)
-    
+    storage, has_url = await _get_storage_with_url(session_id)
+
     try:
         session.notebook.response = request.response
         saved_to_colab = False
@@ -431,8 +416,8 @@ async def update_notebook_cell(session_id: str, request: UpdateNotebookCellReque
     if request.cell_type not in HEADING_MAP:
         raise HTTPException(400, f"Invalid cell_type: {request.cell_type}")
     
-    storage, has_url = _get_storage_with_url(session_id)
-    
+    storage, has_url = await _get_storage_with_url(session_id)
+
     try:
         _update_session_notebook_field(session, request.cell_type, request.content)
         saved_to_colab = False
@@ -453,8 +438,8 @@ async def update_notebook_cell(session_id: str, request: UpdateNotebookCellReque
 async def update_notebook_cells(session_id: str, request: UpdateNotebookCellsRequest):
     """Update multiple cells in the notebook and save to Colab (if URL available)."""
     session = await _get_validated_session(session_id)
-    storage, has_url = _get_storage_with_url(session_id)
-    
+    storage, has_url = await _get_storage_with_url(session_id)
+
     try:
         cells = [(c.cell_type, c.content) for c in request.cells if c.cell_type in HEADING_MAP]
         if not cells:
@@ -473,12 +458,10 @@ async def update_notebook_cells(session_id: str, request: UpdateNotebookCellsReq
             if not colab_url:
                 colab_url = (request.colab_url or "").strip() or None
             if not colab_url:
-                try:
-                    db_data = sqlite_load(session_id)
-                    if db_data:
-                        colab_url = (db_data.get("colab_url") or "").strip() or None
-                except Exception:
-                    pass
+                meta = await get_session_metadata_pg(session_id)
+                colab_url = (
+                    (meta.get("colab_url") or meta.get("url") or "").strip() or None
+                )
             if colab_url:
                 saved_to_colab = await _save_cells_to_drive_via_url(
                     session_id, session, colab_url, cells
@@ -526,16 +509,10 @@ async def progressive_save(session_id: str, request: ProgressiveSaveRequest):
     # --- resolve Colab URL ---
     colab_url = (request.colab_url or "").strip() or None
     if not colab_url:
-        storage = get_session_storage(session_id)
-        if storage:
-            colab_url = (storage.get("url") or "").strip() or None
-    if not colab_url:
-        try:
-            db_data = sqlite_load(session_id)
-            if db_data:
-                colab_url = (db_data.get("colab_url") or "").strip() or None
-        except Exception:
-            pass
+        meta = await get_session_metadata_pg(session_id)
+        colab_url = (
+            (meta.get("url") or meta.get("colab_url") or "").strip() or None
+        )
     if not colab_url:
         raise HTTPException(400, "No Colab URL found for this session")
 
@@ -559,12 +536,17 @@ async def progressive_save(session_id: str, request: ProgressiveSaveRequest):
         if not success:
             raise HTTPException(500, "Failed to write notebook to Google Drive")
 
-        # Update cached original_content so other save paths stay in sync
-        storage = get_session_storage(session_id) or {}
-        storage["original_content"] = updated_content
-        if not storage.get("url"):
-            storage["url"] = colab_url.strip()
-        save_session_storage(session_id, storage)
+        try:
+            await merge_session_metadata_pg(
+                session_id,
+                {
+                    "original_content": updated_content,
+                    "url": colab_url.strip(),
+                    "colab_url": colab_url.strip(),
+                },
+            )
+        except Exception:
+            logger.exception("Failed to merge metadata after progressive save for %s", session_id)
 
         headings = [c.heading for c in request.cells]
         logger.info(f"Progressive save: wrote {len(headings)} cell(s) to {file_id}: {headings}")
@@ -586,11 +568,9 @@ async def progressive_save(session_id: str, request: ProgressiveSaveRequest):
 async def get_original_notebook(session_id: str):
     """Get the original notebook JSON for a session."""
     try:
-        storage = get_session_storage(session_id)
-        if not storage:
-            raise HTTPException(404, "Session not found")
-        
-        original_content = storage.get("original_content")
+        await _get_validated_session(session_id)
+        meta = await get_session_metadata_pg(session_id)
+        original_content = meta.get("original_content")
         if not original_content:
             raise HTTPException(404, "Original notebook content not available")
         
@@ -609,29 +589,28 @@ async def export_notebook(session_id: str, include_reasoning: bool = True):
     """Export modified notebook with hunt results."""
     try:
         session = await _get_validated_session(session_id)
-        
-        storage = get_session_storage(session_id)
-        if not storage:
-            raise HTTPException(400, "Original notebook content not available")
-        
-        original_content = storage.get("original_content")
+
+        meta = await get_session_metadata_pg(session_id)
+        original_content = meta.get("original_content")
         if not original_content:
-            raise HTTPException(400, "Original notebook content not stored (URL fetch)")
+            raise HTTPException(400, "Original notebook content not available")
         
         results = await hunt_engine.export_results_async(session_id)
         human_reviews = getattr(session, 'human_reviews', {})
         total_hunts_ran = len(results)
-        
+        alignment = await build_alignment_export_payload(session_id, results, human_reviews)
+
         modified_content = notebook_parser.export_notebook(
             original_content=original_content,
             parsed=session.notebook,
             results=results,
             include_reasoning=include_reasoning,
             human_reviews=human_reviews,
-            total_hunts_ran=total_hunts_ran
+            total_hunts_ran=total_hunts_ran,
+            alignment=alignment,
         )
         
-        filename = storage.get("filename", "notebook.ipynb")
+        filename = meta.get("filename", "notebook.ipynb")
         if not filename.endswith('.ipynb'):
             filename += '.ipynb'
         
@@ -707,7 +686,11 @@ async def save_reviews(session_id: str, request: Request):
 
     data = await request.json()
     reviews = data.get("reviews", {})
-    
+
+    trainer_ui = data.get("trainer_ui")
+    if isinstance(trainer_ui, dict) and trainer_ui:
+        await redis_store.set_trainer_ui(session_id, trainer_ui)
+
     if not hasattr(session, 'human_reviews'):
         session.human_reviews = {}
     # Merge incoming reviews (auto-save sends one at a time; full save sends all)
@@ -717,11 +700,10 @@ async def save_reviews(session_id: str, request: Request):
     # Persist to Redis so GET /api/session and submit-for-review see up-to-date reviews
     await redis_store.set_human_reviews(session_id, session.human_reviews)
 
-    # Write-through to SQLite
     try:
-        sqlite_update(session_id, "human_reviews", session.human_reviews)
+        await save_session_pg(session)
     except Exception:
-        logger.exception(f"SQLite write-through failed for reviews {session_id}")
+        logger.exception(f"PostgreSQL save failed for reviews {session_id}")
 
     is_auto = data.get("auto_save", False)
 
@@ -831,6 +813,11 @@ async def save_snapshot(request: Request):
                 turns_data = snapshot.metadata.get('turns', [])
                 conversation_history = snapshot.metadata.get('conversation_history', [])
                 logger.info(f"Multi-turn export: {len(turns_data)} turns")
+
+                sid = getattr(snapshot, "session_id", None) or ""
+                alignment = await build_alignment_export_payload(
+                    sid, results, snapshot.human_reviews or {}
+                )
                 
                 modified_content = notebook_parser.export_multi_turn_notebook(
                     original_content=original_content,
@@ -840,16 +827,22 @@ async def save_snapshot(request: Request):
                     include_reasoning=snapshot.include_reasoning,
                     human_reviews=snapshot.human_reviews,
                     total_hunts_ran=total_hunts_ran,
-                    conversation_history=conversation_history
+                    conversation_history=conversation_history,
+                    alignment=alignment,
                 )
             else:
+                sid = getattr(snapshot, "session_id", None) or ""
+                alignment = await build_alignment_export_payload(
+                    sid, results, snapshot.human_reviews or {}
+                )
                 modified_content = notebook_parser.export_notebook(
                     original_content=original_content,
                     parsed=parsed,
                     results=results,
                     include_reasoning=snapshot.include_reasoning,
                     human_reviews=snapshot.human_reviews,
-                    total_hunts_ran=total_hunts_ran
+                    total_hunts_ran=total_hunts_ran,
+                    alignment=alignment,
                 )
             
             success = drive_client.update_file_content(file_id, modified_content)
@@ -952,18 +945,17 @@ async def save_to_drive(session_id: str, request: Request):
         total_hunts_from_frontend = body.get("total_hunts")
         
         session = await _get_validated_session(session_id)
-            
-        storage = get_session_storage(session_id)
-        if not storage or not storage.get("url"):
+
+        meta = await get_session_metadata_pg(session_id)
+        url = (meta.get("url") or meta.get("colab_url") or "").strip()
+        if not url:
             raise HTTPException(400, "No Google Drive URL found for this session")
-            
-        url = storage.get("url")
         file_id = drive_client.get_file_id_from_url(url)
         
         if not file_id:
             raise HTTPException(400, "Could not extract File ID from URL")
             
-        original_content = storage.get("original_content")
+        original_content = meta.get("original_content")
         all_results = session.results # Use session.results now that we have full session
         
         # If all_results is empty but session exists, try export_results fallback (shouldn't be needed with _get_validated_session)
@@ -1007,6 +999,8 @@ async def save_to_drive(session_id: str, request: Request):
         human_reviews = getattr(session, 'human_reviews', {})
         valid_response_count = count_valid_responses(all_results)
         logger.debug(f" valid_response_count = {valid_response_count} (frontend sent: {total_hunts_from_frontend}, total results: {len(all_results)})")
+
+        alignment = await build_alignment_export_payload(session_id, results, human_reviews)
         
         modified_content = notebook_parser.export_notebook(
             original_content=original_content,
@@ -1014,7 +1008,8 @@ async def save_to_drive(session_id: str, request: Request):
             results=results,
             include_reasoning=True,
             human_reviews=human_reviews,
-            total_hunts_ran=valid_response_count
+            total_hunts_ran=valid_response_count,
+            alignment=alignment,
         )
         
         success = drive_client.update_file_content(file_id, modified_content)

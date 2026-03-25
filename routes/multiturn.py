@@ -12,7 +12,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from models.schemas import TurnData, HuntStatus
-from storage.session_storage import get_session_storage, save_session_storage
+from services.pg_session import save_session_pg
 from helpers.shared import _get_validated_session
 import services.redis_session as redis_store
 
@@ -159,14 +159,10 @@ async def _do_advance_turn(session_id: str, request: AdvanceTurnRequest):
     except Exception as e:
         logger.error(f"Failed to persist session after turn advance: {e}")
 
-    # Also persist to disk storage
     try:
-        storage = get_session_storage(session_id)
-        if storage:
-            storage["session_data"] = session.model_dump()
-            save_session_storage(session_id, storage)
+        await save_session_pg(session)
     except Exception as e:
-        logger.error(f"Failed to persist to disk after turn advance: {e}")
+        logger.error(f"Failed to persist session to PostgreSQL after turn advance: {e}")
     
     logger.info(f"Session {session_id}: Advanced to turn {session.current_turn} "
                 f"(history: {len(session.conversation_history)} messages)")

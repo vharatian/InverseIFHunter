@@ -18,8 +18,7 @@ from fastapi import APIRouter, Header, HTTPException, Query  # noqa: F401 - HTTP
 from typing import Annotated
 
 from models.schemas import HuntConfig
-from storage.session_storage import get_session_storage, save_session_storage
-from storage.sqlite_store import update_field as sqlite_update, load_session as sqlite_load
+from services.pg_session import save_session_pg, get_session_metadata_pg
 from helpers.shared import _get_validated_session
 import services.redis_session as redis_store
 from agentic_reviewer.team_config import get_role, get_allowed_trainer_emails_for_role
@@ -86,16 +85,15 @@ async def get_session(session_id: str):
 @router.get("/session/{session_id}/full-state")
 async def get_session_full_state(session_id: str):
     """Return all session data for full UI hydration (clicked from trainer queue)."""
+    # Warm Redis from disk/SQLite when hunt keys are missing (same as GET /session/{id}).
+    await _get_validated_session(session_id)
     data = await redis_store.get_full_session_state(session_id)
     if data is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    # Add colab_url from SQLite so Save to Colab has the URL when resuming from queue
-    try:
-        db = sqlite_load(session_id)
-        if db and db.get("colab_url"):
-            data["colab_url"] = db["colab_url"]
-    except Exception:
-        pass
+    meta = await get_session_metadata_pg(session_id)
+    cu = (meta.get("colab_url") or meta.get("url") or "").strip()
+    if cu:
+        data["colab_url"] = cu
     return data
 
 
@@ -169,10 +167,10 @@ async def update_config(session_id: str, config: HuntConfig):
     await redis_store.set_config(session_id, session.config)
     await redis_store.set_meta_field(session_id, "total_hunts", session.total_hunts)
 
-    # Update storage
-    storage = get_session_storage(session_id) or {}
-    storage["session_data"] = session.model_dump()
-    save_session_storage(session_id, storage)
+    try:
+        await save_session_pg(session)
+    except Exception:
+        logger.exception("PostgreSQL save failed after config update for %s", session_id)
 
     return {"success": True, "config": config.model_dump()}
 
@@ -240,12 +238,6 @@ async def submit_for_review(session_id: str):
         _notify_reviewer_for_session(session_id, "task_submitted", "A new task has been submitted for your review."),
         context=f"submit notification for {session_id}",
     )
-    # Write-through to SQLite
-    try:
-        sqlite_update(session_id, "review_status", "submitted")
-        sqlite_update(session_id, "review_round", round_num)
-    except Exception:
-        logger.exception(f"SQLite write-through failed for submit {session_id}")
     version = await get_version(r, session_id)
     logger.info(f"Session {session_id} submitted for review (round {round_num})")
     return {"ok": True, "review_status": "submitted", "review_round": round_num, "version": version}
@@ -256,10 +248,6 @@ async def mark_qc_done(session_id: str):
     """Mark Quality Check as completed. Call when trainer finishes Proceed to QC."""
     await _get_validated_session(session_id)
     await redis_store.set_qc_done(session_id)
-    try:
-        sqlite_update(session_id, "qc_done", True)
-    except Exception:
-        logger.exception(f"SQLite write-through failed for qc_done {session_id}")
     logger.info(f"Session {session_id}: QC marked done")
     return {"ok": True}
 
@@ -315,12 +303,6 @@ async def resubmit_for_review(session_id: str):
         _notify_reviewer_for_session(session_id, "task_resubmitted", "A task has been fixed and resubmitted for your review."),
         context=f"resubmit notification for {session_id}",
     )
-    # Write-through to SQLite
-    try:
-        sqlite_update(session_id, "review_status", "submitted")
-        sqlite_update(session_id, "review_round", next_round)
-    except Exception:
-        logger.exception(f"SQLite write-through failed for resubmit {session_id}")
     version = await get_version(r, session_id)
     logger.info(f"Session {session_id} resubmitted for review round {next_round} (feedback archived)")
     return {"ok": True, "review_status": "submitted", "review_round": next_round, "version": version}

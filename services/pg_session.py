@@ -136,3 +136,33 @@ async def session_exists_pg(session_id: str) -> bool:
             {"sid": session_id},
         )
         return result.scalar() is not None
+
+
+async def get_session_metadata_pg(session_id: str) -> Dict[str, Any]:
+    """Load JSONB `metadata` column (colab URL, original notebook JSON, filename, trainer hints)."""
+    async with get_db() as db:
+        result = await db.execute(
+            select(SessionRow.metadata_).where(SessionRow.id == session_id)
+        )
+        row = result.scalar_one_or_none()
+        if row is None or not isinstance(row, dict):
+            return {}
+        return dict(row)
+
+
+async def merge_session_metadata_pg(session_id: str, patch: Dict[str, Any]) -> None:
+    """Deep-merge `patch` into sessions.metadata (upsert row if missing)."""
+    if not patch:
+        return
+    payload = json.dumps(patch, default=str)
+    async with get_db() as db:
+        await db.execute(
+            text("""
+                INSERT INTO sessions (id, metadata, status)
+                VALUES (:sid, CAST(:patch AS jsonb), 'pending')
+                ON CONFLICT (id) DO UPDATE SET
+                    metadata = COALESCE(sessions.metadata, '{}'::jsonb) || CAST(:patch AS jsonb),
+                    updated_at = now()
+            """),
+            {"sid": session_id, "patch": payload},
+        )
