@@ -117,8 +117,8 @@ async def save_full_session(
     Save a full session object to Redis.
     Used when restoring from disk storage or initializing complex state.
 
-    sqlite_workflow: optional row from SQLite (same shape as storage.sqlite_store.load_session)
-    so review_status / qc_done / reviewer feedback are not lost after create_session resets them.
+    sqlite_workflow: optional workflow row dict (legacy SQLite-shaped) so review_status, qc_done,
+    and reviewer feedback are not lost after create_session resets them.
     """
     notebook = session.notebook
     if notebook is None:

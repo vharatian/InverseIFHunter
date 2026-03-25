@@ -90,7 +90,7 @@ def _jsonb_str(val) -> str | None:
 
 
 def _session_row_from_disk_json(sid: str, j: dict) -> dict:
-    """Build a SQLite-shaped row dict from a disk JSON backup (see storage/session_storage)."""
+    """Build a SQLite-shaped row dict from a legacy on-disk JSON session backup."""
     sd = j.get("session_data") or {}
     status = sd.get("status", "pending")
     if hasattr(status, "value"):
