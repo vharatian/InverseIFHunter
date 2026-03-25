@@ -4,6 +4,7 @@ Team configuration — roles, pods, and permissions.
 Reads config/team.yaml and provides lookup functions for both trainer and reviewer apps.
 Config is loaded once and cached. All email comparisons are case-insensitive.
 """
+import fcntl
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -16,15 +17,26 @@ _CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
 _TEAM_CONFIG_PATH = _CONFIG_DIR / "team.yaml"
 
 _cache: Optional[Dict[str, Any]] = None
+_cache_mtime: float = 0.0
+
+
+def _file_changed() -> bool:
+    """Check if team.yaml was modified since last load."""
+    try:
+        return _TEAM_CONFIG_PATH.stat().st_mtime != _cache_mtime
+    except OSError:
+        return False
 
 
 def _load() -> Dict[str, Any]:
-    global _cache
-    if _cache is not None:
+    global _cache, _cache_mtime
+    if _cache is not None and not _file_changed():
         return _cache
     try:
         with open(_TEAM_CONFIG_PATH, "r") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_SH)
             data = yaml.safe_load(f) or {}
+        _cache_mtime = _TEAM_CONFIG_PATH.stat().st_mtime
     except FileNotFoundError:
         logger.warning("team.yaml not found at %s — running without team config", _TEAM_CONFIG_PATH)
         data = {}

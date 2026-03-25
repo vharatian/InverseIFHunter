@@ -24,6 +24,16 @@ import { hideModelLockedIndicator } from './editors.js';
 import { showMultiTurnDecision, updateTurnAwareUI } from './multiturn.js';
 import { showAppModal } from './api.js';
 import { MIN_EXPLANATION_WORDS, getConfigValue, adminBypass, getHuntModeById, getSelectionSlots } from './config.js';
+import {
+    recalculateAlignmentGateFromTrainer,
+    revealAllowedByAlignment,
+    updateAlignmentBanner,
+    persistTrainerUi,
+    alignmentGateActive,
+    resetAlignmentGateState,
+    normalizeReviewRowNumber,
+    syncAlignmentSlotDisplays,
+} from './alignment.js';
 import { playHuntComplete, playHuntCompleteEmpty } from './sounds.js';
 
 // ============== Hunt Result Classification Helpers ==============
@@ -449,7 +459,7 @@ export function openGradingSlideout(result, slotIndex, rowNumber) {
     
     // Check if we're in read-only mode (after LLM reveal)
     const isReadOnly = state.llmRevealed;
-    
+
     const modelDisplay = getModelDisplayName(result.model);
     const slotNum = slotIndex !== undefined ? slotIndex + 1 : result.hunt_id;
     const responseText = result.response || 'No response available';
@@ -567,7 +577,7 @@ export function openGradingSlideout(result, slotIndex, rowNumber) {
                             Review submitted and locked
                         </div>
                     ` : `
-                        <button class="btn btn-primary grading-submit-btn" data-hunt-id="${huntId}" data-slot-index="${slotIndex}" data-row-number="${rowNumber}" disabled style="opacity: 0.7;">
+                        <button class="btn btn-primary grading-submit-btn" data-hunt-id="${huntId}" data-slot-index="${slotIndex}" data-row-number="${rowNumber !== undefined && rowNumber !== null ? rowNumber : ''}" disabled style="opacity: 0.7;">
                             Submit Review
                         </button>
                     `}
@@ -794,7 +804,7 @@ export function submitGradingReview(huntId, result, slotIndex, rowNumber) {
     const rowKey = `row_${rowNumber}`;
     state.humanReviews[rowKey] = {
         hunt_id: huntId,
-        row_number: rowNumber,
+        row_number: normalizeReviewRowNumber(rowNumber) ?? rowNumber,
         judgment: overallJudgment,
         grading_basis: gradingBasis,
         explanation: notes,
@@ -810,8 +820,12 @@ export function submitGradingReview(huntId, result, slotIndex, rowNumber) {
         statusEl.innerHTML = '<span style="color: var(--success);">Review Submitted!</span>';
     }
     
-    // Update the compact card
-    const card = document.querySelector(`.slot-compact-card[data-hunt-id="${huntId}"]`);
+    // Update the compact card (prefer row id — hunt_id can repeat across slots)
+    const rowNorm = normalizeReviewRowNumber(rowNumber);
+    const card =
+        rowNorm !== null
+            ? document.querySelector(`.slot-compact-card[data-row-number="${rowNorm}"]`)
+            : document.querySelector(`.slot-compact-card[data-hunt-id="${huntId}"]`);
     if (card) {
         card.classList.add('reviewed');
         const statusDiv = card.querySelector('.slot-compact-status');
@@ -824,10 +838,20 @@ export function submitGradingReview(huntId, result, slotIndex, rowNumber) {
             btn.textContent = 'Edit';
         }
     }
-    
+
+    if (
+        alignmentGateActive() &&
+        !state.llmRevealed &&
+        (state.alignmentPhase === 'passed' || state.alignmentPhase === 're_review')
+    ) {
+        state.alignmentPhase = 'idle';
+        state.alignmentLastSnapshot = null;
+        void persistTrainerUi();
+    }
+
     // Update review progress — this is the single source of truth for counter + button state
     updateReviewProgress();
-    
+
     showToast(`Review for Slot ${slotIndex + 1} submitted!`, 'success');
     
     // Close slideout after a short delay
@@ -1010,7 +1034,7 @@ export async function fetchAllResponses(options = {}) {
 export async function fetchAllResponsesAndShowSelection(completedHunts, breaksFound) {
     try {
         // Fetch all results from the session
-        const response = await fetch(`/api/results/${state.sessionId}`);
+        const response = await fetch(`/api/results/${state.sessionId}`, { cache: 'no-store' });
         if (!response.ok) throw new Error(`Failed to fetch results: ${response.status}`);
         const data = await response.json();
         
@@ -1156,6 +1180,8 @@ export async function exportNotebook() {
     
     try {
         showToast('Preparing export with human reviews...', 'info');
+
+        await persistTrainerUi();
         
         // Send human reviews to backend first
         const reviewData = await fetch(`/api/save-reviews/${state.sessionId}`, {
@@ -1204,6 +1230,7 @@ export function clearPreviousResults() {
     state.selectedRowNumbers = [];  // Reset selection
     state.selectionConfirmed = false;  // FIX 2: Reset selection lock
     state.llmRevealed = false;  // Reset reveal state
+    resetAlignmentGateState();
     // NOTE: totalHuntsCount is the single source of truth, no separate offset to reset
     state.currentRunStartOffset = 0;  // Reset run offset (will be set correctly in initProgressUI)
     state.originalNotebookJson = null;  // Reset original notebook
@@ -2077,7 +2104,7 @@ export function displaySelectedForReview() {
     // Create result cards for each selected response (blind mode - LLM hidden)
     selectedResponses.forEach((result, index) => {
         const rowNumber = state.selectedRowNumbers[index]; // Get the row number for this result
-        const card = createResultCard(result, index, rowNumber); // Pass row number
+        const card = createResultCard(result, index, rowNumber);
         elements.breakingResults.appendChild(card);
     });
     
@@ -2102,6 +2129,27 @@ export function displaySelectedForReview() {
             elements.revealLLMBtn.style.opacity = '0.5';
         }
     }
+}
+
+export function handleRefreshAlignmentClick() {
+    if (!alignmentGateActive() || state.llmRevealed) {
+        showToast('Alignment is not active for this step.', 'info');
+        return;
+    }
+    const selected = state.selectedRowNumbers || [];
+    const reviewKeys = selected.map((rn) => `row_${rn}`);
+    if (selected.length === 0 || !reviewKeys.every((k) => state.humanReviews[k])) {
+        showToast('Complete all human reviews first.', 'info');
+        return;
+    }
+    const r = recalculateAlignmentGateFromTrainer();
+    if (!r.ok) {
+        showToast('Complete all human reviews first.', 'info');
+        return;
+    }
+    updateReviewProgress();
+    void persistTrainerUi();
+    showToast('Alignment updated.', 'success');
 }
 
 // FIX 2: Helper function to disable all selection checkboxes
@@ -2138,6 +2186,9 @@ export function handleChangeSelection() {
         Object.keys(state.humanReviews).forEach(key => delete state.humanReviews[key]);
     }
 
+    resetAlignmentGateState();
+    void persistTrainerUi();
+
     enableSelectionCheckboxes();
     setReviewModeButtonsDisabled(false);
 
@@ -2146,6 +2197,7 @@ export function handleChangeSelection() {
 
     elements.breakingResults.innerHTML = '';
     elements.saveDriveContainer.classList.add('hidden');
+    syncAlignmentSlotDisplays();
 
     elements.selectionSection?.classList.remove('hidden');
     expandSelectionSectionCard();
@@ -2174,8 +2226,10 @@ export function updateReviewProgress() {
     // Enable reveal button only when all selected reviews are complete — always enable in admin mode
     const allComplete = reviewCount >= selectedCount && selectedCount > 0;
 
+    const _alignmentOk = revealAllowedByAlignment();
+
     // Add pulse to reveal button on the exact tick all reviews are first completed
-    if (allComplete && !state.llmRevealed && elements.revealLLMBtn) {
+    if (allComplete && !state.llmRevealed && elements.revealLLMBtn && _alignmentOk) {
         elements.revealLLMBtn.classList.add('pulse');
     }
     
@@ -2185,8 +2239,8 @@ export function updateReviewProgress() {
             elements.revealLLMBtn.disabled = state.llmRevealed;
             elements.revealLLMBtn.style.opacity = state.llmRevealed ? '0.5' : '1';
         } else {
-            elements.revealLLMBtn.disabled = !allComplete || state.llmRevealed;
-            elements.revealLLMBtn.style.opacity = (!allComplete || state.llmRevealed) ? '0.5' : '1';
+            elements.revealLLMBtn.disabled = !allComplete || state.llmRevealed || !_alignmentOk;
+            elements.revealLLMBtn.style.opacity = (!allComplete || state.llmRevealed || !_alignmentOk) ? '0.5' : '1';
         }
         if (state.llmRevealed) {
             elements.revealLLMBtn.textContent = 'AI Evaluation Shown';
@@ -2216,13 +2270,32 @@ export function updateReviewProgress() {
             // Keep save disabled until reveal (handled in revealLLMJudgments)
         }
     }
+
+    if (elements.submitColabBtn && !state.llmRevealed) {
+        elements.submitColabBtn.disabled = true;
+        elements.submitColabBtn.style.opacity = '0.5';
+        if (alignmentGateActive() && allComplete && !_alignmentOk) {
+            elements.submitColabBtn.title =
+                'Meet the alignment target (Refresh alignment), then reveal AI evaluation to enable.';
+        } else {
+            elements.submitColabBtn.title = 'Reveal AI Evaluation first to enable';
+        }
+    }
     
     // Update top instructions
     if (elements.reviewInstructions) {
         if (state.llmRevealed) {
             elements.reviewInstructions.textContent = 'Reviews locked. Scroll down to save.';
             elements.reviewInstructions.style.color = 'var(--success)';
-        } else if (reviewCount >= 4) {
+        } else if (allComplete && alignmentGateActive() && state.alignmentPhase === 'idle') {
+            elements.reviewInstructions.textContent =
+                'All reviews complete. Click Refresh alignment to verify, then you can show AI evaluation.';
+            elements.reviewInstructions.style.color = 'var(--warning)';
+        } else if (allComplete && alignmentGateActive() && state.alignmentPhase === 're_review') {
+            elements.reviewInstructions.textContent =
+                'Alignment is below target. Edit reviews as needed, then click Refresh alignment again.';
+            elements.reviewInstructions.style.color = 'var(--warning)';
+        } else if (reviewCount >= selectedCount && selectedCount > 0) {
             elements.reviewInstructions.textContent = 'All reviews complete! Scroll down to show AI evaluation.';
             elements.reviewInstructions.style.color = 'var(--success)';
         } else {
@@ -2235,7 +2308,15 @@ export function updateReviewProgress() {
         if (state.llmRevealed) {
             elements.bottomInstructions.textContent = 'AI Evaluation shown. Click "Proceed to Quality Check" (runs below), then Save.';
             elements.bottomInstructions.style.color = 'var(--success)';
-        } else if (reviewCount >= 4) {
+        } else if (allComplete && alignmentGateActive() && state.alignmentPhase === 'idle') {
+            elements.bottomInstructions.textContent =
+                'All reviews complete. Use Refresh alignment, then "Show AI Evaluation" when it unlocks.';
+            elements.bottomInstructions.style.color = 'var(--warning)';
+        } else if (allComplete && alignmentGateActive() && state.alignmentPhase === 're_review') {
+            elements.bottomInstructions.textContent =
+                'Below alignment target — adjust grades if needed, then Refresh alignment again.';
+            elements.bottomInstructions.style.color = 'var(--warning)';
+        } else if (reviewCount >= selectedCount && selectedCount > 0) {
             elements.bottomInstructions.textContent = 'All reviews complete! Click "Show AI Evaluation" → then "Proceed to Quality Check".';
             elements.bottomInstructions.style.color = 'var(--success)';
         } else {
@@ -2243,6 +2324,40 @@ export function updateReviewProgress() {
             elements.bottomInstructions.style.color = 'var(--text-muted)';
         }
     }
+
+    updateAlignmentBanner();
+    syncAlignmentSlotDisplays();
+
+    if (elements.refreshAlignmentBtn) {
+        const showAlignUi =
+            alignmentGateActive() && !state.llmRevealed && selectedCount > 0;
+        elements.refreshAlignmentBtn.style.display = showAlignUi ? 'inline-flex' : 'none';
+        const canRefresh = allComplete && showAlignUi;
+        elements.refreshAlignmentBtn.disabled = !canRefresh;
+    }
+}
+
+/** Apply DOM state when session was hydrated with llmRevealed already true (no modal). */
+export function applyLlmRevealedUi() {
+    if (!state.llmRevealed) return;
+    document.querySelectorAll('.llm-judge-section').forEach((section) => {
+        section.style.display = 'block';
+    });
+    document.querySelectorAll('.slot-compact-card').forEach((card) => {
+        card.classList.add('revealed');
+        const btn = card.querySelector('.slot-open-btn');
+        if (btn) btn.textContent = 'View LLM Judgment';
+    });
+    if (elements.proceedToQCBtn) {
+        elements.proceedToQCBtn.disabled = false;
+        elements.proceedToQCBtn.style.opacity = '1';
+    }
+    if (elements.submitColabBtn) {
+        elements.submitColabBtn.disabled = false;
+        elements.submitColabBtn.style.opacity = '1';
+        elements.submitColabBtn.title = 'Save session data to Colab notebook';
+    }
+    syncAlignmentSlotDisplays();
 }
 
 export async function revealLLMJudgments() {
@@ -2274,6 +2389,11 @@ export async function revealLLMJudgments() {
             });
             return;
         }
+    }
+
+    if (!revealAllowedByAlignment()) {
+        showToast('Click Refresh alignment and meet the target before showing AI evaluation.', 'error');
+        return;
     }
     
     const confirmed = await showAppModal({
@@ -2343,7 +2463,8 @@ export async function revealLLMJudgments() {
     
     // Update progress display
     updateReviewProgress();
-    
+    void persistTrainerUi();
+
     showToast('LLM Judgments revealed! Click any slot to view details. Reviews are locked.', 'success');
 }
 
@@ -2386,8 +2507,12 @@ export function createResultCard(result, slotIndex, rowNumber) {
     const card = document.createElement('div');
     card.className = 'slot-compact-card';
     card.dataset.huntId = result.hunt_id;
-    card.dataset.slotIndex = slotIndex || 0;
-    card.dataset.rowNumber = rowNumber !== undefined ? rowNumber : null;
+    card.dataset.slotIndex =
+        slotIndex !== undefined && slotIndex !== null ? String(slotIndex) : '0';
+    const rn = normalizeReviewRowNumber(rowNumber);
+    if (rn !== null) {
+        card.dataset.rowNumber = String(rn);
+    }
     
     const modelDisplay = getModelDisplayName(result.model);
     const score = result.judge_score ?? 0;
@@ -2397,16 +2522,19 @@ export function createResultCard(result, slotIndex, rowNumber) {
     // Check if this slot has been reviewed — use row_N key (matches updateReviewProgress counter)
     // with huntId.submitted as fallback for legacy paths
     const huntId = result.hunt_id;
-    const rowKey  = rowNumber !== undefined && rowNumber !== null ? `row_${rowNumber}` : null;
+    const rowKey = rn !== null ? `row_${rn}` : null;
     const isReviewed = (rowKey && state.humanReviews?.[rowKey])
         || (state.humanReviews?.[huntId]?.submitted === true);
     
     if (isReviewed) {
         card.classList.add('reviewed');
     }
-    
+
     card.innerHTML = `
         <div class="slot-compact-badge">Slot ${slotNum}</div>
+        <div class="slot-compact-align-center">
+            <div class="slot-alignment-pct" aria-live="polite"></div>
+        </div>
         <div class="slot-compact-info">
             <div class="slot-compact-model">${modelDisplay}</div>
             <div class="slot-compact-status ${isReviewed ? 'reviewed' : ''}">
@@ -2618,7 +2746,11 @@ export function checkAllReviewsComplete() {
     
     if (reviewCount >= totalSlots && totalSlots >= 1) {
         showToast(`All ${totalSlots} review(s) complete! Ready to export.`, 'success');
-        if (elements.revealLLMBtn) {
+        const _pulseReveal =
+            !alignmentGateActive() ||
+            revealAllowedByAlignment() ||
+            (state.adminMode && adminBypass('all_grades_before_reveal'));
+        if (elements.revealLLMBtn && _pulseReveal) {
             elements.revealLLMBtn.classList.add('pulse');
         }
         import('./reviewSync.js').then(({ refreshReviewSync }) => {

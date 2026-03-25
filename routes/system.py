@@ -88,6 +88,20 @@ async def get_config():
     return get_app_config()
 
 
+@router.post("/api/reload-config")
+async def reload_config():
+    """Reload global.yaml config cache. Called by admin panel after config changes."""
+    try:
+        from agentic_reviewer.config_loader import reload_config as _reload
+        _reload()
+        from agentic_reviewer.team_config import reload as _reload_team
+        _reload_team()
+        return {"ok": True, "message": "Config and team caches reloaded"}
+    except Exception as e:
+        logger.error("Config reload failed: %s", e)
+        return JSONResponse(status_code=500, content={"detail": f"Reload failed: {e}"})
+
+
 @router.get("/api/version")
 async def get_version():
     """Get app version for soft-reload detection. Recomputes on every call to detect file changes after deploy."""

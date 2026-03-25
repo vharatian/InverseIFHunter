@@ -941,6 +941,23 @@ body {
     background: var(--bg-hover);
 }
 
+/* Solid secondary-style control (e.g. refresh alignment) — avoids washed-out transparent look */
+.btn-refresh-alignment {
+    background: rgba(var(--accent-primary-rgb), 0.22);
+    color: var(--text-primary);
+    border: 1px solid var(--accent-primary);
+    font-weight: 600;
+}
+
+.btn-refresh-alignment:hover:not(:disabled) {
+    background: rgba(var(--accent-primary-rgb), 0.32);
+    border-color: var(--accent-secondary);
+}
+
+.btn-refresh-alignment:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
 
 .btn-success {
     background: var(--success);
@@ -3096,8 +3113,55 @@ input[type="range"]::-moz-range-thumb:hover {
     box-shadow: var(--shadow-sm);
 }
 
-.slot-compact-info {
+/* Center column: alignment % vs configured target (same threshold as gate) */
+.slot-compact-align-center {
     flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 6.5rem;
+    min-height: 2.75rem;
+    padding: 0 0.5rem;
+}
+
+.slot-alignment-pct {
+    font-size: 1.05rem;
+    font-weight: 700;
+    line-height: 1.25;
+    text-align: center;
+    letter-spacing: -0.02em;
+    min-height: 1.25em;
+}
+
+.alignment-pct-ok {
+    color: var(--success);
+}
+
+.alignment-pct-below {
+    color: var(--danger);
+}
+
+.alignment-overall-row {
+    margin: 0 0 1rem 0;
+    padding: 0.65rem 1rem;
+    font-size: 0.95rem;
+    line-height: 1.45;
+    border-radius: var(--radius-md);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+}
+
+.alignment-overall-pct {
+    font-weight: 700;
+}
+
+.alignment-target-hint {
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+.slot-compact-info {
+    flex: 1.15;
     min-width: 0;
 }
 

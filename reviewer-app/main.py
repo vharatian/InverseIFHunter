@@ -112,10 +112,11 @@ if _STATIC_DIR.exists():
 
 
 if __name__ == "__main__":
+    import os
     import uvicorn
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
-        port=8001,
+        port=int(os.environ.get("PORT", "8003")),
         reload=True,
     )

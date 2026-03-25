@@ -30,6 +30,7 @@ def get_app_config() -> dict:
             "hunt": get_config_value("hunt") or {},
             "features": get_config_value("features") or {},
             "auto_save": get_config_value("auto_save") or {},
+            "alignment": get_config_value("alignment") or {},
             "notifications": {
                 "poll_interval_ms": (get_config_value("notifications.poll_interval_ms") or 15000),
             },

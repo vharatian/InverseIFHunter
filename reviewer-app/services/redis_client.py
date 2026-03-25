@@ -1,57 +1,54 @@
 """
-Redis client for reviewer app.
+Redis access for reviewer app.
 
-Uses same key layout as trainer app (mh:sess:{id}:*) so we can read session data
-without importing model-hunter. Returns plain dicts for agentic_reviewer snapshot builder.
+Uses the repo-wide async client in redis_client.py (single pool). Key layout matches
+the trainer app (mh:sess:{id}:*) so we read session data without importing model-hunter.
+Returns plain dicts for agentic_reviewer snapshot builder.
 """
 import json
-import logging
+import os
+import sys
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-import redis.asyncio as aioredis
+_REVIEWER_APP_ROOT = Path(__file__).resolve().parents[1]
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+# Reviewer package must precede repo root so `config` is reviewer-app/config, not config.py at repo root.
+for _p in (_REPO_ROOT, _REVIEWER_APP_ROOT):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 
 from config import get_redis_url, get_session_ttl
 from config.settings import ensure_agentic_path
 
 ensure_agentic_path()
-from agentic_reviewer.team_config import get_role, get_allowed_trainer_emails_for_role  # noqa: E402
 
-logger = logging.getLogger(__name__)
+# Resolve URL from reviewer YAML/env before shared module snapshots REDIS_URL.
+os.environ["REDIS_URL"] = get_redis_url()
+
+from redis_client import close_redis, get_redis  # noqa: E402
+from agentic_reviewer.team_config import get_role, get_allowed_trainer_emails_for_role  # noqa: E402
 
 KEY_PREFIX = "mh:sess"
 SESSION_TTL = get_session_ttl()
 
-_redis_client: Optional[aioredis.Redis] = None
+__all__ = [
+    "get_redis",
+    "close_redis",
+    "list_sessions",
+    "get_review_status",
+    "set_review_status",
+    "cas_review_status",
+    "get_review_status_and_trainer_batch",
+    "list_sessions_for_review",
+    "get_session_dict",
+    "clear_qc_done",
+    "set_human_reviews",
+]
 
 
 def _key(session_id: str, field: str) -> str:
     return f"{KEY_PREFIX}:{session_id}:{field}"
-
-
-async def get_redis() -> aioredis.Redis:
-    """Get or create async Redis connection."""
-    global _redis_client
-    if _redis_client is None:
-        url = get_redis_url()
-        _redis_client = aioredis.from_url(
-            url,
-            encoding="utf-8",
-            decode_responses=True,
-            socket_connect_timeout=5,
-            socket_timeout=10,
-        )
-        await _redis_client.ping()
-        logger.info("Redis connected for reviewer app")
-    return _redis_client
-
-
-async def close_redis() -> None:
-    """Close Redis connection (e.g. on shutdown)."""
-    global _redis_client
-    if _redis_client:
-        await _redis_client.close()
-        _redis_client = None
-        logger.info("Redis connection closed")
 
 
 REVIEW_STATUS_VALUES = ("draft", "submitted", "returned", "approved", "rejected", "escalated")

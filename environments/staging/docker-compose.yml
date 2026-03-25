@@ -135,4 +135,5 @@ volumes:
 
 networks:
   model-hunter-staging-network:
+    name: model-hunter-staging-network
     driver: bridge

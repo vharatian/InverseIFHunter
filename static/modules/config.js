@@ -10,15 +10,18 @@ export const VERSION_CHECK_INTERVAL = 30000;
 let _apiConfig = null;
 
 /**
- * Fetch config from /api/config and merge with static defaults.
- * Returns merged config. Caches result.
+ * Fetch config from /api/config (reads global.yaml via backend).
+ * Always fetches fresh — admin panel is the single source of truth.
+ * Retries once on failure. Cache-busted to prevent stale browser responses.
  */
 export async function fetchConfigFromAPI() {
-    if (_apiConfig) return _apiConfig;
-    try {
-        const r = await fetch('/api/config');
-        if (r.ok) _apiConfig = await r.json();
-    } catch (_) {}
+    for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+            const r = await fetch('/api/config?_t=' + Date.now(), { cache: 'no-store' });
+            if (r.ok) { _apiConfig = await r.json(); return _apiConfig; }
+        } catch (_) {}
+        if (attempt === 0) await new Promise(r => setTimeout(r, 500));
+    }
     return _apiConfig || {};
 }
 
@@ -43,67 +46,42 @@ export function adminBypass(bypassKey) {
     return bypassMap[bypassKey] !== false;
 }
 
-/** Static fallback when global.yaml hunt.provider_models is not set. Prefer getProviderModels() after fetchConfigFromAPI(). */
-export const PROVIDER_MODELS = {
-    'openrouter': [
-        { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5' },
-        { id: 'anthropic/claude-sonnet-4.6', name: 'Claude Sonnet 4.6' },
-        { id: 'anthropic/claude-opus-4.5', name: 'Claude Opus 4.5' },
-        { id: 'anthropic/claude-opus-4.6', name: 'Claude Opus 4.6' },
-        { id: 'openai/gpt-5.4', name: 'GPT-5.4' },
-        { id: 'openai/gpt-5.2', name: 'GPT-5.2' },
-        { id: 'openai/gpt-5.2-pro', name: 'GPT 5.2 Pro' },
-        { id: 'openai/gpt-5.4-pro', name: 'GPT 5.4 Pro' },
-        { id: 'google/gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro (Preview)' },
-        { id: 'nvidia/nemotron-3-nano-30b-a3b', name: 'Nemotron-3-Nano (Fast)' },
-        { id: 'qwen/qwen3-235b-a22b-thinking-2507', name: 'Qwen3-235B (Thinking)' },
-    ],
-    'fireworks': [
-        { id: 'accounts/fireworks/models/qwen3-235b-a22b-thinking-2507', name: 'Qwen3-235B (Thinking)' }
-    ]
-};
-
-/** Judge models fallback when global.yaml hunt.judge_models is not set. */
-const JUDGE_MODELS_FALLBACK = [
-    { id: 'openai/gpt-5.4', name: 'GPT-5.4' },
-    { id: 'openai/gpt-5.2', name: 'GPT-5.2' },
-    { id: 'openai/gpt-5.2-pro', name: 'GPT 5.2 Pro' },
-    { id: 'openai/gpt-5.4-pro', name: 'GPT 5.4 Pro' },
-    { id: 'anthropic/claude-opus-4.6', name: 'Claude Opus 4.6' }
-];
-
-/** Provider model list for trainer "Model" dropdown. From global.yaml hunt.provider_models when available. */
-export function getProviderModels() {
-    const fromConfig = _apiConfig?.hunt?.provider_models;
-    if (fromConfig && typeof fromConfig === 'object') return fromConfig;
-    return PROVIDER_MODELS;
+/**
+ * Alignment gate settings from global.yaml (exposed via /api/config top-level `alignment`).
+ * @returns {{ enabled: boolean, targetRate: number }}
+ */
+export function getAlignmentConfig() {
+    const a = _apiConfig?.alignment;
+    if (!a || typeof a !== 'object') {
+        return { enabled: true, targetRate: 0.85 };
+    }
+    const enabled = a.enabled !== false;
+    const tr = a.target_rate;
+    const targetRate = typeof tr === 'number' && !Number.isNaN(tr) ? tr : 0.85;
+    return { enabled, targetRate };
 }
 
-/** Judge model list for trainer "Evaluation Model" dropdown. From global.yaml hunt.judge_models when available.
- * Config can be provider-keyed (judge_models.openrouter) or a flat array. Pass provider for keyed config. */
+/** @deprecated — kept for backward compat with imports. Always empty; real data comes from /api/config → global.yaml. */
+export const PROVIDER_MODELS = {};
+
+/** Provider models from global.yaml (via /api/config). Admin panel is the single source of truth. */
+export function getProviderModels() {
+    return _apiConfig?.hunt?.provider_models || {};
+}
+
+/** Judge models from global.yaml (via /api/config). Admin panel is the single source of truth. */
 export function getJudgeModels(provider = 'openrouter') {
     const fromConfig = _apiConfig?.hunt?.judge_models;
-    if (!fromConfig || typeof fromConfig !== 'object') return JUDGE_MODELS_FALLBACK;
-    // Provider-keyed: { openrouter: [...], fireworks: [...] }
+    if (!fromConfig || typeof fromConfig !== 'object') return [];
     if (!Array.isArray(fromConfig)) {
-        const list = fromConfig[provider] || fromConfig['openrouter'] || [];
-        return Array.isArray(list) && list.length > 0 ? list : JUDGE_MODELS_FALLBACK;
+        return fromConfig[provider] || fromConfig['openrouter'] || [];
     }
-    return fromConfig.length > 0 ? fromConfig : JUDGE_MODELS_FALLBACK;
+    return fromConfig;
 }
 
-/** Hunt modes from global.yaml hunt.modes. Fallback to hardcoded defaults. */
-const HUNT_MODES_FALLBACK = [
-    { id: 'break_50', name: '>50% Criteria Breaking', break_threshold: 0.5, type: 'breaking' },
-    { id: 'break_all', name: 'All Criteria Breaking', break_threshold: 1.0, type: 'breaking' },
-    { id: '1_breaking', name: '1 Breaking', type: 'breaking', count_based: true, required_breaking: 1 },
-    { id: 'all_passing', name: 'All Passing', pass_threshold: 1.0, type: 'passing' },
-];
-
+/** Hunt modes from global.yaml (via /api/config). Admin panel is the single source of truth. */
 export function getHuntModes() {
-    const fromConfig = _apiConfig?.hunt?.modes;
-    if (Array.isArray(fromConfig) && fromConfig.length > 0) return fromConfig;
-    return HUNT_MODES_FALLBACK;
+    return _apiConfig?.hunt?.modes || [];
 }
 
 export function getHuntModeById(modeId) {

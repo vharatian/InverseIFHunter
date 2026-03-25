@@ -9,7 +9,7 @@
 
 import { elements } from './dom.js';
 import { state } from './state.js';
-import { PROVIDER_MODELS, ADMIN_MODE_PASSWORD, getConfigValue, fetchConfigFromAPI, adminBypass, getHuntModeById } from './config.js';
+import { PROVIDER_MODELS, getProviderModels, ADMIN_MODE_PASSWORD, getConfigValue, fetchConfigFromAPI, adminBypass, getHuntModeById } from './config.js';
 import { 
     escapeHtml, 
     loadHuntCount, 
@@ -464,7 +464,7 @@ export async function uploadFile(file, forceNew = false) {
             return;
         }
 
-        handleNotebookLoaded(data, false);
+        await handleNotebookLoaded(data, false);
         
     } catch (error) {
         showError(error, { operation: 'Upload' });
@@ -551,7 +551,7 @@ export async function fetchFromUrl(forceNew = false) {
             return;
         }
 
-        handleNotebookLoaded(data, true);
+        await handleNotebookLoaded(data, true);
         playFetchSuccess();
         
     } catch (error) {
@@ -608,7 +608,7 @@ export async function createNotebook() {
             'success'
         );
 
-        handleNotebookLoaded(data, true, data.notebook_url);
+        await handleNotebookLoaded(data, true, data.notebook_url);
 
     } catch (error) {
         console.error('Error creating notebook:', error);
@@ -618,7 +618,7 @@ export async function createNotebook() {
     }
 }
 
-export function handleNotebookLoaded(data, isUrl = false, overrideUrl = null) {
+export async function handleNotebookLoaded(data, isUrl = false, overrideUrl = null) {
     // Clear any previous results when loading a new notebook
     clearPreviousResults();
     
@@ -664,11 +664,9 @@ export function handleNotebookLoaded(data, isUrl = false, overrideUrl = null) {
     // Save sessionId to localStorage for restoration on refresh
     if (data.session_id) {
         localStorage.setItem('modelHunter_sessionId', data.session_id);
-        // Sync turn status from backend (restore turns and conversation history for multi-turn sessions)
-        syncTurnStatusFromBackend(data.session_id);
+        await syncTurnStatusFromBackend(data.session_id);
     }
 
-    // Show Turn 1 Test Prompt panel when in Turn 1 (will be updated when syncTurnStatusFromBackend completes)
     updateTurn1TestPromptVisibility();
     
     // Toggle UI sections
@@ -767,10 +765,10 @@ export function handleNotebookLoaded(data, isUrl = false, overrideUrl = null) {
             provider = 'openrouter';
         } else if (modelPrefixLower === 'qwen' || modelPrefixLower.includes('qwen')) {
             // Prefer openrouter if available, fallback to fireworks
-            if (PROVIDER_MODELS['openrouter']?.some(m => m.id.includes('qwen'))) {
+            if (getProviderModels()['openrouter']?.some(m => m.id.includes('qwen'))) {
                 modelId = 'qwen/qwen3-235b-a22b-thinking-2507';
                 provider = 'openrouter';
-            } else if (PROVIDER_MODELS['fireworks']?.some(m => m.id.includes('qwen'))) {
+            } else if (getProviderModels()['fireworks']?.some(m => m.id.includes('qwen'))) {
                 modelId = 'accounts/fireworks/models/qwen3-235b-a22b-thinking-2507';
                 provider = 'fireworks';
             }

@@ -36,6 +36,7 @@ import {
     confirmSelection,
     revealLLMJudgments,
     handleChangeSelection,
+    handleRefreshAlignmentClick,
     initSelectionSectionCollapse
 } from './modules/results.js';
 import { initMultiTurnListeners, initCalibrationListeners } from './modules/multiturn.js';
@@ -230,12 +231,13 @@ document.addEventListener('DOMContentLoaded', async () => {
                 showTaskView();
                 try {
                     await hydrateSession(sessionId);
+                    await syncTurnStatusFromBackend(sessionId);
                 } catch (err) {
                     console.error('Failed to load task from notification:', err);
                     showToast(err.message || 'Failed to load task', 'error');
                     localStorage.setItem('modelHunter_sessionId', sessionId);
                     state.sessionId = sessionId;
-                    syncTurnStatusFromBackend(sessionId);
+                    await syncTurnStatusFromBackend(sessionId);
                     refreshReviewSync(sessionId);
                 }
             },
@@ -357,6 +359,8 @@ function initEventListeners() {
     // Selection & Reveal (use getElementById as fallback - elements may be null if DOM not ready at module load)
     const confirmBtn = document.getElementById('confirmSelectionBtn') || elements.confirmSelectionBtn;
     if (confirmBtn) confirmBtn.addEventListener('click', confirmSelection);
+    const refreshAlignBtn = document.getElementById('refreshAlignmentBtn') || elements.refreshAlignmentBtn;
+    if (refreshAlignBtn) refreshAlignBtn.addEventListener('click', handleRefreshAlignmentClick);
     const revealBtn = document.getElementById('revealLLMBtnBottom') || elements.revealLLMBtn;
     if (revealBtn) revealBtn.addEventListener('click', revealLLMJudgments);
     if (elements.changeSelectionBtn) {
@@ -411,9 +415,9 @@ async function restoreSession() {
     if (!savedSessionId) return;
     
     try {
-        const response = await fetch(`/api/session/${savedSessionId}`);
+        const response = await fetch(`/api/session/${savedSessionId}`, { cache: 'no-store' });
         if (response.ok) {
-            const sessionData = await response.json();
+            await response.json(); // validate body; UI uses turn-status + hydrate on open-task
             state.sessionId = savedSessionId;
             // Restore multi-turn state from Redis (turns, conversationHistory, currentTurn)
             await syncTurnStatusFromBackend(savedSessionId);

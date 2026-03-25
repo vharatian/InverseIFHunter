@@ -44,3 +44,16 @@ node_modules/
 # OS
 .DS_Store
 Thumbs.db
+
+# Local-only Obsidian code map (regenerate: python3 scripts/generate_obsidian_code_map.py)
+local/obsidian-code-map/
+
+# Obsidian setup doc for this workflow (otherwise *.md is ignored)
+!docs/OBSIDIAN_CODE_MAP.md
+
+# Local-only AI workflow state & clones (GSD .planning/, agency-agents copy, notes)
+.planning/
+local/ai-workflows/
+
+# Cursor workflow setup reference (committed on purpose)
+!docs/CURSOR_WORKFLOWS.md

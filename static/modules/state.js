@@ -36,6 +36,12 @@ export const state = {
     allResponses: [],       // All hunt responses (accumulated across runs)
     selectedRowNumbers: [], // Row numbers (0-based indices) of 4 selected hunts for review
     llmRevealed: false,     // Whether LLM judgments have been revealed
+
+    // Criteria alignment gate (pre-reveal); see alignment.js
+    alignmentPhase: 'idle', // idle = not yet verified via Refresh alignment; passed / re_review after check
+    alignmentReReviewRounds: 0,
+    alignmentFlaggedRowNumber: null,
+    alignmentLastSnapshot: null,
     // NOTE: Row numbering now uses totalHuntsCount (from localStorage) as single source of truth
     currentRunStartOffset: 0,  // Offset at start of current run (set from totalHuntsCount - requestedHunts)
     originalNotebookJson: null,  // Original notebook JSON for WYSIWYG snapshot
@@ -100,6 +106,10 @@ export function resetTurnState() {
     state.humanReviews = {};
     state.selectionConfirmed = false;
     state.llmRevealed = false;
+    state.alignmentPhase = 'idle';
+    state.alignmentReReviewRounds = 0;
+    state.alignmentFlaggedRowNumber = null;
+    state.alignmentLastSnapshot = null;
     state.referenceValidated = false;
     state._selectedGoodResponse = null;
     state.huntsThisTurn = 0;

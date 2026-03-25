@@ -731,12 +731,17 @@
                         <!-- Results cards added dynamically -->
                     </div>
 
+                    <div id="alignmentOverallRow" class="alignment-overall-row hidden" aria-live="polite"></div>
+
                     <div id="saveDriveContainer" class="hidden"
                         style="padding: 1.5rem; text-align: center; border-top: 1px solid var(--border); position: relative; background: var(--bg-card); margin-top: 2rem;">
 
                         <!-- Action Buttons Row -->
                         <div
                             style="display: flex; justify-content: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem;">
+                            <button class="btn btn-refresh-alignment btn-lg" id="refreshAlignmentBtn" type="button" style="display: none;" title="Update alignment percentages on each slot">
+                                Refresh alignment
+                            </button>
                             <button class="btn btn-primary btn-lg" id="revealLLMBtnBottom" disabled>
                                 Show AI Evaluation
                             </button>

@@ -10,6 +10,7 @@ Usage:
     ttl = cfg.session.ttl_seconds
     api_key = cfg.secrets.openai_api_key
 """
+import fcntl
 import os
 import re
 import logging
@@ -75,14 +76,16 @@ class _ConfigNode:
 
 
 _config: Optional[_ConfigNode] = None
+_config_mtime: float = 0.0
 
 
 def _load_raw(path: Path) -> Dict[str, Any]:
-    """Load YAML file. Returns empty dict if not found."""
+    """Load YAML file with shared lock. Returns empty dict if not found."""
     if not path.exists():
         logger.warning("Config not found: %s", path)
         return {}
     with open(path, "r") as f:
+        fcntl.flock(f.fileno(), fcntl.LOCK_SH)
         data = yaml.safe_load(f)
     return data if isinstance(data, dict) else {}
 
@@ -107,31 +110,41 @@ def load_config(path: Optional[Path] = None) -> _ConfigNode:
     """
     Load and resolve config. Caches result. Call with path=None to use default.
     """
-    global _config
+    global _config, _config_mtime
     cfg_path = path or DEFAULT_CONFIG_PATH
     raw = _load_raw(cfg_path)
     raw = _merge_agentic_fallback(raw)
     resolved = _resolve_env(raw)
 
-    # Log missing secrets (optional validation)
     secrets = resolved.get("secrets") or {}
     for key, val in secrets.items():
         if not val and key != "google_service_account_path":
             logger.debug("Secret %s is empty (env var not set)", key)
 
     _config = _ConfigNode(resolved)
+    try:
+        _config_mtime = cfg_path.stat().st_mtime
+    except OSError:
+        _config_mtime = 0.0
     return _config
+
+
+def _file_changed() -> bool:
+    """Check if global.yaml was modified since last load."""
+    try:
+        return DEFAULT_CONFIG_PATH.stat().st_mtime != _config_mtime
+    except OSError:
+        return False
 
 
 def get_config(path: Optional[Path] = None) -> _ConfigNode:
     """
-    Get config singleton. Loads on first call, then returns cached.
-    Use path= to force reload from a specific file.
+    Get config singleton. Auto-reloads if the file changed on disk.
     """
     global _config
     if path is not None:
         return load_config(path)
-    if _config is None:
+    if _config is None or _file_changed():
         load_config()
     return _config
 

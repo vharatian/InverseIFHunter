@@ -534,6 +534,15 @@ class NotebookParser:
                 max_slot = max(max_slot, slot_num)
         return max_slot + 1
     
+    def _merge_alignment_metadata(self, notebook: Dict[str, Any], alignment: Optional[Dict[str, Any]]) -> None:
+        """Attach alignment export payload under notebook.metadata.model_hunter.alignment."""
+        if alignment is None:
+            return
+        if not isinstance(notebook.get("metadata"), dict):
+            notebook["metadata"] = {}
+        mh = notebook["metadata"].setdefault("model_hunter", {})
+        mh["alignment"] = alignment
+
     def export_notebook(
         self, 
         original_content: str,
@@ -541,7 +550,8 @@ class NotebookParser:
         results: List[Dict[str, Any]],
         include_reasoning: bool = True,
         human_reviews: Dict[str, Any] = None,
-        total_hunts_ran: int = 0
+        total_hunts_ran: int = 0,
+        alignment: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         Export modified notebook with hunt results.
@@ -1078,6 +1088,7 @@ class NotebookParser:
         
         notebook['cells'] = final_cells
         logger.debug("Final notebook has %d cells", len(final_cells))
+        self._merge_alignment_metadata(notebook, alignment)
         return json.dumps(notebook, indent=2)
 
     def export_multi_turn_notebook(
@@ -1089,7 +1100,8 @@ class NotebookParser:
         include_reasoning: bool = True,
         human_reviews: dict = None,
         total_hunts_ran: int = 0,
-        conversation_history: list = None
+        conversation_history: list = None,
+        alignment: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         Export multi-turn notebook with all turns' data.
@@ -1131,7 +1143,8 @@ class NotebookParser:
                 results=breaking_turn_results,
                 include_reasoning=include_reasoning,
                 human_reviews=human_reviews,
-                total_hunts_ran=total_hunts_ran
+                total_hunts_ran=total_hunts_ran,
+                alignment=alignment,
             )
         
         total_turns = len(turns)
@@ -1145,7 +1158,8 @@ class NotebookParser:
                 results=breaking_turn_results,
                 include_reasoning=include_reasoning,
                 human_reviews=human_reviews,
-                total_hunts_ran=total_hunts_ran
+                total_hunts_ran=total_hunts_ran,
+                alignment=alignment,
             )
         
         # Multi-turn export
@@ -1320,6 +1334,7 @@ class NotebookParser:
         notebook['cells'] = non_slot_cells + multi_turn_cells
         
         logger.debug("Multi-turn export: %d turns, breaking at turn %d, %d total cells", total_turns, bt_num, len(notebook['cells']))
+        self._merge_alignment_metadata(notebook, alignment)
         return json.dumps(notebook, indent=2)
     
     def _format_turn_judge(self, judge_result: dict) -> str:

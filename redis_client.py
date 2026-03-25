@@ -1,8 +1,8 @@
 """
 Single Redis connection pool shared by all modules.
 
-Replaces the duplicate Redis clients in services/redis_session.py
-and reviewer-app/services/redis_client.py.
+Reviewer app sets REDIS_URL from its config before importing this module, then
+re-exports get_redis/close_redis from reviewer-app/services/redis_client.py.
 """
 import os
 import logging

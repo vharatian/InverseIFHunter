@@ -54,6 +54,34 @@ class TestNotebookExport:
         notebook = json.loads(exported)
         assert len(notebook["cells"]) > 2
 
+    def test_export_merges_alignment_metadata(self):
+        """Notebook metadata should include model_hunter.alignment when provided."""
+        original = self._make_original([
+            {"cell_type": "markdown", "id": "c1", "metadata": {},
+             "source": ["**[prompt]**\n\nTest prompt"]},
+        ])
+        parsed = ParsedNotebook(filename="test.ipynb", prompt="Test")
+        results = [
+            {"hunt_id": 1, "model": "nvidia/nemotron-3-nano-30b-a3b",
+             "response": "R1", "reasoning_trace": "",
+             "judge_score": 0, "judge_criteria": {"C1": "PASS"},
+             "judge_explanation": "", "judge_output": "", "is_breaking": True},
+        ]
+        alignment = {
+            "overall_rate": 1.0,
+            "per_slot": {"slot_1": 1.0},
+            "re_review_rounds": 0,
+            "threshold": 0.85,
+            "total_criteria_compared": 1,
+            "total_agreed": 1,
+        }
+        exported = self.parser.export_notebook(
+            original, parsed, results, alignment=alignment
+        )
+        notebook = json.loads(exported)
+        mh = notebook.get("metadata", {}).get("model_hunter", {})
+        assert mh.get("alignment", {}).get("overall_rate") == 1.0
+
     def test_multi_turn_export_single_turn_fallback(self):
         """Multi-turn export with 1 turn should still produce valid output."""
         original = self._make_original([

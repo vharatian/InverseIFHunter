@@ -5,7 +5,8 @@
 import { 
     MIN_EXPLANATION_WORDS, 
     TURN_COLORS, 
-    PROVIDER_MODELS, 
+    PROVIDER_MODELS,
+    getProviderModels,
     INSIGHT_TIPS,
     HUNT_COUNT_STORAGE_PREFIX,
     TIPS_PAUSED_KEY,
@@ -104,7 +105,7 @@ function getModelKey(modelStr) {
 
 export function getModelDisplayName(modelId) {
     if (!modelId) return 'Unknown';
-    for (const list of Object.values(PROVIDER_MODELS)) {
+    for (const list of Object.values(getProviderModels())) {
         const found = list.find(m => m.id === modelId);
         if (found) return found.name;
     }

@@ -1,5 +1,5 @@
 /**
- * Session hydrator — loads full session state from Redis and populates the trainer UI.
+ * Session hydrator — loads full session state from GET /session/{id}/full-state and populates the trainer UI.
  *
  * Called when a trainer clicks a task from the queue. Replaces the old
  * "please reload the notebook URL" toast with full hydration.
@@ -16,7 +16,9 @@ import {
     updateReviewProgress,
     collapseSelectionSectionCard,
     disableSelectionCheckboxes,
+    applyLlmRevealedUi,
 } from './results.js';
+import { applyTrainerUiAfterHydrate } from './alignment.js';
 import { syncHuntModeFromConfig } from './hunt.js';
 import { resetTestbed, showTestbed } from './testbed.js';
 
@@ -44,6 +46,9 @@ export async function hydrateSession(sessionId) {
     state.originalNotebookJson = data.notebook ? JSON.stringify(data.notebook) : null;
     state.config = _mergeConfig(data.config);
     state.humanReviews = data.human_reviews || {};
+    if (data.trainer_ui) {
+        applyTrainerUiAfterHydrate(data.trainer_ui);
+    }
     state.allResponses = data.all_results || [];
     state.results = data.results || [];
     state.conversationHistory = data.conversation_history || [];
@@ -56,8 +61,8 @@ export async function hydrateSession(sessionId) {
 
     // Hydrate DOM sections — each guard against missing data internally
     _hydrateNotebookSection(data.notebook);
+    // human_reviews already on state; _hydrateResultsSection normalizes keys — do not overwrite after.
     _hydrateResultsSection(data.all_results || []);
-    _hydrateReviewsSection(data.human_reviews || {});
     _hydrateMetaInfo(data);
 
     // Restore section visibility based on hydrated state
@@ -85,6 +90,10 @@ export async function hydrateSession(sessionId) {
 
     // Refresh review sync block
     refreshReviewSync(sessionId);
+
+    if (state.selectionConfirmed && state.selectedRowNumbers.length > 0 && state.llmRevealed) {
+        applyLlmRevealedUi();
+    }
 
     return {
         ok: true,
@@ -284,12 +293,6 @@ function _hydrateResultsSection(allResults) {
             response: r.response || r.model_response || '',
         };
     });
-}
-
-
-function _hydrateReviewsSection(reviews) {
-    if (!reviews || typeof reviews !== 'object') return;
-    state.humanReviews = reviews;
 }
 
 

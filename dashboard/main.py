@@ -16,7 +16,13 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-from log_reader import get_log_reader, EnhancedLogReader
+from log_reader import get_log_reader
+
+from admin.routes.auth_routes import router as admin_auth_router
+from admin.routes.team_routes import router as admin_team_router
+from admin.routes.config_routes import router as admin_config_router
+from admin.routes.tracking_routes import router as admin_tracking_router
+from admin.routes.dashboard_admin_routes import router as admin_dashboard_router
 
 
 # Configuration
@@ -211,6 +217,31 @@ async def health_check():
     }
 
 
+# ============== Admin Panel ==============
+
+app.include_router(admin_auth_router)
+app.include_router(admin_team_router)
+app.include_router(admin_config_router)
+app.include_router(admin_tracking_router)
+app.include_router(admin_dashboard_router)
+
+# Admin UI
+admin_static_dir = Path(__file__).parent / "static" / "admin"
+
+
+@app.get("/admin/")
+async def admin_ui():
+    """Serve admin panel UI."""
+    admin_index = admin_static_dir / "index.html"
+    if admin_index.exists():
+        return FileResponse(str(admin_index))
+    return {"message": "Admin UI not found."}
+
+
+if admin_static_dir.exists():
+    app.mount("/admin/static", StaticFiles(directory=str(admin_static_dir)), name="admin-static")
+
+
 # ============== Static Files ==============
 
 static_dir = Path(__file__).parent / "static"
@@ -221,10 +252,6 @@ if static_dir.exists():
 @app.get("/")
 async def root():
     """Serve dashboard."""
-    index_path = static_dir / "index.html"
-    if index_path.exists():
-        return FileResponse(str(index_path))
-    # Fallback to original
     index_path = static_dir / "index.html"
     if index_path.exists():
         return FileResponse(str(index_path))

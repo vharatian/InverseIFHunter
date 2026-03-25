@@ -1,5 +1,7 @@
 # Model Hunter Admin Dashboard Dependencies
+pyyaml>=6.0
 fastapi>=0.100.0
+pydantic[email]>=2.0
 uvicorn>=0.23.0
 sse-starlette>=1.6.0
 itsdangerous>=2.1.0

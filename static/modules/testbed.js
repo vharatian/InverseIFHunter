@@ -11,7 +11,7 @@
  */
 
 import { state } from './state.js';
-import { PROVIDER_MODELS, getJudgeModels, getConfigValue, adminBypass } from './config.js';
+import { PROVIDER_MODELS, getProviderModels, getJudgeModels, getConfigValue, adminBypass } from './config.js';
 import { escapeHtml } from './utils.js';
 import { showToast } from './celebrations.js';
 import { parseCriteria, validateModelReferenceAndCriteria, progressiveSaveToColab } from './notebook.js';
@@ -944,7 +944,7 @@ function renderStatusBanner(run) {
 function buildModelOptions(selectedModel) {
     const seen = new Set();
     const options = [];
-    for (const [provider, models] of Object.entries(PROVIDER_MODELS)) {
+    for (const [provider, models] of Object.entries(getProviderModels())) {
         for (const m of models) {
             if (seen.has(m.name)) continue;
             seen.add(m.name);

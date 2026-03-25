@@ -518,7 +518,7 @@ def get_openrouter_client(api_key: Optional[str] = None) -> OpenRouterClient:
     return _openrouter_client
 
 
-# --- Agentic reviewer sync API (formerly agentic_reviewer/llm_client.py) ---
+# --- Agentic reviewer sync API (consolidated from legacy standalone LLM helper) ---
 
 OPENROUTER_URL = OpenRouterClient.BASE_URL
 

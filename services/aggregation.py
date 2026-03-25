@@ -21,9 +21,11 @@ def classify_sample(
     Classify a single sample from judge criteria.
 
     - Any criterion status "MISSING" → sample_label = "ERROR" (treat as format error).
-    - Otherwise: pass_rate = pass_count / total; pass if (pass_rate >= 1.0) or
-      (pass_threshold < 1.0 and pass_rate > pass_threshold). Else BREAK for ratio/any_break,
-      or PASS for no_break when not passing.
+    - Otherwise: pass_rate = pass_count / total; compute passed the same way as ratio
+      (see implementation: threshold 0 is special-cased).
+    - ratio: PASS if passed else BREAK.
+    - any_break: BREAK if any criterion FAIL; else same as ratio.
+    - no_break: PASS only if no criterion FAIL (all PASS); else BREAK.
 
     Returns:
         {
@@ -61,10 +63,12 @@ def classify_sample(
         passed = pass_rate > 0  # All Breaking: break only when ALL criteria fail
 
     if break_mode == "no_break":
-        # In no_break mode we care about "did it break?" — not passing = breaking
-        label: SampleLabel = "BREAK" if not passed else "PASS"
+        # No failed criterion => sample did not "break"; any FAIL => BREAK.
+        label = "PASS" if fail_count == 0 else "BREAK"
+    elif break_mode == "any_break":
+        # Any FAIL breaks the sample; otherwise same threshold rule as ratio.
+        label = "BREAK" if fail_count > 0 else ("PASS" if passed else "BREAK")
     else:
-        # ratio / any_break: passing = PASS, not passing = BREAK
         label = "PASS" if passed else "BREAK"
 
     return {

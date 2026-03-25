@@ -31,7 +31,7 @@ ONLINE_THRESHOLD_SECONDS = 120  # Heartbeat < 2 min = online
 IDLE_THRESHOLD_SECONDS = 600  # Heartbeat < 10 min = idle
 
 
-def compute_trainer_timing(events: List[Dict], trainer_registry: Dict[str, Dict],
+def compute_trainer_timing(events: List[Dict], trainers_by_email: Dict[str, Dict],
                            session_to_email: Dict[str, str]) -> Dict[str, Dict]:
     """
     Compute per-trainer timing analytics.
@@ -57,7 +57,7 @@ def compute_trainer_timing(events: List[Dict], trainer_registry: Dict[str, Dict]
     now = datetime.utcnow()
 
     for email, evts in trainer_events.items():
-        reg = trainer_registry.get(email, {})
+        reg = trainers_by_email.get(email, {})
         name = reg.get("name", email.split("@")[0])
 
         # Sort by timestamp
@@ -413,10 +413,13 @@ def _extract_failure_phrases(explanation: str) -> List[str]:
 
 # ============== Prompt Analytics ==============
 
-def compute_prompt_analytics(trainer_registry: Dict, session_data: Dict[str, Dict]) -> Dict[str, Any]:
+def compute_prompt_analytics(
+    _trainers_by_email: Dict, session_data: Dict[str, Dict]
+) -> Dict[str, Any]:
     """
     Cluster prompts and compute domain breakdown.
     Uses TF-IDF + KMeans if sklearn is available, else returns basic stats.
+    (_trainers_by_email reserved for future per-trainer prompt stats.)
     """
     prompts = []
     prompt_meta = []

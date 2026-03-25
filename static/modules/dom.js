@@ -74,6 +74,7 @@ export const elements = {
     
     // Reveal Button - now at bottom
     revealLLMBtn: document.getElementById('revealLLMBtnBottom'),  // Bottom button
+    refreshAlignmentBtn: document.getElementById('refreshAlignmentBtn'),
     reviewProgressText: document.getElementById('reviewProgressText'),
     reviewInstructions: document.getElementById('reviewInstructions'),
     reviewProgressContainer: document.getElementById('reviewProgressContainer'),
