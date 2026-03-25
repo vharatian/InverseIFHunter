@@ -169,6 +169,24 @@ from middleware.error_handler import global_exception_handler
 app.add_middleware(TraceIdMiddleware)
 app.add_exception_handler(Exception, global_exception_handler)
 
+from resilience.health import health_live, health_ready, health_deep
+
+
+@app.get("/health/live")
+async def _health_live():
+    return await health_live()
+
+
+@app.get("/health/ready")
+async def _health_ready():
+    return await health_ready()
+
+
+@app.get("/health/deep")
+async def _health_deep():
+    return await health_deep()
+
+
 # Import and include all route modules
 from routes.trainer import router as trainer_router
 from routes.session import router as session_router
