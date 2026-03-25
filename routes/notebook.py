@@ -30,7 +30,6 @@ from services.alignment import build_alignment_export_payload
 from services.hunt_engine import hunt_engine
 from services.snapshot_service import snapshot_service, NotebookSnapshot
 from services.pg_session import save_session_pg, merge_session_metadata_pg, get_session_metadata_pg
-from storage.trainer_registry import register_or_update_trainer
 from helpers.notebook_helpers import HEADING_MAP, _update_session_notebook_field
 import services.redis_session as redis_store
 from helpers.shared import (
@@ -122,9 +121,7 @@ async def upload_notebook(request: Request, file: UploadFile = File(...), force_
         trainer_name = request.headers.get("X-Trainer-Name", request.query_params.get("trainer_name", ""))
         trainer_info = _extract_trainer_info_from_request(request, trainer_email, trainer_name)
         
-        # Register trainer session linkage if email provided
         if trainer_email:
-            register_or_update_trainer(trainer_email, trainer_name or "Unknown", session.session_id)
             await redis_store.set_trainer_email(session.session_id, trainer_email)
         
         # Telemetry
@@ -214,9 +211,7 @@ async def fetch_notebook(http_request: Request, request: NotebookURLRequest):
         trainer_name = request.trainer_name or ""
         trainer_info = _extract_trainer_info_from_request(http_request, trainer_email, trainer_name)
         
-        # Register trainer session linkage if email provided
         if trainer_email:
-            register_or_update_trainer(trainer_email, trainer_name or "Unknown", session.session_id)
             await redis_store.set_trainer_email(session.session_id, trainer_email)
         
         # Telemetry
@@ -313,7 +308,6 @@ async def create_notebook(http_request: Request, request: CreateNotebookRequest)
         trainer_info = _extract_trainer_info_from_request(http_request, trainer_email, trainer_name)
 
         if trainer_email:
-            register_or_update_trainer(trainer_email, trainer_name or "Unknown", session.session_id)
             await redis_store.set_trainer_email(session.session_id, trainer_email)
 
         _log_telemetry_safe("session_created", {

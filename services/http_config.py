@@ -159,8 +159,6 @@ async def warmup_all_connections(providers: list = None) -> dict:
         Dict of {provider: success_bool}
     """
     import os
-    from dotenv import load_dotenv
-    load_dotenv()
 
     def _get_api_key(provider: str) -> str:
         from agentic_reviewer.config_loader import get_config_value

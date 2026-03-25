@@ -5,10 +5,6 @@ from storage.session_storage import (
     save_session_storage,
     get_session_storage,
 )
-from storage.trainer_registry import (
-    register_or_update_trainer,
-    update_trainer_last_seen,
-)
 from storage.sqlite_store import (
     save_session as sqlite_save_session,
     load_session as sqlite_load_session,

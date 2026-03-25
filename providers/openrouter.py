@@ -16,9 +16,7 @@ import os
 import re
 import httpx
 import logging
-from pathlib import Path
 from typing import Tuple, Optional, Dict, Any
-from dotenv import load_dotenv
 
 from providers.base import BaseAPIClient
 
@@ -26,14 +24,6 @@ from providers.base import BaseAPIClient
 from services.fast_json import json_loads, json_dumps, JSONDecodeError
 
 logger = logging.getLogger(__name__)
-
-load_dotenv()
-try:
-    _mh_root = Path(__file__).resolve().parent.parent
-    load_dotenv(_mh_root / ".env")
-    load_dotenv(_mh_root / "app" / "model-hunter-refactored" / ".env")
-except Exception:
-    pass
 
 
 class OpenRouterClient(BaseAPIClient):

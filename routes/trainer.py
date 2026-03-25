@@ -10,7 +10,6 @@ from fastapi import APIRouter
 
 from pydantic import BaseModel
 
-from storage.trainer_registry import register_or_update_trainer, update_trainer_last_seen
 from helpers.shared import _log_telemetry_safe
 
 logger = logging.getLogger(__name__)
@@ -32,7 +31,10 @@ class HeartbeatRequest(BaseModel):
 async def api_register_trainer(request: TrainerRegistrationRequest):
     """Register a trainer (name + email). Called on first visit and on each page load."""
     try:
-        trainer = register_or_update_trainer(request.email, request.name)
+        trainer = {
+            "name": request.name,
+            "email": request.email,
+        }
         _log_telemetry_safe("trainer_registered", {
             "trainer_email": request.email,
             "trainer_name": request.name
@@ -47,12 +49,11 @@ async def api_register_trainer(request: TrainerRegistrationRequest):
 async def api_heartbeat(request: HeartbeatRequest):
     """Heartbeat endpoint for trainer activity tracking. Called every 60s by the frontend."""
     try:
-        update_trainer_last_seen(request.trainer_email)
         _log_telemetry_safe("trainer_heartbeat", {
             "session_id": request.session_id,
             "trainer_email": request.trainer_email
         })
     except Exception:
         pass  # Fire-and-forget, never fail
-    
+
     return {"ok": True}

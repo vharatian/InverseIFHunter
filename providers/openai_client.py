@@ -15,7 +15,6 @@ import asyncio
 import logging
 from typing import Dict, Any, Optional, List, AsyncGenerator
 from openai import AsyncOpenAI
-from dotenv import load_dotenv
 import time
 
 logger = logging.getLogger(__name__)
@@ -26,8 +25,6 @@ try:
     _telemetry_enabled = True
 except ImportError:
     _telemetry_enabled = False
-
-load_dotenv()
 
 
 JUDGE_PROMPT_TEMPLATE = """## Question

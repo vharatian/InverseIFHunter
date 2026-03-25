@@ -198,8 +198,6 @@ from routes.multiturn import router as multiturn_router
 from routes.system import router as system_router
 from routes.agentic import router as agentic_router
 from routes.notifications import router as notifications_router
-from routes.presence import router as presence_router
-from routes.bulk import router as bulk_router
 
 app.include_router(trainer_router)
 app.include_router(session_router)
@@ -210,8 +208,6 @@ app.include_router(multiturn_router)
 app.include_router(system_router)
 app.include_router(agentic_router)
 app.include_router(notifications_router)
-app.include_router(presence_router)
-app.include_router(bulk_router)
 logger.info("All routes loaded.")
 
 # ============== Static Files ==============

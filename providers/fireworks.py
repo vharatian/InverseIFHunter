@@ -13,13 +13,10 @@ import os
 import re
 import logging
 from typing import Tuple, Optional, Dict, Any
-from dotenv import load_dotenv
 
 from providers.base import BaseAPIClient
 
 logger = logging.getLogger(__name__)
-
-load_dotenv()
 
 
 class FireworksClient(BaseAPIClient):
