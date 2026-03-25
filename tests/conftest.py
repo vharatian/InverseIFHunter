@@ -7,11 +7,12 @@ httpx Client for external server testing (E2E tests).
 In-process mode allows direct access to the hunt engine's session state,
 enabling result injection without real model calls.
 """
-import pytest
 import httpx
 import json
 import os
 import sys
+
+import pytest
 
 # Add model-hunter root to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -20,6 +21,17 @@ from typing import Optional, List, Dict, Any
 
 BASE_URL = "http://localhost:8000"
 
+
+@pytest.fixture(scope="session")
+def event_loop_policy():
+    """Use default event loop policy for all async tests."""
+    import asyncio
+
+    return asyncio.DefaultEventLoopPolicy()
+
+
+# Async SQLAlchemy/asyncpg: session-wide loop — see pytest.ini
+# (asyncio_default_test_loop_scope / asyncio_default_fixture_loop_scope).
 
 # ---------------------------------------------------------------------------
 # In-Process TestClient (for API tests — no server needed)
