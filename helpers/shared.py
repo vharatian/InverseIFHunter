@@ -10,7 +10,7 @@ from typing import Optional, Dict, Any, List
 
 from fastapi import HTTPException
 
-from models.schemas import HuntSession
+from models.schemas import HuntSession, HuntStatus
 from storage.session_storage import save_session_storage, get_session_storage
 from storage.sqlite_store import (
     save_session as sqlite_save,
@@ -18,6 +18,7 @@ from storage.sqlite_store import (
     update_field as sqlite_update,
 )
 import services.redis_session as redis_store
+from services.pg_session import load_session_pg, save_session_pg
 
 logger = logging.getLogger(__name__)
 
@@ -44,9 +45,10 @@ async def _get_validated_session(session_id: str) -> HuntSession:
     Strategy:
     1. Try Redis (primary, fast cache).
     2. If miss, try Disk JSON (warm cache).
-    3. If miss, try SQLite (permanent store).
-    4. If found in any fallback, restore to Redis and return.
-    5. If none, 404.
+    3. If miss, try PostgreSQL (permanent store).
+    4. If miss, try SQLite (legacy fallback).
+    5. If found in any fallback, restore to Redis and return.
+    6. If none, 404.
     """
     from services.hunt_engine import hunt_engine
     
@@ -62,11 +64,29 @@ async def _get_validated_session(session_id: str) -> HuntSession:
             session_data = storage["session_data"]
             session = HuntSession(**session_data)
             await redis_store.save_full_session(session)
+            try:
+                await save_session_pg(session)
+            except Exception as e:
+                logger.error(f"Failed to save session {session.session_id} to PostgreSQL: {e}")
             return session
     except Exception as e:
         logger.warning(f"Failed to restore session {session_id} from disk: {e}")
 
-    # 3. Try SQLite (permanent store)
+    # 3. Try PostgreSQL (permanent store)
+    try:
+        session = await load_session_pg(session_id)
+        if session:
+            await redis_store.save_full_session(session)
+            try:
+                await save_session_pg(session)
+            except Exception as e:
+                logger.error(f"Failed to save session {session.session_id} to PostgreSQL: {e}")
+            logger.info(f"Session {session_id} restored from PostgreSQL → Redis")
+            return session
+    except Exception as e:
+        logger.warning(f"Failed to restore session {session_id} from PostgreSQL: {e}")
+
+    # 4. Try SQLite (legacy fallback — remove after Phase 2)
     try:
         db_data = sqlite_load(session_id)
         if db_data:
@@ -88,14 +108,23 @@ async def _get_validated_session(session_id: str) -> HuntSession:
             session_fields["breaks_found"] = db_data.get("breaks_found", 0)
             session_fields["current_turn"] = db_data.get("current_turn", 1)
             session_fields["accumulated_hunt_count"] = db_data.get("accumulated_hunt_count", 0)
+            raw_st = db_data.get("status") or "pending"
+            try:
+                session_fields["status"] = HuntStatus(str(raw_st).strip().lower())
+            except ValueError:
+                session_fields["status"] = HuntStatus.PENDING
             session = HuntSession(**session_fields)
-            await redis_store.save_full_session(session)
+            await redis_store.save_full_session(session, sqlite_workflow=db_data)
+            try:
+                await save_session_pg(session)
+            except Exception as e:
+                logger.error(f"Failed to save session {session.session_id} to PostgreSQL: {e}")
             logger.info(f"Session {session_id} restored from SQLite → Redis")
             return session
     except Exception as e:
         logger.warning(f"Failed to restore session {session_id} from SQLite: {e}")
 
-    # 4. Not found anywhere
+    # 5. Not found anywhere
     raise HTTPException(404, "Session not found")
 
 
@@ -143,6 +172,11 @@ async def _persist_session(session_id: str, session: HuntSession, storage: Optio
         })
     except Exception as e:
         logger.error(f"Failed to persist session {session_id} to SQLite: {e}")
+
+    try:
+        await save_session_pg(session)
+    except Exception as e:
+        logger.error(f"Failed to save session {session.session_id} to PostgreSQL: {e}")
 
 
 # ============== Drive Helpers ==============
@@ -231,6 +265,10 @@ async def _save_cells_to_drive_via_url(
             if "session_data" not in storage:
                 storage["session_data"] = session.model_dump()
             save_session_storage(session_id, storage)
+            try:
+                await save_session_pg(session)
+            except Exception as e:
+                logger.error(f"Failed to save session {session.session_id} to PostgreSQL: {e}")
         return success
     except Exception as e:
         logger.error(f"Error saving cells to Drive via URL: {e}")
