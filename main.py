@@ -93,6 +93,7 @@ APP_VERSION = _compute_app_version()
 
 logger.info("Loading redis_session...")
 import services.redis_session as redis_store
+from redis_client import close_redis
 logger.info("Loading rate_limiter...")
 
 # Rate limiter - from config.features.rate_limiter_enabled
@@ -142,7 +143,7 @@ async def lifespan(app: FastAPI):
         pass
     
     try:
-        await redis_store.close()
+        await close_redis()
     except Exception:
         pass
     

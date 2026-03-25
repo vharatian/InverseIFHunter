@@ -23,10 +23,12 @@ Benefits:
 """
 import json
 import logging
+import os
 from typing import Dict, Any, Optional, List
 
 import redis.asyncio as aioredis
 
+from redis_client import get_redis, get_redis_blocking, close_redis
 from models.schemas import (
     HuntSession, HuntConfig, HuntResult, HuntStatus,
     ParsedNotebook, TurnData, HuntEvent
@@ -35,47 +37,11 @@ from models.schemas import (
 logger = logging.getLogger(__name__)
 
 # Configuration — env vars with fallback (config file read deferred to avoid import-time hang)
-import os as _os
-REDIS_URL = _os.getenv("REDIS_URL", "redis://localhost:6379/0")
-SESSION_TTL = int(_os.getenv("SESSION_TTL", "14400"))
+SESSION_TTL = int(os.getenv("SESSION_TTL", "14400"))
 KEY_PREFIX = "mh:sess"
-
-# Singleton Redis connections
-_redis_client: Optional[aioredis.Redis] = None
-_redis_blocking_client: Optional[aioredis.Redis] = None
-
-
-async def get_redis() -> aioredis.Redis:
-    """Get or create the Redis connection for normal operations (short timeout)."""
-    global _redis_client
-    if _redis_client is None:
-        _redis_client = aioredis.from_url(
-            REDIS_URL,
-            encoding="utf-8",
-            decode_responses=True,
-            socket_connect_timeout=5,
-            socket_timeout=5,
-        )
-        await _redis_client.ping()
-        logger.info(f"Redis connected: {REDIS_URL}")
-    return _redis_client
-
-
-async def get_redis_blocking() -> aioredis.Redis:
-    """Get or create a Redis connection for blocking operations (XREAD BLOCK).
-    Uses a longer socket timeout so XREAD BLOCK doesn't get killed."""
-    global _redis_blocking_client
-    if _redis_blocking_client is None:
-        _redis_blocking_client = aioredis.from_url(
-            REDIS_URL,
-            encoding="utf-8",
-            decode_responses=True,
-            socket_connect_timeout=5,
-            socket_timeout=60,  # Long timeout for XREAD BLOCK
-        )
-        await _redis_blocking_client.ping()
-        logger.info(f"Redis blocking client connected: {REDIS_URL}")
-    return _redis_blocking_client
+# Reviewer feedback (keep aligned with reviewer-app/services/feedback_store.py)
+_FB_PREFIX = "mh:rev_fb"
+_FB_HISTORY_PREFIX = "mh:rev_fb_history"
 
 
 def _key(session_id: str, field: str) -> str:
@@ -89,14 +55,21 @@ def _session_keys(session_id: str) -> List[str]:
     """All Redis keys belonging to a session (for TTL refresh / deletion)."""
     fields = ["config", "notebook", "status", "meta", "results",
               "all_results", "turns", "history", "reviews", "review_status",
-              "qc_done", "resubmitted_at"]
+              "qc_done", "resubmitted_at", "trainer_ui"]
     return [_key(session_id, f) for f in fields]
 
 
+def _feedback_keys(session_id: str) -> List[str]:
+    """Reviewer feedback keys — same TTL family as session but different key pattern."""
+    return [f"{_FB_PREFIX}:{session_id}", f"{_FB_HISTORY_PREFIX}:{session_id}"]
+
+
 async def _refresh_ttl(r: aioredis.Redis, session_id: str):
-    """Refresh TTL on all keys for a session."""
+    """Refresh TTL on all keys for a session (including reviewer feedback keys)."""
     pipe = r.pipeline()
     for key in _session_keys(session_id):
+        pipe.expire(key, SESSION_TTL)
+    for key in _feedback_keys(session_id):
         pipe.expire(key, SESSION_TTL)
     await pipe.execute()
 
@@ -137,13 +110,23 @@ async def create_session(session_id: str, notebook: ParsedNotebook, config: Hunt
 
 
 
-async def save_full_session(session: HuntSession) -> None:
+async def save_full_session(
+    session: HuntSession,
+    *,
+    sqlite_workflow: Optional[Dict[str, Any]] = None,
+) -> None:
     """
     Save a full session object to Redis.
     Used when restoring from disk storage or initializing complex state.
+
+    sqlite_workflow: optional row from SQLite (same shape as storage.sqlite_store.load_session)
+    so review_status / qc_done / reviewer feedback are not lost after create_session resets them.
     """
-    # Initialize basic keys
-    await create_session(session.session_id, session.notebook, session.config)
+    notebook = session.notebook
+    if notebook is None:
+        notebook = ParsedNotebook(filename="restored.ipynb")
+
+    await create_session(session.session_id, notebook, session.config)
 
     # Update status
     await set_status(session.session_id, session.status)
@@ -170,6 +153,9 @@ async def save_full_session(session: HuntSession) -> None:
     await set_results(session.session_id, session.results or [])
     await set_all_results(session.session_id, session.all_results or [])
     await set_turns(session.session_id, session.turns or [])
+
+    if sqlite_workflow:
+        await apply_sqlite_workflow_snapshot(session.session_id, sqlite_workflow)
 
     logger.info(f"Full session {session.session_id} restored to Redis")
 
@@ -339,6 +325,25 @@ async def set_human_reviews(session_id: str, reviews: Dict[str, Any]) -> None:
     await r.expire(_key(session_id, "reviews"), SESSION_TTL)
 
 
+async def set_trainer_ui(session_id: str, data: Dict[str, Any]) -> None:
+    """Persist trainer-only UI state (LLM reveal flag, alignment gate). Not sent to reviewers as reviews."""
+    r = await get_redis()
+    await r.set(_key(session_id, "trainer_ui"), json.dumps(data, default=str))
+    await r.expire(_key(session_id, "trainer_ui"), SESSION_TTL)
+
+
+async def get_trainer_ui(session_id: str) -> Dict[str, Any]:
+    r = await get_redis()
+    raw = await r.get(_key(session_id, "trainer_ui"))
+    if not raw:
+        return {}
+    try:
+        out = json.loads(raw)
+        return out if isinstance(out, dict) else {}
+    except (json.JSONDecodeError, TypeError):
+        return {}
+
+
 # ============================================================
 # Review status (trainer/reviewer sync)
 # ============================================================
@@ -410,8 +415,50 @@ async def clear_qc_done(session_id: str) -> None:
     await r.delete(_key(session_id, "qc_done"))
 
 
-_FB_PREFIX = "mh:rev_fb"
-_FB_HISTORY_PREFIX = "mh:rev_fb_history"
+async def apply_sqlite_workflow_snapshot(session_id: str, db_row: Dict[str, Any]) -> None:
+    """Restore trainer/reviewer workflow Redis keys from a SQLite session row after save_full_session."""
+    r = await get_redis()
+    sid = session_id
+
+    rs_raw = db_row.get("review_status")
+    rs = str(rs_raw).strip().lower() if rs_raw is not None and rs_raw != "" else ""
+    if rs in REVIEW_STATUS_VALUES:
+        k = _key(sid, "review_status")
+        await r.set(k, rs)
+        await r.expire(k, SESSION_TTL)
+
+    if db_row.get("qc_done"):
+        kq = _key(sid, "qc_done")
+        await r.set(kq, "1")
+        await r.expire(kq, SESSION_TTL)
+    else:
+        await clear_qc_done(sid)
+
+    rr = db_row.get("review_round")
+    if rr is not None:
+        try:
+            await set_meta_field(sid, "review_round", int(rr))
+        except (TypeError, ValueError):
+            pass
+
+    fb = db_row.get("review_feedback")
+    if fb:
+        payload: Any = fb
+        if isinstance(fb, str):
+            try:
+                payload = json.loads(fb)
+            except (json.JSONDecodeError, TypeError):
+                payload = None
+        if payload:
+            fb_key = f"{_FB_PREFIX}:{sid}"
+            await r.set(fb_key, json.dumps(payload, default=str))
+            await r.expire(fb_key, SESSION_TTL)
+
+    email = db_row.get("trainer_email")
+    if email and isinstance(email, str) and email.strip():
+        await set_trainer_email(sid, email.strip())
+
+    await r.expire(_key(sid, "meta"), SESSION_TTL)
 
 
 async def get_review_feedback(session_id: str) -> Optional[Dict[str, Any]]:
@@ -883,12 +930,13 @@ async def get_full_session_state(session_id: str) -> Optional[Dict[str, Any]]:
     pipe.get(_key(session_id, "review_status"))
     pipe.get(_key(session_id, "qc_done"))
     pipe.get(_key(session_id, "resubmitted_at"))
+    pipe.get(_key(session_id, "trainer_ui"))
     pipe.get(f"{_FB_PREFIX}:{session_id}")
     pipe.lrange(f"{_FB_HISTORY_PREFIX}:{session_id}", 0, -1)
 
     (config_json, notebook_json, meta, results_jsons, all_results_jsons,
      turns_jsons, history_json, reviews_json, review_status_val,
-     qc_done_val, resubmitted_at_val, feedback_json,
+     qc_done_val, resubmitted_at_val, trainer_ui_json, feedback_json,
      feedback_history_jsons) = await pipe.execute()
 
     config = {}
@@ -942,6 +990,15 @@ async def get_full_session_state(session_id: str) -> Optional[Dict[str, Any]]:
         except (json.JSONDecodeError, TypeError):
             pass
 
+    trainer_ui = {}
+    if trainer_ui_json:
+        try:
+            trainer_ui = json.loads(trainer_ui_json)
+            if not isinstance(trainer_ui, dict):
+                trainer_ui = {}
+        except (json.JSONDecodeError, TypeError):
+            trainer_ui = {}
+
     feedback = None
     if feedback_json:
         try:
@@ -983,6 +1040,7 @@ async def get_full_session_state(session_id: str) -> Optional[Dict[str, Any]]:
         "turns": turns,
         "conversation_history": conversation_history,
         "human_reviews": reviews,
+        "trainer_ui": trainer_ui,
         "review_status": review_status,
         "qc_done": qc_done_val == "1",
         "resubmitted_at": resubmitted_at_val,
@@ -994,11 +1052,5 @@ async def get_full_session_state(session_id: str) -> Optional[Dict[str, Any]]:
 
 
 async def close():
-    """Close all Redis connections."""
-    global _redis_client, _redis_blocking_client
-    if _redis_client:
-        await _redis_client.close()
-        _redis_client = None
-    if _redis_blocking_client:
-        await _redis_blocking_client.close()
-        _redis_blocking_client = None
+    """Close all Redis connections (delegates to shared redis_client module)."""
+    await close_redis()
