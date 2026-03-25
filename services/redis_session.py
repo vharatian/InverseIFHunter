@@ -24,9 +24,7 @@ Benefits:
 import json
 import logging
 import os
-from typing import Dict, Any, Optional, List
-
-import redis.asyncio as aioredis
+from typing import Any, Dict, Optional, List
 
 from redis_client import get_redis, get_redis_blocking, close_redis
 from models.schemas import (
@@ -64,7 +62,7 @@ def _feedback_keys(session_id: str) -> List[str]:
     return [f"{_FB_PREFIX}:{session_id}", f"{_FB_HISTORY_PREFIX}:{session_id}"]
 
 
-async def _refresh_ttl(r: aioredis.Redis, session_id: str):
+async def _refresh_ttl(r: Any, session_id: str):
     """Refresh TTL on all keys for a session (including reviewer feedback keys)."""
     pipe = r.pipeline()
     for key in _session_keys(session_id):

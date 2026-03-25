@@ -74,7 +74,7 @@ async def publish(session_id: str, event: HuntEvent) -> str:
 
     # Persist to SQLite for audit
     try:
-        from storage.sqlite_store import append_event
+        from storage import append_event
         payload = dict(event.data)
         if event.hunt_id is not None:
             payload["hunt_id"] = event.hunt_id
