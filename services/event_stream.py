@@ -25,6 +25,7 @@ Usage:
     # Replay missed events
     events = await replay(session_id, last_event_id)
 """
+import asyncio
 import json
 import logging
 from typing import AsyncGenerator, Tuple, Optional, List, Dict, Any
@@ -54,7 +55,7 @@ def _stream_key(session_id: str) -> str:
 async def publish(session_id: str, event: HuntEvent) -> str:
     """
     Publish a hunt event to the session's Redis Stream.
-    Also appends to SQLite hunt_events for audit/replay.
+    Also appends to PostgreSQL telemetry_events for audit/replay.
     Returns the stream entry ID (used as SSE event id).
     """
     r = await get_redis()
@@ -72,15 +73,16 @@ async def publish(session_id: str, event: HuntEvent) -> str:
     # Set TTL on first event (refresh on subsequent)
     await r.expire(key, STREAM_TTL)
 
-    # Persist to SQLite for audit
+    # Persist to PostgreSQL telemetry (non-blocking, best-effort)
     try:
-        from storage import append_event
+        from services.telemetry_pg import append_telemetry_event
+
         payload = dict(event.data)
         if event.hunt_id is not None:
             payload["hunt_id"] = event.hunt_id
-        append_event(session_id, event.event_type, payload)
+        asyncio.create_task(append_telemetry_event(session_id, event.event_type, payload))
     except Exception as e:
-        logger.debug("append_event failed (non-fatal): %s", e)
+        logger.debug("telemetry append failed (non-fatal): %s", e)
 
     return entry_id
 
