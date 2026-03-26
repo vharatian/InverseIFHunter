@@ -18,8 +18,8 @@ services:
       - "--metrics.prometheus.addServicesLabels=true"
       - "--api.insecure=true"
     ports:
-      - "80:80"
-      - "443:443"
+      - "${TRAEFIK_HTTP_PORT:-80}:80"
+      - "${TRAEFIK_HTTPS_PORT:-443}:443"
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
       - "letsencrypt:/letsencrypt"
@@ -29,9 +29,8 @@ services:
 
   elixir-edge:
     build: ./elixir-edge
-    # Localhost binding for deploy.sh health check and ops (Traefik still serves public traffic).
     ports:
-      - "127.0.0.1:4000:4000"
+      - "127.0.0.1:${ELIXIR_PORT:-4000}:4000"
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.edge.rule=Host(`${DOMAIN}`)"
@@ -41,7 +40,7 @@ services:
     environment:
       PYTHON_CORE_URL: http://python-core:8000
       PYTHON_DASHBOARD_URL: http://python-dashboard:8001
-      REDIS_URL: redis://redis:6379/0
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       SECRET_KEY_BASE: ${ELIXIR_SECRET_KEY_BASE}
       PORT: "4000"
     depends_on:
@@ -62,12 +61,12 @@ services:
       context: .
       dockerfile: docker/Dockerfile
     ports:
-      - "127.0.0.1:8000:8000"
-    env_file: .env
+      - "127.0.0.1:${PYTHON_PORT:-8000}:8000"
+    env_file: ${ENV_FILE:-.env}
     environment:
       PORT: "8000"
-      REDIS_URL: redis://redis:6379/0
-      DATABASE_URL: postgresql+asyncpg://${PG_USER}:${PG_PASSWORD}@postgres:5432/model_hunter
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      DATABASE_URL: postgresql+asyncpg://${PG_USER:-mh}:${PG_PASSWORD}@postgres:5432/${PG_DATABASE:-model_hunter}
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/live')"]
       interval: 30s
@@ -92,12 +91,12 @@ services:
       context: ./dashboard
       dockerfile: Dockerfile
     ports:
-      - "127.0.0.1:8001:8001"
+      - "127.0.0.1:${DASHBOARD_PORT:-8001}:8001"
     environment:
       DASHBOARD_PORT: "8001"
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
-      REDIS_URL: redis://redis:6379/0
-      DATABASE_URL: postgresql+asyncpg://${PG_USER}:${PG_PASSWORD}@postgres:5432/model_hunter
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      DATABASE_URL: postgresql+asyncpg://${PG_USER:-mh}:${PG_PASSWORD}@postgres:5432/${PG_DATABASE:-model_hunter}
     depends_on:
       postgres:
         condition: service_healthy
@@ -114,16 +113,16 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: model_hunter
-      POSTGRES_USER: ${PG_USER}
+      POSTGRES_DB: ${PG_DATABASE:-model_hunter}
+      POSTGRES_USER: ${PG_USER:-mh}
       POSTGRES_PASSWORD: ${PG_PASSWORD}
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./backups:/backups
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:${PG_PORT:-5432}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${PG_USER} -d model_hunter"]
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-mh} -d ${PG_DATABASE:-model_hunter}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -155,7 +154,7 @@ services:
     volumes:
       - redisdata:/data
     ports:
-      - "127.0.0.1:6379:6379"
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -175,7 +174,7 @@ services:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - promdata:/prometheus
     ports:
-      - "127.0.0.1:9090:9090"
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
     restart: unless-stopped
     networks:
       - mh-network
@@ -195,6 +194,8 @@ services:
       - "traefik.http.routers.grafana.entrypoints=websecure"
       - "traefik.http.routers.grafana.tls.certresolver=letsencrypt"
       - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
     restart: unless-stopped
     networks:
       - mh-network
