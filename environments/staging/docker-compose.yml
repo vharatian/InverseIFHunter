@@ -42,7 +42,7 @@ services:
       - telemetry-data-staging:/app/.telemetry
       - ../../static:/app/static:ro
     healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8010/api/health')"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8010/health/live')"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -79,7 +79,7 @@ services:
       - telemetry-data-staging:/app/.telemetry
       - ../../static:/app/static:ro
     healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8012/api/health')"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8012/health/live')"]
       interval: 30s
       timeout: 10s
       retries: 3

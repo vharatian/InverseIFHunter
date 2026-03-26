@@ -1,4 +1,9 @@
 #!/bin/bash
+# ⚠️  DEPRECATED — Use the unified deploy script instead:
+#     cd /path/to/repo && ./deploy.sh production
+#
+# This script is kept for backward compatibility.
+# See DEPLOYMENT.md for the new workflow.
 #
 # PRODUCTION Deploy — Zero-Downtime
 #
