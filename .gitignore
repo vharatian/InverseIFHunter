@@ -57,3 +57,6 @@ local/ai-workflows/
 
 # Cursor workflow setup reference (committed on purpose)
 !docs/CURSOR_WORKFLOWS.md
+
+# Deployment guide (committed on purpose)
+!DEPLOYMENT.md
