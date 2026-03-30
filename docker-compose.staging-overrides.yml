@@ -1,0 +1,45 @@
+# Optional second file for staging behind a raw IP with a path prefix (e.g. /staging)
+# and HTTP-only Traefik (no Let's Encrypt — LE cannot issue for bare IPs via HTTP-01).
+#
+# Enable by setting STAGING_COMPOSE_OVERRIDE=1 in .env.staging (deploy.sh picks it up), or run:
+#   docker compose -f docker-compose.prod.yml -f docker-compose.staging-overrides.yml ...
+#
+# Required in .env when using this file:
+#   DOMAIN=<ip-or-hostname-only>   # never http://... or path segments
+#   EDGE_PATH_PREFIX=/staging
+#   GRAFANA_PATH_PREFIX=/staging/grafana
+#   EDGE_STRIP_PREFIX=/staging
+#   GRAFANA_ROOT_URL=http://<ip>:<TRAEFIK_HTTP_PORT>/staging/grafana/
+#
+services:
+  traefik:
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--metrics.prometheus=true"
+      - "--metrics.prometheus.addEntryPointsLabels=true"
+      - "--metrics.prometheus.addServicesLabels=true"
+      - "--api.insecure=true"
+
+  elixir-edge:
+    labels: !reset
+      - "traefik.enable=true"
+      - "traefik.http.routers.edge.rule=Host(`${DOMAIN}`) && PathPrefix(`${EDGE_PATH_PREFIX}`)"
+      - "traefik.http.middlewares.staging-edge-strip.stripprefix.prefixes=${EDGE_STRIP_PREFIX}"
+      - "traefik.http.routers.edge.middlewares=staging-edge-strip"
+      - "traefik.http.routers.edge.entrypoints=web"
+      - "traefik.http.services.edge.loadbalancer.server.port=4000"
+
+  grafana:
+    labels: !reset
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=Host(`${DOMAIN}`) && PathPrefix(`${GRAFANA_PATH_PREFIX}`)"
+      - "traefik.http.middlewares.staging-grafana-strip.stripprefix.prefixes=${EDGE_STRIP_PREFIX}"
+      - "traefik.http.routers.grafana.middlewares=staging-grafana-strip"
+      - "traefik.http.routers.grafana.entrypoints=web"
+      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD}
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL}
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"

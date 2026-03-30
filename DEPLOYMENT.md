@@ -44,6 +44,16 @@ cp .env.staging.example .env.staging
 # Edit .env.staging with staging values
 ```
 
+**Traefik / Grafana**
+
+- `DOMAIN` must be a **hostname or IP only** (no `http://`, no path). Routing uses `Host(DOMAIN)` plus `PathPrefix` from `EDGE_PATH_PREFIX` / `GRAFANA_PATH_PREFIX`.
+- Set **`GRAFANA_ROOT_URL`** to the full URL browsers use (scheme, host, port if non-default, path, trailing slash), e.g. `https://staging.example.com/grafana/`.
+- Staging on a **bare IP** with a path such as `/staging` and **HTTP only** (no Let’s Encrypt): set `STAGING_COMPOSE_OVERRIDE=1` plus `EDGE_STRIP_PREFIX`, paths, and `GRAFANA_ROOT_URL` as in `.env.staging.example` section B. `deploy.sh` merges `docker-compose.staging-overrides.yml` (requires Docker Compose **v2.23+** for `labels: !reset`).
+
+**Postgres WAL archive**
+
+- The stack archives WAL under `./backups/wal`. `deploy.sh` runs `chown -R 70:70 backups` when possible (`postgres:16-alpine` uses UID **70**). If archiving still fails, run that `chown` with `sudo` on the host.
+
 ### 3. Create PostgreSQL databases
 
 The first deploy creates the database automatically via the `POSTGRES_DB` env var. Each environment gets its own PostgreSQL container with its own data volume.

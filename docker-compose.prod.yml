@@ -33,7 +33,7 @@ services:
       - "127.0.0.1:${ELIXIR_PORT:-4000}:4000"
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.edge.rule=Host(`${DOMAIN}`)"
+      - "traefik.http.routers.edge.rule=Host(`${DOMAIN}`) && PathPrefix(`${EDGE_PATH_PREFIX}`)"
       - "traefik.http.routers.edge.entrypoints=websecure"
       - "traefik.http.routers.edge.tls.certresolver=letsencrypt"
       - "traefik.http.services.edge.loadbalancer.server.port=4000"
@@ -42,6 +42,7 @@ services:
       PYTHON_DASHBOARD_URL: http://python-dashboard:8001
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       SECRET_KEY_BASE: ${ELIXIR_SECRET_KEY_BASE}
+      PHX_HOST: ${DOMAIN}
       PORT: "4000"
     depends_on:
       redis:
@@ -186,11 +187,11 @@ services:
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD}
-      GF_SERVER_ROOT_URL: "https://${DOMAIN}/grafana/"
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL}
       GF_SERVER_SERVE_FROM_SUB_PATH: "true"
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.grafana.rule=Host(`${DOMAIN}`) && PathPrefix(`/grafana`)"
+      - "traefik.http.routers.grafana.rule=Host(`${DOMAIN}`) && PathPrefix(`${GRAFANA_PATH_PREFIX}`)"
       - "traefik.http.routers.grafana.entrypoints=websecure"
       - "traefik.http.routers.grafana.tls.certresolver=letsencrypt"
       - "traefik.http.services.grafana.loadbalancer.server.port=3000"

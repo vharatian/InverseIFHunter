@@ -174,6 +174,13 @@ from middleware.error_handler import global_exception_handler
 app.add_middleware(TraceIdMiddleware)
 app.add_exception_handler(Exception, global_exception_handler)
 
+try:
+    from prometheus_fastapi_instrumentator import Instrumentator
+
+    Instrumentator().instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
+except Exception as e:
+    logger.warning("Prometheus /metrics not enabled: %s", e)
+
 from resilience.health import health_live, health_ready, health_deep
 
 

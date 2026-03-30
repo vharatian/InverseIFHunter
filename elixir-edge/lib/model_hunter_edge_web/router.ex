@@ -11,6 +11,10 @@ defmodule ModelHunterEdgeWeb.Router do
     get "/deep", HealthController, :deep
   end
 
+  scope "/", ModelHunterEdgeWeb do
+    get "/metrics", MetricsController, :index
+  end
+
   scope "/sse", ModelHunterEdgeWeb do
     get "/hunt/:session_id", SSEController, :stream
   end

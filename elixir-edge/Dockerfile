@@ -1,7 +1,9 @@
-# Elixir Edge Service — multi-stage build
-FROM elixir:1.17-alpine AS builder
+# Elixir Edge — build and runtime on Debian bookworm + OpenSSL 3 (avoids Alpine/glibc
+# OpenSSL mismatches that break Erlang crypto NIFs, e.g. EVP_MD_CTX_get_size_ex).
+FROM elixir:1.17-slim AS builder
 
-RUN apk add --no-cache git
+RUN apt-get update && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -18,10 +20,14 @@ COPY priv priv
 
 RUN mix compile && mix release
 
-# Runtime
-FROM alpine:3.19
+FROM debian:bookworm-slim
 
-RUN apk add --no-cache libstdc++ openssl ncurses-libs
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libssl3 \
+    libncurses6 \
+    libstdc++6 \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 

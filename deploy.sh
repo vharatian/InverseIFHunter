@@ -58,10 +58,15 @@ resolve_env() {
 # Use Compose V2 plugin if present; otherwise standalone docker-compose (avoids
 # "unknown shorthand flag: 'p' in -p" when `docker compose` is not installed).
 run_compose() {
+    local -a _files=( -f "$SCRIPT_DIR/$COMPOSE_FILE" )
+    if [ "${ENV_NAME:-}" = "staging" ] && [ -f "$SCRIPT_DIR/docker-compose.staging-overrides.yml" ] \
+        && grep -q '^STAGING_COMPOSE_OVERRIDE=1' "$SCRIPT_DIR/$ENV_FILE" 2>/dev/null; then
+        _files+=( -f "$SCRIPT_DIR/docker-compose.staging-overrides.yml" )
+    fi
     if docker compose version &>/dev/null; then
-        docker compose -p "$PROJECT" -f "$SCRIPT_DIR/$COMPOSE_FILE" --env-file "$SCRIPT_DIR/$ENV_FILE" "$@"
+        docker compose -p "$PROJECT" "${_files[@]}" --env-file "$SCRIPT_DIR/$ENV_FILE" "$@"
     elif command -v docker-compose &>/dev/null; then
-        docker-compose --project-name "$PROJECT" -f "$SCRIPT_DIR/$COMPOSE_FILE" --env-file "$SCRIPT_DIR/$ENV_FILE" "$@"
+        docker-compose --project-name "$PROJECT" "${_files[@]}" --env-file "$SCRIPT_DIR/$ENV_FILE" "$@"
     else
         echo -e "${RED}Docker Compose not found.${NC}"
         echo "  Debian/Ubuntu: sudo apt-get install -y docker-compose-plugin"
@@ -106,6 +111,12 @@ deploy() {
     # 2. Create backup directories
     echo -e "${YELLOW}[2/6] Creating backup directories...${NC}"
     mkdir -p backups/wal backups/daily
+    # postgres:16-alpine runs as UID 70 — WAL archive needs write access to ./backups
+    if chown -R 70:70 "$SCRIPT_DIR/backups" 2>/dev/null; then
+        echo "  backups/ ownership set for postgres (uid 70)"
+    else
+        echo -e "${YELLOW}  If WAL archive fails: sudo chown -R 70:70 $SCRIPT_DIR/backups${NC}"
+    fi
     echo ""
 
     # 3. Build images

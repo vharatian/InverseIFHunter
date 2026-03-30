@@ -3,7 +3,6 @@
 docker/
 environments/
 tests/
-reviewer-app/
 .storage/
 .storage-staging/
 .telemetry/

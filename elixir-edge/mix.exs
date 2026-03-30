@@ -33,6 +33,7 @@ defmodule ModelHunterEdge.MixProject do
   defp deps do
     [
       {:phoenix, "~> 1.8.5"},
+      {:castore, "~> 1.0"},
       {:redix, "~> 1.4"},
       {:finch, "~> 0.18"},
       {:jason, "~> 1.4"},
