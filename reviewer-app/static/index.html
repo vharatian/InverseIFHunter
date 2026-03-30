@@ -4,8 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Reviewer</title>
-  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="icon" type="image/svg+xml" href="/reviewer/static/favicon.svg">
+  <link rel="stylesheet" href="/reviewer/static/style.css" />
 </head>
 <body>
     <div id="app">
@@ -16,9 +16,9 @@
         </div>
         <div class="header-right">
         <span id="keyboard-hint" class="keyboard-hint" hidden title="Keyboard shortcuts">
+          <kbd>C</kbd> Council
           <kbd>A</kbd> Approve
           <kbd>R</kbd> Return
-          <kbd>S</kbd> Save
           <kbd>Esc</kbd> Back
         </span>
         <!-- Notifications bell -->
@@ -37,6 +37,10 @@
             </ul>
           </div>
         </div>
+        <button class="update-indicator hidden" id="reviewerUpdateIndicator" type="button" title="Update available">
+          <span class="update-indicator-dot"></span>
+          <span class="update-indicator-label">Update</span>
+        </button>
         <div class="reviewer-identity">
           <span id="reviewer-email" class="reviewer-email"></span>
           <button type="button" id="btn-change-email" class="reviewer-change-btn" title="Sign out / change email">Change</button>
@@ -45,15 +49,31 @@
     </header>
 
       <section id="gate" class="gate">
+        <div class="gate-glow"></div>
         <div class="gate-icon">
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
         </div>
-        <h2 class="gate-title">Sign in to Reviewer</h2>
-        <p>Enter your email to start reviewing tasks.</p>
-      <input type="email" id="email-input" placeholder="you@company.com" aria-label="Your email" autocomplete="email" />
-      <button type="button" id="btn-continue" aria-busy="false">Sign in</button>
-      <p id="gate-error" class="error" hidden role="alert"></p>
-    </section>
+        <h2 class="gate-title">Review Console</h2>
+        <p class="gate-subtitle">AI-assisted task review with LLM Council</p>
+        <div class="gate-form">
+          <label class="gate-label" for="email-input">Email address</label>
+          <input type="email" id="email-input" placeholder="you@company.com" aria-label="Your email" autocomplete="email" />
+          <button type="button" id="btn-continue" aria-busy="false">
+            <span class="btn-continue-text">Sign in</span>
+            <svg class="btn-continue-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
+          </button>
+        </div>
+        <p id="gate-error" class="error" hidden role="alert"></p>
+        <div class="gate-footer">
+          <span class="gate-footer-text">Powered by 4-model LLM council</span>
+          <div class="gate-models">
+            <span class="gate-model-chip">GPT-5.2</span>
+            <span class="gate-model-chip">Sonnet 4.6</span>
+            <span class="gate-model-chip">Gemini 3</span>
+            <span class="gate-model-chip">Grok 4</span>
+          </div>
+        </div>
+      </section>
 
     <main id="main" class="main" hidden>
       <nav class="nav">
@@ -86,6 +106,12 @@
           <button type="button" class="queue-tab" data-status="approved">Approved <span class="tab-count" data-status="approved" aria-label="count">0</span></button>
           <button type="button" class="queue-tab" data-status="returned">Returned <span class="tab-count" data-status="returned" aria-label="count">0</span></button>
         </nav>
+        <div id="queue-batch-bar" class="queue-batch-bar" hidden>
+          <span id="batch-count" class="batch-count">0 selected</span>
+          <button type="button" id="btn-batch-approve" class="btn-batch-approve">Approve Selected</button>
+          <button type="button" id="btn-batch-clear" class="btn-batch-clear">Clear</button>
+        </div>
+        <div id="queue-stats" class="queue-stats" hidden></div>
         <p id="queue-count" aria-live="polite">No tasks.</p>
         <p id="queue-error" class="error" hidden role="alert"></p>
         <ul id="queue-list" aria-busy="false"></ul>
@@ -122,6 +148,31 @@
         <p id="task-error" class="error" hidden role="alert"></p>
         <div id="agent-summary-at-top" class="agent-summary-at-top" hidden aria-live="polite"></div>
 
+          <!-- Council verdict bar -->
+          <div id="council-bar" class="council-bar council-bar--idle">
+            <div class="council-bar-header">
+              <button type="button" id="btn-run-council" class="btn-run-council">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                Run Council
+              </button>
+              <button type="button" id="btn-stop-council" class="btn-stop-council" hidden>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+                Stop
+              </button>
+              <div class="council-models-row">
+                <span class="council-model-chip">GPT-5.2</span>
+                <span class="council-model-chip">Sonnet 4.6</span>
+                <span class="council-model-chip">Gemini 3</span>
+                <span class="council-model-chip">Grok 4</span>
+                <span class="council-model-chip council-model-chip--chairman" title="Chairman &mdash; makes final PASS/FAIL call"><span class="chairman-tag">C</span> Opus 4.6</span>
+              </div>
+              <button type="button" id="btn-council-rules" class="btn-council-rules" title="View council rules">Rules</button>
+              <span id="council-summary" class="council-summary"></span>
+            </div>
+            <div id="council-slots" class="council-slots" hidden></div>
+            <div id="council-detail" class="council-detail" hidden></div>
+          </div>
+
           <div id="edit-panel" class="edit-panel" hidden>
             <p class="hint">Edit human review grades and explanations directly. Only non-structural fields can be changed.</p>
             <div id="edit-reviews-fields" class="edit-reviews-fields"></div>
@@ -135,11 +186,14 @@
             </div>
           </div>
 
+        <div id="triage-banner" class="triage-banner" hidden></div>
+
         <div id="task-content" class="task-content" aria-busy="false"></div>
 
         <hr />
 
-          <div class="feedback-card">
+          <!-- PAUSED: feedback UI — re-enable when ready -->
+          <div class="feedback-card" hidden>
             <div class="feedback-card-header">
               <h3>Reviewer Feedback</h3>
             </div>
@@ -212,16 +266,17 @@
 
         <hr />
 
-        <div class="agent-card">
+        <!-- PAUSED: deep review — re-enable when ready -->
+        <div class="agent-card" hidden>
           <div class="agent-card-header">
-            <h3>Agent Review</h3>
-            <button type="button" id="btn-run-agent" class="btn-run-agent-inline">Run agent</button>
+            <h3>Deep Review</h3>
+            <button type="button" id="btn-run-agent" class="btn-run-agent-inline">Run deep review</button>
           </div>
           <p id="agent-status" class="status"></p>
           <div id="agent-output" class="agent-output"></div>
         </div>
 
-        <!-- Colab save section (shown for approved tasks) -->
+        <!-- PAUSED: colab save not needed on reviewer side -->
         <div id="colab-save-section" class="colab-save-section" hidden>
           <div class="colab-save-card">
             <h3>Submit to Colab</h3>
@@ -239,7 +294,7 @@
         <div class="sticky-action-bar">
           <div class="action-bar-inner">
             <div class="action-bar-left">
-              <button type="button" id="btn-save-feedback">Save <kbd>S</kbd></button>
+              <button type="button" id="btn-save-feedback" hidden>Save <kbd>S</kbd></button>
             </div>
             <div class="action-bar-right">
               <button type="button" id="btn-approve" class="btn-approve">Approve <kbd>A</kbd></button>
@@ -267,6 +322,6 @@
     </div>
   </div>
 
-  <script type="module" src="/static/app.js"></script>
+  <script type="module" src="/reviewer/static/app.js"></script>
 </body>
 </html>

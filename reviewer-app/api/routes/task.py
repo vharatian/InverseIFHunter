@@ -2,6 +2,8 @@
 Task view: get one task by session_id (snapshot + optional trainer QC context).
 Requires allowlist.
 """
+import json
+import logging
 from typing import Annotated, Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -15,6 +17,8 @@ from services.queue_service import _extract_task_display_id
 from services.feedback_store import get_feedback, get_feedback_history
 from services.agent_store import get_agent_result as get_agent_result_store
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api", tags=["task"])
 
 
@@ -25,7 +29,7 @@ async def get_task(
 ):
     """
     Get task by session_id: raw session dict + snapshot (if 4 human reviews).
-    Trainer-side QC is not stored in Redis by default; can be added later.
+    Includes previous round snapshot for diff when task was resubmitted.
     """
     session_dict = await get_session_dict(session_id)
     if session_dict is None:
@@ -42,6 +46,18 @@ async def get_task(
     review_round_val = await r.hget(f"mh:sess:{session_id}:meta", "review_round")
     review_round = int(review_round_val) if review_round_val and str(review_round_val).isdigit() else 0
 
+    previous_round_snapshot = None
+    if feedback_history:
+        versions_key = f"mh:versions:{session_id}"
+        version_count = await r.llen(versions_key)
+        if version_count >= 2:
+            prev_raw = await r.lindex(versions_key, -2)
+            if prev_raw:
+                try:
+                    previous_round_snapshot = json.loads(prev_raw)
+                except Exception:
+                    pass
+
     task_display_id = _extract_task_display_id(session_dict)
     ti_config = get_task_identity_config()
 
@@ -57,4 +73,5 @@ async def get_task(
         "agent_result": agent_result,
         "review_status": review_status,
         "review_round": review_round,
+        "previous_round_snapshot": previous_round_snapshot,
     }

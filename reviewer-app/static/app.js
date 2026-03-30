@@ -1,19 +1,23 @@
 /**
  * Reviewer app entry: gate, queue, task, feedback, agent, edit, keyboard, toasts.
  */
-import { getEmail, setEmail, api } from "./js/api.js";
+import { getEmail, setEmail, api, initVersionCheck } from "./js/api.js";
 import { show, showGate, showQueue, showTask, showToast, showModal, hideModal } from "./js/dom.js";
-import { loadQueue, setOnSelectTask, initQueueTabs, initQueueSearch } from "./js/queue.js";
-import { loadTask, renderTaskContent, renderAgentResult, renderAgentSummaryAtTop, escapeHtml } from "./js/task.js";
+import { loadQueue, setOnSelectTask, initQueueTabs, initQueueSearch, initBatchApprove, startQueueRefresh, stopQueueRefresh } from "./js/queue.js";
+import { loadTask, renderTaskContent, renderAgentResult, renderAgentSummaryAtTop, escapeHtml, FEEDBACK_ENABLED } from "./js/task.js";
 import { renderFeedbackForm, collectFeedback, showReturnNudgeIfNeeded } from "./js/feedback.js";
 import { setKeyboardHandlers, initKeyboard } from "./js/keyboard.js";
 import { initNotifications } from "./js/notifications.js";
+import { initCouncil, resetCouncil, autoRunCouncil, getCouncilState } from "./js/council.js";
+
+const DEEP_REVIEW_ENABLED = false; // PAUSED: re-enable when ready
 
 let currentSessionId = null;
 let currentTask = null;
 let queueSessionIds = [];
 let currentTaskDisplayId = "";
 let _isLoadingTask = false;
+let _taskOpenedAt = 0;
 
 function updateBreadcrumb(sessionId, index, total, taskDisplayId) {
   const breadcrumb = document.getElementById("breadcrumb");
@@ -46,6 +50,7 @@ function _navigateTask(delta) {
 async function loadTaskAndShow(sessionId) {
   if (_isLoadingTask) return;
   _isLoadingTask = true;
+  stopQueueRefresh();
   // Disable nav arrows while loading to prevent double-navigation
   const prevBtn = document.getElementById("btn-prev-task");
   const nextBtn = document.getElementById("btn-next-task");
@@ -92,10 +97,12 @@ async function loadTaskAndShow(sessionId) {
       renderTaskContent(taskContentEl, currentTask.snapshot || {}, currentTask.feedback || {});
     }
     _renderRevisedBanner(currentTask);
-    renderFeedbackForm(currentTask.feedback || {}, true);
-    renderAgentResult(currentTask.agent_result);
-    const agentSummaryEl = document.getElementById("agent-summary-at-top");
-    renderAgentSummaryAtTop(agentSummaryEl, currentTask.agent_result);
+    if (FEEDBACK_ENABLED) renderFeedbackForm(currentTask.feedback || {}, true);
+    if (DEEP_REVIEW_ENABLED) {
+      renderAgentResult(currentTask.agent_result);
+      const agentSummaryEl = document.getElementById("agent-summary-at-top");
+      renderAgentSummaryAtTop(agentSummaryEl, currentTask.agent_result);
+    }
       document.getElementById("edit-reviews-json").textContent = JSON.stringify(
         currentTask.session?.human_reviews || {},
         null,
@@ -105,7 +112,16 @@ async function loadTaskAndShow(sessionId) {
     document.getElementById("feedback-status").textContent = "";
     document.getElementById("edit-status").textContent = "";
     document.getElementById("agent-status").textContent = "";
-      wireScoreButtons();
+    if (FEEDBACK_ENABLED) wireScoreButtons();
+    resetCouncil();
+    _taskOpenedAt = Date.now();
+    // Auto-populate notebook fetch URL from session data
+    const nbUrl = currentTask.session?.notebook?.url
+      || currentTask.session?.notebook?.metadata?.url
+      || currentTask.session?.notebook?.source_url
+      || "";
+    const fetchInput = document.getElementById("notebook-fetch-url");
+    if (fetchInput) fetchInput.value = nbUrl;
     _updateColabSection(currentTask.review_status || "");
     _updateActionButtons(currentTask.review_status || "");
     showTask(true);
@@ -180,10 +196,22 @@ function _renderRevisedBanner(task) {
   const historyCount = (task.feedback_history || []).length;
   if (resubmittedAt || historyCount > 0) {
     const ts = resubmittedAt ? new Date(resubmittedAt).toLocaleString() : "";
-    const round = historyCount + 1;
+    const round = task.review_round || (historyCount + 1);
+
+    const changeSummary = _buildChangeSummary(task);
+    const lastReturnReason = _getLastReturnReason(task);
+
+    let extraHtml = "";
+    if (lastReturnReason) {
+      extraHtml += `<div class="revised-return-reason"><span class="revised-label">Previous return reason:</span> ${escapeHtml(lastReturnReason)}</div>`;
+    }
+    if (changeSummary) {
+      extraHtml += `<div class="revised-changes"><span class="revised-label">What changed:</span> ${escapeHtml(changeSummary)}</div>`;
+    }
+
     banner.hidden = false;
     banner.className = "revised-banner";
-    banner.innerHTML = `<span class="revised-icon">\u21BB</span><strong>Revised since last review</strong>${ts ? ` (resubmitted ${ts})` : ""} \u00b7 Review round ${round}${historyCount > 0 ? ` \u00b7 <button type="button" id="btn-show-prev-feedback" class="btn-link">View previous feedback</button>` : ""}`;
+    banner.innerHTML = `<div class="revised-banner-top"><span class="revised-icon">\u21BB</span><strong>Revised since last review</strong>${ts ? ` (resubmitted ${ts})` : ""} \u00b7 Review round ${round}${historyCount > 0 ? ` \u00b7 <button type="button" id="btn-show-prev-feedback" class="btn-link">View previous feedback</button>` : ""}</div>${extraHtml}`;
     const prevBtn = banner.querySelector("#btn-show-prev-feedback");
     if (prevBtn) {
       prevBtn.addEventListener("click", () => {
@@ -202,6 +230,39 @@ function _renderRevisedBanner(task) {
   } else {
     banner.hidden = true;
   }
+}
+
+function _getLastReturnReason(task) {
+  const history = task.feedback_history || [];
+  if (history.length === 0) return "";
+  const last = history[0];
+  return (last.overall_comment || "").trim();
+}
+
+function _buildChangeSummary(task) {
+  const prev = task.previous_round_snapshot;
+  if (!prev || !prev.reviews) return "";
+  const currentReviews = task.session?.human_reviews || {};
+  const prevReviews = prev.reviews || {};
+  const changes = [];
+  for (const [huntId, current] of Object.entries(currentReviews)) {
+    const old = prevReviews[huntId];
+    if (!old) { changes.push(`Slot ${huntId}: new review added`); continue; }
+    const curGrades = current.grades || current.grading_basis || {};
+    const oldGrades = old.grades || old.grading_basis || {};
+    for (const [cid, curVal] of Object.entries(curGrades)) {
+      const oldVal = oldGrades[cid];
+      if (oldVal && String(curVal).toLowerCase() !== String(oldVal).toLowerCase()) {
+        changes.push(`${cid}: ${String(oldVal).toUpperCase()} -> ${String(curVal).toUpperCase()}`);
+      }
+    }
+    const curExp = (current.explanation || "").trim();
+    const oldExp = (old.explanation || "").trim();
+    if (curExp !== oldExp && curExp) {
+      changes.push(`Slot ${huntId}: explanation updated`);
+    }
+  }
+  return changes.length > 0 ? changes.join(", ") : "";
 }
 
 // ----- Gate -----
@@ -226,6 +287,7 @@ document.getElementById("btn-continue").addEventListener("click", async () => {
     showToast("Signed in as " + email, "success");
     queueSessionIds = [];
     loadQueue(true).then(_syncQueueSessionIds);
+    startQueueRefresh();
     initNotifications({ onNavigateToTask: loadTaskAndShow });
   } catch (e) {
     setEmail("");
@@ -263,32 +325,36 @@ document.getElementById("btn-change-email")?.addEventListener("click", () => {
 setOnSelectTask(loadTaskAndShow);
 initQueueTabs();
 initQueueSearch();
+initBatchApprove();
 
 document.getElementById("btn-queue").addEventListener("click", () => {
   loadQueue(true).then(_syncQueueSessionIds);
+  startQueueRefresh();
 });
 
 // ----- Prev/Next task navigation -----
 document.getElementById("btn-prev-task")?.addEventListener("click", () => _navigateTask(-1));
 document.getElementById("btn-next-task")?.addEventListener("click", () => _navigateTask(1));
 
-// ----- Save feedback -----
-document.getElementById("btn-save-feedback").addEventListener("click", async () => {
-  const btn = document.getElementById("btn-save-feedback");
-  btn.disabled = true;
-  try {
-    const body = collectFeedback();
-    await api("/api/tasks/" + currentSessionId + "/feedback", {
-      method: "PUT",
-      body: JSON.stringify(body),
-    });
-    showToast("Feedback saved", "success");
-  } catch (e) {
-    showToast("Error: " + e.message, "error");
-  } finally {
-    btn.disabled = false;
-  }
-});
+// ----- Save feedback (PAUSED when feedback UI is hidden) -----
+if (FEEDBACK_ENABLED) {
+  document.getElementById("btn-save-feedback").addEventListener("click", async () => {
+    const btn = document.getElementById("btn-save-feedback");
+    btn.disabled = true;
+    try {
+      const body = collectFeedback();
+      await api("/api/tasks/" + currentSessionId + "/feedback", {
+        method: "PUT",
+        body: JSON.stringify(body),
+      });
+      showToast("Feedback saved", "success");
+    } catch (e) {
+      showToast("Error: " + e.message, "error");
+    } finally {
+      btn.disabled = false;
+    }
+  });
+}
 
 // ----- Approve / Return / Reject -----
 document.getElementById("btn-approve").addEventListener("click", async () => {
@@ -300,6 +366,7 @@ document.getElementById("btn-approve").addEventListener("click", async () => {
   btn.disabled = true;
   try {
     await api("/api/tasks/" + currentSessionId + "/approve", { method: "POST", body: JSON.stringify({}) });
+    _recordReviewStat("approved");
     showToast("Task approved!", "success");
     await loadQueue(true);
     _syncQueueSessionIds();
@@ -312,20 +379,66 @@ document.getElementById("btn-approve").addEventListener("click", async () => {
   }
 });
 
-document.getElementById("btn-return").addEventListener("click", async () => {
+document.getElementById("btn-return").addEventListener("click", () => {
     if (!currentSessionId) {
       showToast("Open a task first.", "info");
       return;
     }
-    if (!showReturnNudgeIfNeeded()) return;
-    const btn = document.getElementById("btn-return");
-  btn.disabled = true;
+    if (FEEDBACK_ENABLED) {
+      if (!showReturnNudgeIfNeeded()) return;
+      _submitReturn(collectFeedback());
+      return;
+    }
+    _showReturnModal();
+});
+
+function _showReturnModal() {
+  const cs = getCouncilState();
+  const failedMsgs = (cs.ruleOrder || [])
+    .filter((r) => !cs.rules[r]?.passed)
+    .map((r) => {
+      const label = r.replace(/_/g, " ");
+      const msg = cs.rules[r]?.issue?.message || cs.rules[r]?.description || "";
+      return `<div class="return-reason-item"><strong>${escapeHtml(label)}</strong>: ${escapeHtml(msg)}</div>`;
+    });
+
+  const suggestedHtml = failedMsgs.length > 0
+    ? `<div class="return-suggested"><div class="return-suggested-label">Council findings (auto-filled):</div>${failedMsgs.join("")}</div>`
+    : "";
+
+  const html = `<div class="return-modal-content">
+    ${suggestedHtml}
+    <label class="return-modal-label">Reason for returning this task:</label>
+    <textarea id="return-reason-input" class="return-reason-textarea" rows="4" placeholder="Add your comments...">${failedMsgs.length > 0 ? escapeHtml((cs.ruleOrder || []).filter((r) => !cs.rules[r]?.passed).map((r) => cs.rules[r]?.issue?.message || cs.rules[r]?.description || r).join("; ")) : ""}</textarea>
+    <div class="return-modal-actions">
+      <button type="button" id="btn-return-cancel" class="btn-return-cancel">Cancel</button>
+      <button type="button" id="btn-return-confirm" class="btn-return-confirm">Return Task</button>
+    </div>
+  </div>`;
+
+  showModal("Return Task", html);
+
+  const textarea = document.getElementById("return-reason-input");
+  if (textarea) { textarea.focus(); textarea.setSelectionRange(textarea.value.length, textarea.value.length); }
+
+  document.getElementById("btn-return-cancel")?.addEventListener("click", hideModal);
+  document.getElementById("btn-return-confirm")?.addEventListener("click", () => {
+    const reason = (document.getElementById("return-reason-input")?.value || "").trim();
+    if (!reason) { showToast("Please enter a reason.", "error"); return; }
+    hideModal();
+    _submitReturn({ overall_comment: reason });
+  });
+}
+
+async function _submitReturn(body) {
+  const btn = document.getElementById("btn-return");
+  if (btn) btn.disabled = true;
   try {
-    const body = collectFeedback();
     await api("/api/tasks/" + currentSessionId + "/return", {
       method: "POST",
       body: JSON.stringify(body),
     });
+    _recordReviewStat("returned");
     showToast("Returned with comments", "success");
     await loadQueue(true);
     _syncQueueSessionIds();
@@ -334,9 +447,9 @@ document.getElementById("btn-return").addEventListener("click", async () => {
   } catch (e) {
     showToast("Error: " + e.message, "error");
   } finally {
-    btn.disabled = false;
+    if (btn) btn.disabled = false;
   }
-});
+}
 
 document.getElementById("btn-escalate").addEventListener("click", async () => {
   if (!currentSessionId) {
@@ -347,7 +460,7 @@ document.getElementById("btn-escalate").addEventListener("click", async () => {
   const btn = document.getElementById("btn-escalate");
   btn.disabled = true;
   try {
-    const body = collectFeedback();
+    const body = FEEDBACK_ENABLED ? collectFeedback() : {};
     await api("/api/tasks/" + currentSessionId + "/escalate", {
       method: "POST",
       body: JSON.stringify(body),
@@ -365,22 +478,8 @@ document.getElementById("btn-escalate").addEventListener("click", async () => {
 });
 
 // ----- Colab save (reviewer submits approved tasks) -----
-function _updateColabSection(reviewStatus) {
-  const section = document.getElementById("colab-save-section");
-  if (!section) return;
-  const colabSaved = currentTask?.session?.meta?.colab_saved === "1";
-  if (reviewStatus === "approved" && !colabSaved) {
-    section.hidden = false;
-  } else if (colabSaved) {
-    section.hidden = false;
-    section.querySelector(".colab-save-hint").textContent = "This task has already been submitted to Colab.";
-    const previewBtn = document.getElementById("btn-colab-preview");
-    const submitBtn = document.getElementById("btn-colab-submit");
-    if (previewBtn) previewBtn.disabled = true;
-    if (submitBtn) submitBtn.disabled = true;
-  } else {
-    section.hidden = true;
-  }
+function _updateColabSection(_reviewStatus) {
+  // PAUSED: colab save not needed on reviewer side
 }
 
 /**
@@ -479,30 +578,32 @@ function _renderColabPreview(preview) {
   <div class="colab-slots-preview">${slots}</div>`;
 }
 
-// ----- Run agent -----
-document.getElementById("btn-run-agent").addEventListener("click", async () => {
-  const btn = document.getElementById("btn-run-agent");
-  const statusEl = document.getElementById("agent-status");
-  btn.disabled = true;
-  statusEl.textContent = "Running agent\u2026";
-  statusEl.style.color = "";
-  try {
-    const result = await api("/api/tasks/" + currentSessionId + "/agent-run", { method: "POST" });
-    renderAgentResult(result);
-    showToast(result.error ? "Agent finished with errors" : "Agent review complete", result.error ? "error" : "success");
-    if (result.error) statusEl.textContent = "Done with errors.";
-    else statusEl.textContent = "";
-    currentTask.agent_result = result;
-    const agentSummaryEl = document.getElementById("agent-summary-at-top");
-    renderAgentSummaryAtTop(agentSummaryEl, result);
-  } catch (e) {
-    showToast("Error: " + e.message, "error");
-    statusEl.textContent = "";
-    renderAgentResult({ error: e.message });
-  } finally {
-    btn.disabled = false;
-  }
-});
+// ----- Run agent (PAUSED when deep review is hidden) -----
+if (DEEP_REVIEW_ENABLED) {
+  document.getElementById("btn-run-agent").addEventListener("click", async () => {
+    const btn = document.getElementById("btn-run-agent");
+    const statusEl = document.getElementById("agent-status");
+    btn.disabled = true;
+    statusEl.textContent = "Running agent\u2026";
+    statusEl.style.color = "";
+    try {
+      const result = await api("/api/tasks/" + currentSessionId + "/agent-run", { method: "POST" });
+      renderAgentResult(result);
+      showToast(result.error ? "Agent finished with errors" : "Agent review complete", result.error ? "error" : "success");
+      if (result.error) statusEl.textContent = "Done with errors.";
+      else statusEl.textContent = "";
+      currentTask.agent_result = result;
+      const agentSummaryEl = document.getElementById("agent-summary-at-top");
+      renderAgentSummaryAtTop(agentSummaryEl, result);
+    } catch (e) {
+      showToast("Error: " + e.message, "error");
+      statusEl.textContent = "";
+      renderAgentResult({ error: e.message });
+    } finally {
+      btn.disabled = false;
+    }
+  });
+}
 
 // ----- Edit toggle (top-right pill button) -----
 document.getElementById("edit-toggle").addEventListener("click", () => {
@@ -661,6 +762,7 @@ setKeyboardHandlers({
   onReturn: () => document.getElementById("btn-return")?.click(),
   onEscalate: () => document.getElementById("btn-escalate")?.click(),
   onSaveFeedback: () => document.getElementById("btn-save-feedback")?.click(),
+  onRunCouncil: () => document.getElementById("btn-run-council")?.click(),
   onSelectTask: loadTaskAndShow,
   getQueueSessionIds: () => queueSessionIds,
   getFocusedQueueIndex,
@@ -669,7 +771,37 @@ setKeyboardHandlers({
 });
 initKeyboard();
 
-// ----- Feedback section collapsibles -----
+// ----- Council -----
+initCouncil(() => currentSessionId, () => document.getElementById("btn-approve")?.click());
+
+// ----- Review stats -----
+function _recordReviewStat(action) {
+  const elapsed = _taskOpenedAt ? Math.round((Date.now() - _taskOpenedAt) / 1000) : 0;
+  const today = new Date().toISOString().slice(0, 10);
+  const key = `review_stats_${today}`;
+  let stats;
+  try { stats = JSON.parse(localStorage.getItem(key) || "null"); } catch { stats = null; }
+  if (!stats) stats = { date: today, count: 0, totalSeconds: 0, approved: 0, returned: 0 };
+  stats.count++;
+  stats.totalSeconds += elapsed;
+  if (action === "approved") stats.approved++;
+  if (action === "returned") stats.returned++;
+  localStorage.setItem(key, JSON.stringify(stats));
+  _renderQueueStats();
+}
+function _renderQueueStats() {
+  const el = document.getElementById("queue-stats");
+  if (!el) return;
+  const today = new Date().toISOString().slice(0, 10);
+  let stats;
+  try { stats = JSON.parse(localStorage.getItem(`review_stats_${today}`) || "null"); } catch { stats = null; }
+  if (!stats || stats.count === 0) { el.hidden = true; return; }
+  const avg = Math.round(stats.totalSeconds / stats.count);
+  el.hidden = false;
+  el.innerHTML = `Today: <strong>${stats.count}</strong> reviewed &middot; avg <strong>${avg}s</strong> &middot; ${stats.approved} approved &middot; ${stats.returned} returned`;
+}
+
+// ----- Feedback section collapsibles (PAUSED when feedback UI hidden) -----
 document.querySelectorAll(".fb-section-header").forEach((header) => {
   const section = header.dataset.section;
   const bodyId = `fb-body-${section}`;
@@ -695,11 +827,13 @@ document.querySelectorAll(".fb-section-header").forEach((header) => {
 });
 
 // ----- Init -----
+initVersionCheck();
 if (getEmail()) {
   document.getElementById("reviewer-email").textContent = getEmail();
   showGate(false);
-  loadQueue(true).then(_syncQueueSessionIds);
-  initNotifications({ onNavigateToTask: loadTaskAndShow });
+    loadQueue(true).then(() => { _syncQueueSessionIds(); _renderQueueStats(); });
+    startQueueRefresh();
+    initNotifications({ onNavigateToTask: loadTaskAndShow });
 } else {
   showGate(true);
 }

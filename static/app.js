@@ -119,6 +119,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             onOpenTask: async (sessionId) => {
                 showTaskView();
                 clearSectionLocks();
+                if (elements.uploadSection) elements.uploadSection.classList.add('hidden');
                 try {
                     const result = await hydrateSession(sessionId);
                     await syncTurnStatusFromBackend(sessionId);
@@ -406,6 +407,7 @@ function initEventListeners() {
         }
         if (e.target.id === 'testbedCloseBtn' || e.target.closest('#testbedCloseBtn')) {
             hideTestbed();
+            showQueueView();
         }
     });
 }

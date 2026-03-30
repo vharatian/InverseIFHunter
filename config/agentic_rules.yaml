@@ -15,7 +15,8 @@ council:
       enabled: true
     - id: "x-ai/grok-4"
       enabled: true
-  consensus: "majority"   # or "unanimity"
+  consensus: "chairman"
+  chairman_model: "anthropic/claude-opus-4.6"
 
 rules:
 

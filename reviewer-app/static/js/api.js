@@ -1,7 +1,10 @@
 /**
- * API client: auth header and fetch wrapper with automatic retry on network errors.
+ * API client: auth header, fetch wrapper, and version check for soft-reload.
  */
 const EMAIL_KEY = "reviewer_email";
+const VERSION_CHECK_INTERVAL = 30000;
+let _currentVersion = null;
+let _pendingVersion = null;
 // When served under /reviewer (e.g. behind single-link proxy), API calls must use that prefix.
 const API_BASE = (() => {
   const p = typeof location !== "undefined" ? location.pathname : "";
@@ -61,4 +64,37 @@ export async function api(path, options = {}, retryOptions = {}) {
     }
   }
   throw lastErr;
+}
+
+export async function checkVersion() {
+  try {
+    const res = await fetch("/api/version", { cache: "no-store" });
+    const data = await res.json();
+    if (_currentVersion === null) {
+      _currentVersion = data.version;
+    } else if (data.version !== _currentVersion) {
+      _pendingVersion = data.version;
+      _showUpdateBanner();
+    }
+  } catch { /* server may be restarting */ }
+}
+
+let _indicatorWired = false;
+
+function _showUpdateBanner() {
+  const btn = document.getElementById("reviewerUpdateIndicator");
+  if (!btn) return;
+  btn.classList.remove("hidden");
+  if (_indicatorWired) return;
+  _indicatorWired = true;
+  btn.addEventListener("click", () => {
+    if (confirm("A new version is available. Refresh now?")) {
+      window.location.href = window.location.pathname + "?_v=" + Date.now();
+    }
+  });
+}
+
+export function initVersionCheck() {
+  checkVersion();
+  setInterval(checkVersion, VERSION_CHECK_INTERVAL);
 }

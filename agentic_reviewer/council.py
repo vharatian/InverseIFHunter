@@ -148,6 +148,7 @@ def run_council_streaming(
       ("model_chunk", model_id, chunk)
       ("model_verdict", model_id, vote_str, full_response)
       ("chairman_start", chairman_model_id)   # only when consensus=chairman
+      ("chairman_chunk", chairman_model_id, chunk) # streamed chairman reasoning
       ("chairman_verdict", passed, rationale) # only when consensus=chairman
       ("complete", passed, votes)
     """
@@ -196,18 +197,25 @@ def run_council_streaming(
             for (mid, v), resp in zip(votes, responses)
         ]
         chairman_prompt = _build_chairman_prompt(prompt, votes_with_reasoning)
-        chairman_response, chairman_err = call_model_sync(
-            chairman_prompt, chairman_model, max_tokens=1024
-        )
-        if chairman_err:
-            logger.warning("Council chairman %s error for rule %s: %s", chairman_model, rule_id, chairman_err)
+        chairman_full = []
+        had_chairman_error = False
+        for chunk, err in call_model_streaming(chairman_prompt, chairman_model):
+            if err:
+                logger.warning("Council chairman %s error for rule %s: %s", chairman_model, rule_id, err)
+                had_chairman_error = True
+                break
+            if chunk:
+                chairman_full.append(chunk)
+                yield ("chairman_chunk", chairman_model, chunk)
+        if had_chairman_error:
             pass_count = sum(1 for _, v in votes if v is True)
             fail_count = sum(1 for _, v in votes if v is False)
             passed = pass_count > fail_count
             rationale = ""
         else:
+            chairman_response = "".join(chairman_full)
             passed = parse_pass_fail(chairman_response) is True
-            rationale = (chairman_response or "").strip()
+            rationale = chairman_response.strip()
         logger.info("Council %s: chairman %s -> %s", rule_id, chairman_model, passed)
         yield ("chairman_verdict", passed, rationale)
         yield ("complete", passed, votes)

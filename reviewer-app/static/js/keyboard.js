@@ -13,6 +13,7 @@ let getQueueSessionIds = () => [];
 let getFocusedQueueIndex = () => -1;
 let onPrevTask = () => {};
 let onNextTask = () => {};
+let onRunCouncil = () => {};
 
 export function setKeyboardHandlers(handlers) {
   onApprove = handlers.onApprove || onApprove;
@@ -24,6 +25,7 @@ export function setKeyboardHandlers(handlers) {
   getFocusedQueueIndex = handlers.getFocusedQueueIndex || getFocusedQueueIndex;
   onPrevTask = handlers.onPrevTask || onPrevTask;
   onNextTask = handlers.onNextTask || onNextTask;
+  onRunCouncil = handlers.onRunCouncil || onRunCouncil;
 }
 
 function isTypingElement(el) {
@@ -54,6 +56,7 @@ export function initKeyboard() {
     if (key === "r" && inTask) { e.preventDefault(); onReturn(); return; }
     if (key === "e" && inTask) { e.preventDefault(); onEscalate(); return; }
     if (key === "s" && inTask) { e.preventDefault(); onSaveFeedback(); return; }
+    if (key === "c" && inTask) { e.preventDefault(); onRunCouncil(); return; }
 
     if (inTask && (key === "arrowleft" || key === "[")) { e.preventDefault(); onPrevTask(); return; }
     if (inTask && (key === "arrowright" || key === "]")) { e.preventDefault(); onNextTask(); return; }

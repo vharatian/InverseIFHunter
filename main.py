@@ -75,6 +75,10 @@ def _compute_app_version():
         os.path.join(base, "config", "*.yaml"),
         os.path.join(base, "config", "*.yml"),
         os.path.join(base, "templates", "**", "*.html"),
+        os.path.join(base, "reviewer-app", "static", "**", "*.js"),
+        os.path.join(base, "reviewer-app", "static", "**", "*.css"),
+        os.path.join(base, "reviewer-app", "static", "**", "*.html"),
+        os.path.join(base, "reviewer-app", "api", "**", "*.py"),
     ]
     content_hash = _hashlib.md5()
     for pat in patterns:
@@ -208,6 +212,15 @@ app.include_router(multiturn_router)
 app.include_router(system_router)
 app.include_router(agentic_router)
 app.include_router(notifications_router)
+
+# Reviewer app routes (absorbed from reviewer-app/)
+try:
+    from modules.review.router import reviewer_router
+    app.include_router(reviewer_router, prefix="/reviewer")
+    logger.info("Reviewer routes loaded at /reviewer/")
+except Exception as e:
+    logger.warning(f"Reviewer routes not loaded: {e}")
+
 logger.info("All routes loaded.")
 
 # ============== Static Files ==============
@@ -228,6 +241,26 @@ class NoCacheStaticFiles(StaticFiles):
         await super().__call__(scope, receive, send_wrapper)
 
 app.mount("/static", NoCacheStaticFiles(directory="static"), name="static")
+
+# Reviewer static files
+_reviewer_static = os.path.join(os.path.dirname(__file__), "reviewer-app", "static")
+if os.path.isdir(_reviewer_static):
+    app.mount("/reviewer/static", NoCacheStaticFiles(directory=_reviewer_static), name="reviewer-static")
+
+
+@app.get("/reviewer/")
+async def reviewer_index():
+    """Serve the reviewer UI index page."""
+    index_path = os.path.join(os.path.dirname(__file__), "reviewer-app", "static", "index.html")
+    if os.path.exists(index_path):
+        from starlette.responses import HTMLResponse
+        with open(index_path) as f:
+            content = f.read()
+        base_tag = '<base href="/reviewer/">'
+        if "<base" not in content.lower():
+            content = content.replace("<head>", "<head>\n  " + base_tag, 1)
+        return HTMLResponse(content)
+    return {"error": "Reviewer UI not found"}
 
 
 # ============== Run with uvicorn ==============

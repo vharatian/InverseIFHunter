@@ -3,11 +3,13 @@
  */
 import { api } from "./api.js";
 import { show, showQueue, showTask } from "./dom.js";
+import { escapeHtml } from "./task.js";
 
 /** @type {(sessionId: string) => void} */
 let onSelectTask = () => {};
 let currentStatusFilter = "";
 let searchDebounceTimer = null;
+let _refreshInterval = null;
 
 // Pagination state
 let _currentPage = 1;
@@ -164,9 +166,11 @@ export async function loadQueue(withSummaries = true, statusFilter, append = fal
           timeDisplay ? `<span class="queue-item-chip chip-time" title="${escapeHtml(submittedAt)}">${escapeHtml(timeDisplay)}</span>` : "",
         ].filter(Boolean).join("");
 
+        const canBatchSelect = reviewStatus === "submitted" || reviewStatus === "";
         const itemIndex = existingCount + index;
         li.innerHTML = [
           `<div class="queue-item-top">`,
+          canBatchSelect ? `<input type="checkbox" class="queue-item-check" data-session-id="${escapeHtml(sid)}" onclick="event.stopPropagation()" />` : "",
           `  ${idDisplay}`,
           `  <span class="queue-item-meta">${statusBadge}${passIcon}</span>`,
           `</div>`,
@@ -178,10 +182,15 @@ export async function loadQueue(withSummaries = true, statusFilter, append = fal
           `</div>`,
         ].filter(Boolean).join("");
 
-      li.addEventListener("click", () => onSelectTask(sid));
+      li.addEventListener("click", (e) => {
+        if (e.target.classList.contains("queue-item-check")) return;
+        onSelectTask(sid);
+      });
       li.addEventListener("keydown", (e) => {
         if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelectTask(sid); }
       });
+      const cb = li.querySelector(".queue-item-check");
+      if (cb) cb.addEventListener("change", _updateBatchBar);
       if (listEl) listEl.appendChild(li);
     });
 
@@ -304,10 +313,71 @@ function _updateActiveTab(status) {
   });
 }
 
-function escapeHtml(s) {
-  const div = document.createElement("div");
-  div.textContent = s;
-  return div.innerHTML;
+function _getSelectedSessionIds() {
+  return [...document.querySelectorAll(".queue-item-check:checked")].map((cb) => cb.dataset.sessionId).filter(Boolean);
+}
+
+function _updateBatchBar() {
+  const ids = _getSelectedSessionIds();
+  const bar = document.getElementById("queue-batch-bar");
+  const countEl = document.getElementById("batch-count");
+  if (!bar) return;
+  if (ids.length === 0) { bar.hidden = true; return; }
+  bar.hidden = false;
+  if (countEl) countEl.textContent = `${ids.length} selected`;
+}
+
+export function initBatchApprove() {
+  const approveBtn = document.getElementById("btn-batch-approve");
+  const clearBtn = document.getElementById("btn-batch-clear");
+
+  if (approveBtn) {
+    approveBtn.addEventListener("click", async () => {
+      const ids = _getSelectedSessionIds();
+      if (ids.length === 0) return;
+      if (!confirm(`Approve ${ids.length} task${ids.length > 1 ? "s" : ""}?`)) return;
+      approveBtn.disabled = true;
+      approveBtn.textContent = "Approving...";
+      try {
+        const result = await api("/api/tasks/bulk-approve", {
+          method: "POST",
+          body: JSON.stringify({ session_ids: ids }),
+        });
+        const ok = result.succeeded?.length || 0;
+        const fail = result.failed?.length || 0;
+        if (fail > 0) {
+          alert(`${ok} approved, ${fail} failed: ${result.failed.map((f) => f.reason).join("; ")}`);
+        }
+        loadQueue(true);
+      } catch (e) {
+        alert("Batch approve failed: " + e.message);
+      } finally {
+        approveBtn.disabled = false;
+        approveBtn.textContent = "Approve Selected";
+        const bar = document.getElementById("queue-batch-bar");
+        if (bar) bar.hidden = true;
+      }
+    });
+  }
+
+  if (clearBtn) {
+    clearBtn.addEventListener("click", () => {
+      document.querySelectorAll(".queue-item-check:checked").forEach((cb) => { cb.checked = false; });
+      _updateBatchBar();
+    });
+  }
+}
+
+export function startQueueRefresh() {
+  stopQueueRefresh();
+  _refreshInterval = setInterval(() => {
+    const qv = document.getElementById("queue-view");
+    if (qv && !qv.hidden) loadQueue(true);
+  }, 30000);
+}
+
+export function stopQueueRefresh() {
+  if (_refreshInterval) { clearInterval(_refreshInterval); _refreshInterval = null; }
 }
 
 function _formatRelativeTime(isoOrTs) {

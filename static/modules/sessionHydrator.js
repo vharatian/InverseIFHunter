@@ -20,7 +20,7 @@ import {
 } from './results.js';
 import { applyTrainerUiAfterHydrate } from './alignment.js';
 import { syncHuntModeFromConfig } from './hunt.js';
-import { resetTestbed, showTestbed } from './testbed.js';
+// testbed imports removed — resuming a task no longer auto-opens testbed
 
 /**
  * Fetch full session state from backend and hydrate the UI.
@@ -155,24 +155,13 @@ function _hydrateNotebookSection(notebook) {
  * Replicates the section transitions that normally happen during interactive use.
  */
 function _restoreSectionVisibility() {
-    // 1. Collapse upload section — notebook is already loaded
+    // 1. Hide upload section when resuming — notebook is already loaded
     if (state.notebook) {
-        const uploadBody = document.getElementById('uploadBody');
-        const uploadChevron = document.getElementById('uploadChevron');
-        const uploadHeaderText = document.getElementById('uploadHeaderText');
-        if (uploadBody) uploadBody.classList.add('collapsed');
-        if (uploadChevron) uploadChevron.classList.add('collapsed');
-        if (uploadHeaderText) uploadHeaderText.textContent = 'Notebook Loaded';
+        if (elements.uploadSection) elements.uploadSection.classList.add('hidden');
 
         // Show config section (prompt, criteria, hunt config)
         if (elements.configSection) elements.configSection.classList.remove('hidden');
         syncHuntModeFromConfig();
-
-        // Auto-open Testbed when no hunt results exist (user is still in editing phase)
-        if (state.allResponses.length === 0) {
-            resetTestbed();
-            showTestbed();
-        }
     }
 
     // 2. If hunt results exist, show selection section
@@ -189,7 +178,6 @@ function _restoreSectionVisibility() {
         displaySelectedForReview();
         updateReviewProgress();
 
-        // Collapse selection section (it's locked now)
         collapseSelectionSectionCard(state.selectedRowNumbers.length);
         disableSelectionCheckboxes();
     }

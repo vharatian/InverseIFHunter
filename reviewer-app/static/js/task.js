@@ -4,6 +4,8 @@
  */
 import { api } from "./api.js";
 
+export const FEEDBACK_ENABLED = false; // PAUSED: re-enable when feedback UI is ready
+
 const SLOT_IDS = ["slot_1", "slot_2", "slot_3", "slot_4"];
 
 /**
@@ -48,6 +50,7 @@ export function renderTaskContent(container, snapshot, feedback) {
 function _buildMetadataBar(taskMeta) {
   const bar = document.createElement("div");
   bar.className = "task-metadata-bar";
+  bar.setAttribute("data-council-target", "metadata");
   const labels = {
     domain: "Domain",
     use_case: "Use Case",
@@ -67,6 +70,7 @@ function _buildMetadataBar(taskMeta) {
 
 function _buildPromptSection(prompt) {
   const card = _createSectionCard("Prompt");
+  card.setAttribute("data-council-target", "prompt");
   const body = card.querySelector(".section-card-body");
 
   const textEl = document.createElement("div");
@@ -121,6 +125,7 @@ function _buildIdealResponseSection(idealResponse) {
 
 function _buildCriteriaSection(criteria) {
   const card = _createSectionCard(`Criteria (${criteria.length})`);
+  card.setAttribute("data-council-target", "criteria");
   const body = card.querySelector(".section-card-body");
 
   const ul = document.createElement("ul");
@@ -191,6 +196,7 @@ function _buildSlotsSection(selectedHunts, reviewsByHuntId, bySection) {
     if (allPass) card.classList.add("slot-pass");
     else if (anyFail) card.classList.add("slot-fail");
     card.dataset.slotId = slotId;
+    card.setAttribute("data-council-target", `slot-${index}`);
     card.style.animationDelay = `${index * 0.08}s`;
     card.classList.add("slot-enter");
 
@@ -205,15 +211,14 @@ function _buildSlotsSection(selectedHunts, reviewsByHuntId, bySection) {
     header.innerHTML = `<span class="slot-number">Slot ${index + 1}</span><span class="slot-model">${escapeHtml(model)}</span>${statusBadge}`;
     card.appendChild(header);
 
-    // Two-column body
+    // Two-column body: response LEFT, judgments RIGHT
     const body = document.createElement("div");
     body.className = "task-slot-body";
 
-    // ── LEFT: response + human + LLM judgment ──
+    // ── LEFT: response only ──
     const left = document.createElement("div");
     left.className = "slot-left";
 
-    // Response
     const responseSection = document.createElement("div");
     responseSection.className = "slot-section";
     responseSection.innerHTML = `<div class="slot-section-label">Response</div>`;
@@ -223,9 +228,15 @@ function _buildSlotsSection(selectedHunts, reviewsByHuntId, bySection) {
     responseSection.appendChild(responseText);
     left.appendChild(responseSection);
 
-    // ── Human Judgment block ──
+    body.appendChild(left);
+
+    // ── RIGHT: human + LLM judgment ──
+    const right = document.createElement("div");
+    right.className = "slot-right";
+
     const humanBlock = document.createElement("div");
     humanBlock.className = "slot-judgment-block slot-judgment-human";
+    humanBlock.setAttribute("data-council-target", `explanation-${index}`);
 
     const humanTitle = document.createElement("div");
     humanTitle.className = "slot-judgment-title";
@@ -251,9 +262,8 @@ function _buildSlotsSection(selectedHunts, reviewsByHuntId, bySection) {
       expEl.appendChild(expText);
       humanBlock.appendChild(expEl);
     }
-    left.appendChild(humanBlock);
+    right.appendChild(humanBlock);
 
-    // ── LLM Judgment block ──
     const llmBlock = document.createElement("div");
     llmBlock.className = "slot-judgment-block slot-judgment-llm";
 
@@ -281,34 +291,32 @@ function _buildSlotsSection(selectedHunts, reviewsByHuntId, bySection) {
       llmExpEl.appendChild(llmExpText);
       llmBlock.appendChild(llmExpEl);
     }
-    left.appendChild(llmBlock);
+    right.appendChild(llmBlock);
 
-    body.appendChild(left);
-
-    // ── RIGHT: reviewer comments ──
-    const right = document.createElement("div");
-    right.className = "slot-right";
-
-    const commentSection = document.createElement("div");
-    commentSection.className = "slot-section";
-    commentSection.innerHTML = `<div class="slot-section-label">Your Comment</div><textarea id="section-comment-${slotId}" rows="4" placeholder="Comment on this slot...">${escapeHtml(sf.comment || "")}</textarea>`;
-    right.appendChild(commentSection);
-
-    const appreciationSection = document.createElement("div");
-    appreciationSection.className = "slot-section";
-    appreciationSection.innerHTML = `<div class="slot-section-label">What Was Good</div><textarea id="section-appreciation-${slotId}" rows="2" placeholder="Optional...">${escapeHtml(sf.appreciation || "")}</textarea>`;
-    right.appendChild(appreciationSection);
+    if (FEEDBACK_ENABLED) {
+      const commentSection = document.createElement("div");
+      commentSection.className = "slot-section";
+      commentSection.innerHTML = `<div class="slot-section-label">Your Comment</div><textarea id="section-comment-${slotId}" rows="4" placeholder="Comment on this slot...">${escapeHtml(sf.comment || "")}</textarea>`;
+      right.appendChild(commentSection);
+      const appreciationSection = document.createElement("div");
+      appreciationSection.className = "slot-section";
+      appreciationSection.innerHTML = `<div class="slot-section-label">What Was Good</div><textarea id="section-appreciation-${slotId}" rows="2" placeholder="Optional...">${escapeHtml(sf.appreciation || "")}</textarea>`;
+      right.appendChild(appreciationSection);
+    }
 
     body.appendChild(right);
+
     card.appendChild(body);
 
-    const footer = document.createElement("div");
-    footer.className = "slot-revision-footer";
-    footer.innerHTML =
-      `<span class="footer-title">Flag for Revision</span>` +
-      _buildToggle(`slot_${index + 1}_grade`, "Grade") +
-      _buildToggle(`slot_${index + 1}_explanation`, "Explanation");
-    card.appendChild(footer);
+    if (FEEDBACK_ENABLED) {
+      const footer = document.createElement("div");
+      footer.className = "slot-revision-footer";
+      footer.innerHTML =
+        `<span class="footer-title">Flag for Revision</span>` +
+        _buildToggle(`slot_${index + 1}_grade`, "Grade") +
+        _buildToggle(`slot_${index + 1}_explanation`, "Explanation");
+      card.appendChild(footer);
+    }
 
     grid.appendChild(card);
   });

@@ -682,17 +682,8 @@ export async function handleNotebookLoaded(data, isUrl = false, overrideUrl = nu
         }
     }
     
-    // Auto-collapse the upload section (notebook is loaded, no need to show it)
-    const uploadBody = document.getElementById('uploadBody');
-    const uploadChevron = document.getElementById('uploadChevron');
-    const uploadHeaderText = document.getElementById('uploadHeaderText');
-    if (uploadBody && uploadChevron) {
-        uploadBody.classList.add('collapsed');
-        uploadChevron.classList.add('collapsed');
-    }
-    if (uploadHeaderText) {
-        uploadHeaderText.textContent = 'Notebook Loaded';
-    }
+    // Hide the upload section entirely — notebook is loaded, no need to show it
+    if (elements.uploadSection) elements.uploadSection.classList.add('hidden');
     
     // Config section is shown after testbed "Use as Ideal Response" commit
     // (was previously shown here — now deferred to promoteResponse in testbed.js)

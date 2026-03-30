@@ -51,8 +51,8 @@ async def get_session(session_id: str):
     human_reviews = getattr(session, "human_reviews", None) or {}
     review_count = redis_store.count_submitted_reviews(human_reviews)
     qc_done = await redis_store.get_qc_done(session_id)
-    # QC itself requires 4 reviews to run, so qc_done implies reviews are complete
-    can_submit = qc_done and review_status == "draft"
+    # QC gate bypassed — reviewer-side council handles quality checks now
+    can_submit = review_count >= 4 and review_status == "draft"
     can_resubmit = qc_done and review_status == "returned"
 
     review_round = await redis_store.get_review_round(session_id)
@@ -217,12 +217,20 @@ async def _notify_escalation(session_id: str, round_num: int, max_rounds: int) -
 
 @router.post("/session/{session_id}/submit-for-review")
 async def submit_for_review(session_id: str):
-    """Set review_status to submitted so the task appears in the reviewer queue. Requires QC completion."""
-    await _get_validated_session(session_id)
-    if not await redis_store.get_qc_done(session_id):
+    """Set review_status to submitted so the task appears in the reviewer queue."""
+    session = await _get_validated_session(session_id)
+    # QC gate temporarily bypassed — reviewer-side council handles quality checks now
+    # if not await redis_store.get_qc_done(session_id):
+    #     raise HTTPException(
+    #         status_code=400,
+    #         detail="Complete the Quality Check (Proceed to QC) before submitting for review.",
+    #     )
+    human_reviews = session.human_reviews if hasattr(session, "human_reviews") else {}
+    review_count = redis_store.count_submitted_reviews(human_reviews) if human_reviews else 0
+    if review_count < 4:
         raise HTTPException(
             status_code=400,
-            detail="Complete the Quality Check (Proceed to QC) before submitting for review.",
+            detail=f"Need 4 human reviews before submitting. Currently have {review_count}.",
         )
     ok, actual = await redis_store.cas_review_status(session_id, "draft", "submitted")
     if not ok:
@@ -254,14 +262,15 @@ async def mark_qc_done(session_id: str):
 
 @router.post("/session/{session_id}/resubmit")
 async def resubmit_for_review(session_id: str):
-    """Set review_status back to submitted after trainer revised (from returned). Requires re-QC.
+    """Set review_status back to submitted after trainer revised (from returned).
     If max rounds exceeded, escalates to admin instead."""
     await _get_validated_session(session_id)
-    if not await redis_store.get_qc_done(session_id):
-        raise HTTPException(
-            status_code=400,
-            detail="Re-run Quality Check before resubmitting. Reviews may have changed since last QC.",
-        )
+    # QC gate temporarily bypassed — reviewer-side council handles quality checks now
+    # if not await redis_store.get_qc_done(session_id):
+    #     raise HTTPException(
+    #         status_code=400,
+    #         detail="Re-run Quality Check before resubmitting. Reviews may have changed since last QC.",
+    #     )
     r = await redis_store.get_redis()
     ack_at = await get_acknowledged_at(r, session_id)
     if not ack_at:

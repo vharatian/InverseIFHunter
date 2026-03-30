@@ -53,8 +53,21 @@ resolve_env() {
         echo "Then edit it with your values."
         exit 1
     fi
+}
 
-    COMPOSE="docker compose -p $PROJECT -f $SCRIPT_DIR/$COMPOSE_FILE --env-file $SCRIPT_DIR/$ENV_FILE"
+# Use Compose V2 plugin if present; otherwise standalone docker-compose (avoids
+# "unknown shorthand flag: 'p' in -p" when `docker compose` is not installed).
+run_compose() {
+    if docker compose version &>/dev/null; then
+        docker compose -p "$PROJECT" -f "$SCRIPT_DIR/$COMPOSE_FILE" --env-file "$SCRIPT_DIR/$ENV_FILE" "$@"
+    elif command -v docker-compose &>/dev/null; then
+        docker-compose --project-name "$PROJECT" -f "$SCRIPT_DIR/$COMPOSE_FILE" --env-file "$SCRIPT_DIR/$ENV_FILE" "$@"
+    else
+        echo -e "${RED}Docker Compose not found.${NC}"
+        echo "  Debian/Ubuntu: sudo apt-get install -y docker-compose-plugin"
+        echo "  Then: docker compose version"
+        exit 1
+    fi
 }
 
 # --- Commands ---
@@ -62,18 +75,18 @@ resolve_env() {
 show_status() {
     resolve_env "$1"
     echo -e "${BLUE}=== $ENV_NAME Status ===${NC}"
-    $COMPOSE ps --format "table {{.Service}}\t{{.Status}}\t{{.Ports}}"
+    run_compose ps --format "table {{.Service}}\t{{.Status}}\t{{.Ports}}"
 }
 
 show_logs() {
     resolve_env "$1"
-    $COMPOSE logs -f --tail 50
+    run_compose logs -f --tail 50
 }
 
 stop_stack() {
     resolve_env "$1"
     echo -e "${YELLOW}Stopping $ENV_NAME stack...${NC}"
-    $COMPOSE down
+    run_compose down
     echo -e "${GREEN}$ENV_NAME stopped.${NC}"
 }
 
@@ -97,25 +110,25 @@ deploy() {
 
     # 3. Build images
     echo -e "${YELLOW}[3/6] Building images...${NC}"
-    $COMPOSE build
+    run_compose build
     echo ""
 
     # 4. Rolling update
     echo -e "${YELLOW}[4/6] Rolling update...${NC}"
-    $COMPOSE up -d --no-deps postgres redis
+    run_compose up -d --no-deps postgres redis
     echo "  Waiting for database + redis..."
     sleep 5
 
-    $COMPOSE up -d --no-deps python-core
+    run_compose up -d --no-deps python-core
     echo "  Waiting for python-core..."
     sleep 5
 
-    $COMPOSE up -d --no-deps python-dashboard
-    $COMPOSE up -d --no-deps elixir-edge
+    run_compose up -d --no-deps python-dashboard
+    run_compose up -d --no-deps elixir-edge
     echo "  Waiting for elixir-edge..."
     sleep 5
 
-    $COMPOSE up -d --no-deps traefik prometheus grafana
+    run_compose up -d --no-deps traefik prometheus grafana
     echo ""
 
     # 5. Health check
@@ -149,7 +162,7 @@ deploy() {
     echo -e "${GREEN}  $ENV_NAME deploy complete!${NC}"
     echo -e "${GREEN}=========================================${NC}"
     echo ""
-    $COMPOSE ps --format "table {{.Service}}\t{{.Status}}\t{{.Ports}}"
+    run_compose ps --format "table {{.Service}}\t{{.Status}}\t{{.Ports}}"
 }
 
 # --- Main ---

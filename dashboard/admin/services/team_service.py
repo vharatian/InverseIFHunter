@@ -1,0 +1,202 @@
+"""
+Team management service — read/write config/team.yaml.
+
+Uses agentic_reviewer/team_config.py for reading (no duplication).
+Writes back to the YAML file and reloads the cache on mutations.
+"""
+import fcntl
+import logging
+import re
+import sys
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+import yaml
+
+logger = logging.getLogger(__name__)
+
+_CONFIG_DIR = Path(__file__).resolve().parent.parent.parent.parent / "config"
+_TEAM_FILE = _CONFIG_DIR / "team.yaml"
+
+
+def _load_raw() -> Dict[str, Any]:
+    """Load raw team.yaml dict."""
+    try:
+        with open(_TEAM_FILE, "r") as f:
+            return yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        logger.warning("team.yaml not found at %s", _TEAM_FILE)
+        return {}
+
+
+def _ensure_agentic_path():
+    root = str(Path(__file__).resolve().parent.parent.parent.parent)
+    if root not in sys.path:
+        sys.path.append(root)
+
+
+def _save(data: Dict[str, Any]) -> None:
+    """Write team.yaml atomically with exclusive lock, then reload cache."""
+    tmp = _TEAM_FILE.with_suffix(".yaml.tmp")
+    with open(tmp, "w") as f:
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+        f.flush()
+    tmp.replace(_TEAM_FILE)
+    try:
+        _ensure_agentic_path()
+        from agentic_reviewer.team_config import reload
+        reload()
+    except Exception as e:
+        logger.warning("team_config.reload() failed: %s", e)
+    # No need to notify other apps — team_config auto-detects file changes via mtime
+
+
+def _norm(email: str) -> str:
+    return email.strip().lower()
+
+
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _validate_email(email: str) -> str:
+    """Normalize and validate email. Raises ValueError on bad input."""
+    em = _norm(email)
+    if not _EMAIL_RE.match(em):
+        raise ValueError(f"Invalid email: {email}")
+    return em
+
+
+def _all_emails(data: Dict[str, Any]) -> set:
+    """Collect all emails in team.yaml for duplicate checking."""
+    emails = set()
+    for sa in data.get("super_admins") or []:
+        emails.add(_norm(sa.get("email", "")))
+    for admin in data.get("admins") or []:
+        emails.add(_norm(admin.get("email", "")))
+    for pod in (data.get("pods") or {}).values():
+        reviewer = pod.get("reviewer") or {}
+        if reviewer.get("email"):
+            emails.add(_norm(reviewer["email"]))
+        for t in pod.get("trainers") or []:
+            emails.add(_norm(t))
+    emails.discard("")
+    return emails
+
+
+def get_team() -> Dict[str, Any]:
+    """Return structured team data for the admin UI."""
+    data = _load_raw()
+    pods = []
+    for pod_id, pod in (data.get("pods") or {}).items():
+        pods.append({
+            "pod_id": pod_id,
+            "name": pod.get("name", pod_id),
+            "reviewer": pod.get("reviewer"),
+            "trainers": [_norm(t) for t in (pod.get("trainers") or [])],
+        })
+    return {
+        "super_admins": data.get("super_admins") or [],
+        "admins": data.get("admins") or [],
+        "pods": pods,
+    }
+
+
+def add_trainer(pod_id: str, email: str) -> None:
+    """Add a trainer to a pod. Raises ValueError on bad input or duplicates."""
+    em = _validate_email(email)
+    data = _load_raw()
+    pods = data.get("pods") or {}
+    if pod_id not in pods:
+        raise ValueError(f"Pod '{pod_id}' not found")
+    if em in _all_emails(data):
+        raise ValueError(f"Email '{em}' already exists in team config")
+    pods[pod_id].setdefault("trainers", []).append(em)
+    _save(data)
+
+
+def remove_trainer(pod_id: str, email: str) -> None:
+    """Remove a trainer from a pod. Raises ValueError if not found."""
+    em = _validate_email(email)
+    data = _load_raw()
+    pods = data.get("pods") or {}
+    if pod_id not in pods:
+        raise ValueError(f"Pod '{pod_id}' not found")
+    trainers = pods[pod_id].get("trainers") or []
+    normalized = [_norm(t) for t in trainers]
+    if em not in normalized:
+        raise ValueError(f"Trainer '{em}' not in pod '{pod_id}'")
+    idx = normalized.index(em)
+    trainers.pop(idx)
+    pods[pod_id]["trainers"] = trainers
+    _save(data)
+
+
+def set_reviewer(pod_id: str, email: str, name: str = "") -> None:
+    """Set the reviewer for a pod. Raises ValueError on bad input."""
+    em = _validate_email(email)
+    data = _load_raw()
+    pods = data.get("pods") or {}
+    if pod_id not in pods:
+        raise ValueError(f"Pod '{pod_id}' not found")
+    existing = _all_emails(data)
+    current_reviewer = (pods[pod_id].get("reviewer") or {}).get("email", "")
+    existing.discard(_norm(current_reviewer))
+    if em in existing:
+        raise ValueError(f"Email '{em}' already exists in team config")
+    pods[pod_id]["reviewer"] = {"email": em, "name": name or em.split("@")[0]}
+    _save(data)
+
+
+def add_admin(email: str, name: str = "", pods: Optional[List[str]] = None) -> None:
+    """Add an admin entry. Raises ValueError on bad input."""
+    em = _validate_email(email)
+    data = _load_raw()
+    if em in _all_emails(data):
+        raise ValueError(f"Email '{em}' already exists in team config")
+    valid_pods = list((data.get("pods") or {}).keys())
+    for p in (pods or []):
+        if p not in valid_pods:
+            raise ValueError(f"Pod '{p}' not found")
+    entry = {"email": em, "name": name or em.split("@")[0]}
+    if pods:
+        entry["pods"] = pods
+    data.setdefault("admins", []).append(entry)
+    _save(data)
+
+
+def remove_admin(email: str) -> None:
+    """Remove an admin. Raises ValueError if not found."""
+    em = _validate_email(email)
+    data = _load_raw()
+    admins = data.get("admins") or []
+    new_admins = [a for a in admins if _norm(a.get("email", "")) != em]
+    if len(new_admins) == len(admins):
+        raise ValueError(f"Admin '{em}' not found")
+    data["admins"] = new_admins
+    _save(data)
+
+
+def create_pod(pod_id: str, name: str) -> None:
+    """Create a new empty pod. Raises ValueError if pod_id exists."""
+    data = _load_raw()
+    pods = data.setdefault("pods", {})
+    if pod_id in pods:
+        raise ValueError(f"Pod '{pod_id}' already exists")
+    pods[pod_id] = {"name": name, "reviewer": None, "trainers": []}
+    _save(data)
+
+
+def remove_pod(pod_id: str) -> None:
+    """Remove a pod. Must be empty (no trainers, no reviewer). Raises ValueError otherwise."""
+    data = _load_raw()
+    pods = data.get("pods") or {}
+    if pod_id not in pods:
+        raise ValueError(f"Pod '{pod_id}' not found")
+    pod = pods[pod_id]
+    if pod.get("trainers"):
+        raise ValueError(f"Pod '{pod_id}' still has trainers — remove them first")
+    if pod.get("reviewer") and pod["reviewer"].get("email"):
+        raise ValueError(f"Pod '{pod_id}' still has a reviewer — remove them first")
+    del pods[pod_id]
+    _save(data)
