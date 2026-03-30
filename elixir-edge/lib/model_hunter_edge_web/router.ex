@@ -19,6 +19,6 @@ defmodule ModelHunterEdgeWeb.Router do
     get "/hunt/:session_id", SSEController, :stream
   end
 
-  forward "/api", ModelHunterEdgeWeb.ProxyController
-  forward "/dashboard", ModelHunterEdgeWeb.ProxyController
+  # Core: /, /static, /reviewer, /api, …  Dashboard: /dashboard/* → PYTHON_DASHBOARD_URL (path stripped).
+  forward "/", ModelHunterEdgeWeb.ProxyController
 end

@@ -3,6 +3,9 @@ import Config
 config :model_hunter_edge, :python_core_url,
   System.get_env("PYTHON_CORE_URL") || "http://localhost:8000"
 
+config :model_hunter_edge, :python_dashboard_url,
+  System.get_env("PYTHON_DASHBOARD_URL") || "http://localhost:8001"
+
 config :model_hunter_edge, :redis_url,
   System.get_env("REDIS_URL") || "redis://localhost:6379/0"
 

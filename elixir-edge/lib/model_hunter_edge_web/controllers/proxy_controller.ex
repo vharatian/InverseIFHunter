@@ -1,6 +1,6 @@
 defmodule ModelHunterEdgeWeb.ProxyController do
   @moduledoc """
-  Forwards /api/* requests to Python core service.
+  Reverse proxy to Python services: core (trainer, reviewer, /api) and dashboard (monitoring, /admin).
   Generates/propagates X-Trace-Id and X-Authenticated-User headers.
   """
   use Plug.Router
@@ -10,10 +10,11 @@ defmodule ModelHunterEdgeWeb.ProxyController do
   plug :dispatch
 
   match _ do
-    python_url =
-      Application.get_env(:model_hunter_edge, :python_core_url, "http://localhost:8000")
+    request_path = conn.request_path
 
-    target_url = "#{python_url}#{conn.request_path}"
+    {base_url, upstream_path} = resolve_upstream(request_path)
+
+    target_url = "#{String.trim_trailing(base_url, "/")}#{upstream_path}"
 
     target_url =
       if conn.query_string != "", do: "#{target_url}?#{conn.query_string}", else: target_url
@@ -73,6 +74,24 @@ defmodule ModelHunterEdgeWeb.ProxyController do
     end
   end
 
+  defp resolve_upstream(request_path) do
+    core = Application.get_env(:model_hunter_edge, :python_core_url, "http://localhost:8000")
+    dash = Application.get_env(:model_hunter_edge, :python_dashboard_url, "http://localhost:8001")
+
+    if String.starts_with?(request_path, "/dashboard") do
+      suffix =
+        case String.replace_prefix(request_path, "/dashboard", "") do
+          "" -> "/"
+          "/" -> "/"
+          other -> other
+        end
+
+      {dash, suffix}
+    else
+      {core, request_path}
+    end
+  end
+
   defp get_or_generate_trace_id(conn) do
     case Plug.Conn.get_req_header(conn, "x-trace-id") do
       [tid | _] -> tid
@@ -98,7 +117,7 @@ defmodule ModelHunterEdgeWeb.ProxyController do
       {"x-trace-id", trace_id},
       {"content-type",
        List.first(Plug.Conn.get_req_header(conn, "content-type")) || "application/json"},
-      {"accept", List.first(Plug.Conn.get_req_header(conn, "accept")) || "application/json"}
+      {"accept", List.first(Plug.Conn.get_req_header(conn, "accept")) || "*/*"}
     ]
 
     if auth_user, do: [{"x-authenticated-user", auth_user} | base], else: base
