@@ -1,14 +1,32 @@
-# Elixir Edge — builder + runtime both elixir:1.17-slim so Erlang crypto NIFs and OpenSSL match.
-FROM elixir:1.17-slim AS builder
+# Elixir Edge — builder + runtime on elixir:1.17.
+#
+# mix local.hex / default mix local.rebar use Erlang :httpc, which loads
+# pubkey_os_cacerts; on some images that returns :no_cacerts_found and crashes
+# (OTP public_key bug path). Bootstrap Hex + rebar3 with curl instead, then use
+# HEX_UNSAFE_HTTPS for Hex-driven fetches (deps.get) so Erlang skips broken CA loading.
+FROM elixir:1.17 AS builder
 
-RUN apt-get update && apt-get install -y --no-install-recommends git \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && update-ca-certificates
+
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 
 WORKDIR /app
 
 ENV MIX_ENV=prod
 
-RUN mix local.hex --force && mix local.rebar --force
+RUN curl -fsSL https://builds.hex.pm/installs/hex.ez -o /tmp/hex.ez \
+    && mix archive.install /tmp/hex.ez --force \
+    && rm -f /tmp/hex.ez
+
+ARG REBAR3_VERSION=3.24.0
+RUN curl -fsSL "https://github.com/erlang/rebar3/releases/download/${REBAR3_VERSION}/rebar3" -o /tmp/rebar3 \
+    && chmod +x /tmp/rebar3 \
+    && mix local.rebar rebar3 /tmp/rebar3 --force \
+    && rm -f /tmp/rebar3
+
+ENV HEX_UNSAFE_HTTPS=1
 
 COPY mix.exs mix.lock ./
 RUN mix deps.get --only prod && mix deps.compile
@@ -19,9 +37,14 @@ COPY priv priv
 
 RUN mix compile && mix release
 
-# Same image family as builder so Erlang crypto NIFs see the same OpenSSL/libc
-# as at link time (debian:bookworm-slim alone can mismatch elixir:1.17-slim).
-FROM elixir:1.17-slim
+# Runtime: CA bundle for normal TLS from the release (APIs, etc.).
+FROM elixir:1.17
+
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && update-ca-certificates
+
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 
 WORKDIR /app
 
