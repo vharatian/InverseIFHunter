@@ -1,27 +1,12 @@
-# Optional second file for staging behind a raw IP with a path prefix (e.g. /staging)
-# and HTTP-only Traefik (no Let's Encrypt — LE cannot issue for bare IPs via HTTP-01).
+# Optional: path prefix (e.g. /staging) behind Traefik — adds StripPrefix so backends see /… not /staging/…
 #
-# Enable by setting STAGING_COMPOSE_OVERRIDE=1 in .env.staging (deploy.sh picks it up), or run:
+# Enable with STAGING_COMPOSE_OVERRIDE=1 in .env.staging (deploy.sh merges this file), or:
 #   docker compose -f docker-compose.prod.yml -f docker-compose.staging-overrides.yml ...
 #
-# Required in .env when using this file:
-#   DOMAIN=<ip-or-hostname-only>   # never http://... or path segments
-#   EDGE_PATH_PREFIX=/staging
-#   GRAFANA_PATH_PREFIX=/staging/grafana
-#   EDGE_STRIP_PREFIX=/staging
-#   GRAFANA_ROOT_URL=http://<ip>:<TRAEFIK_HTTP_PORT>/staging/grafana/
+# Set in .env: DOMAIN, EDGE_PATH_PREFIX, GRAFANA_PATH_PREFIX, EDGE_STRIP_PREFIX (e.g. /staging),
+# GRAFANA_ROOT_URL (e.g. http://IP:8080/staging/grafana/)
 #
 services:
-  traefik:
-    command:
-      - "--providers.docker=true"
-      - "--providers.docker.exposedbydefault=false"
-      - "--entrypoints.web.address=:80"
-      - "--metrics.prometheus=true"
-      - "--metrics.prometheus.addEntryPointsLabels=true"
-      - "--metrics.prometheus.addServicesLabels=true"
-      - "--api.insecure=true"
-
   elixir-edge:
     labels: !reset
       - "traefik.enable=true"

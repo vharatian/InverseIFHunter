@@ -7,22 +7,14 @@ services:
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
       - "--entrypoints.web.address=:80"
-      - "--entrypoints.websecure.address=:443"
-      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
-      - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}"
-      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
-      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
-      - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
       - "--metrics.prometheus=true"
       - "--metrics.prometheus.addEntryPointsLabels=true"
       - "--metrics.prometheus.addServicesLabels=true"
       - "--api.insecure=true"
     ports:
       - "${TRAEFIK_HTTP_PORT:-80}:80"
-      - "${TRAEFIK_HTTPS_PORT:-443}:443"
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
-      - "letsencrypt:/letsencrypt"
     restart: unless-stopped
     networks:
       - mh-network
@@ -34,8 +26,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.edge.rule=Host(`${DOMAIN}`) && PathPrefix(`${EDGE_PATH_PREFIX}`)"
-      - "traefik.http.routers.edge.entrypoints=websecure"
-      - "traefik.http.routers.edge.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.edge.entrypoints=web"
       - "traefik.http.services.edge.loadbalancer.server.port=4000"
     environment:
       PYTHON_CORE_URL: http://python-core:8000
@@ -43,6 +34,8 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       SECRET_KEY_BASE: ${ELIXIR_SECRET_KEY_BASE}
       PHX_HOST: ${DOMAIN}
+      PHX_URL_SCHEME: ${PHX_URL_SCHEME:-http}
+      PHX_PUBLIC_PORT: ${TRAEFIK_HTTP_PORT:-80}
       PORT: "4000"
     depends_on:
       redis:
@@ -119,7 +112,9 @@ services:
       POSTGRES_PASSWORD: ${PG_PASSWORD}
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./backups:/backups
+      # WAL archive: named volume so postgres (uid 70) can always write (bind mounts are often root-owned).
+      - pg_wal_archive:/backups/wal
+      - ./backups/daily:/backups/daily
     ports:
       - "127.0.0.1:${PG_PORT:-5432}:5432"
     healthcheck:
@@ -192,8 +187,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.grafana.rule=Host(`${DOMAIN}`) && PathPrefix(`${GRAFANA_PATH_PREFIX}`)"
-      - "traefik.http.routers.grafana.entrypoints=websecure"
-      - "traefik.http.routers.grafana.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.grafana.entrypoints=web"
       - "traefik.http.services.grafana.loadbalancer.server.port=3000"
     ports:
       - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
@@ -203,10 +197,10 @@ services:
 
 volumes:
   pgdata:
+  pg_wal_archive:
   redisdata:
   promdata:
   grafdata:
-  letsencrypt:
 
 networks:
   mh-network:

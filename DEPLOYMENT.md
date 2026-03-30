@@ -47,12 +47,13 @@ cp .env.staging.example .env.staging
 **Traefik / Grafana**
 
 - `DOMAIN` must be a **hostname or IP only** (no `http://`, no path). Routing uses `Host(DOMAIN)` plus `PathPrefix` from `EDGE_PATH_PREFIX` / `GRAFANA_PATH_PREFIX`.
-- Set **`GRAFANA_ROOT_URL`** to the full URL browsers use (scheme, host, port if non-default, path, trailing slash), e.g. `https://staging.example.com/grafana/`.
-- Staging on a **bare IP** with a path such as `/staging` and **HTTP only** (no Let’s Encrypt): set `STAGING_COMPOSE_OVERRIDE=1` plus `EDGE_STRIP_PREFIX`, paths, and `GRAFANA_ROOT_URL` as in `.env.staging.example` section B. `deploy.sh` merges `docker-compose.staging-overrides.yml` (requires Docker Compose **v2.23+** for `labels: !reset`).
+- Set **`GRAFANA_ROOT_URL`** to the full URL browsers use (e.g. `http://YOUR_IP:8080/grafana/`).
+- Traefik is **HTTP only** (no TLS / Let’s Encrypt). Set **`GRAFANA_ROOT_URL`** with `http://` and the host port you publish (e.g. `http://YOUR_IP:8080/grafana/`).
+- Serving under a path prefix (e.g. `/staging`): set `STAGING_COMPOSE_OVERRIDE=1`, `EDGE_STRIP_PREFIX`, and paths as in `.env.staging.example`. `deploy.sh` merges `docker-compose.staging-overrides.yml` (Docker Compose **v2.23+** for `labels: !reset`).
 
 **Postgres WAL archive**
 
-- The stack archives WAL under `./backups/wal`. `deploy.sh` runs `chown -R 70:70 backups` when possible (`postgres:16-alpine` uses UID **70**). If archiving still fails, run that `chown` with `sudo` on the host.
+- WAL segments go to the Docker volume **`pg_wal_archive`** (mounted at `/backups/wal`), so archiving does not depend on host permissions. Host **`./backups/daily`** is for optional manual dumps; `deploy.sh` creates it and may `chown` it for UID **70**.
 
 ### 3. Create PostgreSQL databases
 
@@ -85,7 +86,7 @@ cd ~/staging
 
 # Step 2: Test staging
 curl -s http://localhost:4010/health/ready | python3 -m json.tool
-# Open https://staging.your-domain.com in browser, run a test hunt
+# Open http://localhost:8080/ (or your Traefik URL) in browser, run a test hunt
 
 # Step 3: If staging is good, deploy production
 cd ~/production
@@ -115,7 +116,6 @@ Short aliases work: `staging`/`stg`/`s`, `production`/`prod`/`p`.
 | Service | Production | Staging |
 |---------|-----------|---------|
 | Traefik HTTP | 80 | 8080 |
-| Traefik HTTPS | 443 | 8443 |
 | Elixir Edge | 4000 | 4010 |
 | Python Core | 8000 | 8010 |
 | Dashboard | 8001 | 8011 |
@@ -150,13 +150,13 @@ docker compose -p mh-production -f docker-compose.prod.yml --env-file .env.produ
 
 - **Health check**: `curl localhost:4000/health/ready` (production) or `localhost:4010/health/ready` (staging)
 - **Deep diagnostics**: `curl localhost:4000/health/deep`
-- **Grafana**: `https://your-domain.com/grafana/` (production) or `https://staging.your-domain.com/grafana/` (staging)
+- **Grafana**: `http://your-host:PORT/grafana/` (match `GRAFANA_ROOT_URL` / Traefik publish port)
 - **Logs**: `./deploy.sh logs production` or `./deploy.sh logs staging`
 
 ## Database Backups
 
 Production PostgreSQL is configured with:
-- **WAL archiving**: Continuous, files in `./backups/wal/`
+- **WAL archiving**: Continuous, stored in Docker volume **`pg_wal_archive`**
 - **Daily pg_dump**: Set up a cron job:
 
 ```bash

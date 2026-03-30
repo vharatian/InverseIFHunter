@@ -21,6 +21,34 @@ NC='\033[0m'
 COMPOSE_FILE="docker-compose.prod.yml"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# Docker Compose reads --env-file for ${VAR} interpolation; exported shell vars override those values.
+# Normalize DOMAIN when operators paste a full URL into DOMAIN= (Traefik Host() must be host/IP only).
+_compose_normalize_domain_from_env_file() {
+    local f="$SCRIPT_DIR/${ENV_FILE:-}"
+    [ -n "${ENV_FILE:-}" ] && [ -f "$f" ] || return 0
+    local raw
+    raw=$(grep -E '^[[:space:]]*DOMAIN=' "$f" | tail -1 | cut -d= -f2- || true)
+    raw="${raw%$'\r'}"
+    case "$raw" in
+        \"*\") raw="${raw#\"}"; raw="${raw%\"}" ;;
+        \'*\') raw="${raw#\'}"; raw="${raw%\'}" ;;
+    esac
+    [ -n "$raw" ] || return 0
+    local host="${raw#http://}"
+    host="${host#https://}"
+    host="${host#HTTP://}"
+    host="${host#HTTPS://}"
+    host="${host%%/*}"
+    if [ "$host" != "$raw" ]; then
+        echo -e "${YELLOW}  DOMAIN was a URL; using host only for Traefik/compose: ${host}${NC}" >&2
+    fi
+    export DOMAIN="$host"
+    if [[ "$host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && [ "${ENV_NAME:-}" = "staging" ] \
+        && ! grep -q '^STAGING_COMPOSE_OVERRIDE=1' "$f" 2>/dev/null; then
+        echo -e "${YELLOW}  Staging DOMAIN is an IP: set EDGE_PATH_PREFIX=/staging (etc.) and STAGING_COMPOSE_OVERRIDE=1 if you serve under a path prefix.${NC}" >&2
+    fi
+}
+
 # --- Resolve environment ---
 resolve_env() {
     local env="${1:-}"
@@ -58,6 +86,7 @@ resolve_env() {
 # Use Compose V2 plugin if present; otherwise standalone docker-compose (avoids
 # "unknown shorthand flag: 'p' in -p" when `docker compose` is not installed).
 run_compose() {
+    _compose_normalize_domain_from_env_file
     local -a _files=( -f "$SCRIPT_DIR/$COMPOSE_FILE" )
     if [ "${ENV_NAME:-}" = "staging" ] && [ -f "$SCRIPT_DIR/docker-compose.staging-overrides.yml" ] \
         && grep -q '^STAGING_COMPOSE_OVERRIDE=1' "$SCRIPT_DIR/$ENV_FILE" 2>/dev/null; then
@@ -108,14 +137,11 @@ deploy() {
     cd "$SCRIPT_DIR" && git pull origin mth 2>/dev/null || echo "  (git pull skipped or failed — continuing with local code)"
     echo ""
 
-    # 2. Create backup directories
+    # 2. Create backup directories (WAL lives in Docker volume pg_wal_archive; daily dumps use host dir)
     echo -e "${YELLOW}[2/6] Creating backup directories...${NC}"
-    mkdir -p backups/wal backups/daily
-    # postgres:16-alpine runs as UID 70 — WAL archive needs write access to ./backups
+    mkdir -p backups/daily
     if chown -R 70:70 "$SCRIPT_DIR/backups" 2>/dev/null; then
-        echo "  backups/ ownership set for postgres (uid 70)"
-    else
-        echo -e "${YELLOW}  If WAL archive fails: sudo chown -R 70:70 $SCRIPT_DIR/backups${NC}"
+        echo "  backups/daily ownership set for postgres (uid 70) if you dump into that path"
     fi
     echo ""
 

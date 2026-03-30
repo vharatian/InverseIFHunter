@@ -174,12 +174,24 @@ from middleware.error_handler import global_exception_handler
 app.add_middleware(TraceIdMiddleware)
 app.add_exception_handler(Exception, global_exception_handler)
 
+_metrics_exposed = False
 try:
     from prometheus_fastapi_instrumentator import Instrumentator
 
     Instrumentator().instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
-except Exception as e:
-    logger.warning("Prometheus /metrics not enabled: %s", e)
+    _metrics_exposed = True
+except Exception:
+    logger.exception("prometheus_fastapi_instrumentator failed; using minimal /metrics")
+
+if not _metrics_exposed:
+    from fastapi.responses import PlainTextResponse
+
+    @app.get("/metrics", include_in_schema=False)
+    async def _prometheus_metrics_minimal():
+        return PlainTextResponse(
+            "# HELP mh_python_core_up python-core up\n# TYPE mh_python_core_up gauge\nmh_python_core_up 1\n",
+            media_type="text/plain; version=0.0.4",
+        )
 
 from resilience.health import health_live, health_ready, health_deep
 

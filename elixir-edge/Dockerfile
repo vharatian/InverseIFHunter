@@ -1,5 +1,4 @@
-# Elixir Edge — build and runtime on Debian bookworm + OpenSSL 3 (avoids Alpine/glibc
-# OpenSSL mismatches that break Erlang crypto NIFs, e.g. EVP_MD_CTX_get_size_ex).
+# Elixir Edge — builder + runtime both elixir:1.17-slim so Erlang crypto NIFs and OpenSSL match.
 FROM elixir:1.17-slim AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends git \
@@ -20,14 +19,9 @@ COPY priv priv
 
 RUN mix compile && mix release
 
-FROM debian:bookworm-slim
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libssl3 \
-    libncurses6 \
-    libstdc++6 \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+# Same image family as builder so Erlang crypto NIFs see the same OpenSSL/libc
+# as at link time (debian:bookworm-slim alone can mismatch elixir:1.17-slim).
+FROM elixir:1.17-slim
 
 WORKDIR /app
 
