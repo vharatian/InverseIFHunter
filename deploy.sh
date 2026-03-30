@@ -5,12 +5,23 @@ set -euo pipefail
 # Model Hunter — Unified Deploy Script
 # =========================================
 # Usage:
-#   ./deploy.sh staging        Deploy staging stack
-#   ./deploy.sh production     Deploy production stack
-#   ./deploy.sh status <env>   Show stack status
-#   ./deploy.sh logs <env>     Tail logs
-#   ./deploy.sh down <env>     Stop stack
+#   ./deploy.sh staging [options]     Deploy staging stack
+#   ./deploy.sh production [options]  Deploy production stack
+#   ./deploy.sh status <env>          Show stack status
+#   ./deploy.sh logs <env>            Tail logs
+#   ./deploy.sh down <env>            Stop stack
+#
+# Deploy options:
+#   --quick / --no-build   Skip image build + prune (reuse cached images; fast config-only / code-on-volume cases)
+#   --no-pull              Skip git pull
+#   --no-prune             Skip docker image prune after deploy
+#
+# Tip: set DOCKER_BUILDKIT=1 (default below) for faster layer caching; keep dependency files
+# (requirements.txt, mix.lock) before COPY . in Dockerfiles; use .dockerignore to shrink context.
 # =========================================
+
+export DOCKER_BUILDKIT=${DOCKER_BUILDKIT:-1}
+export COMPOSE_DOCKER_CLI_BUILD=${COMPOSE_DOCKER_CLI_BUILD:-1}
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -64,13 +75,13 @@ resolve_env() {
             PROJECT="mh-production"
             ;;
         *)
-            echo -e "${RED}Usage: $0 {staging|production} or {status|logs|down} {staging|production}${NC}"
+            echo -e "${RED}Usage: $0 {staging|production} [opts] | {status|logs|down} {staging|production}${NC}"
             echo ""
-            echo "  $0 staging        Deploy staging"
-            echo "  $0 production     Deploy production"
-            echo "  $0 status staging Show staging status"
-            echo "  $0 logs staging   Tail staging logs"
-            echo "  $0 down staging   Stop staging stack"
+            echo "  $0 staging [--quick] [--no-pull] [--no-prune]"
+            echo "  $0 production [--quick] [--no-pull] [--no-prune]"
+            echo "  $0 status staging"
+            echo "  $0 logs staging"
+            echo "  $0 down staging"
             exit 1
             ;;
     esac
@@ -109,7 +120,12 @@ run_compose() {
 show_status() {
     resolve_env "$1"
     echo -e "${BLUE}=== $ENV_NAME Status ===${NC}"
-    run_compose ps --format "table {{.Service}}\t{{.Status}}\t{{.Ports}}"
+    # docker-compose v1 does not support `ps --format` (breaks with "Usage: ps ...")
+    if docker compose version &>/dev/null; then
+        run_compose ps --format "table {{.Service}}\t{{.Status}}\t{{.Ports}}"
+    else
+        run_compose ps
+    fi
 }
 
 show_logs() {
@@ -124,21 +140,81 @@ stop_stack() {
     echo -e "${GREEN}$ENV_NAME stopped.${NC}"
 }
 
+_compose_ps_table() {
+    if docker compose version &>/dev/null; then
+        run_compose ps --format "table {{.Service}}\t{{.Status}}\t{{.Ports}}"
+    else
+        run_compose ps
+    fi
+}
+
+_build_images() {
+    if docker compose version &>/dev/null; then
+        run_compose build --parallel
+    else
+        run_compose build --parallel 2>/dev/null || run_compose build
+    fi
+}
+
+_wait_health_ready() {
+    local elixir_port="$1"
+    local max_attempts="${2:-45}"
+    local i
+    for ((i = 1; i <= max_attempts; i++)); do
+        local health
+        health=$(curl -sf "http://127.0.0.1:${elixir_port}/health/ready" 2>/dev/null || true)
+        if echo "$health" | grep -q '"ready"'; then
+            echo "  Health: $health"
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
+
 deploy() {
-    resolve_env "$1"
+    [[ $# -ge 1 ]] || {
+        echo -e "${RED}Usage: $0 staging|production [--quick] [--no-pull] [--no-prune]${NC}"
+        exit 1
+    }
+    local env_arg="$1"
+    shift
+    local quick=0 no_pull=0 no_prune=0
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --quick | --no-build) quick=1 ;;
+            --no-pull) no_pull=1 ;;
+            --no-prune) no_prune=1 ;;
+            *)
+                echo -e "${RED}Unknown option: $1${NC}"
+                echo "  Use: --quick, --no-pull, --no-prune"
+                exit 1
+                ;;
+        esac
+        shift
+    done
+
+    resolve_env "$env_arg"
 
     echo -e "${BLUE}=========================================${NC}"
     echo -e "${BLUE}  Model Hunter — $ENV_NAME Deploy${NC}"
+    if [[ "$quick" -eq 1 ]]; then
+        echo -e "${BLUE}  (quick: no image build)${NC}"
+    fi
     echo -e "${BLUE}=========================================${NC}"
     echo ""
 
-    # 1. Pull latest code
-    echo -e "${YELLOW}[1/6] Pulling latest code...${NC}"
-    cd "$SCRIPT_DIR" && git pull origin mth 2>/dev/null || echo "  (git pull skipped or failed — continuing with local code)"
+    # 1. Pull latest code (tracking branch)
+    if [[ "$no_pull" -eq 0 ]]; then
+        echo -e "${YELLOW}[1/5] Git pull (tracking branch)...${NC}"
+        cd "$SCRIPT_DIR" && git pull --ff-only 2>/dev/null || echo "  (git pull skipped or failed — continuing with local code)"
+    else
+        echo -e "${YELLOW}[1/5] Skipping git pull (--no-pull)${NC}"
+    fi
     echo ""
 
-    # 2. Create backup directories (WAL lives in Docker volume pg_wal_archive; daily dumps use host dir)
-    echo -e "${YELLOW}[2/6] Creating backup directories...${NC}"
+    # 2. Backup dirs
+    echo -e "${YELLOW}[2/5] Backup directories...${NC}"
     mkdir -p backups/daily
     if chown -R 70:70 "$SCRIPT_DIR/backups" 2>/dev/null; then
         echo "  backups/daily ownership set for postgres (uid 70) if you dump into that path"
@@ -146,60 +222,50 @@ deploy() {
     echo ""
 
     # 3. Build images
-    echo -e "${YELLOW}[3/6] Building images...${NC}"
-    run_compose build
+    if [[ "$quick" -eq 1 ]]; then
+        echo -e "${YELLOW}[3/5] Skipping image build (--quick)${NC}"
+    else
+        echo -e "${YELLOW}[3/5] Building images...${NC}"
+        _build_images
+    fi
     echo ""
 
-    # 4. Rolling update
-    echo -e "${YELLOW}[4/6] Rolling update...${NC}"
-    run_compose up -d --no-deps postgres redis
-    echo "  Waiting for database + redis..."
-    sleep 5
-
-    run_compose up -d --no-deps python-core
-    echo "  Waiting for python-core..."
-    sleep 5
-
-    run_compose up -d --no-deps python-dashboard
-    run_compose up -d --no-deps elixir-edge
-    echo "  Waiting for elixir-edge..."
-    sleep 5
-
-    run_compose up -d --no-deps traefik prometheus grafana
+    # 4. Start / recreate stack (compose orders services via depends_on)
+    echo -e "${YELLOW}[4/5] Starting stack (docker compose up -d)...${NC}"
+    run_compose up -d
     echo ""
 
-    # 5. Health check
-    echo -e "${YELLOW}[5/6] Verifying health...${NC}"
-    sleep 5
-
-    # Read ELIXIR_PORT from env file for health check
+    # 5. Health check (retry; avoids long fixed sleeps)
+    echo -e "${YELLOW}[5/5] Verifying health...${NC}"
     local elixir_port
     elixir_port=$(grep -E "^ELIXIR_PORT=" "$SCRIPT_DIR/$ENV_FILE" | cut -d= -f2 || echo "4000")
     elixir_port="${elixir_port:-4000}"
 
-    local health
-    health=$(curl -sf "http://localhost:${elixir_port}/health/ready" 2>/dev/null || echo '{"status":"error"}')
-    echo "  Health: $health"
-
-    if echo "$health" | grep -q '"ready"'; then
+    if _wait_health_ready "$elixir_port" 60; then
         echo -e "  ${GREEN}✓ Health check PASSED${NC}"
     else
+        local health
+        health=$(curl -sf "http://127.0.0.1:${elixir_port}/health/ready" 2>/dev/null || echo '{"status":"error"}')
+        echo "  Health: $health"
         echo -e "  ${RED}✗ Health check FAILED${NC}"
         echo "  Check logs: $0 logs $ENV_NAME"
         exit 1
     fi
     echo ""
 
-    # 6. Cleanup
-    echo -e "${YELLOW}[6/6] Cleaning up old images...${NC}"
-    docker image prune -f
+    if [[ "$quick" -eq 1 ]] || [[ "$no_prune" -eq 1 ]]; then
+        echo -e "${YELLOW}Skipping image prune (--quick or --no-prune)${NC}"
+    else
+        echo -e "${YELLOW}Pruning unused images...${NC}"
+        docker image prune -f
+    fi
     echo ""
 
     echo -e "${GREEN}=========================================${NC}"
     echo -e "${GREEN}  $ENV_NAME deploy complete!${NC}"
     echo -e "${GREEN}=========================================${NC}"
     echo ""
-    run_compose ps --format "table {{.Service}}\t{{.Status}}\t{{.Ports}}"
+    _compose_ps_table
 }
 
 # --- Main ---
@@ -214,6 +280,6 @@ case "${1:-}" in
         stop_stack "${2:-}"
         ;;
     *)
-        deploy "${1:-}"
+        deploy "$@"
         ;;
 esac
