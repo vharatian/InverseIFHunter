@@ -4,6 +4,9 @@
 # pubkey_os_cacerts; on some images that returns :no_cacerts_found and crashes
 # (OTP public_key bug path). Bootstrap Hex + rebar3 with curl instead, then use
 # HEX_UNSAFE_HTTPS for Hex-driven fetches (deps.get) so Erlang skips broken CA loading.
+#
+# Pin Hex to a build matching elixir:1.17 (OTP 26). installs/hex.ez is latest Hex (e.g. 2.4.x)
+# compiled for OTP 27 and will not load on this image.
 FROM elixir:1.17 AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates curl \
@@ -16,7 +19,8 @@ WORKDIR /app
 
 ENV MIX_ENV=prod
 
-RUN curl -fsSL https://builds.hex.pm/installs/hex.ez -o /tmp/hex.ez \
+ARG HEX_EZ_URL=https://builds.hex.pm/installs/1.17.0/hex-2.2.1.ez
+RUN curl -fsSL "$HEX_EZ_URL" -o /tmp/hex.ez \
     && mix archive.install /tmp/hex.ez --force \
     && rm -f /tmp/hex.ez
 
