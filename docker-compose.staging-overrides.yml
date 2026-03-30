@@ -10,7 +10,7 @@ services:
   elixir-edge:
     labels: !reset
       - "traefik.enable=true"
-      - "traefik.http.routers.edge.rule=PathPrefix(`${EDGE_PATH_PREFIX}`)"
+      - "traefik.http.routers.edge.rule=PathPrefix(`${EDGE_PATH_PREFIX:-/staging}`)"
       - "traefik.http.routers.edge.priority=1"
       - "traefik.http.middlewares.staging-edge-strip.stripprefix.prefixes=${EDGE_STRIP_PREFIX}"
       - "traefik.http.routers.edge.middlewares=staging-edge-strip"
@@ -20,7 +20,7 @@ services:
   grafana:
     labels: !reset
       - "traefik.enable=true"
-      - "traefik.http.routers.grafana.rule=PathPrefix(`${GRAFANA_PATH_PREFIX}`)"
+      - "traefik.http.routers.grafana.rule=PathPrefix(`${GRAFANA_PATH_PREFIX:-/staging/grafana}`)"
       - "traefik.http.routers.grafana.priority=100"
       - "traefik.http.middlewares.staging-grafana-strip.stripprefix.prefixes=${EDGE_STRIP_PREFIX}"
       - "traefik.http.routers.grafana.middlewares=staging-grafana-strip"
