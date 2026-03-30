@@ -36,10 +36,18 @@ debug.log
 # Node (if ever needed)
 node_modules/
 
-# Docs (except READMEs)
+# Docs (except READMEs and DEPLOYMENT.md)
 *.md
 !README.md
 !*/README.md
+!DEPLOYMENT.md
+
+# Plans and design docs (internal)
+docs/plans/
+
+# Local AI/obsidian state
+.local/
+local/
 
 # OS
 .DS_Store
@@ -58,5 +66,5 @@ local/ai-workflows/
 # Cursor workflow setup reference (committed on purpose)
 !docs/CURSOR_WORKFLOWS.md
 
-# Deployment guide (committed on purpose)
-!DEPLOYMENT.md
+# Old env template (replaced by .env.production.example / .env.staging.example)
+.env.example.prod
