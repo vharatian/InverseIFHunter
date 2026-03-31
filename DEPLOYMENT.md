@@ -36,6 +36,15 @@ Use **HTTP on port 80** only (no `https://`, no `:8080` unless you changed `EDGE
 
 If nothing loads: allow **inbound TCP 80** on the cloud firewall, run **`./deploy.sh production`** on the prod clone, **`./deploy.sh staging`** on the staging clone, then test from the VM: `curl -sI http://127.0.0.1/` and `curl -sI http://127.0.0.1/grafana/`.
 
+### Legacy `environments/prod` (prod-server) nginx on :80
+
+If **`model-hunter-nginx`** from **`environments/prod/docker-compose.yml`** is what listens on **port 80** (Python blue/green + dashboard), it **does not** know about InverseIFHunter until you use the bundled **`environments/prod/nginx.conf`** update: it proxies **`/grafana/`** and **`/staging/`** (except **`/staging/dashboard/`**, **`/staging/admin/`**, etc.) to **InverseIFHunter edge** at **`host.docker.internal:9080`**.
+
+1. In **`.env.production`** for the **unified** stack: set **`EDGE_HOST_PORTMAP=127.0.0.1:9080:80`** so IH `edge` does not fight prod-server for :80.
+2. Run **`./deploy.sh production`** (IH) and **`./deploy.sh staging`** (IH).
+3. From **`environments/prod`**, **`docker compose up -d nginx`** so **`extra_hosts: host.docker.internal:host-gateway`** applies, then **`nginx -s reload`** or recreate the container.
+4. Test: **`curl -sI http://127.0.0.1:9080/grafana/`** on the VM (IH edge), then **`curl -sI http://127.0.0.1/grafana/`** (public nginx → 9080).
+
 ## Initial VM Setup
 
 ### 1. Clone the repo twice
