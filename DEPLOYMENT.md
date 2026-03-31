@@ -2,16 +2,23 @@
 
 ## Architecture
 
-Both staging and production use the **same codebase, same Docker images, same `docker-compose.prod.yml`**. The difference is configuration (`.env` files) and Docker project names (container isolation).
+Both stacks use the **same `docker-compose.prod.yml`**, different **`.env`** files and **Compose project names** (`mh-staging` vs `mh-production`).
+
+### Same VM: `http://IP/` (prod) + `http://IP/staging` (staging)
+
+- **Production Traefik** listens on **`80:80`** and keeps routing **`/`** to production (unchanged).
+- A **file-provider route** on production Traefik forwards **`PathPrefix(/staging)`** to the **staging** Traefik over Docker network **`modelhunter_edge`** (alias **`staging-traefik-gateway`**).
+- **Staging Traefik** is published on **`127.0.0.1:8080`** only (optional local debugging); **trainers use port 80** and never need 8080 open on the firewall.
+- `deploy.sh` creates **`modelhunter_edge`** if missing.
 
 ```
-Single GitHub repo (branch: mth)
-        │
-        ├── VM: ~/staging/     → .env.staging     → project: mh-staging
-        │                        ports: 4010, 8010, 8011, 5433, 6380
-        │
-        └── VM: ~/production/  → .env.production  → project: mh-production
-                                 ports: 4000, 8000, 8001, 5432, 6379
+        ┌─────────────────────────────────────────┐
+        │  Trainer browser: http://VM_IP:80       │
+        └─────────────────┬───────────────────────┘
+                          │
+              Production Traefik (:80)
+                ├─ /          → mh-production …
+                └─ /staging/* → staging Traefik (mh-edge) → mh-staging …
 ```
 
 ## Initial VM Setup
@@ -46,10 +53,10 @@ cp .env.staging.example .env.staging
 
 **Traefik / Grafana**
 
-- `DOMAIN` must be a **hostname or IP only** (no `http://`, no path). Routing uses `Host(DOMAIN)` plus `PathPrefix` from `EDGE_PATH_PREFIX` / `GRAFANA_PATH_PREFIX`.
-- Set **`GRAFANA_ROOT_URL`** to the full URL browsers use (e.g. `http://YOUR_IP:8080/grafana/`).
-- Traefik is **HTTP only** (no TLS / Let’s Encrypt). Set **`GRAFANA_ROOT_URL`** with `http://` and the host port you publish (e.g. `http://YOUR_IP:8080/grafana/`).
-- Serving under a path prefix (e.g. `/staging`): set `STAGING_COMPOSE_OVERRIDE=1`, `EDGE_STRIP_PREFIX`, and paths as in `.env.staging.example`. `deploy.sh` merges `docker-compose.staging-overrides.yml` (Docker Compose **v2.23+** for `labels: !reset`).
+- **`DOMAIN`**: host or IP only (no `http://`, no path). Use the same value on prod and staging if clients use the same `Host` header (e.g. public IP).
+- **Production**: `TRAEFIK_DYNAMIC_DIR=./traefik/dynamic-bridge`, `TRAEFIK_HOST_PORTMAP=80:80`, `GRAFANA_ROOT_URL=http://IP/grafana/`.
+- **Staging**: `TRAEFIK_DYNAMIC_DIR=./traefik/dynamic-noop`, `TRAEFIK_HOST_PORTMAP=127.0.0.1:8080:80`, `PUBLIC_HTTP_PORT=80`, `STAGING_COMPOSE_OVERRIDE=1`, path vars as in `.env.staging.example`, `GRAFANA_ROOT_URL=http://IP/staging/grafana/`.
+- HTTP only (no TLS). `deploy.sh` merges `docker-compose.staging-overrides.yml` (Compose **v2.23+** for `labels: !reset`).
 
 **Postgres WAL archive**
 
@@ -66,12 +73,12 @@ After the first deploy, run migrations inside each environment's python-core con
 ```bash
 # Production
 cd ~/production
-docker compose -p mh-production -f docker-compose.prod.yml --env-file .env.production \
+COMPOSE_PROJECT_NAME=mh-production docker compose -f docker-compose.prod.yml --env-file .env.production \
   exec python-core alembic upgrade head
 
-# Staging
+# Staging (include staging overrides if STAGING_COMPOSE_OVERRIDE=1)
 cd ~/staging
-docker compose -p mh-staging -f docker-compose.prod.yml --env-file .env.staging \
+COMPOSE_PROJECT_NAME=mh-staging docker compose -f docker-compose.prod.yml -f docker-compose.staging-overrides.yml --env-file .env.staging \
   exec python-core alembic upgrade head
 ```
 
@@ -84,9 +91,10 @@ docker compose -p mh-staging -f docker-compose.prod.yml --env-file .env.staging 
 cd ~/staging
 ./deploy.sh staging
 
-# Step 2: Test staging
-curl -s http://localhost:4010/health/ready | python3 -m json.tool
-# Open http://localhost:8080/ (or your Traefik URL) in browser, run a test hunt
+# Step 2: Test staging (direct container + via production :80 if prod is up)
+curl -s http://127.0.0.1:4010/health/ready | python3 -m json.tool
+curl -sf "http://127.0.0.1/staging/health/ready" | python3 -m json.tool || true
+# Open http://VM_IP/staging in browser (production Traefik must be running on :80)
 
 # Step 3: If staging is good, deploy production
 cd ~/production
@@ -115,7 +123,7 @@ Short aliases work: `staging`/`stg`/`s`, `production`/`prod`/`p`.
 
 | Service | Production | Staging |
 |---------|-----------|---------|
-| Traefik HTTP | 80 | 8080 |
+| Traefik (public) | 80 (`TRAEFIK_HOST_PORTMAP`) | — (staging Traefik on `127.0.0.1:8080` only) |
 | Elixir Edge | 4000 | 4010 |
 | Python Core | 8000 | 8010 |
 | Dashboard | 8001 | 8011 |
@@ -124,7 +132,7 @@ Short aliases work: `staging`/`stg`/`s`, `production`/`prod`/`p`.
 | Prometheus | 9090 | 9091 |
 | Grafana | 3000 | 3001 |
 
-All ports are bound to `127.0.0.1` (not accessible from outside the VM). External traffic enters through Traefik only.
+Other services use `127.0.0.1` publish ports on the VM. **Production Traefik** uses **`TRAEFIK_HOST_PORTMAP`** (default `80:80`) so **:80** can be world-reachable; open only what you need in the cloud firewall.
 
 ## Rollback
 
@@ -142,7 +150,7 @@ git checkout <good-commit>
 ./deploy.sh production
 
 # Option 3: Roll back a single service
-docker compose -p mh-production -f docker-compose.prod.yml --env-file .env.production \
+COMPOSE_PROJECT_NAME=mh-production docker compose -f docker-compose.prod.yml --env-file .env.production \
   up -d --no-deps --build python-core
 ```
 
@@ -161,5 +169,5 @@ Production PostgreSQL is configured with:
 
 ```bash
 # Add to crontab on the VM
-0 3 * * * cd ~/production && docker compose -p mh-production -f docker-compose.prod.yml --env-file .env.production exec -T postgres pg_dump -Fc -U mh model_hunter > backups/daily/mh_$(date +\%Y\%m\%d).dump
+0 3 * * * cd ~/production && COMPOSE_PROJECT_NAME=mh-production docker compose -f docker-compose.prod.yml --env-file .env.production exec -T postgres pg_dump -Fc -U mh model_hunter > backups/daily/mh_$(date +\%Y\%m\%d).dump
 ```

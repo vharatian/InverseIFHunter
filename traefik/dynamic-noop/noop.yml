@@ -1,0 +1,2 @@
+# Staging Traefik: no /staging bridge (production Traefik owns public routing).
+http: {}

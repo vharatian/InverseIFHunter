@@ -56,8 +56,16 @@ _compose_normalize_domain_from_env_file() {
     export DOMAIN="$host"
     if [[ "$host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && [ "${ENV_NAME:-}" = "staging" ] \
         && ! grep -q '^STAGING_COMPOSE_OVERRIDE=1' "$f" 2>/dev/null; then
-        echo -e "${YELLOW}  Staging DOMAIN is an IP: set EDGE_PATH_PREFIX=/staging (etc.) and STAGING_COMPOSE_OVERRIDE=1 if you serve under a path prefix.${NC}" >&2
+        echo -e "${YELLOW}  For http://IP/staging: set STAGING_COMPOSE_OVERRIDE=1, path vars, PUBLIC_HTTP_PORT=80, and deploy production with TRAEFIK_DYNAMIC_DIR=./traefik/dynamic-bridge.${NC}" >&2
     fi
+}
+
+_ensure_modelhunter_edge_network() {
+    if docker network inspect modelhunter_edge &>/dev/null; then
+        return 0
+    fi
+    echo -e "${BLUE}Creating Docker network modelhunter_edge (prod ↔ staging Traefik).${NC}"
+    docker network create modelhunter_edge
 }
 
 # --- Resolve environment ---
@@ -94,19 +102,20 @@ resolve_env() {
     fi
 }
 
-# Use Compose V2 plugin if present; otherwise standalone docker-compose (avoids
-# "unknown shorthand flag: 'p' in -p" when `docker compose` is not installed).
+# COMPOSE_PROJECT_NAME avoids docker compose -p (some CLIs mis-parse -p).
 run_compose() {
     _compose_normalize_domain_from_env_file
+    _ensure_modelhunter_edge_network
     local -a _files=( -f "$SCRIPT_DIR/$COMPOSE_FILE" )
     if [ "${ENV_NAME:-}" = "staging" ] && [ -f "$SCRIPT_DIR/docker-compose.staging-overrides.yml" ] \
         && grep -q '^STAGING_COMPOSE_OVERRIDE=1' "$SCRIPT_DIR/$ENV_FILE" 2>/dev/null; then
         _files+=( -f "$SCRIPT_DIR/docker-compose.staging-overrides.yml" )
     fi
+    export COMPOSE_PROJECT_NAME="$PROJECT"
     if docker compose version &>/dev/null; then
-        docker compose -p "$PROJECT" "${_files[@]}" --env-file "$SCRIPT_DIR/$ENV_FILE" "$@"
+        docker compose "${_files[@]}" --env-file "$SCRIPT_DIR/$ENV_FILE" "$@"
     elif command -v docker-compose &>/dev/null; then
-        docker-compose --project-name "$PROJECT" "${_files[@]}" --env-file "$SCRIPT_DIR/$ENV_FILE" "$@"
+        docker-compose "${_files[@]}" --env-file "$SCRIPT_DIR/$ENV_FILE" "$@"
     else
         echo -e "${RED}Docker Compose not found.${NC}"
         echo "  Debian/Ubuntu: sudo apt-get install -y docker-compose-plugin"

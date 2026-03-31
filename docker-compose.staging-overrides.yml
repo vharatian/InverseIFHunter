@@ -1,15 +1,19 @@
-# Optional: path prefix (e.g. /staging) behind Traefik — adds StripPrefix so backends see /… not /staging/…
+# Path prefix /staging + StripPrefix for backends. Required for http://VM_IP/staging via production Traefik.
+# Enable STAGING_COMPOSE_OVERRIDE=1 in .env.staging (deploy.sh merges this file).
 #
-# Enable with STAGING_COMPOSE_OVERRIDE=1 in .env.staging (deploy.sh merges this file), or:
-#   docker compose -f docker-compose.prod.yml -f docker-compose.staging-overrides.yml ...
-#
-# Set in .env: DOMAIN, EDGE_PATH_PREFIX, GRAFANA_PATH_PREFIX, EDGE_STRIP_PREFIX (e.g. /staging),
-# GRAFANA_ROOT_URL (e.g. http://IP:8080/staging/grafana/)
+# Also registers alias staging-traefik-gateway on modelhunter_edge so production Traefik can reach this stack.
 #
 services:
+  traefik:
+    networks:
+      mh-edge:
+        aliases:
+          - staging-traefik-gateway
+
   elixir-edge:
     labels: !reset
       - "traefik.enable=true"
+      # Path only (no Host): reachable only via modelhunter_edge; defaults avoid empty PathPrefix().
       - "traefik.http.routers.edge.rule=PathPrefix(`${EDGE_PATH_PREFIX:-/staging}`)"
       - "traefik.http.routers.edge.priority=1"
       - "traefik.http.middlewares.staging-edge-strip.stripprefix.prefixes=${EDGE_STRIP_PREFIX}"
