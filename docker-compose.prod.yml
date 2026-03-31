@@ -33,7 +33,6 @@ services:
       # Literal PathPrefix: env vars like EDGE_PATH_PREFIX= (blank) become PathPrefix(``) and
       # Traefik v3 rejects empty PathPrefix. Use docker-compose.staging-overrides.yml for /staging.
       - "traefik.http.routers.edge.rule=PathPrefix(`/`)"
-      - "traefik.http.routers.edge.priority=1"
       - "traefik.http.routers.edge.entrypoints=web"
       - "traefik.http.routers.edge.priority=10"
       - "traefik.http.services.edge.loadbalancer.server.port=4000"
@@ -208,7 +207,6 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.grafana.rule=PathPrefix(`/grafana`)"
-      - "traefik.http.routers.grafana.priority=100"
       - "traefik.http.routers.grafana.entrypoints=web"
       - "traefik.http.routers.grafana.priority=10"
       - "traefik.http.services.grafana.loadbalancer.server.port=3000"
@@ -228,6 +226,7 @@ volumes:
 networks:
   mh-network:
     driver: bridge
+  # Shared by mh-production + mh-staging Traefik (fixed name). Compose creates it on first up — no manual docker network create.
   mh-edge:
     name: modelhunter_edge
-    external: true
+    driver: bridge

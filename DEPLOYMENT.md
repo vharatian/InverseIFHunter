@@ -9,7 +9,7 @@ Both stacks use the **same `docker-compose.prod.yml`**, different **`.env`** fil
 - **Production Traefik** listens on **`80:80`** and keeps routing **`/`** to production (unchanged).
 - A **file-provider route** on production Traefik forwards **`PathPrefix(/staging)`** to the **staging** Traefik over Docker network **`modelhunter_edge`** (alias **`staging-traefik-gateway`**).
 - **Staging Traefik** is published on **`127.0.0.1:8080`** only (optional local debugging); **trainers use port 80** and never need 8080 open on the firewall.
-- `deploy.sh` creates **`modelhunter_edge`** if missing.
+- **`modelhunter_edge`** is a Compose-managed network (fixed name in `docker-compose.prod.yml`); the **first** `docker compose up` creates it; the second stack attaches to the same network.
 
 ```
         ┌─────────────────────────────────────────┐

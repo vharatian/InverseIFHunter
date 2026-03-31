@@ -60,14 +60,6 @@ _compose_normalize_domain_from_env_file() {
     fi
 }
 
-_ensure_modelhunter_edge_network() {
-    if docker network inspect modelhunter_edge &>/dev/null; then
-        return 0
-    fi
-    echo -e "${BLUE}Creating Docker network modelhunter_edge (prod ↔ staging Traefik).${NC}"
-    docker network create modelhunter_edge
-}
-
 # --- Resolve environment ---
 resolve_env() {
     local env="${1:-}"
@@ -105,7 +97,6 @@ resolve_env() {
 # COMPOSE_PROJECT_NAME avoids docker compose -p (some CLIs mis-parse -p).
 run_compose() {
     _compose_normalize_domain_from_env_file
-    _ensure_modelhunter_edge_network
     local -a _files=( -f "$SCRIPT_DIR/$COMPOSE_FILE" )
     if [ "${ENV_NAME:-}" = "staging" ] && [ -f "$SCRIPT_DIR/docker-compose.staging-overrides.yml" ] \
         && grep -q '^STAGING_COMPOSE_OVERRIDE=1' "$SCRIPT_DIR/$ENV_FILE" 2>/dev/null; then
