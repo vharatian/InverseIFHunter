@@ -5,8 +5,8 @@
 #
 services:
   traefik:
-    # Always loopback — never 80:80 (production owns :80). Ignores TRAEFIK_HOST_PORTMAP if unset/wrong in .env.staging.
-    ports: !reset
+    # Loopback only (base compose has no Traefik ports — avoids merge appending 80:80 with older compose).
+    ports:
       - "127.0.0.1:8080:80"
     networks:
       mh-edge:

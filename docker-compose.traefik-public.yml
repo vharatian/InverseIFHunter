@@ -1,0 +1,5 @@
+# Merged for production only (deploy.sh). Staging gets Traefik ports from docker-compose.staging-overrides.yml.
+services:
+  traefik:
+    ports:
+      - "${TRAEFIK_HOST_PORTMAP:-80:80}"

@@ -2,7 +2,7 @@
 
 ## Architecture
 
-Both stacks use the **same `docker-compose.prod.yml`**, different **`.env`** files and **Compose project names** (`mh-staging` vs `mh-production`).
+Both stacks use **`docker-compose.prod.yml`** as the base, different **`.env`** files and **Compose project names** (`mh-staging` vs `mh-production`). **Production** also merges **`docker-compose.traefik-public.yml`** (host `:80`); **staging** merges **`docker-compose.staging-overrides.yml`** (Traefik on `127.0.0.1:8080` only). `deploy.sh` passes the correct `-f` list.
 
 ### Same VM: `http://IP/` (prod) + `http://IP/staging` (staging)
 
@@ -73,7 +73,7 @@ After the first deploy, run migrations inside each environment's python-core con
 ```bash
 # Production
 cd ~/production
-COMPOSE_PROJECT_NAME=mh-production docker compose -f docker-compose.prod.yml --env-file .env.production \
+COMPOSE_PROJECT_NAME=mh-production docker compose -f docker-compose.prod.yml -f docker-compose.traefik-public.yml --env-file .env.production \
   exec python-core alembic upgrade head
 
 # Staging (include staging overrides if STAGING_COMPOSE_OVERRIDE=1)
@@ -150,7 +150,7 @@ git checkout <good-commit>
 ./deploy.sh production
 
 # Option 3: Roll back a single service
-COMPOSE_PROJECT_NAME=mh-production docker compose -f docker-compose.prod.yml --env-file .env.production \
+COMPOSE_PROJECT_NAME=mh-production docker compose -f docker-compose.prod.yml -f docker-compose.traefik-public.yml --env-file .env.production \
   up -d --no-deps --build python-core
 ```
 
@@ -169,5 +169,5 @@ Production PostgreSQL is configured with:
 
 ```bash
 # Add to crontab on the VM
-0 3 * * * cd ~/production && COMPOSE_PROJECT_NAME=mh-production docker compose -f docker-compose.prod.yml --env-file .env.production exec -T postgres pg_dump -Fc -U mh model_hunter > backups/daily/mh_$(date +\%Y\%m\%d).dump
+0 3 * * * cd ~/production && COMPOSE_PROJECT_NAME=mh-production docker compose -f docker-compose.prod.yml -f docker-compose.traefik-public.yml --env-file .env.production exec -T postgres pg_dump -Fc -U mh model_hunter > backups/daily/mh_$(date +\%Y\%m\%d).dump
 ```

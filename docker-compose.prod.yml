@@ -13,9 +13,7 @@ services:
       - "--metrics.prometheus.addEntryPointsLabels=true"
       - "--metrics.prometheus.addServicesLabels=true"
       - "--api.insecure=true"
-    # Default 80:80 (production). Staging: use 127.0.0.1:8080:80 so only :80 on prod is world-facing.
-    ports:
-      - "${TRAEFIK_HOST_PORTMAP:-80:80}"
+    # Host publish: production merges docker-compose.traefik-public.yml; staging uses docker-compose.staging-overrides.yml.
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
       - "${TRAEFIK_DYNAMIC_DIR:-./traefik/dynamic-noop}:/etc/traefik/dynamic:ro"

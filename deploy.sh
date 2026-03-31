@@ -98,6 +98,9 @@ resolve_env() {
 run_compose() {
     _compose_normalize_domain_from_env_file
     local -a _files=( -f "$SCRIPT_DIR/$COMPOSE_FILE" )
+    if [ "${ENV_NAME:-}" = "production" ] && [ -f "$SCRIPT_DIR/docker-compose.traefik-public.yml" ]; then
+        _files+=( -f "$SCRIPT_DIR/docker-compose.traefik-public.yml" )
+    fi
     if [ "${ENV_NAME:-}" = "staging" ] && [ -f "$SCRIPT_DIR/docker-compose.staging-overrides.yml" ] \
         && grep -q '^STAGING_COMPOSE_OVERRIDE=1' "$SCRIPT_DIR/$ENV_FILE" 2>/dev/null; then
         _files+=( -f "$SCRIPT_DIR/docker-compose.staging-overrides.yml" )
