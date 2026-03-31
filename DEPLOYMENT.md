@@ -55,7 +55,7 @@ cp .env.staging.example .env.staging
 
 - **`DOMAIN`**: host or IP only (no `http://`, no path). Use the same value on prod and staging if clients use the same `Host` header (e.g. public IP).
 - **Production**: `TRAEFIK_DYNAMIC_DIR=./traefik/dynamic-bridge`, `TRAEFIK_HOST_PORTMAP=80:80`, `GRAFANA_ROOT_URL=http://IP/grafana/`.
-- **Staging**: `TRAEFIK_DYNAMIC_DIR=./traefik/dynamic-noop`, `TRAEFIK_HOST_PORTMAP=127.0.0.1:8080:80`, `PUBLIC_HTTP_PORT=80`, `STAGING_COMPOSE_OVERRIDE=1`, path vars as in `.env.staging.example`, `GRAFANA_ROOT_URL=http://IP/staging/grafana/`.
+- **Staging**: `TRAEFIK_DYNAMIC_DIR=./traefik/dynamic-noop`, `PUBLIC_HTTP_PORT=80`, `STAGING_COMPOSE_OVERRIDE=1`, path vars as in `.env.staging.example`, `GRAFANA_ROOT_URL=http://IP/staging/grafana/`. Staging Traefik publishes **`127.0.0.1:8080`** only (set in `docker-compose.staging-overrides.yml`, not via env).
 - HTTP only (no TLS). `deploy.sh` merges `docker-compose.staging-overrides.yml` (Compose **v2.23+** for `labels: !reset`).
 
 **Postgres WAL archive**
