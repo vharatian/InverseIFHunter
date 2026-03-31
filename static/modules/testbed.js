@@ -1073,26 +1073,6 @@ function renderActiveTab() {
                     </div>
                 </div>
 
-                <!-- Model Reasoning (collapsible) -->
-                <div class="tb-field tb-field-collapsible">
-                    <div class="tb-collapsible-hdr">
-                    <button class="tb-judge-collapse-btn" id="tbModelReasoningCollapseBtn" type="button">
-                        <span class="tb-judge-collapse-icon">${left.modelReasoning ? '▼' : '▶'}</span>
-                        <span>Model Reasoning</span>
-                        <span class="tb-judge-collapse-hint">${left.modelReasoning ? 'click to collapse' : 'click to expand / edit'}</span>
-                    </button>
-                    ${_tbCopyBtn('tbSharedReasoning', 'Copy model reasoning')}
-                    </div>
-                    <div class="tb-collapsible-body ${left.modelReasoning ? '' : 'tb-collapsed'}" id="tbSharedReasoningBody">
-                        <textarea
-                            class="tb-textarea tb-textarea-judge"
-                            id="tbSharedReasoning"
-                            placeholder="Enter the model reasoning here…"
-                            rows="6"
-                        >${escapeHtml(left.modelReasoning)}</textarea>
-                    </div>
-                </div>
-
                 <!-- Criteria chips -->
                 <div class="tb-field">
                     <div class="tb-label-row">
@@ -1239,23 +1219,6 @@ function renderActiveTab() {
         const body = document.getElementById('tbSharedIdealBody');
         const icon = document.querySelector('#tbIdealCollapseBtn .tb-judge-collapse-icon');
         const hint = document.querySelector('#tbIdealCollapseBtn .tb-judge-collapse-hint');
-        if (body) {
-            const isCollapsed = body.classList.toggle('tb-collapsed');
-            if (icon) icon.textContent = isCollapsed ? '▶' : '▼';
-            if (hint) hint.textContent = isCollapsed ? 'click to expand / edit' : 'click to collapse';
-        }
-    });
-
-    // Shared reasoning trace persist
-    document.getElementById('tbSharedReasoning')?.addEventListener('input', (e) => {
-        getSharedLeft().modelReasoning = e.target.value;
-    });
-
-    // Model reasoning collapse toggle
-    document.getElementById('tbModelReasoningCollapseBtn')?.addEventListener('click', () => {
-        const body = document.getElementById('tbSharedReasoningBody');
-        const icon = document.querySelector('#tbModelReasoningCollapseBtn .tb-judge-collapse-icon');
-        const hint = document.querySelector('#tbModelReasoningCollapseBtn .tb-judge-collapse-hint');
         if (body) {
             const isCollapsed = body.classList.toggle('tb-collapsed');
             if (icon) icon.textContent = isCollapsed ? '▶' : '▼';
