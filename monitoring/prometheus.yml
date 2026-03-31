@@ -12,7 +12,3 @@ scrape_configs:
     metrics_path: /metrics
     static_configs:
       - targets: ["elixir-edge:4000"]
-
-  - job_name: "traefik"
-    static_configs:
-      - targets: ["traefik:8080"]

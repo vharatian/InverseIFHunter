@@ -33,7 +33,7 @@ COMPOSE_FILE="docker-compose.prod.yml"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # Docker Compose reads --env-file for ${VAR} interpolation; exported shell vars override those values.
-# Normalize DOMAIN when operators paste a full URL into DOMAIN= (Traefik Host() must be host/IP only).
+# Normalize DOMAIN when operators paste a full URL into DOMAIN= (must be host/IP only).
 _compose_normalize_domain_from_env_file() {
     local f="$SCRIPT_DIR/${ENV_FILE:-}"
     [ -n "${ENV_FILE:-}" ] && [ -f "$f" ] || return 0
@@ -51,12 +51,12 @@ _compose_normalize_domain_from_env_file() {
     host="${host#HTTPS://}"
     host="${host%%/*}"
     if [ "$host" != "$raw" ]; then
-        echo -e "${YELLOW}  DOMAIN was a URL; using host only for Traefik/compose: ${host}${NC}" >&2
+        echo -e "${YELLOW}  DOMAIN was a URL; using host only for compose: ${host}${NC}" >&2
     fi
     export DOMAIN="$host"
     if [[ "$host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && [ "${ENV_NAME:-}" = "staging" ] \
         && ! grep -q '^STAGING_COMPOSE_OVERRIDE=1' "$f" 2>/dev/null; then
-        echo -e "${YELLOW}  For http://IP/staging: set STAGING_COMPOSE_OVERRIDE=1, path vars, PUBLIC_HTTP_PORT=80, and deploy production with TRAEFIK_DYNAMIC_DIR=./traefik/dynamic-bridge.${NC}" >&2
+        echo -e "${YELLOW}  For http://IP/staging: set STAGING_COMPOSE_OVERRIDE=1, path vars, PUBLIC_HTTP_PORT=80; production must deploy with docker-compose.edge-public.yml (deploy.sh does this).${NC}" >&2
     fi
 }
 
@@ -98,8 +98,8 @@ resolve_env() {
 run_compose() {
     _compose_normalize_domain_from_env_file
     local -a _files=( -f "$SCRIPT_DIR/$COMPOSE_FILE" )
-    if [ "${ENV_NAME:-}" = "production" ] && [ -f "$SCRIPT_DIR/docker-compose.traefik-public.yml" ]; then
-        _files+=( -f "$SCRIPT_DIR/docker-compose.traefik-public.yml" )
+    if [ "${ENV_NAME:-}" = "production" ] && [ -f "$SCRIPT_DIR/docker-compose.edge-public.yml" ]; then
+        _files+=( -f "$SCRIPT_DIR/docker-compose.edge-public.yml" )
     fi
     if [ "${ENV_NAME:-}" = "staging" ] && [ -f "$SCRIPT_DIR/docker-compose.staging-overrides.yml" ] \
         && grep -q '^STAGING_COMPOSE_OVERRIDE=1' "$SCRIPT_DIR/$ENV_FILE" 2>/dev/null; then

@@ -1,0 +1,17 @@
+# Merged for production only (deploy.sh). Public HTTP :80 → nginx routes /, /grafana, /staging → staging stack on modelhunter_edge.
+services:
+  edge:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./nginx/edge.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "${EDGE_HOST_PORTMAP:-${TRAEFIK_HOST_PORTMAP:-80:80}}"
+    depends_on:
+      elixir-edge:
+        condition: service_started
+      grafana:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      mh-network:
+      mh-edge:

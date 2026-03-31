@@ -1,6 +1,0 @@
-# Staging Traefik: no /staging bridge (production Traefik owns public routing).
-# Traefik v3 rejects `http: {}`; use explicit empty sections.
-http:
-  routers: {}
-  services: {}
-  middlewares: {}

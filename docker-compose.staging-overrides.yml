@@ -1,39 +1,17 @@
-# Path prefix /staging + StripPrefix for backends. Required for http://VM_IP/staging via production Traefik.
+# Path-based staging at http://VM_IP/staging (production nginx proxies to these aliases on modelhunter_edge).
 # Enable STAGING_COMPOSE_OVERRIDE=1 in .env.staging (deploy.sh merges this file).
 #
-# Also registers alias staging-traefik-gateway on modelhunter_edge so production Traefik can reach this stack.
-#
 services:
-  traefik:
-    # Loopback only (base compose has no Traefik ports — avoids merge appending 80:80 with older compose).
-    ports:
-      - "127.0.0.1:8080:80"
+  elixir-edge:
     networks:
+      mh-network:
       mh-edge:
         aliases:
-          - staging-traefik-gateway
-
-  elixir-edge:
-    labels: !reset
-      - "traefik.enable=true"
-      # Path only (no Host): reachable only via modelhunter_edge; defaults avoid empty PathPrefix().
-      - "traefik.http.routers.edge.rule=PathPrefix(`${EDGE_PATH_PREFIX:-/staging}`)"
-      - "traefik.http.routers.edge.priority=1"
-      - "traefik.http.middlewares.staging-edge-strip.stripprefix.prefixes=${EDGE_STRIP_PREFIX}"
-      - "traefik.http.routers.edge.middlewares=staging-edge-strip"
-      - "traefik.http.routers.edge.entrypoints=web"
-      - "traefik.http.services.edge.loadbalancer.server.port=4000"
+          - staging-edge-gateway
 
   grafana:
-    labels: !reset
-      - "traefik.enable=true"
-      - "traefik.http.routers.grafana.rule=PathPrefix(`${GRAFANA_PATH_PREFIX:-/staging/grafana}`)"
-      - "traefik.http.routers.grafana.priority=100"
-      - "traefik.http.middlewares.staging-grafana-strip.stripprefix.prefixes=${EDGE_STRIP_PREFIX}"
-      - "traefik.http.routers.grafana.middlewares=staging-grafana-strip"
-      - "traefik.http.routers.grafana.entrypoints=web"
-      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
-    environment:
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD}
-      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL}
-      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+    networks:
+      mh-network:
+      mh-edge:
+        aliases:
+          - staging-grafana-gateway

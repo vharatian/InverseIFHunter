@@ -37,7 +37,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 0 },
+      "gridPos": { "h": 4, "w": 12, "x": 0, "y": 0 },
       "id": 1,
       "options": {
         "colorMode": "background",
@@ -76,7 +76,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 0 },
+      "gridPos": { "h": 4, "w": 12, "x": 12, "y": 0 },
       "id": 2,
       "options": {
         "colorMode": "background",
@@ -100,45 +100,6 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
-          "mappings": [
-            { "options": { "0": { "color": "red", "index": 0 }, "1": { "color": "green", "index": 1 } }, "type": "value" }
-          ],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "red", "value": null },
-              { "color": "green", "value": 1 }
-            ]
-          },
-          "unit": "none"
-        },
-        "overrides": []
-      },
-      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 0 },
-      "id": 3,
-      "options": {
-        "colorMode": "background",
-        "graphMode": "none",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
-        "textMode": "value_and_name"
-      },
-      "targets": [
-        {
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "editorMode": "code",
-          "expr": "up{job=\"traefik\"}",
-          "legendFormat": "traefik",
-          "refId": "A"
-        }
-      ],
-      "title": "traefik up",
-      "type": "stat"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
           "color": { "mode": "palette-classic" },
           "custom": {
             "drawStyle": "line",
@@ -151,7 +112,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 4 },
       "id": 4,
       "options": {
         "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
@@ -167,40 +128,6 @@
         }
       ],
       "title": "Prometheus scrape duration",
-      "type": "timeseries"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineWidth": 1,
-            "showPoints": "never",
-            "spanNulls": false
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
-      "id": 5,
-      "options": {
-        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
-        "tooltip": { "mode": "single", "sort": "none" }
-      },
-      "targets": [
-        {
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "editorMode": "code",
-          "expr": "rate(traefik_entrypoint_requests_total[5m])",
-          "legendFormat": "{{entrypoint}} {{protocol}}",
-          "refId": "A"
-        }
-      ],
-      "title": "Traefik entrypoint request rate",
       "type": "timeseries"
     }
   ],

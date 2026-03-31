@@ -87,7 +87,7 @@ See [design spec](docs/plans/2026-03-25-backend-restructure-design.md) for full 
 ├── migrations/              # Alembic database migrations
 ├── tests/                   # Unit + integration tests
 ├── docker-compose.dev.yml   # Local development stack
-├── docker-compose.prod.yml  # Production stack (Traefik, PG, Redis, Grafana)
+├── docker-compose.prod.yml  # Production stack (PG, Redis, Grafana, apps; prod adds nginx edge)
 └── deploy.sh                # Production deployment script
 ```
 
