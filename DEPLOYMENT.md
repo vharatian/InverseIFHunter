@@ -21,6 +21,21 @@ Both stacks use **`docker-compose.prod.yml`** as the base, different **`.env`** 
                 └─ /staging/* → mh-staging (via mh-edge aliases) …
 ```
 
+### Trainer URLs (replace `IP` with your VM address, e.g. `34.28.88.135`)
+
+Use **HTTP on port 80** only (no `https://`, no `:8080` unless you changed `EDGE_HOST_PORTMAP`).
+
+| What | URL |
+|------|-----|
+| Production app | `http://IP/` |
+| Production Grafana | `http://IP/grafana/` |
+| Staging app | `http://IP/staging/` |
+| Staging Grafana | `http://IP/staging/grafana/` |
+
+**`:8080` does not serve the app anymore** (old staging Traefik on localhost was removed). **`:3000`** is Grafana bound to `127.0.0.1` on the VM only — not reachable from the internet; use **`/grafana/`** on port 80 instead.
+
+If nothing loads: allow **inbound TCP 80** on the cloud firewall, run **`./deploy.sh production`** on the prod clone, **`./deploy.sh staging`** on the staging clone, then test from the VM: `curl -sI http://127.0.0.1/` and `curl -sI http://127.0.0.1/grafana/`.
+
 ## Initial VM Setup
 
 ### 1. Clone the repo twice
