@@ -22,7 +22,7 @@ defmodule ModelHunterEdgeWeb.ProxyController do
     trace_id = get_or_generate_trace_id(conn)
     auth_user = extract_auth_user(conn)
 
-    {:ok, body, conn} = Plug.Conn.read_body(conn)
+    body = get_request_body(conn)
 
     headers = build_proxy_headers(conn, trace_id, auth_user)
 
@@ -30,6 +30,7 @@ defmodule ModelHunterEdgeWeb.ProxyController do
          |> Finch.request(ModelHunterEdge.Finch, receive_timeout: 30_000) do
       {:ok, response} ->
         conn
+        |> forward_set_cookie_headers(response.headers)
         |> put_resp_content_type(get_content_type(response.headers))
         |> Plug.Conn.put_resp_header("x-trace-id", trace_id)
         |> send_resp(response.status, response.body)
@@ -118,6 +119,30 @@ defmodule ModelHunterEdgeWeb.ProxyController do
     end
   end
 
+  defp get_request_body(conn) do
+    case conn.body_params do
+      %Plug.Conn.Unfetched{} ->
+        case Plug.Conn.read_body(conn) do
+          {:ok, body, _conn} -> body
+          _ -> ""
+        end
+
+      params when is_map(params) and map_size(params) > 0 ->
+        Jason.encode!(params)
+
+      _ ->
+        ""
+    end
+  end
+
+  defp forward_set_cookie_headers(conn, headers) do
+    headers
+    |> Enum.filter(fn {name, _} -> name == "set-cookie" end)
+    |> Enum.reduce(conn, fn {_, value}, acc ->
+      %{acc | resp_headers: [{"set-cookie", value} | acc.resp_headers]}
+    end)
+  end
+
   defp build_proxy_headers(conn, trace_id, auth_user) do
     base = [
       {"x-trace-id", trace_id},
@@ -125,6 +150,12 @@ defmodule ModelHunterEdgeWeb.ProxyController do
        List.first(Plug.Conn.get_req_header(conn, "content-type")) || "application/json"},
       {"accept", List.first(Plug.Conn.get_req_header(conn, "accept")) || "*/*"}
     ]
+
+    base =
+      case Plug.Conn.get_req_header(conn, "cookie") do
+        [cookie | _] -> [{"cookie", cookie} | base]
+        [] -> base
+      end
 
     if auth_user, do: [{"x-authenticated-user", auth_user} | base], else: base
   end

@@ -15,7 +15,14 @@ async function api(path, options = {}) {
     });
     if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }));
-        throw new Error(err.detail || res.statusText);
+        const detail = err.detail;
+        let message;
+        if (Array.isArray(detail)) {
+            message = detail.map(d => d.msg || d.message || JSON.stringify(d)).join('; ');
+        } else {
+            message = detail || res.statusText;
+        }
+        throw new Error(message);
     }
     return res.json();
 }
@@ -551,7 +558,7 @@ async function handleAdminsAction(action, params) {
 // EVENT DELEGATION
 // ═════════════════════════════════════════════════════════════════
 
-document.addEventListener('DOMContentLoaded', () => {
+function init() {
     checkSession();
 
     const superToggle = document.getElementById('super-toggle');
@@ -559,6 +566,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const loginBtn = document.getElementById('login-btn');
     const loginError = document.getElementById('login-error');
 
+    if (superToggle.checked) passwordGroup.classList.remove('hidden');
     superToggle.addEventListener('change', () => passwordGroup.classList.toggle('hidden', !superToggle.checked));
 
     loginBtn.addEventListener('click', async () => {
@@ -615,4 +623,10 @@ document.addEventListener('DOMContentLoaded', () => {
             else if (ft === 'add-test-account') { if (!fields.email) { toast('Email required', 'error'); return; } handleAdminsAction('add-test-account', { email: fields.email, name: fields.name }); }
         }
     });
-});
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+} else {
+    init();
+}
