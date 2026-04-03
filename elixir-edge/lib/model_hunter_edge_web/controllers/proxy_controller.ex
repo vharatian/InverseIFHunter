@@ -89,7 +89,8 @@ defmodule ModelHunterEdgeWeb.ProxyController do
 
         {dash, suffix}
 
-      String.starts_with?(request_path, "/admin") ->
+      String.starts_with?(request_path, "/admin") or
+        String.starts_with?(request_path, "/api/admin") ->
         {dash, request_path}
 
       true ->
