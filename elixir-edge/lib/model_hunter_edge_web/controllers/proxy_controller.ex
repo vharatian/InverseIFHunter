@@ -78,17 +78,22 @@ defmodule ModelHunterEdgeWeb.ProxyController do
     core = Application.get_env(:model_hunter_edge, :python_core_url, "http://localhost:8000")
     dash = Application.get_env(:model_hunter_edge, :python_dashboard_url, "http://localhost:8001")
 
-    if String.starts_with?(request_path, "/dashboard") do
-      suffix =
-        case String.replace_prefix(request_path, "/dashboard", "") do
-          "" -> "/"
-          "/" -> "/"
-          other -> other
-        end
+    cond do
+      String.starts_with?(request_path, "/dashboard") ->
+        suffix =
+          case String.replace_prefix(request_path, "/dashboard", "") do
+            "" -> "/"
+            "/" -> "/"
+            other -> other
+          end
 
-      {dash, suffix}
-    else
-      {core, request_path}
+        {dash, suffix}
+
+      String.starts_with?(request_path, "/admin") ->
+        {dash, request_path}
+
+      true ->
+        {core, request_path}
     end
   end
 
