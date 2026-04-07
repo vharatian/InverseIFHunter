@@ -268,14 +268,16 @@ if os.path.isdir(_reviewer_static):
 
 
 @app.get("/reviewer/")
-async def reviewer_index():
+async def reviewer_index(request):
     """Serve the reviewer UI index page."""
     index_path = os.path.join(os.path.dirname(__file__), "reviewer-app", "static", "index.html")
     if os.path.exists(index_path):
         from starlette.responses import HTMLResponse
         with open(index_path) as f:
             content = f.read()
-        base_tag = '<base href="/reviewer/">'
+        prefix = (request.headers.get("x-forwarded-prefix") or "").rstrip("/")
+        base_href = f'{prefix}/reviewer/'
+        base_tag = f'<base href="{base_href}">'
         if "<base" not in content.lower():
             content = content.replace("<head>", "<head>\n  " + base_tag, 1)
         return HTMLResponse(content)

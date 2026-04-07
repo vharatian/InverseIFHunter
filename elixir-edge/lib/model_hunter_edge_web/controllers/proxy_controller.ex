@@ -157,6 +157,18 @@ defmodule ModelHunterEdgeWeb.ProxyController do
         [] -> base
       end
 
+    base =
+      Enum.reduce(
+        ["x-forwarded-for", "x-forwarded-proto", "x-forwarded-prefix", "x-real-ip"],
+        base,
+        fn header, acc ->
+          case Plug.Conn.get_req_header(conn, header) do
+            [val | _] -> [{header, val} | acc]
+            [] -> acc
+          end
+        end
+      )
+
     if auth_user, do: [{"x-authenticated-user", auth_user} | base], else: base
   end
 
