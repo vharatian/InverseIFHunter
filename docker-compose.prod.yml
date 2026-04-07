@@ -38,6 +38,8 @@ services:
       PORT: "8000"
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       DATABASE_URL: postgresql+asyncpg://${PG_USER:-mh}:${PG_PASSWORD}@postgres:5432/${PG_DATABASE:-model_hunter}
+    volumes:
+      - ./config:/app/config
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/live')"]
       interval: 30s
