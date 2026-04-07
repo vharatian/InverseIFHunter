@@ -68,6 +68,8 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       DATABASE_URL: postgresql+asyncpg://${PG_USER:-mh}:${PG_PASSWORD}@postgres:5432/${PG_DATABASE:-model_hunter}
+    volumes:
+      - ./config:/config
     depends_on:
       postgres:
         condition: service_healthy
