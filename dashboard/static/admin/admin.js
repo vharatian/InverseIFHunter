@@ -613,24 +613,24 @@ function renderDataTab(stats, container) {
     document.getElementById('delete-session-btn').addEventListener('click', async () => {
         const sid = document.getElementById('delete-session-id').value.trim();
         if (!sid) { toast('Enter a session ID', 'error'); return; }
-        if (!confirm(\`Delete session \${sid}? This cannot be undone.\`)) return;
+        if (!confirm(`Delete session ${sid}? This cannot be undone.`)) return;
         try {
-            await api(\`data/session/\${sid}\`, { method: 'DELETE' });
-            toast(\`Session \${sid} deleted\`);
+            await api(`data/session/${sid}`, { method: 'DELETE' });
+            toast(`Session ${sid} deleted`);
             loadDataTab();
         } catch (e) { toast(e.message, 'error'); }
     });
     document.getElementById('wipe-sessions-btn').addEventListener('click', async () => {
         const days = document.getElementById('wipe-days').value;
         const msg = days
-            ? \`Wipe all draft sessions older than \${days} days?\`
+            ? `Wipe all draft sessions older than ${days} days?`
             : 'Wipe ALL draft/in-progress sessions? Submitted & approved are safe.';
         if (!confirm(msg)) return;
         try {
             const body = { confirm: 'yes' };
             if (days) body.older_than_days = parseInt(days);
             const result = await api('data/wipe-sessions', { method: 'POST', body: JSON.stringify(body) });
-            toast(\`Wiped: \${result.sessions}, results: \${result.results}\`);
+            toast(`Wiped: ${result.sessions}, results: ${result.results}`);
             loadDataTab();
         } catch (e) { toast(e.message, 'error'); }
     });
