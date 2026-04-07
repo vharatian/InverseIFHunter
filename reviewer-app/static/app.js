@@ -104,9 +104,8 @@ async function loadNotebookOnly(url) {
     banner.hidden = true;
     banner.textContent = "";
   }
-  if (taskDisplayIdLabelEl) taskDisplayIdLabelEl.textContent = "Notebook URL";
-  if (taskDisplayIdEl) taskDisplayIdEl.textContent = raw.length > 72 ? raw.slice(0, 72) + "\u2026" : raw;
-  if (taskSessionIdEl) taskSessionIdEl.textContent = "";
+  const taskHeader = document.querySelector(".task-view-header--slim");
+  if (taskHeader) taskHeader.hidden = true;
   if (taskErrorEl) taskErrorEl.hidden = true;
   if (taskContentEl) {
     taskContentEl.textContent = "Loading notebook\u2026";

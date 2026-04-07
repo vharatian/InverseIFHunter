@@ -185,7 +185,10 @@ async def _fetch_notebook_json(url: str) -> dict:
 def _normalize_section_label(label: str) -> str | None:
     import re
 
-    n = re.sub(r"[\s_-]+", "_", label.strip().lower())
+    raw = label.strip().lower()
+    # Strip optional "Turn-X:" prefix for multi-turn notebooks
+    raw = re.sub(r"^turn[_\s-]*\d+\s*[:：]\s*", "", raw, flags=re.IGNORECASE)
+    n = re.sub(r"[\s_-]+", "_", raw.strip())
     if n == "prompt":
         return "prompt"
     if n in ("response", "ideal_response", "ideal", "trainer_response", "expected_response"):
@@ -258,6 +261,9 @@ def _extract_preview(nb_json: dict) -> tuple[str, str, list, dict]:
             "has_structured_content": False,
         }
 
+    prompts: list[str] = []
+    ideal_responses: list[str] = []
+
     for cell in cells:
         src = "".join(cell.get("source") or []).strip()
         cells_scanned += 1
@@ -268,12 +274,15 @@ def _extract_preview(nb_json: dict) -> tuple[str, str, list, dict]:
         if not key:
             continue
 
-        if key == "prompt" and not prompt:
-            prompt = content
-        elif key == "response" and not ideal_response:
-            ideal_response = content
+        if key == "prompt":
+            prompts.append(content)
+        elif key == "response":
+            ideal_responses.append(content)
         elif key == "response_reference" and not response_reference:
             response_reference = content
+
+    prompt = "\n\n---\n\n".join(prompts) if prompts else ""
+    ideal_response = "\n\n---\n\n".join(ideal_responses) if ideal_responses else ""
 
     criteria = _parse_criteria(response_reference)
     has_prompt = bool(prompt and prompt.strip() and prompt != "(no prompt)")
