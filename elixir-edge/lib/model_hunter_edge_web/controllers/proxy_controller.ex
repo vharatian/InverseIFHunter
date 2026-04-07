@@ -159,7 +159,10 @@ defmodule ModelHunterEdgeWeb.ProxyController do
 
     base =
       Enum.reduce(
-        ["x-forwarded-for", "x-forwarded-proto", "x-forwarded-prefix", "x-real-ip"],
+        [
+          "x-forwarded-for", "x-forwarded-proto", "x-forwarded-prefix", "x-real-ip",
+          "x-reviewer-email", "x-reviewer-id", "x-trainer-email"
+        ],
         base,
         fn header, acc ->
           case Plug.Conn.get_req_header(conn, header) do
