@@ -501,6 +501,9 @@ function _handleEvent(evt, slotsEl, summaryEl, detailEl) {
   else if (type === "persist_warning") {
     showToast(evt.message || "Could not save council results.", "error");
   }
+  else if (type === "status") {
+    if (summaryEl) summaryEl.textContent = evt.message || "";
+  }
 }
 
 // ── Triage system ──────────────────────────────────────────────────────

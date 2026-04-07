@@ -197,36 +197,39 @@ async def notebook_council_stream(
     """
     Run LLM council QC against a notebook URL (no session required).
     Fetches the notebook, parses all slots, builds a snapshot, then streams council.
-    """
-    from api.routes.notebook_preview import _fetch_notebook_json, _extract_preview
 
+    Heavy work (fetch + parse) runs INSIDE the generator so SSE headers are sent
+    immediately and the Elixir proxy timeout doesn't expire during the fetch.
+    """
     url = (body.url or "").strip()
     if not url:
         raise HTTPException(status_code=400, detail="URL is required")
 
-    try:
-        nb_json = await _fetch_notebook_json(url)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Could not fetch notebook: {e}")
-
-    preview_data = _extract_preview(nb_json)
-
-    if not preview_data.get("slots"):
-        raise HTTPException(
-            status_code=422,
-            detail="No hunt result slots found in notebook. Council needs slot data to run.",
-        )
-
-    try:
-        snapshot = _build_snapshot_from_notebook(preview_data)
-    except Exception as e:
-        logger.warning("Notebook snapshot build failed: %s", e)
-        raise HTTPException(status_code=422, detail=f"Cannot build snapshot from notebook: {e}")
-
-    from agentic_reviewer.stream import stream_review_events
-
     async def agen():
         yield ": " + (" " * 2040) + "\n\n"
+
+        from api.routes.notebook_preview import _fetch_notebook_json, _extract_preview
+
+        yield f"data: {json.dumps({'type': 'status', 'message': 'Fetching notebook...'})}\n\n"
+        try:
+            nb_json = await _fetch_notebook_json(url)
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'message': f'Could not fetch notebook: {e}'})}\n\n"
+            return
+
+        preview_data = _extract_preview(nb_json)
+        if not preview_data.get("slots"):
+            yield f"data: {json.dumps({'type': 'error', 'message': 'No hunt result slots found in notebook. Council needs slot data to run.'})}\n\n"
+            return
+
+        try:
+            snapshot = _build_snapshot_from_notebook(preview_data)
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'message': f'Cannot build snapshot from notebook: {e}'})}\n\n"
+            return
+
+        from agentic_reviewer.stream import stream_review_events
+
         try:
             for chunk in stream_review_events(snapshot):
                 yield chunk

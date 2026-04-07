@@ -1,5 +1,7 @@
-"""Health and readiness endpoints. No allowlist required."""
+"""Health, readiness, and version endpoints. No allowlist required."""
 import logging
+import sys
+from pathlib import Path
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
@@ -8,7 +10,21 @@ from services import get_redis
 
 logger = logging.getLogger(__name__)
 
+_repo_root = str(Path(__file__).resolve().parents[3])
+if _repo_root not in sys.path:
+    sys.path.insert(0, _repo_root)
+
 router = APIRouter(tags=["health"])
+
+
+@router.get("/api/version")
+async def version():
+    """Return app version hash. Polled by the UI to detect code changes."""
+    try:
+        from main import APP_VERSION
+        return {"version": APP_VERSION}
+    except Exception:
+        return {"version": "unknown"}
 
 
 @router.get("/health")
