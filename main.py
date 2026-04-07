@@ -26,6 +26,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.types import Receive, Scope, Send
 
 from dotenv import load_dotenv
+from config_routing import REVIEWER_PREFIX, REVIEWER_STATIC, TRAINER_STATIC
 
 # Configure logging
 logging.basicConfig(
@@ -235,8 +236,8 @@ app.include_router(notifications_router)
 # Reviewer app routes (absorbed from reviewer-app/)
 try:
     from modules.review.router import reviewer_router
-    app.include_router(reviewer_router, prefix="/reviewer")
-    logger.info("Reviewer routes loaded at /reviewer/")
+    app.include_router(reviewer_router, prefix=REVIEWER_PREFIX)
+    logger.info("Reviewer routes loaded at %s/", REVIEWER_PREFIX)
 except Exception as e:
     logger.warning(f"Reviewer routes not loaded: {e}")
 
@@ -259,15 +260,15 @@ class NoCacheStaticFiles(StaticFiles):
         
         await super().__call__(scope, receive, send_wrapper)
 
-app.mount("/static", NoCacheStaticFiles(directory="static"), name="static")
+app.mount(TRAINER_STATIC, NoCacheStaticFiles(directory="static"), name="static")
 
 # Reviewer static files
 _reviewer_static = os.path.join(os.path.dirname(__file__), "reviewer-app", "static")
 if os.path.isdir(_reviewer_static):
-    app.mount("/reviewer/static", NoCacheStaticFiles(directory=_reviewer_static), name="reviewer-static")
+    app.mount(REVIEWER_STATIC, NoCacheStaticFiles(directory=_reviewer_static), name="reviewer-static")
 
 
-@app.get("/reviewer/")
+@app.get(REVIEWER_PREFIX + "/")
 async def reviewer_index(request: Request):
     """Serve the reviewer UI index page."""
     index_path = os.path.join(os.path.dirname(__file__), "reviewer-app", "static", "index.html")
@@ -275,17 +276,16 @@ async def reviewer_index(request: Request):
         from starlette.responses import HTMLResponse
         with open(index_path) as f:
             content = f.read()
-        # Browser-visible prefix: forwarded prefix or ASGI root_path + /reviewer/ when proxy strips path.
         prefix = (request.headers.get("x-forwarded-prefix") or "").rstrip("/")
         if not prefix:
             prefix = (request.scope.get("root_path") or "").rstrip("/")
         path = request.url.path.rstrip("/") or "/"
         if prefix:
-            base_href = f"{prefix}/reviewer/"
-        elif path.endswith("/reviewer"):
+            base_href = f"{prefix}{REVIEWER_PREFIX}/"
+        elif path.endswith(REVIEWER_PREFIX):
             base_href = f"{path}/"
         else:
-            base_href = "/reviewer/"
+            base_href = f"{REVIEWER_PREFIX}/"
         base_tag = f'<base href="{base_href}">'
         if "<base" not in content.lower():
             content = content.replace("<head>", "<head>\n  " + base_tag, 1)

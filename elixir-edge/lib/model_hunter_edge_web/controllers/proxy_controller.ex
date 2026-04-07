@@ -2,6 +2,11 @@ defmodule ModelHunterEdgeWeb.ProxyController do
   @moduledoc """
   Reverse proxy to Python services: core (trainer, reviewer, /api) and dashboard (monitoring, /admin).
   Generates/propagates X-Trace-Id and X-Authenticated-User headers.
+
+  Path routing source of truth: config_routing.py
+  /dashboard -> PYTHON_DASHBOARD_URL (strips /dashboard prefix)
+  /admin, /api/admin -> PYTHON_DASHBOARD_URL (keeps path)
+  everything else -> PYTHON_CORE_URL (keeps path, including /reviewer)
   """
   use Plug.Router
   require Logger

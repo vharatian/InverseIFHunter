@@ -7,6 +7,7 @@ and ML-ready insights.
 Run: python dashboard/main.py
 """
 import os
+import sys
 from pathlib import Path
 from typing import Optional
 from contextlib import asynccontextmanager
@@ -17,6 +18,11 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from log_reader import get_log_reader
+
+_repo_root = str(Path(__file__).resolve().parent.parent)
+if _repo_root not in sys.path:
+    sys.path.insert(0, _repo_root)
+from config_routing import ADMIN_PREFIX
 
 from admin.routes.auth_routes import router as admin_auth_router
 from admin.routes.team_routes import router as admin_team_router
@@ -231,7 +237,7 @@ app.include_router(admin_data_router)
 admin_static_dir = Path(__file__).parent / "static" / "admin"
 
 
-@app.get("/admin/")
+@app.get(ADMIN_PREFIX + "/")
 async def admin_ui():
     """Serve admin panel UI."""
     admin_index = admin_static_dir / "index.html"
@@ -241,7 +247,7 @@ async def admin_ui():
 
 
 if admin_static_dir.exists():
-    app.mount("/admin/static", StaticFiles(directory=str(admin_static_dir)), name="admin-static")
+    app.mount(ADMIN_PREFIX + "/static", StaticFiles(directory=str(admin_static_dir)), name="admin-static")
 
 
 # ============== Static Files ==============
