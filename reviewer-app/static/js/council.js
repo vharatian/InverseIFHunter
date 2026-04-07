@@ -3,7 +3,7 @@
  * Auto-run council, SSE streaming, verdict bar, triage modes (green/amber/red),
  * inline badges, stop button, chairman streaming, comprehensive rules modal.
  */
-import { getEmail, api } from "./api.js";
+import { getEmail, api, API_BASE } from "./api.js";
 import { escapeHtml } from "./task.js";
 import { showModal, showToast } from "./dom.js";
 
@@ -207,7 +207,7 @@ async function runCouncil(sessionId) {
   _state.abortCtrl = abortCtrl;
 
   try {
-    const response = await fetch(`/reviewer/api/tasks/${sessionId}/council-stream`, {
+    const response = await fetch(`${API_BASE}/api/tasks/${sessionId}/council-stream`, {
       method: "POST",
       headers: { "X-Reviewer-Email": getEmail() },
       signal: abortCtrl.signal,

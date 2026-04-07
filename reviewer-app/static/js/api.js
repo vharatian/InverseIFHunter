@@ -5,10 +5,11 @@ const EMAIL_KEY = "reviewer_email";
 const VERSION_CHECK_INTERVAL = 30000;
 let _currentVersion = null;
 let _pendingVersion = null;
-// When served under /reviewer (e.g. behind single-link proxy), API calls must use that prefix.
-const API_BASE = (() => {
+// Detect prefix (e.g. /staging/reviewer or /reviewer) from current URL for API calls.
+export const API_BASE = (() => {
   const p = typeof location !== "undefined" ? location.pathname : "";
-  return p.startsWith("/reviewer") ? "/reviewer" : "";
+  const idx = p.indexOf("/reviewer");
+  return idx >= 0 ? p.substring(0, idx + "/reviewer".length) : "";
 })();
 
 export function getEmail() {
@@ -68,7 +69,7 @@ export async function api(path, options = {}, retryOptions = {}) {
 
 export async function checkVersion() {
   try {
-    const res = await fetch("/api/version", { cache: "no-store" });
+    const res = await fetch(`${API_BASE}/api/version`, { cache: "no-store" });
     const data = await res.json();
     if (_currentVersion === null) {
       _currentVersion = data.version;
