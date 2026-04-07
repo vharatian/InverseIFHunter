@@ -21,7 +21,7 @@ else:
 if _agentic_root not in sys.path:
     sys.path.insert(0, _agentic_root)
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from starlette.types import Receive, Scope, Send
 
@@ -268,7 +268,7 @@ if os.path.isdir(_reviewer_static):
 
 
 @app.get("/reviewer/")
-async def reviewer_index(request):
+async def reviewer_index(request: Request):
     """Serve the reviewer UI index page."""
     index_path = os.path.join(os.path.dirname(__file__), "reviewer-app", "static", "index.html")
     if os.path.exists(index_path):
