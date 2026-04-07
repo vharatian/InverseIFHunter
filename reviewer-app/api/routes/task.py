@@ -16,6 +16,7 @@ from services.snapshot import build_snapshot_safe
 from services.queue_service import _extract_task_display_id
 from services.feedback_store import get_feedback, get_feedback_history
 from services.agent_store import get_agent_result as get_agent_result_store
+from api.ih_pg import get_last_reviewer_council
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,12 @@ async def get_task(
     task_display_id = _extract_task_display_id(session_dict)
     ti_config = get_task_identity_config()
 
+    last_council = None
+    try:
+        last_council = await get_last_reviewer_council(session_id)
+    except Exception:
+        logger.warning("Could not load last council run for %s", session_id, exc_info=True)
+
     return {
         "session_id": session_id,
         "task_display_id": task_display_id,
@@ -74,4 +81,5 @@ async def get_task(
         "review_status": review_status,
         "review_round": review_round,
         "previous_round_snapshot": previous_round_snapshot,
+        "last_council": last_council,
     }

@@ -43,3 +43,15 @@ def test_audit_403_without_header():
     """GET audit without reviewer header returns 403."""
     r = client.get("/api/audit")
     assert r.status_code == 403
+
+
+def test_notebook_preview_403_without_header():
+    """POST notebook-preview without reviewer header returns 403."""
+    r = client.post("/reviewer/api/notebook-preview", json={"url": "https://drive.google.com/file/d/x/view"})
+    assert r.status_code == 403
+
+
+def test_session_lookup_403_without_header():
+    """GET session-lookup without reviewer header returns 403."""
+    r = client.get("/reviewer/api/session-lookup?q=https%3A%2F%2Fexample.com")
+    assert r.status_code == 403

@@ -12,7 +12,7 @@ from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from database import get_db
-from models.db_models import SessionRow, HuntResultRow, TrainerRow
+from models.db_models import SessionRow, HuntResultRow, TrainerRow, QCRunRow
 from models.schemas import HuntSession, HuntConfig, HuntStatus, ParsedNotebook, HuntResult, TurnData
 
 logger = logging.getLogger(__name__)
@@ -272,3 +272,68 @@ async def find_sessions_by_file_id_pg(file_id: str, trainer_email: str = "") -> 
             {"session_id": row.id, "review_status": "unknown", "hunt_status": row.status or "pending"}
             for row in result.fetchall()
         ]
+
+
+async def find_sessions_by_colab_url_pg(url: str) -> List[Dict[str, Any]]:
+    """Find sessions whose metadata colab_url or url matches (exact or trailing-slash variant)."""
+    u = (url or "").strip()
+    if not u:
+        return []
+    u_strip = u.rstrip("/")
+    async with get_db() as db:
+        result = await db.execute(
+            text("""
+                SELECT id, status FROM sessions
+                WHERE TRIM(COALESCE(metadata->>'colab_url', '')) IN (:u, :u2)
+                   OR TRIM(COALESCE(metadata->>'url', '')) IN (:u, :u2)
+                ORDER BY updated_at DESC
+                LIMIT 10
+            """),
+            {"u": u, "u2": u_strip},
+        )
+        return [
+            {"session_id": row.id, "review_status": "unknown", "hunt_status": row.status or "pending"}
+            for row in result.fetchall()
+        ]
+
+
+async def insert_qc_run_pg(
+    session_id: str,
+    run_type: str,
+    result: Dict[str, Any],
+    rules_applied: List[Any],
+) -> None:
+    """Append one QC / reviewer council run (append-only history)."""
+    async with get_db() as db:
+        await db.execute(
+            pg_insert(QCRunRow).values(
+                session_id=session_id,
+                run_type=run_type,
+                result=result,
+                rules_applied=list(rules_applied or []),
+            )
+        )
+
+
+async def get_last_qc_run_pg(session_id: str, run_type: str) -> Optional[Dict[str, Any]]:
+    """Latest qc_runs row for session + run_type, or None."""
+    async with get_db() as db:
+        res = await db.execute(
+            select(QCRunRow)
+            .where(QCRunRow.session_id == session_id, QCRunRow.run_type == run_type)
+            .order_by(QCRunRow.created_at.desc())
+            .limit(1)
+        )
+        row = res.scalar_one_or_none()
+        if row is None:
+            return None
+        return {
+            "id": str(row.id),
+            "session_id": row.session_id,
+            "run_type": row.run_type,
+            "result": dict(row.result) if isinstance(row.result, dict) else row.result,
+            "rules_applied": list(row.rules_applied or []),
+            "created_at": row.created_at.isoformat().replace("+00:00", "Z")
+            if row.created_at
+            else None,
+        }

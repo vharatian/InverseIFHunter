@@ -58,6 +58,7 @@ try:
     from api.routes.colab import router as colab_router
     from api.routes.presence import router as presence_router
     from api.routes.notebook_preview import router as notebook_preview_router
+    from api.routes.session_lookup import router as session_lookup_router
     from api.routes.council import router as council_router
 finally:
     # 4. Restore sys.path and main-app modules so the rest of python-core
@@ -90,4 +91,5 @@ reviewer_router.include_router(notifications_router)
 reviewer_router.include_router(colab_router)
 reviewer_router.include_router(presence_router)
 reviewer_router.include_router(notebook_preview_router)
+reviewer_router.include_router(session_lookup_router)
 reviewer_router.include_router(council_router)

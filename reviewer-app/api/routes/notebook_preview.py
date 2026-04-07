@@ -6,8 +6,12 @@ POST /api/notebook-preview  — fetch a notebook from a Google Drive / Colab URL
                               Reviewers use this to verify task content against a link.
 """
 import logging
-from fastapi import APIRouter, HTTPException
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+
+from api.deps import require_reviewer
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["notebook_preview"])
@@ -24,7 +28,10 @@ class NotebookPreviewResponse(BaseModel):
 
 
 @router.post("/notebook-preview", response_model=NotebookPreviewResponse)
-async def notebook_preview(body: NotebookPreviewRequest):
+async def notebook_preview(
+    body: NotebookPreviewRequest,
+    _reviewer: Annotated[str, Depends(require_reviewer)],
+):
     """
     Fetch a notebook from Google Drive/Colab URL and return prompt + ideal response.
     No session is created; this is read-only for the reviewer.

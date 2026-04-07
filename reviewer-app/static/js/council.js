@@ -7,6 +7,66 @@ import { getEmail, api, API_BASE } from "./api.js";
 import { escapeHtml } from "./task.js";
 import { showModal, showToast } from "./dom.js";
 
+function _ruleStateFromStored(rd) {
+  const models = {};
+  const cr = rd.council_responses || {};
+  const votes = rd.council_votes || [];
+  for (const v of votes) {
+    const mid = v.model_id || v.model;
+    if (!mid) continue;
+    const text = typeof cr[mid] === "string" ? cr[mid] : "";
+    models[mid] = { status: "done", vote: v.vote, chunks: text ? [text] : [] };
+  }
+  let chairman = null;
+  if (rd.chairman_model) {
+    chairman = {
+      model: rd.chairman_model,
+      status: "done",
+      passed: rd.chairman_verdict === "PASS",
+      rationale: rd.chairman_rationale || "",
+      chunks: [],
+    };
+  }
+  const ref = RULES_REFERENCE.find((r) => r.id === rd.rule_id);
+  return {
+    id: rd.rule_id,
+    description: rd.content_checked || ref?.description || rd.rule_id,
+    status: "done",
+    passed: rd.passed,
+    councilVotes: votes,
+    chairman,
+    issue: rd.issue,
+    rationale: rd.rationale,
+    models,
+  };
+}
+
+/** Hydrate council UI from GET /api/tasks last_council row. */
+export function restoreCouncilFromTask(lastCouncil) {
+  if (!lastCouncil?.result?.complete) return;
+  const { complete, rule_results } = lastCouncil.result;
+  if (!complete || !Array.isArray(rule_results)) return;
+
+  resetCouncil();
+  const slotsEl = document.getElementById("council-slots");
+  const summaryEl = document.getElementById("council-summary");
+  const detailEl = document.getElementById("council-detail");
+  if (slotsEl) {
+    slotsEl.innerHTML = "";
+    slotsEl.hidden = false;
+    slotsEl.classList.add("council-slots--grid");
+  }
+
+  for (const rd of rule_results) {
+    if (!rd.rule_id) continue;
+    _state.ruleOrder.push(rd.rule_id);
+    _state.rules[rd.rule_id] = _ruleStateFromStored(rd);
+    _renderSlot(slotsEl, rd.rule_id);
+    _injectBadges(rd.rule_id, rd.passed);
+  }
+  _handleEvent(complete, slotsEl, summaryEl, detailEl);
+}
+
 const MODEL_SHORT = {
   "openai/gpt-5.2": "GPT-5.2",
   "anthropic/claude-sonnet-4.6": "Sonnet 4.6",
@@ -191,7 +251,11 @@ async function runCouncil(sessionId) {
   const banner = document.getElementById("triage-banner");
 
   if (bar) bar.className = "council-bar council-bar--running";
-  if (slotsEl) { slotsEl.innerHTML = ""; slotsEl.hidden = false; }
+  if (slotsEl) {
+    slotsEl.innerHTML = "";
+    slotsEl.hidden = false;
+    slotsEl.classList.add("council-slots--grid");
+  }
   if (summaryEl) summaryEl.textContent = "Starting council...";
   if (detailEl) { detailEl.innerHTML = ""; detailEl.hidden = true; }
   if (banner) { banner.innerHTML = ""; banner.hidden = true; }
@@ -347,6 +411,9 @@ function _handleEvent(evt, slotsEl, summaryEl, detailEl) {
     const bar = document.getElementById("council-bar");
     if (bar) bar.className = "council-bar council-bar--error";
   }
+  else if (type === "persist_warning") {
+    showToast(evt.message || "Could not save council results.", "error");
+  }
 }
 
 // ── Triage system ──────────────────────────────────────────────────────
@@ -380,14 +447,10 @@ function _applyTriageMode(issues) {
         <p class="triage-subtitle">Council found no issues. This task looks good to approve.</p>
       </div>
       <div class="triage-actions">
-        <button type="button" class="btn-quick-approve" id="btn-quick-approve">Quick Approve</button>
         <button type="button" class="btn-show-details" id="btn-triage-details">Show task details</button>
       </div>`;
     const taskContent = document.getElementById("task-content");
     if (taskContent) taskContent.classList.add("task-content--collapsed");
-    document.getElementById("btn-quick-approve")?.addEventListener("click", () => {
-      if (_onApprove) _onApprove();
-    });
     document.getElementById("btn-triage-details")?.addEventListener("click", () => {
       if (taskContent) taskContent.classList.toggle("task-content--collapsed");
       const btn = document.getElementById("btn-triage-details");

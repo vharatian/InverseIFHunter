@@ -1735,6 +1735,118 @@ button[aria-busy="true"]::after {
     padding: 0 var(--space-lg) var(--space-md);
 }
 
+.council-slots--grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+}
+@media (min-width: 720px) {
+    .council-slots--grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+.council-slots--grid .council-slot {
+    justify-content: flex-start;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+/* Slim reviewer fetch */
+.main--reviewer-slim {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: var(--space-lg);
+}
+.reviewer-fetch-card {
+    margin-bottom: var(--space-lg);
+    padding: var(--space-lg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--bg-card);
+}
+.reviewer-fetch-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+    margin-top: var(--space-sm);
+}
+.reviewer-fetch-input {
+    flex: 1;
+    min-width: 200px;
+    padding: 10px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    font-size: 0.9rem;
+}
+.btn-fetch-task {
+    padding: 10px 20px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--accent-primary);
+    background: var(--accent-primary);
+    color: var(--bg-base, #0a0a0f);
+    font-weight: 600;
+    cursor: pointer;
+    font-family: var(--font-body);
+}
+.btn-fetch-task:hover:not(:disabled) {
+    filter: brightness(1.08);
+}
+.fetch-status {
+    margin-top: var(--space-sm);
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+.fetch-status.error {
+    color: var(--danger);
+}
+.lookup-matches-title {
+    margin: var(--space-md) 0 var(--space-xs);
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+.lookup-matches-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.lookup-pick-btn {
+    width: 100%;
+    text-align: left;
+    padding: 10px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    cursor: pointer;
+    font-family: var(--font-mono, monospace);
+    font-size: 0.9rem;
+}
+.lookup-pick-btn:hover {
+    border-color: var(--accent-primary);
+    background: var(--bg-hover);
+}
+.lookup-pick-meta {
+    float: right;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    font-family: var(--font-body);
+}
+.task-view-header--slim {
+    margin-bottom: var(--space-md);
+}
+.notebook-fetch-card--compact {
+    margin-bottom: var(--space-lg);
+}
+.task-panel {
+    animation: view-enter 0.25s ease-out;
+}
+
 .council-slot {
     display: inline-flex;
     align-items: center;
