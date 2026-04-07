@@ -275,12 +275,17 @@ async def reviewer_index(request: Request):
         from starlette.responses import HTMLResponse
         with open(index_path) as f:
             content = f.read()
+        # Browser-visible prefix: forwarded prefix or ASGI root_path + /reviewer/ when proxy strips path.
+        prefix = (request.headers.get("x-forwarded-prefix") or "").rstrip("/")
+        if not prefix:
+            prefix = (request.scope.get("root_path") or "").rstrip("/")
         path = request.url.path.rstrip("/") or "/"
-        if path.endswith("/reviewer"):
+        if prefix:
+            base_href = f"{prefix}/reviewer/"
+        elif path.endswith("/reviewer"):
             base_href = f"{path}/"
         else:
-            prefix = (request.headers.get("x-forwarded-prefix") or "").rstrip("/")
-            base_href = f"{prefix}/reviewer/"
+            base_href = "/reviewer/"
         base_tag = f'<base href="{base_href}">'
         if "<base" not in content.lower():
             content = content.replace("<head>", "<head>\n  " + base_tag, 1)
