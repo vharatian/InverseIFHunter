@@ -31,6 +31,8 @@ def _ensure_agentic_path():
     root = str(Path(__file__).resolve().parent.parent.parent.parent)
     if root not in sys.path:
         sys.path.append(root)
+    if "/" not in sys.path:
+        sys.path.append("/")
 
 
 def _save(data: Dict[str, Any]) -> None:

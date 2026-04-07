@@ -23,6 +23,7 @@ from admin.routes.team_routes import router as admin_team_router
 from admin.routes.config_routes import router as admin_config_router
 from admin.routes.tracking_routes import router as admin_tracking_router
 from admin.routes.dashboard_admin_routes import router as admin_dashboard_router
+from admin.routes.data_routes import router as admin_data_router
 
 
 # Configuration
@@ -224,6 +225,7 @@ app.include_router(admin_team_router)
 app.include_router(admin_config_router)
 app.include_router(admin_tracking_router)
 app.include_router(admin_dashboard_router)
+app.include_router(admin_data_router)
 
 # Admin UI
 admin_static_dir = Path(__file__).parent / "static" / "admin"

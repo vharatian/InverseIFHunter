@@ -83,7 +83,7 @@ async function logout() {
 function showTab(tabName) {
     document.querySelectorAll('#tab-nav .tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tabName));
     document.querySelectorAll('.content-area > .section').forEach(s => s.classList.toggle('active', s.id === `section-${tabName}`));
-    ({ team: loadTeam, config: loadConfig, tracking: loadTracking, admins: loadDashboardAdmins })[tabName]?.();
+    ({ team: loadTeam, config: loadConfig, tracking: loadTracking, admins: loadDashboardAdmins, data: loadDataTab })[tabName]?.();
 }
 
 // ═════════════════════════════════════════════════════════════════
@@ -563,6 +563,79 @@ async function handleAdminsAction(action, params) {
 
 // ═════════════════════════════════════════════════════════════════
 // EVENT DELEGATION
+// ═════════════════════════════════════════════════════════════════
+// DATA TAB
+// ═════════════════════════════════════════════════════════════════
+
+async function loadDataTab() {
+    const c = document.getElementById('data-content');
+    c.innerHTML = '<div class="loading">Loading...</div>';
+    try {
+        const stats = await api('data/stats');
+        renderDataTab(stats, c);
+    } catch (e) { c.innerHTML = `<div class="error-msg">${esc(e.message)}</div>`; }
+}
+
+function renderDataTab(stats, container) {
+    container.innerHTML = `
+        <div class="summary-cards" style="margin-bottom:1.5rem;">
+            <div class="summary-card"><div class="summary-value">${stats.total_sessions}</div><div class="summary-label">Total Sessions</div></div>
+            <div class="summary-card"><div class="summary-value">${stats.submitted_sessions}</div><div class="summary-label">Submitted / Approved</div></div>
+            <div class="summary-card"><div class="summary-value">${stats.draft_sessions}</div><div class="summary-label">Draft / In-Progress</div></div>
+            <div class="summary-card"><div class="summary-value">${stats.total_hunt_results}</div><div class="summary-label">Hunt Results</div></div>
+        </div>
+        <div class="card" style="margin-bottom:1rem;">
+            <div class="card-header"><h3>Delete Single Session</h3></div>
+            <div style="padding:1rem;display:flex;gap:0.5rem;align-items:flex-end;">
+                <div class="form-group" style="flex:1;margin:0;">
+                    <label for="delete-session-id">Session ID</label>
+                    <input type="text" id="delete-session-id" placeholder="e.g. a3f2b91c" />
+                </div>
+                <button class="btn btn-danger btn-sm" id="delete-session-btn">Delete</button>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header"><h3>Wipe Draft / Test Sessions</h3></div>
+            <div style="padding:1rem;">
+                <p style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:0.75rem;">
+                    Removes all sessions that are NOT submitted or approved. Submitted and approved sessions are preserved.
+                </p>
+                <div style="display:flex;gap:0.5rem;align-items:flex-end;">
+                    <div class="form-group" style="margin:0;">
+                        <label for="wipe-days">Older than (days, optional)</label>
+                        <input type="number" id="wipe-days" placeholder="All" min="1" style="width:100px;" />
+                    </div>
+                    <button class="btn btn-danger btn-sm" id="wipe-sessions-btn">Wipe Drafts</button>
+                </div>
+            </div>
+        </div>
+    `;
+    document.getElementById('delete-session-btn').addEventListener('click', async () => {
+        const sid = document.getElementById('delete-session-id').value.trim();
+        if (!sid) { toast('Enter a session ID', 'error'); return; }
+        if (!confirm(\`Delete session \${sid}? This cannot be undone.\`)) return;
+        try {
+            await api(\`data/session/\${sid}\`, { method: 'DELETE' });
+            toast(\`Session \${sid} deleted\`);
+            loadDataTab();
+        } catch (e) { toast(e.message, 'error'); }
+    });
+    document.getElementById('wipe-sessions-btn').addEventListener('click', async () => {
+        const days = document.getElementById('wipe-days').value;
+        const msg = days
+            ? \`Wipe all draft sessions older than \${days} days?\`
+            : 'Wipe ALL draft/in-progress sessions? Submitted & approved are safe.';
+        if (!confirm(msg)) return;
+        try {
+            const body = { confirm: 'yes' };
+            if (days) body.older_than_days = parseInt(days);
+            const result = await api('data/wipe-sessions', { method: 'POST', body: JSON.stringify(body) });
+            toast(\`Wiped: \${result.sessions}, results: \${result.results}\`);
+            loadDataTab();
+        } catch (e) { toast(e.message, 'error'); }
+    });
+}
+
 // ═════════════════════════════════════════════════════════════════
 
 function init() {

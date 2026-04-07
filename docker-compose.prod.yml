@@ -70,6 +70,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://${PG_USER:-mh}:${PG_PASSWORD}@postgres:5432/${PG_DATABASE:-model_hunter}
     volumes:
       - ./config:/config
+      - ./agentic_reviewer:/agentic_reviewer:ro
     depends_on:
       postgres:
         condition: service_healthy
