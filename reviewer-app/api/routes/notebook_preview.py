@@ -2,16 +2,24 @@
 Notebook preview route for the reviewer app.
 
 POST /api/notebook-preview  — fetch a notebook from a Google Drive / Colab URL
-                              and return only: prompt, reference (ideal response), criteria.
-                              Reviewers use this to verify task content against a link.
+                              and return all labeled sections.
+
+Heading registry: notebook_headings.py
 """
 import logging
+import sys
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from api.deps import require_reviewer
+
+_repo_root = str(Path(__file__).resolve().parents[3])
+if _repo_root not in sys.path:
+    sys.path.insert(0, _repo_root)
+from notebook_headings import TASK_ALIASES, METADATA_KEYS
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["notebook_preview"])
@@ -232,13 +240,10 @@ def _classify_heading(label: str) -> tuple[str, str | None, int | None]:
     stripped = re.sub(r"^turn[_\s-]*\d+\s*[:：]\s*", "", lower, flags=re.IGNORECASE).strip()
     norm = re.sub(r"[\s_-]+", "_", stripped)
 
-    # Task sections
-    if norm == "prompt":
-        return "task", "prompt", None
-    if norm in ("response", "ideal_response", "ideal", "trainer_response", "expected_response"):
-        return "task", "response", None
-    if norm in ("response_reference", "reference", "rubric", "criteria", "scoring", "response_ref", "grading_rubric"):
-        return "task", "response_reference", None
+    # Task sections (from shared heading registry)
+    task_key = TASK_ALIASES.get(norm)
+    if task_key:
+        return "task", task_key, None
 
     # Slot: llm_judge_N
     m = re.match(r"^llm_judge[_\s-]*(\d+)$", lower)
@@ -266,20 +271,13 @@ def _classify_heading(label: str) -> tuple[str, str | None, int | None]:
                               "turn", "prompt", "response", "response_reference"):
             return "slot_model", name_part, slot_num
 
-    # Metadata keys
-    _META_KEYS = {
-        "number_of_attempts_made", "total_hunts", "pass_rate", "hunt_mode",
-        "hunt_model", "judge_model", "judge_system_prompt",
-        "number_of_turns", "breaking_turn", "conversation_history",
-        "selected_response", "selected_judge",
-    }
-    if norm in _META_KEYS:
+    # Metadata keys (from shared heading registry)
+    if norm in METADATA_KEYS:
         return "metadata", norm, None
-    # Turn-prefixed metadata (e.g. Turn_1_Judge_Model)
     m_meta = re.match(r"^turn[_\s-]*\d+[_\s-]*(.+)$", lower)
     if m_meta:
         sub = re.sub(r"[\s_-]+", "_", m_meta.group(1).strip())
-        if sub in _META_KEYS:
+        if sub in METADATA_KEYS:
             return "metadata", sub, None
 
     return "extra", None, None

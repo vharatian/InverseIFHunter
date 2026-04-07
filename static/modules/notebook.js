@@ -4,6 +4,8 @@
  * Handles notebook upload/fetch, preview tab population, metadata display,
  * save handlers, criteria parsing, and Drive integration.
  * 
+ * Heading registry: notebook_headings.py (keep headings in sync)
+ * 
  * Dependencies: config.js, utils.js, state.js, dom.js (+ editors, results, auth, api, hunt)
  */
 

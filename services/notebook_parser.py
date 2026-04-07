@@ -6,6 +6,8 @@ Parses .ipynb files and extracts structured data including:
 - Prompt and response reference
 - Judge prompts and system prompts
 - Model/judge result slots
+
+Heading registry: notebook_headings.py
 """
 import json
 import logging
