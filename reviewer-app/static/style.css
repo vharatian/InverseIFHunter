@@ -1847,6 +1847,57 @@ button[aria-busy="true"]::after {
     animation: view-enter 0.25s ease-out;
 }
 
+.notebook-only-banner {
+    margin: 0 0 var(--space-md);
+    padding: var(--space-md) var(--space-lg);
+    border-radius: var(--radius-md);
+    font-size: 0.88rem;
+    line-height: 1.45;
+    border: 1px solid var(--border);
+}
+.notebook-only-banner--info {
+    background: rgba(59, 130, 246, 0.12);
+    border-color: rgba(59, 130, 246, 0.35);
+    color: var(--text-secondary);
+}
+.notebook-only-banner--warn {
+    background: rgba(234, 179, 8, 0.15);
+    border-color: rgba(234, 179, 8, 0.4);
+    color: var(--text-primary);
+}
+.notebook-only-banner--error {
+    background: var(--danger-bg);
+    border-color: rgba(239, 68, 68, 0.35);
+    color: var(--danger);
+}
+.notebook-only-sub {
+    display: block;
+    margin-top: 6px;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+.nbp-warnings {
+    margin-bottom: var(--space-md);
+    padding: var(--space-md);
+    border-radius: var(--radius-md);
+    background: rgba(234, 179, 8, 0.12);
+    border: 1px solid rgba(234, 179, 8, 0.35);
+    font-size: 0.86rem;
+    color: var(--text-primary);
+}
+.nbp-meta {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin: 0 0 var(--space-sm);
+}
+.task-error-hint {
+    display: block;
+    margin-top: var(--space-sm);
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    font-weight: normal;
+}
+
 .council-slot {
     display: inline-flex;
     align-items: center;

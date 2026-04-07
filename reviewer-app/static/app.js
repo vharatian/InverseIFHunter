@@ -2,7 +2,7 @@
  * Slim reviewer: auth, session/URL fetch, task preview, council.
  */
 import { getEmail, setEmail, api, initVersionCheck } from "./js/api.js";
-import { show, showGate, showToast, showModal } from "./js/dom.js";
+import { showGate, showToast } from "./js/dom.js";
 import { loadTask, renderTaskContent, escapeHtml } from "./js/task.js";
 import { initCouncil, resetCouncil, restoreCouncilFromTask } from "./js/council.js";
 
@@ -11,6 +11,18 @@ let currentTask = null;
 let _isLoadingTask = false;
 
 const SESSION_ID_RE = /^[a-f0-9]{8}$/i;
+
+function _isLikelyNotebookUrl(s) {
+  const t = (s || "").trim().toLowerCase();
+  if (!t) return false;
+  return (
+    t.includes("colab.research.google.com") ||
+    t.includes("colab.google.com") ||
+    t.includes("drive.google.com") ||
+    t.includes("raw.githubusercontent.com") ||
+    (t.includes("github.com") && t.includes(".ipynb"))
+  );
+}
 
 function _setFetchStatus(msg, isError) {
   const el = document.getElementById("fetch-status");
@@ -69,7 +81,15 @@ async function resolveAndLoad(query) {
     const data = await api("/api/session-lookup?q=" + encodeURIComponent(raw));
     const matches = data.matches || [];
     if (matches.length === 0) {
-      _setFetchStatus("No session found for that URL. Try the 8-character session ID from the trainer queue.", true);
+      if (_isLikelyNotebookUrl(raw)) {
+        _setFetchStatus("No linked session in the database. Fetching notebook from URL\u2026", false);
+        await loadNotebookOnly(raw);
+        return;
+      }
+      _setFetchStatus(
+        "No session found for that URL. Paste a Colab or Drive link to preview the .ipynb, or use the 8-character session ID from the trainer queue.",
+        true,
+      );
       return;
     }
     if (matches.length === 1) {
@@ -84,6 +104,94 @@ async function resolveAndLoad(query) {
   }
 }
 
+async function loadNotebookOnly(url) {
+  const raw = (url || "").trim();
+  if (!raw) {
+    _setFetchStatus("Enter a Colab or Drive URL.", true);
+    return;
+  }
+  _isLoadingTask = true;
+  _hideLookupMatches();
+  currentSessionId = null;
+  currentTask = null;
+
+  const panel = document.getElementById("task-panel");
+  const banner = document.getElementById("notebook-only-banner");
+  const taskSessionIdEl = document.getElementById("task-session-id");
+  const taskDisplayIdEl = document.getElementById("task-display-id");
+  const taskDisplayIdLabelEl = document.getElementById("task-display-id-label");
+  const taskErrorEl = document.getElementById("task-error");
+  const taskContentEl = document.getElementById("task-content");
+
+  if (panel) {
+    panel.hidden = false;
+    panel.dataset.notebookOnly = "true";
+  }
+  if (banner) {
+    banner.hidden = false;
+    banner.className = "notebook-only-banner notebook-only-banner--info";
+    banner.innerHTML =
+      "<strong>Notebook preview only.</strong> No training session is linked to this server for this link. " +
+      "Content below is read from the .ipynb file. Human reviews and council need a session ID from the trainer queue.";
+  }
+  if (taskDisplayIdLabelEl) taskDisplayIdLabelEl.textContent = "Source";
+  if (taskDisplayIdEl) taskDisplayIdEl.textContent = raw.length > 64 ? raw.slice(0, 64) + "\u2026" : raw;
+  if (taskSessionIdEl) taskSessionIdEl.textContent = "";
+  if (taskErrorEl) taskErrorEl.hidden = true;
+  if (taskContentEl) {
+    taskContentEl.textContent = "Loading notebook\u2026";
+    taskContentEl.classList.add("loading-placeholder");
+    taskContentEl.setAttribute("aria-busy", "true");
+  }
+
+  const fetchInput = document.getElementById("notebook-fetch-url");
+  if (fetchInput) fetchInput.value = raw;
+
+  resetCouncil();
+  const summaryEl = document.getElementById("council-summary");
+  if (summaryEl) summaryEl.textContent = "Council requires a linked session.";
+
+  try {
+    const data = await api("/api/notebook-preview", {
+      method: "POST",
+      body: JSON.stringify({ url: raw }),
+    });
+    if (taskContentEl) {
+      taskContentEl.classList.remove("loading-placeholder");
+      taskContentEl.setAttribute("aria-busy", "false");
+      taskContentEl.innerHTML = _renderNotebookPreviewBody(data);
+    }
+    if (banner && data.warnings && data.warnings.length) {
+      banner.className = "notebook-only-banner notebook-only-banner--warn";
+      banner.innerHTML =
+        "<strong>Content check.</strong> " +
+        escapeHtml(data.warnings.join(" ")) +
+        " <span class=\"notebook-only-sub\">Cells scanned: " +
+        (data.cells_scanned ?? 0) +
+        ".</span>";
+    }
+    _setFetchStatus(
+      data.has_structured_content ? "Notebook loaded." : "Notebook opened but expected sections may be missing.",
+      !data.has_structured_content,
+    );
+  } catch (e) {
+    if (taskContentEl) {
+      taskContentEl.classList.remove("loading-placeholder");
+      taskContentEl.textContent = "";
+      taskContentEl.setAttribute("aria-busy", "false");
+    }
+    if (banner) {
+      banner.hidden = false;
+      banner.className = "notebook-only-banner notebook-only-banner--error";
+      banner.innerHTML = "<strong>Could not load notebook.</strong> " + escapeHtml(e.message || "Unknown error");
+    }
+    _setFetchStatus(e.message || "Notebook fetch failed.", true);
+    showToast(e.message || "Notebook fetch failed.", "error");
+  } finally {
+    _isLoadingTask = false;
+  }
+}
+
 async function loadTaskAndShow(sessionId) {
   if (_isLoadingTask) return;
   _isLoadingTask = true;
@@ -91,6 +199,13 @@ async function loadTaskAndShow(sessionId) {
   currentSessionId = sessionId;
 
   const panel = document.getElementById("task-panel");
+  if (panel) delete panel.dataset.notebookOnly;
+
+  const nbBanner = document.getElementById("notebook-only-banner");
+  if (nbBanner) {
+    nbBanner.hidden = true;
+    nbBanner.textContent = "";
+  }
   const taskSessionIdEl = document.getElementById("task-session-id");
   const taskDisplayIdEl = document.getElementById("task-display-id");
   const taskDisplayIdLabelEl = document.getElementById("task-display-id-label");
@@ -144,11 +259,16 @@ async function loadTaskAndShow(sessionId) {
       taskContentEl.textContent = "";
       taskContentEl.setAttribute("aria-busy", "false");
     }
+    const msg = e.message || "Could not load task.";
+    const isNotFound = /not found|404/i.test(msg);
     if (taskErrorEl) {
-      taskErrorEl.textContent = e.message || "Could not load task.";
+      taskErrorEl.innerHTML = escapeHtml(msg) +
+        (isNotFound
+          ? "<br /><span class=\"task-error-hint\">This server has no session with that ID. Paste your <strong>Colab or Drive</strong> link in the fetch box to load the notebook file directly, or copy the session ID from the trainer app.</span>"
+          : "");
       taskErrorEl.hidden = false;
     }
-    showToast(e.message || "Could not load task.", "error");
+    showToast(msg, "error");
   } finally {
     _isLoadingTask = false;
   }
@@ -237,7 +357,7 @@ document.getElementById("btn-fetch-notebook")?.addEventListener("click", async (
     });
     statusEl.hidden = true;
     resultEl.hidden = false;
-    resultEl.innerHTML = _renderNotebookPreview(data);
+    resultEl.innerHTML = _renderNotebookPreviewBody(data);
   } catch (e) {
     statusEl.textContent = "Error: " + (e.message || "Could not fetch notebook.");
     statusEl.className = "notebook-fetch-status error";
@@ -248,7 +368,16 @@ document.getElementById("btn-fetch-notebook")?.addEventListener("click", async (
   }
 });
 
-function _renderNotebookPreview(data) {
+function _renderNotebookPreviewBody(data) {
+  const warnings = data.warnings || [];
+  const warnBlock =
+    warnings.length > 0
+      ? `<div class="nbp-warnings" role="alert"><strong>Notice:</strong> ${warnings.map((w) => escapeHtml(w)).join(" ")}</div>`
+      : "";
+  const meta =
+    data.cells_scanned != null
+      ? `<p class="nbp-meta">Cells scanned in notebook: ${Number(data.cells_scanned)}</p>`
+      : "";
   const prompt = escapeHtml(data.prompt || "(no prompt)");
   const idealResponse = (data.ideal_response || "").trim();
   const criteria = data.criteria || [];
@@ -259,10 +388,13 @@ function _renderNotebookPreview(data) {
   const idealHtml = idealResponse
     ? `<div class="nbp-section"><div class="nbp-section-label">Ideal Response</div><div class="nbp-ideal-response">${escapeHtml(idealResponse)}</div></div>`
     : "";
-  return `
-    <div class="nbp-section"><div class="nbp-section-label">Prompt</div><div class="nbp-text">${prompt}</div></div>
+  return (
+    warnBlock +
+    meta +
+    `<div class="nbp-section"><div class="nbp-section-label">Prompt</div><div class="nbp-text">${prompt}</div></div>
     ${idealHtml}
-    <div class="nbp-section"><div class="nbp-section-label">Criteria / Rubric (${criteria.length})</div>${criteriaHtml}</div>`;
+    <div class="nbp-section"><div class="nbp-section-label">Criteria / Rubric (${criteria.length})</div>${criteriaHtml}</div>`
+  );
 }
 
 initCouncil(() => currentSessionId, null);

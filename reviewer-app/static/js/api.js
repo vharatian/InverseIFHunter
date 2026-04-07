@@ -50,8 +50,14 @@ export async function api(path, options = {}, retryOptions = {}) {
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }));
-        // Don't retry HTTP errors (4xx/5xx) — only network-level failures
-        throw new Error(err.detail || res.statusText);
+        const d = err.detail;
+        let msg = res.statusText;
+        if (typeof d === "string") msg = d;
+        else if (Array.isArray(d))
+          msg = d.map((x) => (typeof x === "object" && x?.msg ? x.msg : String(x))).join("; ");
+        else if (d && typeof d === "object") msg = JSON.stringify(d);
+        if (res.status === 404 && (msg === "Not Found" || !msg)) msg = "Not found (404).";
+        throw new Error(msg);
       }
       if (res.status === 204) return null;
       return await res.json();

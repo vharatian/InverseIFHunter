@@ -171,6 +171,15 @@ export function initCouncil(getSessionId, onApprove) {
     runBtn.addEventListener("click", () => {
       const sid = _getSessionId();
       if (sid) runCouncil(sid);
+      else {
+        const nbOnly = document.getElementById("task-panel")?.dataset?.notebookOnly === "true";
+        showToast(
+          nbOnly
+            ? "Council only runs for a linked training session. This view is from the notebook file only."
+            : "Load a task (session ID from the trainer queue) first.",
+          "info",
+        );
+      }
     });
   }
 
