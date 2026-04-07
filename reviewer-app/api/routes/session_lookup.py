@@ -1,21 +1,11 @@
 """Resolve session_id from pasted Colab/Drive URL or return matches for disambiguation."""
 import re
-import sys
-from pathlib import Path
 from typing import Annotated, Any, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.deps import require_reviewer
-
-_agentic_root = Path(__file__).resolve().parent.parent.parent.parent
-if str(_agentic_root) not in sys.path:
-    sys.path.insert(0, str(_agentic_root))
-
-from services.pg_session import (  # noqa: E402
-    find_sessions_by_colab_url_pg,
-    find_sessions_by_file_id_pg,
-)
+from api.ih_pg import _pg_session
 
 router = APIRouter(prefix="/api", tags=["session_lookup"])
 
@@ -79,12 +69,13 @@ async def session_lookup(
             "matches": [{"session_id": sid, "hunt_status": "unknown", "review_status": "unknown"}],
         }
 
+    pg = _pg_session()
     file_id = _extract_google_file_id(raw)
     matches: List[Dict[str, Any]] = []
     if file_id:
-        matches = await find_sessions_by_file_id_pg(file_id)
+        matches = await pg.find_sessions_by_file_id_pg(file_id)
     if not matches:
-        matches = await find_sessions_by_colab_url_pg(raw)
+        matches = await pg.find_sessions_by_colab_url_pg(raw)
 
     matches = _dedupe_matches(matches)
     return {"query_type": "url", "file_id": file_id, "matches": matches}
