@@ -1,16 +1,31 @@
 /**
- * Slim reviewer: auth, session/URL fetch, task preview, council.
+ * Slim reviewer: auth, fetch notebook by Colab/Drive URL only (no session DB lookup).
  */
 import { getEmail, setEmail, api, initVersionCheck } from "./js/api.js";
 import { showGate, showToast } from "./js/dom.js";
-import { loadTask, renderTaskContent, escapeHtml } from "./js/task.js";
-import { initCouncil, resetCouncil, restoreCouncilFromTask } from "./js/council.js";
+import { escapeHtml } from "./js/task.js";
+import { initCouncil, resetCouncil } from "./js/council.js";
 
 let currentSessionId = null;
 let currentTask = null;
 let _isLoadingTask = false;
 
-const SESSION_ID_RE = /^[a-f0-9]{8}$/i;
+function _normalizeNotebookUrl(s) {
+  let t = (s || "").trim();
+  if (!t) return "";
+  if (!/^https?:\/\//i.test(t)) {
+    if (
+      t.includes("colab.") ||
+      t.includes("drive.google") ||
+      t.includes("github.com") ||
+      t.includes("githubusercontent.com") ||
+      /^[\w.-]+\.[a-z]{2,}\//i.test(t)
+    ) {
+      t = "https://" + t.replace(/^\/+/, "");
+    }
+  }
+  return t;
+}
 
 function _isLikelyNotebookUrl(s) {
   const t = (s || "").trim().toLowerCase();
@@ -20,6 +35,7 @@ function _isLikelyNotebookUrl(s) {
     t.includes("colab.google.com") ||
     t.includes("drive.google.com") ||
     t.includes("raw.githubusercontent.com") ||
+    t.includes("githubusercontent.com") ||
     (t.includes("github.com") && t.includes(".ipynb"))
   );
 }
@@ -42,72 +58,29 @@ function _hideLookupMatches() {
   if (box) box.hidden = true;
 }
 
-function _showLookupMatches(matches) {
-  const box = document.getElementById("lookup-matches");
-  const list = document.getElementById("lookup-matches-list");
-  if (!box || !list) return;
-  list.innerHTML = "";
-  for (const m of matches) {
-    const li = document.createElement("li");
-    const sid = m.session_id;
-    li.innerHTML = `<button type="button" class="lookup-pick-btn" data-session="${escapeHtml(sid)}">${escapeHtml(sid)} <span class="lookup-pick-meta">${escapeHtml(m.hunt_status || "")}</span></button>`;
-    list.appendChild(li);
-  }
-  list.querySelectorAll(".lookup-pick-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const sid = btn.getAttribute("data-session");
-      if (sid) loadTaskAndShow(sid);
-    });
-  });
-  box.hidden = false;
-}
-
 async function resolveAndLoad(query) {
   const raw = (query || "").trim();
   if (!raw) {
-    _setFetchStatus("Enter a session ID or URL.", true);
+    _setFetchStatus("Paste a Colab or Drive link to the notebook.", true);
+    return;
+  }
+  const url = _normalizeNotebookUrl(raw);
+  if (!_isLikelyNotebookUrl(url)) {
+    _setFetchStatus(
+      "Use a Google Colab or Google Drive link to the .ipynb, or a raw GitHub notebook URL.",
+      true,
+    );
     return;
   }
   _hideLookupMatches();
-  _setFetchStatus("Looking up\u2026", false);
-
-  if (SESSION_ID_RE.test(raw)) {
-    _setFetchStatus("", false);
-    await loadTaskAndShow(raw.toLowerCase());
-    return;
-  }
-
-  try {
-    const data = await api("/api/session-lookup?q=" + encodeURIComponent(raw));
-    const matches = data.matches || [];
-    if (matches.length === 0) {
-      if (_isLikelyNotebookUrl(raw)) {
-        _setFetchStatus("No linked session in the database. Fetching notebook from URL\u2026", false);
-        await loadNotebookOnly(raw);
-        return;
-      }
-      _setFetchStatus(
-        "No session found for that URL. Paste a Colab or Drive link to preview the .ipynb, or use the 8-character session ID from the trainer queue.",
-        true,
-      );
-      return;
-    }
-    if (matches.length === 1) {
-      _setFetchStatus("", false);
-      await loadTaskAndShow(matches[0].session_id);
-      return;
-    }
-    _setFetchStatus("Multiple matches — choose one below.", false);
-    _showLookupMatches(matches);
-  } catch (e) {
-    _setFetchStatus(e.message || "Lookup failed.", true);
-  }
+  _setFetchStatus("Fetching notebook\u2026", false);
+  await loadNotebookOnly(url);
 }
 
 async function loadNotebookOnly(url) {
   const raw = (url || "").trim();
   if (!raw) {
-    _setFetchStatus("Enter a Colab or Drive URL.", true);
+    _setFetchStatus("Enter a notebook URL.", true);
     return;
   }
   _isLoadingTask = true;
@@ -131,11 +104,10 @@ async function loadNotebookOnly(url) {
     banner.hidden = false;
     banner.className = "notebook-only-banner notebook-only-banner--info";
     banner.innerHTML =
-      "<strong>Notebook preview only.</strong> No training session is linked to this server for this link. " +
-      "Content below is read from the .ipynb file. Human reviews and council need a session ID from the trainer queue.";
+      "<strong>Notebook preview.</strong> Content is loaded from the file at this link. Run Council is only available when a training session exists on this server (not used here).";
   }
-  if (taskDisplayIdLabelEl) taskDisplayIdLabelEl.textContent = "Source";
-  if (taskDisplayIdEl) taskDisplayIdEl.textContent = raw.length > 64 ? raw.slice(0, 64) + "\u2026" : raw;
+  if (taskDisplayIdLabelEl) taskDisplayIdLabelEl.textContent = "Notebook URL";
+  if (taskDisplayIdEl) taskDisplayIdEl.textContent = raw.length > 72 ? raw.slice(0, 72) + "\u2026" : raw;
   if (taskSessionIdEl) taskSessionIdEl.textContent = "";
   if (taskErrorEl) taskErrorEl.hidden = true;
   if (taskContentEl) {
@@ -149,7 +121,7 @@ async function loadNotebookOnly(url) {
 
   resetCouncil();
   const summaryEl = document.getElementById("council-summary");
-  if (summaryEl) summaryEl.textContent = "Council requires a linked session.";
+  if (summaryEl) summaryEl.textContent = "Notebook-only preview (no session).";
 
   try {
     const data = await api("/api/notebook-preview", {
@@ -166,12 +138,12 @@ async function loadNotebookOnly(url) {
       banner.innerHTML =
         "<strong>Content check.</strong> " +
         escapeHtml(data.warnings.join(" ")) +
-        " <span class=\"notebook-only-sub\">Cells scanned: " +
+        ' <span class="notebook-only-sub">Cells scanned: ' +
         (data.cells_scanned ?? 0) +
         ".</span>";
     }
     _setFetchStatus(
-      data.has_structured_content ? "Notebook loaded." : "Notebook opened but expected sections may be missing.",
+      data.has_structured_content ? "Notebook loaded." : "Notebook opened; some expected sections may be missing.",
       !data.has_structured_content,
     );
   } catch (e) {
@@ -187,88 +159,6 @@ async function loadNotebookOnly(url) {
     }
     _setFetchStatus(e.message || "Notebook fetch failed.", true);
     showToast(e.message || "Notebook fetch failed.", "error");
-  } finally {
-    _isLoadingTask = false;
-  }
-}
-
-async function loadTaskAndShow(sessionId) {
-  if (_isLoadingTask) return;
-  _isLoadingTask = true;
-  _hideLookupMatches();
-  currentSessionId = sessionId;
-
-  const panel = document.getElementById("task-panel");
-  if (panel) delete panel.dataset.notebookOnly;
-
-  const nbBanner = document.getElementById("notebook-only-banner");
-  if (nbBanner) {
-    nbBanner.hidden = true;
-    nbBanner.textContent = "";
-  }
-  const taskSessionIdEl = document.getElementById("task-session-id");
-  const taskDisplayIdEl = document.getElementById("task-display-id");
-  const taskDisplayIdLabelEl = document.getElementById("task-display-id-label");
-  const taskErrorEl = document.getElementById("task-error");
-  const taskContentEl = document.getElementById("task-content");
-
-  if (panel) panel.hidden = false;
-  if (taskSessionIdEl) taskSessionIdEl.textContent = `Session: ${sessionId}`;
-  if (taskDisplayIdEl) taskDisplayIdEl.textContent = "";
-  if (taskErrorEl) taskErrorEl.hidden = true;
-  if (taskContentEl) {
-    taskContentEl.textContent = "Loading task\u2026";
-    taskContentEl.classList.add("loading-placeholder");
-    taskContentEl.setAttribute("aria-busy", "true");
-  }
-
-  try {
-    const result = await loadTask(sessionId);
-    if (!result) throw new Error("No task");
-    currentTask = result.task;
-    const taskIdLabel = currentTask.task_id_label || "Task ID";
-    const disp = currentTask.task_display_id || sessionId;
-
-    if (taskDisplayIdEl) taskDisplayIdEl.textContent = disp;
-    if (taskDisplayIdLabelEl) taskDisplayIdLabelEl.textContent = taskIdLabel;
-    if (taskSessionIdEl) {
-      taskSessionIdEl.textContent = currentTask.task_display_id ? `Session: ${sessionId}` : "";
-    }
-
-    if (taskContentEl) {
-      taskContentEl.classList.remove("loading-placeholder");
-      taskContentEl.setAttribute("aria-busy", "false");
-      renderTaskContent(taskContentEl, currentTask.snapshot || {}, currentTask.feedback || {});
-    }
-
-    const nbUrl =
-      currentTask.session?.notebook?.url ||
-      currentTask.session?.notebook?.metadata?.url ||
-      currentTask.session?.notebook?.source_url ||
-      "";
-    const fetchInput = document.getElementById("notebook-fetch-url");
-    if (fetchInput) fetchInput.value = nbUrl;
-
-    resetCouncil();
-    restoreCouncilFromTask(currentTask.last_council);
-
-    _setFetchStatus("", false);
-  } catch (e) {
-    if (taskContentEl) {
-      taskContentEl.classList.remove("loading-placeholder");
-      taskContentEl.textContent = "";
-      taskContentEl.setAttribute("aria-busy", "false");
-    }
-    const msg = e.message || "Could not load task.";
-    const isNotFound = /not found|404/i.test(msg);
-    if (taskErrorEl) {
-      taskErrorEl.innerHTML = escapeHtml(msg) +
-        (isNotFound
-          ? "<br /><span class=\"task-error-hint\">This server has no session with that ID. Paste your <strong>Colab or Drive</strong> link in the fetch box to load the notebook file directly, or copy the session ID from the trainer app.</span>"
-          : "");
-      taskErrorEl.hidden = false;
-    }
-    showToast(msg, "error");
   } finally {
     _isLoadingTask = false;
   }
@@ -338,9 +228,9 @@ document.getElementById("btn-fetch-notebook")?.addEventListener("click", async (
   const statusEl = document.getElementById("notebook-fetch-status");
   const resultEl = document.getElementById("notebook-fetch-result");
   const btn = document.getElementById("btn-fetch-notebook");
-  const url = (urlInput?.value || "").trim();
-  if (!url) {
-    statusEl.textContent = "Please enter a URL.";
+  const url = _normalizeNotebookUrl(urlInput?.value || "");
+  if (!url || !_isLikelyNotebookUrl(url)) {
+    statusEl.textContent = "Enter a valid Colab or Drive notebook URL.";
     statusEl.hidden = false;
     statusEl.className = "notebook-fetch-status error";
     return;

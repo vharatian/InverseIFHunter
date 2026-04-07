@@ -5,11 +5,24 @@ const EMAIL_KEY = "reviewer_email";
 const VERSION_CHECK_INTERVAL = 30000;
 let _currentVersion = null;
 let _pendingVersion = null;
-// Detect prefix (e.g. /staging/reviewer or /reviewer) from current URL for API calls.
+// Reviewer API lives under the same path as <base href> (injected by server, e.g. /staging/reviewer/).
 export const API_BASE = (() => {
-  const p = typeof location !== "undefined" ? location.pathname : "";
+  if (typeof location === "undefined") return "/reviewer";
+  try {
+    const baseEl = document.querySelector("base[href]");
+    if (baseEl) {
+      const href = baseEl.getAttribute("href") || "";
+      const abs = new URL(href, location.origin);
+      let path = abs.pathname.replace(/\/$/, "");
+      if (path) return path;
+    }
+  } catch (_) {
+    /* fall through */
+  }
+  const p = location.pathname || "";
   const idx = p.indexOf("/reviewer");
-  return idx >= 0 ? p.substring(0, idx + "/reviewer".length) : "";
+  if (idx >= 0) return p.substring(0, idx + "/reviewer".length).replace(/\/$/, "");
+  return "/reviewer";
 })();
 
 export function getEmail() {
@@ -56,7 +69,10 @@ export async function api(path, options = {}, retryOptions = {}) {
         else if (Array.isArray(d))
           msg = d.map((x) => (typeof x === "object" && x?.msg ? x.msg : String(x))).join("; ");
         else if (d && typeof d === "object") msg = JSON.stringify(d);
-        if (res.status === 404 && (msg === "Not Found" || !msg)) msg = "Not found (404).";
+        if (res.status === 404 && (msg === "Not Found" || !msg)) {
+          msg =
+            "API path not found (404). If this page was opened as a file or from a wrong URL, open the reviewer from the server link that ends with /reviewer/ .";
+        }
         throw new Error(msg);
       }
       if (res.status === 204) return null;
