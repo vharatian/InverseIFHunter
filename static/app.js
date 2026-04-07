@@ -39,7 +39,7 @@ import {
     handleRefreshAlignmentClick,
     initSelectionSectionCollapse
 } from './modules/results.js';
-import { initMultiTurnListeners, initCalibrationListeners } from './modules/multiturn.js';
+import { initMultiTurnListeners, initCalibrationListeners, syncTurnUI } from './modules/multiturn.js';
 import { updateModelOptions } from './modules/editors.js';
 import { initAutosave, initNextTurnAutosave, initGradingAutosave, resetAllStatuses } from './modules/autosave.js';
 import { handleHumanJudgment, showNextBlindJudge, showToast, showError } from './modules/celebrations.js';
@@ -122,7 +122,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (elements.uploadSection) elements.uploadSection.classList.add('hidden');
                 try {
                     const result = await hydrateSession(sessionId);
-                    await syncTurnStatusFromBackend(sessionId);
                     if (result.revisionFlags.length > 0) {
                         showToast(`Session loaded. ${result.revisionFlags.length} section(s) flagged for revision.`, 'info');
                     } else {
@@ -132,6 +131,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     localStorage.setItem('modelHunter_sessionId', sessionId);
                     state.sessionId = sessionId;
                     await syncTurnStatusFromBackend(sessionId);
+                    syncTurnUI();
                     refreshReviewSync(sessionId);
                     showToast('Session loaded — some data may not be available. ' + (e.message || ''), 'info');
                 }
@@ -213,13 +213,13 @@ document.addEventListener('DOMContentLoaded', async () => {
             showTaskView();
             clearSectionLocks();
             try {
-                const result = await hydrateSession(sessionId);
-                await syncTurnStatusFromBackend(sessionId);
+                await hydrateSession(sessionId);
                 showToast('Resumed existing session.', 'info');
             } catch (err) {
                 localStorage.setItem('modelHunter_sessionId', sessionId);
                 state.sessionId = sessionId;
                 await syncTurnStatusFromBackend(sessionId);
+                syncTurnUI();
                 refreshReviewSync(sessionId);
                 showToast('Session loaded — some data may not be available. ' + (err.message || ''), 'info');
             }
@@ -232,13 +232,13 @@ document.addEventListener('DOMContentLoaded', async () => {
                 showTaskView();
                 try {
                     await hydrateSession(sessionId);
-                    await syncTurnStatusFromBackend(sessionId);
                 } catch (err) {
                     console.error('Failed to load task from notification:', err);
                     showToast(err.message || 'Failed to load task', 'error');
                     localStorage.setItem('modelHunter_sessionId', sessionId);
                     state.sessionId = sessionId;
                     await syncTurnStatusFromBackend(sessionId);
+                    syncTurnUI();
                     refreshReviewSync(sessionId);
                 }
             },

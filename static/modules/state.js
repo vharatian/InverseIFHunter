@@ -63,6 +63,7 @@ export const state = {
     diversityCheckPassed: false,  // Flag to track if diversity check passed at confirmation
     selectionConfirmed: false,     // Flag to track if selection is confirmed and locked
     selectionSectionCollapsed: true,  // Select Responses for Review section collapsed (auto-collapsed when selection confirmed)
+    activePhase: 'editing',  // UI phase: 'editing' | 'hunting' | 'reviewing' | 'grading'
 
     // Metadata and editing state
     metadata: null,  // Parsed metadata from notebook
@@ -114,6 +115,20 @@ export function resetTurnState() {
     state._selectedGoodResponse = null;
     state.huntsThisTurn = 0;
     state.huntLimitReached = false;
+}
+
+/**
+ * Set and persist the active UI phase to the backend.
+ * @param {'editing'|'hunting'|'reviewing'|'grading'} phase
+ */
+export function setActivePhase(phase) {
+    state.activePhase = phase;
+    if (!state.sessionId) return;
+    fetch(`/api/session/${state.sessionId}/phase`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phase }),
+    }).catch(() => {});
 }
 
 

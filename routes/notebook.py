@@ -17,6 +17,7 @@ POST /api/save-to-drive/{session_id}         — save selected results to Drive
 import asyncio
 import json
 import logging
+import re
 from typing import Optional, List
 
 
@@ -29,7 +30,10 @@ from services.notebook_parser import notebook_parser
 from services.alignment import build_alignment_export_payload
 from services.hunt_engine import hunt_engine
 from services.snapshot_service import snapshot_service, NotebookSnapshot
-from services.pg_session import save_session_pg, merge_session_metadata_pg, get_session_metadata_pg
+from services.pg_session import (
+    save_session_pg, merge_session_metadata_pg, get_session_metadata_pg,
+    find_sessions_by_task_id_pg, find_sessions_by_file_id_pg,
+)
 from helpers.notebook_helpers import HEADING_MAP, _update_session_notebook_field
 import services.redis_session as redis_store
 from helpers.shared import (
@@ -46,6 +50,18 @@ from helpers.shared import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["notebook"])
+
+
+_GOOGLE_FILE_ID_RE = re.compile(
+    r'(?:/d/|/drive/)([a-zA-Z0-9_-]{20,})'
+)
+
+def _extract_google_file_id(url: str) -> str:
+    """Extract Google Drive file ID from Colab/Drive URLs. Returns empty string if not found."""
+    if not url:
+        return ""
+    m = _GOOGLE_FILE_ID_RE.search(url)
+    return m.group(1) if m else ""
 
 
 def _extract_task_id_from_parsed(parsed: ParsedNotebook) -> str:
@@ -103,6 +119,8 @@ async def upload_notebook(request: Request, file: UploadFile = File(...), force_
             task_id = _extract_task_id_from_parsed(parsed)
             if task_id:
                 existing = await redis_store.find_sessions_by_task_id(task_id)
+                if not existing:
+                    existing = await find_sessions_by_task_id_pg(task_id)
                 if existing:
                     return {
                         "success": True,
@@ -188,16 +206,32 @@ async def fetch_notebook(http_request: Request, request: NotebookURLRequest):
     try:
         parsed, content_str = await notebook_parser.load_from_url(request.url)
 
+        file_id = _extract_google_file_id(request.url)
+
         # Check for existing session with same task ID (unless force_new)
         if not request.force_new:
             task_id = _extract_task_id_from_parsed(parsed)
             if task_id:
                 existing = await redis_store.find_sessions_by_task_id(task_id)
+                if not existing:
+                    existing = await find_sessions_by_task_id_pg(task_id)
                 if existing:
                     return {
                         "success": True,
                         "duplicate_found": True,
                         "task_id": task_id,
+                        "existing_sessions": existing,
+                        "notebook": {"metadata": parsed.metadata, "filename": parsed.filename},
+                    }
+            # Secondary dedup: Google Drive file ID (when no task ID)
+            if not task_id and file_id:
+                te = (request.trainer_email or "").strip().lower()
+                existing = await find_sessions_by_file_id_pg(file_id, te)
+                if existing:
+                    return {
+                        "success": True,
+                        "duplicate_found": True,
+                        "task_id": f"file:{file_id[:12]}",
                         "existing_sessions": existing,
                         "notebook": {"metadata": parsed.metadata, "filename": parsed.filename},
                     }
@@ -232,6 +266,7 @@ async def fetch_notebook(http_request: Request, request: NotebookURLRequest):
                     "filename": parsed.filename,
                     "url": request.url,
                     "colab_url": request.url,
+                    **({"file_id": file_id} if file_id else {}),
                     **trainer_info,
                 },
             )

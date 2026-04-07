@@ -8,7 +8,7 @@
  */
 
 import { elements } from './dom.js';
-import { state, getCumulativeStats } from './state.js';
+import { state, getCumulativeStats, setActivePhase } from './state.js';
 import { 
     escapeHtml, 
     countWords, 
@@ -905,6 +905,7 @@ export function toggleSelectionResponse(rowNumber) {
 
 export function handleHuntComplete(data) {
     state.isHunting = false;
+    setActivePhase('reviewing');
     
     // Remove loading state from button
     elements.startHuntBtn.classList.remove('loading');
@@ -2065,6 +2066,7 @@ export async function confirmSelection() {
     
     // Lock selection after confirmation
     state.selectionConfirmed = true;
+    setActivePhase('grading');
     
     // Keep selection section visible, but selection is now locked
     elements.resultsSection.classList.remove('hidden');

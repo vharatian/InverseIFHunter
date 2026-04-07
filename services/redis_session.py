@@ -34,8 +34,11 @@ from models.schemas import (
 
 logger = logging.getLogger(__name__)
 
-# Configuration — env vars with fallback (config file read deferred to avoid import-time hang)
-SESSION_TTL = int(os.getenv("SESSION_TTL", "14400"))
+# SESSION_TTL: safety-net TTL for active sessions (30 days default). Prevents abandoned sessions
+# from living forever in Redis. Refreshed on every access, so active sessions never expire.
+# POST_SUBMIT_TTL: shorter TTL applied after session reaches submitted/approved (7 days).
+SESSION_TTL = int(os.getenv("SESSION_TTL", str(30 * 86400)))
+POST_SUBMIT_TTL = int(os.getenv("POST_SUBMIT_TTL", str(7 * 86400)))
 KEY_PREFIX = "mh:sess"
 # Reviewer feedback (keep aligned with reviewer-app/services/feedback_store.py)
 _FB_PREFIX = "mh:rev_fb"
@@ -63,12 +66,25 @@ def _feedback_keys(session_id: str) -> List[str]:
 
 
 async def _refresh_ttl(r: Any, session_id: str):
-    """Refresh TTL on all keys for a session (including reviewer feedback keys)."""
+    """Refresh TTL on all session keys. Uses SESSION_TTL (30d) for active, POST_SUBMIT_TTL (7d) for submitted."""
+    review_status = await r.get(_key(session_id, "review_status"))
+    ttl = POST_SUBMIT_TTL if review_status in ("submitted", "approved") else SESSION_TTL
     pipe = r.pipeline()
     for key in _session_keys(session_id):
-        pipe.expire(key, SESSION_TTL)
+        pipe.expire(key, ttl)
     for key in _feedback_keys(session_id):
-        pipe.expire(key, SESSION_TTL)
+        pipe.expire(key, ttl)
+    await pipe.execute()
+
+
+async def _apply_post_submit_ttl(session_id: str):
+    """Set TTL on all session keys after submission/approval."""
+    r = await get_redis()
+    pipe = r.pipeline()
+    for key in _session_keys(session_id):
+        pipe.expire(key, POST_SUBMIT_TTL)
+    for key in _feedback_keys(session_id):
+        pipe.expire(key, POST_SUBMIT_TTL)
     await pipe.execute()
 
 
@@ -98,10 +114,7 @@ async def create_session(session_id: str, notebook: ParsedNotebook, config: Hunt
     pipe.set(_key(session_id, "reviews"), "{}")
     pipe.set(_key(session_id, "review_status"), "draft")
     # results, all_results, turns — start as empty lists (created on first RPUSH)
-
-    # Set TTL on all keys
-    for key in _session_keys(session_id):
-        pipe.expire(key, SESSION_TTL)
+    # No TTL on creation — keys live until session is submitted/approved (then POST_SUBMIT_TTL applies).
 
     await pipe.execute()
     logger.info(f"Session {session_id} created in Redis")
@@ -387,6 +400,8 @@ async def cas_review_status(session_id: str, expected: str, new_status: str) -> 
     if result == -1:
         raise ValueError(f"Session {session_id} not found")
     if result == 1:
+        if new_status in ("submitted", "approved"):
+            await _apply_post_submit_ttl(session_id)
         return True, new_status
     return False, str(result)
 
@@ -627,6 +642,20 @@ async def set_current_turn(session_id: str, turn_number: int) -> None:
 # ============================================================
 # Admin / Stats
 # ============================================================
+
+async def delete_all_session_keys(session_id: str) -> int:
+    """Delete all Redis keys for a session (session data, feedback, events, locks)."""
+    r = await get_redis()
+    keys_to_delete = _session_keys(session_id) + _feedback_keys(session_id)
+    keys_to_delete.append(f"mh:events:{session_id}")
+    keys_to_delete.append(f"mh:lock:advance:{session_id}")
+    keys_to_delete.append(f"mh:rev_audit:{session_id}")
+    keys_to_delete.append(f"mh:hunt_active:{session_id}")
+    deleted = 0
+    for key in keys_to_delete:
+        deleted += await r.delete(key)
+    return deleted
+
 
 async def list_sessions() -> List[str]:
     """List all active session IDs.
@@ -1032,6 +1061,7 @@ async def get_full_session_state(session_id: str) -> Optional[Dict[str, Any]]:
             "created_at": meta.get("created_at", ""),
             "version": int(meta.get("version", 0)),
             "acknowledged_at": meta.get("acknowledged_at", ""),
+            "active_phase": meta.get("active_phase", ""),
         },
         "results": results,
         "all_results": all_results,

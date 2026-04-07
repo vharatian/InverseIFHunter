@@ -5178,6 +5178,18 @@ body.sidebar-visible .container.multi-turn-layout {
     gap: 0.5rem;
     margin-bottom: 0.2rem;
 }
+.tq-card-delete {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0.2rem;
+    border-radius: 4px;
+    color: var(--text-muted);
+    opacity: 0;
+    transition: opacity 0.15s, color 0.15s;
+}
+.tq-task-card:hover .tq-card-delete { opacity: 1; }
+.tq-card-delete:hover { color: var(--danger); }
 .tq-card-label {
     font-size: 0.9rem;
     font-weight: 600;

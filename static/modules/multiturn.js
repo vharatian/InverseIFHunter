@@ -33,6 +33,19 @@ import { getConfigValue, adminBypass, getHuntModeById } from './config.js';
 // ============== Turn-Aware UI Functions (Journey Bar, Thread, Badges) ==============
 
 /**
+ * Single entry point to sync all turn-related DOM after state.currentTurn changes.
+ * Call this after any path that sets state.currentTurn (hydration, resume, advance, etc.).
+ */
+export function syncTurnUI() {
+    updateTurnAwareUI();
+    renderTurnHistoryTabs();
+    if (state.isMultiTurn || state.currentTurn > 1) {
+        document.getElementById('multiTurnSection')?.classList.remove('hidden');
+        document.getElementById('mainContainer')?.classList.add('multi-turn-layout');
+    }
+}
+
+/**
  * Activate a specific turn's tab in the turn history panel.
  * Scrolls to the multi-turn section and clicks the correct tab.
  */

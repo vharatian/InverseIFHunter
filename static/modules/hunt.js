@@ -17,7 +17,7 @@ import {
     getTurnColor,
     escapeHtml 
 } from './utils.js';
-import { state } from './state.js';
+import { state, setActivePhase } from './state.js';
 import { showToast } from './celebrations.js';
 import { 
     handleHuntComplete, 
@@ -447,6 +447,7 @@ export async function startHunt() {
     
     state.isHunting = true;
     state.results = [];
+    setActivePhase('hunting');
     
     // Store the offset for this run (used in initProgressUI)
     state.currentRunStartOffset = huntOffset;

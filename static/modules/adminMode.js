@@ -201,6 +201,7 @@ async function _showPasswordModal() {
         const pwd = document.getElementById('adminPwdInput').value;
         const expected = getConfigValue('admin_mode_password', ADMIN_MODE_PASSWORD);
         if (pwd === expected) {
+            localStorage.setItem('modelHunter_adminPwd', pwd);
             close();
             activateAdminMode();
         } else {

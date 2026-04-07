@@ -13,7 +13,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from database import get_db
 from models.db_models import SessionRow, HuntResultRow, TrainerRow
-from models.schemas import HuntSession, HuntConfig, HuntStatus, ParsedNotebook, HuntResult
+from models.schemas import HuntSession, HuntConfig, HuntStatus, ParsedNotebook, HuntResult, TurnData
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +91,13 @@ async def load_session_pg(session_id: str) -> Optional[HuntSession]:
                 pass
 
         if row.turns:
-            fields["turns"] = row.turns
+            restored_turns = []
+            for t in row.turns:
+                try:
+                    restored_turns.append(TurnData(**t) if isinstance(t, dict) else t)
+                except Exception:
+                    restored_turns.append(t)
+            fields["turns"] = restored_turns
 
         result_rows = await db.execute(
             select(HuntResultRow)
@@ -215,3 +221,54 @@ async def merge_session_metadata_pg(session_id: str, patch: Dict[str, Any]) -> N
             """),
             {"sid": session_id, "patch": payload},
         )
+
+
+async def find_sessions_by_task_id_pg(task_id: str) -> List[Dict[str, Any]]:
+    """Find sessions in PG whose notebook_json metadata contains the given task_id."""
+    if not task_id or not task_id.strip():
+        return []
+    async with get_db() as db:
+        result = await db.execute(
+            text("""
+                SELECT id, status FROM sessions
+                WHERE notebook_json->>'metadata' IS NOT NULL
+                  AND EXISTS (
+                      SELECT 1 FROM jsonb_each_text(notebook_json->'metadata') kv
+                      WHERE kv.key IN ('Task ID', 'TaskID', 'task_id')
+                        AND kv.value = :tid
+                  )
+                ORDER BY updated_at DESC
+                LIMIT 10
+            """),
+            {"tid": task_id.strip()},
+        )
+        return [
+            {"session_id": row.id, "review_status": "unknown", "hunt_status": row.status or "pending"}
+            for row in result.fetchall()
+        ]
+
+
+async def find_sessions_by_file_id_pg(file_id: str, trainer_email: str = "") -> List[Dict[str, Any]]:
+    """Find sessions in PG whose metadata contains the given Google Drive file_id."""
+    if not file_id:
+        return []
+    params: dict = {"fid": file_id}
+    email_clause = ""
+    if trainer_email:
+        email_clause = "AND metadata->>'trainer_email' = :email"
+        params["email"] = trainer_email.strip().lower()
+    async with get_db() as db:
+        result = await db.execute(
+            text(f"""
+                SELECT id, status FROM sessions
+                WHERE metadata->>'file_id' = :fid
+                  {email_clause}
+                ORDER BY updated_at DESC
+                LIMIT 10
+            """),
+            params,
+        )
+        return [
+            {"session_id": row.id, "review_status": "unknown", "hunt_status": row.status or "pending"}
+            for row in result.fetchall()
+        ]

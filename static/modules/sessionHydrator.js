@@ -20,7 +20,7 @@ import {
 } from './results.js';
 import { applyTrainerUiAfterHydrate } from './alignment.js';
 import { syncHuntModeFromConfig } from './hunt.js';
-// testbed imports removed — resuming a task no longer auto-opens testbed
+import { syncTurnUI } from './multiturn.js';
 
 /**
  * Fetch full session state from backend and hydrate the UI.
@@ -55,6 +55,18 @@ export async function hydrateSession(sessionId) {
     state.turns = data.turns || [];
     state.currentTurn = data.meta?.current_turn || 1;
     state.isMultiTurn = (state.currentTurn > 1 || state.turns.length > 0);
+    state.activePhase = data.meta?.active_phase || _inferPhase(data);
+
+    // Validate notebook content matches current turn (3c fix).
+    // advance-turn updates session.notebook to the new turn's content server-side.
+    // If the notebook prompt is stale (from an earlier turn), log a warning.
+    if (state.currentTurn > 1 && state.turns.length > 0) {
+        const lastTurn = state.turns[state.turns.length - 1];
+        const lastTurnPrompt = lastTurn?.prompt || '';
+        if (lastTurnPrompt && state.notebook?.prompt === lastTurnPrompt) {
+            console.warn(`[hydrate] Notebook prompt matches Turn ${state.turns.length} (previous turn). Server may not have updated notebook for Turn ${state.currentTurn}.`);
+        }
+    }
 
     // Persist to localStorage
     localStorage.setItem('modelHunter_sessionId', sessionId);
@@ -151,36 +163,56 @@ function _hydrateNotebookSection(notebook) {
 
 
 /**
+ * Infer the UI phase from session data when no explicit phase was persisted.
+ */
+function _inferPhase(data) {
+    const reviews = data.human_reviews || {};
+    const hasReviews = Object.keys(reviews).length > 0 && Object.values(reviews).some(v => v?.judgment != null);
+    if (hasReviews) return 'grading';
+    const allResults = data.all_results || [];
+    if (allResults.length > 0) return 'reviewing';
+    const status = data.hunt_status;
+    if (status === 'running') return 'hunting';
+    return 'editing';
+}
+
+/**
  * Show/hide UI sections to match the hydrated state.
- * Replicates the section transitions that normally happen during interactive use.
+ * Uses state.activePhase to restore the correct view.
  */
 function _restoreSectionVisibility() {
-    // 1. Hide upload section when resuming — notebook is already loaded
+    const phase = state.activePhase || 'editing';
+
+    // Always hide upload when resuming with a notebook
     if (state.notebook) {
         if (elements.uploadSection) elements.uploadSection.classList.add('hidden');
-
-        // Show config section (prompt, criteria, hunt config)
         if (elements.configSection) elements.configSection.classList.remove('hidden');
         syncHuntModeFromConfig();
     }
 
-    // 2. If hunt results exist, show selection section
-    if (state.allResponses.length > 0) {
-        if (elements.selectionSection) {
+    if (phase === 'hunting' || phase === 'reviewing') {
+        if (state.allResponses.length > 0 && elements.selectionSection) {
             elements.selectionSection.classList.remove('hidden');
             displaySelectionCards();
         }
     }
 
-    // 3. If 4 selections confirmed, show the review results section
-    if (state.selectionConfirmed && state.selectedRowNumbers.length === 4) {
-        if (elements.resultsSection) elements.resultsSection.classList.remove('hidden');
-        displaySelectedForReview();
-        updateReviewProgress();
-
-        collapseSelectionSectionCard(state.selectedRowNumbers.length);
-        disableSelectionCheckboxes();
+    if (phase === 'grading') {
+        if (state.allResponses.length > 0 && elements.selectionSection) {
+            elements.selectionSection.classList.remove('hidden');
+            displaySelectionCards();
+        }
+        if (state.selectionConfirmed && state.selectedRowNumbers.length > 0) {
+            if (elements.resultsSection) elements.resultsSection.classList.remove('hidden');
+            displaySelectedForReview();
+            updateReviewProgress();
+            collapseSelectionSectionCard(state.selectedRowNumbers.length);
+            disableSelectionCheckboxes();
+        }
     }
+
+    // Sync turn UI (journey bar, badges, tabs, thread) to match restored state
+    syncTurnUI();
 }
 
 

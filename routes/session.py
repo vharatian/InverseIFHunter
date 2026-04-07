@@ -12,13 +12,14 @@ POST /api/session/{session_id}/resubmit
 POST /api/session/{session_id}/acknowledge
 """
 import logging
+import os
 from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query  # noqa: F401 - HTTPException used in handlers
 from typing import Annotated
 
 from models.schemas import HuntConfig
-from services.pg_session import save_session_pg, get_session_metadata_pg
+from services.pg_session import save_session_pg, get_session_metadata_pg, delete_session_pg
 from helpers.shared import _get_validated_session
 import services.redis_session as redis_store
 from agentic_reviewer.team_config import get_role, get_allowed_trainer_emails_for_role
@@ -95,6 +96,34 @@ async def get_session_full_state(session_id: str):
     if cu:
         data["colab_url"] = cu
     return data
+
+
+VALID_PHASES = {"editing", "hunting", "reviewing", "grading"}
+
+@router.post("/session/{session_id}/phase")
+async def set_session_phase(session_id: str, request: dict):
+    """Persist the trainer's current UI phase (editing/hunting/reviewing/grading) to Redis meta."""
+    phase = (request.get("phase") or "").strip()
+    if phase not in VALID_PHASES:
+        raise HTTPException(400, f"Invalid phase: {phase}")
+    await redis_store.set_meta_field(session_id, "active_phase", phase)
+    return {"ok": True}
+
+
+@router.delete("/admin/session/{session_id}")
+async def admin_delete_session(
+    session_id: str,
+    x_admin_password: Annotated[str | None, Header(alias="X-Admin-Password")] = None,
+):
+    """Delete a session from both Redis and PostgreSQL. Requires admin password."""
+    expected = os.getenv("ADMIN_PASSWORD", "")
+    if not expected or x_admin_password != expected:
+        raise HTTPException(403, "Invalid admin password")
+
+    redis_deleted = await redis_store.delete_all_session_keys(session_id)
+    pg_deleted = await delete_session_pg(session_id)
+    logger.info(f"Admin deleted session {session_id}: redis_keys={redis_deleted}, pg={pg_deleted}")
+    return {"deleted": True, "session_id": session_id, "redis_keys_removed": redis_deleted, "pg_removed": pg_deleted}
 
 
 @router.get("/trainer-queue")

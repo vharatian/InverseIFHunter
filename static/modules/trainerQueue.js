@@ -13,6 +13,8 @@
  * Exports: initTrainerQueue, refreshQueue, showQueueView, showTaskView
  */
 import { createPoller } from './poll.js';
+import { state } from './state.js';
+import { ADMIN_MODE_PASSWORD, getConfigValue } from './config.js';
 
 // ── DOM refs (cached on init) ───────────────────────────────────
 let els = {};
@@ -385,16 +387,34 @@ function buildTaskCard(t, showJourney) {
         </div>`;
     }
 
+    const deleteBtn = state.adminMode
+        ? `<button class="tq-card-delete" title="Delete session" data-sid="${t.session_id}">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          </button>`
+        : '';
+
     card.innerHTML = `
         <div class="tq-card-top">
             <span class="tq-card-label">${label}</span>
-            ${statusBadge}
+            <span style="display:flex;align-items:center;gap:0.35rem;">
+                ${deleteBtn}
+                ${statusBadge}
+            </span>
         </div>
         ${promptPrev}
         ${chipsHtml}
         ${journeyHtml}
         ${feedbackHtml}
     `;
+
+    const delEl = card.querySelector('.tq-card-delete');
+    if (delEl) {
+        delEl.addEventListener('click', (e) => {
+            e.stopPropagation();
+            _confirmDeleteSession(t.session_id, label);
+        });
+    }
+
     return card;
 }
 
@@ -429,6 +449,27 @@ function computeStep(t) {
     if (t.completed_hunts > 0) return 2;
     if (t.total_hunts > 0) return 1;
     return 0;
+}
+
+// ── Admin: delete session ────────────────────────────────────────
+
+async function _confirmDeleteSession(sessionId, label) {
+    if (!confirm(`Delete session "${label}" (${sessionId})?\n\nThis removes it from Redis and PostgreSQL. Cannot be undone.`)) return;
+    try {
+        const pwd = getConfigValue('admin_mode_password', ADMIN_MODE_PASSWORD);
+        const res = await fetch(`/api/admin/session/${sessionId}`, {
+            method: 'DELETE',
+            headers: { 'X-Admin-Password': localStorage.getItem('modelHunter_adminPwd') || pwd },
+        });
+        if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            alert(data.detail || 'Delete failed');
+            return;
+        }
+        refreshQueue();
+    } catch (e) {
+        alert('Delete failed: ' + (e.message || e));
+    }
 }
 
 // ── Helpers ─────────────────────────────────────────────────────
