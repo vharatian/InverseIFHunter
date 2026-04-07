@@ -21,10 +21,22 @@ class NotebookPreviewRequest(BaseModel):
     url: str
 
 
+class SlotResult(BaseModel):
+    slot: int
+    model_name: str = ""
+    model_response: str = ""
+    llm_judge: str = ""
+    human_judge: str = ""
+    reasoning_trace: str = ""
+
+
 class NotebookPreviewResponse(BaseModel):
     prompt: str
     ideal_response: str
     criteria: list
+    slots: list[SlotResult] = Field(default_factory=list)
+    metadata: dict = Field(default_factory=dict)
+    extra_cells: list[dict] = Field(default_factory=list)
     warnings: list = Field(default_factory=list)
     cells_scanned: int = 0
     has_structured_content: bool = False
@@ -49,15 +61,8 @@ async def notebook_preview(
         logger.warning("Notebook fetch failed for %s: %s", url, e)
         raise HTTPException(status_code=400, detail=f"Could not fetch notebook: {e}")
 
-    prompt, ideal_response, criteria, meta = _extract_preview(nb_json)
-    return NotebookPreviewResponse(
-        prompt=prompt,
-        ideal_response=ideal_response,
-        criteria=criteria,
-        warnings=meta.get("warnings") or [],
-        cells_scanned=meta.get("cells_scanned") or 0,
-        has_structured_content=meta.get("has_structured_content") or False,
-    )
+    result = _extract_preview(nb_json)
+    return NotebookPreviewResponse(**result)
 
 
 def _colab_github_to_raw(url: str) -> str | None:
@@ -182,87 +187,132 @@ async def _fetch_notebook_json(url: str) -> dict:
             raise ValueError("Response is not valid JSON. Is the URL a .ipynb file?")
 
 
-def _normalize_section_label(label: str) -> str | None:
-    import re
-
-    raw = label.strip().lower()
-    # Strip optional "Turn-X:" prefix for multi-turn notebooks
-    raw = re.sub(r"^turn[_\s-]*\d+\s*[:：]\s*", "", raw, flags=re.IGNORECASE)
-    n = re.sub(r"[\s_-]+", "_", raw.strip())
-    if n == "prompt":
-        return "prompt"
-    if n in ("response", "ideal_response", "ideal", "trainer_response", "expected_response"):
-        return "response"
-    if n in ("response_reference", "reference", "rubric", "criteria", "scoring", "response_ref", "grading_rubric"):
-        return "response_reference"
-    return None
-
-
-def _split_cell_section(src: str) -> tuple[str | None, str]:
-    """First line / block heading → (section_key, body). Supports ** [x] **, # [x], or line-start [x]."""
+def _extract_bracket_heading(src: str) -> tuple[str | None, str]:
+    """Extract [heading] from cell source. Returns (raw_label, body) or (None, src)."""
     import re
 
     s = src.strip()
     if not s:
         return None, s
 
-    m = re.match(r"^\s*\*{1,2}\s*\[([^\]]+)\]\s*\*{1,2}\s*", s, re.IGNORECASE | re.DOTALL)
-    if m:
-        key = _normalize_section_label(m.group(1))
-        if key:
-            return key, s[m.end() :].strip()
-    m = re.match(r"^\s*#+\s*\[([^\]]+)\]\s*", s, re.IGNORECASE)
-    if m:
-        key = _normalize_section_label(m.group(1))
-        if key:
-            return key, s[m.end() :].strip()
-    m = re.match(r"^\s*\[([^\]]+)\]\s*\n", s, re.IGNORECASE)
-    if m:
-        key = _normalize_section_label(m.group(1))
-        if key:
-            return key, s[m.end() :].strip()
+    for pattern in (
+        r"^\s*\*{1,2}\s*\[([^\]]+)\]\s*\*{1,2}\s*",
+        r"^\s*#+\s*\[([^\]]+)\]\s*",
+        r"^\s*\[([^\]]+)\]\s*\n",
+    ):
+        m = re.match(pattern, s, re.IGNORECASE | re.DOTALL)
+        if m:
+            return m.group(1).strip(), s[m.end():].strip()
 
-    HEADING = re.compile(r"\*\*\[([^\]]+)\]\*\*", re.IGNORECASE)
-    m = HEADING.search(s)
+    m = re.search(r"\*\*\[([^\]]+)\]\*\*", s, re.IGNORECASE)
     if m:
-        key = _normalize_section_label(m.group(1))
-        if key:
-            return key, s[m.end() :].strip()
+        return m.group(1).strip(), s[m.end():].strip()
     return None, s
 
 
-def _extract_preview(nb_json: dict) -> tuple[str, str, list, dict]:
+def _classify_heading(label: str) -> tuple[str, str | None, int | None]:
     """
-    Extract prompt, ideal_response, and criteria from a raw .ipynb dict.
+    Classify a raw bracket heading into (category, sub_key, slot_number).
 
-    Recognizes cells starting with **[prompt]**, # [prompt], **[response]**, **[response_reference]**,
-    and common synonyms (rubric, criteria, ideal, …).
+    Returns:
+      ("task", "prompt"|"response"|"response_reference", None)
+      ("slot_model", model_name, slot_num)
+      ("slot_llm_judge", None, slot_num)
+      ("slot_human_judge", None, slot_num)
+      ("slot_reasoning", None, slot_num)
+      ("metadata", normalized_key, None)
+      ("extra", None, None)  -- unrecognized
+    """
+    import re
+
+    raw = label.strip()
+    lower = raw.lower()
+
+    # Strip Turn-X: prefix
+    stripped = re.sub(r"^turn[_\s-]*\d+\s*[:：]\s*", "", lower, flags=re.IGNORECASE).strip()
+    norm = re.sub(r"[\s_-]+", "_", stripped)
+
+    # Task sections
+    if norm == "prompt":
+        return "task", "prompt", None
+    if norm in ("response", "ideal_response", "ideal", "trainer_response", "expected_response"):
+        return "task", "response", None
+    if norm in ("response_reference", "reference", "rubric", "criteria", "scoring", "response_ref", "grading_rubric"):
+        return "task", "response_reference", None
+
+    # Slot: llm_judge_N
+    m = re.match(r"^llm_judge[_\s-]*(\d+)$", lower)
+    if m:
+        return "slot_llm_judge", None, int(m.group(1))
+
+    # Slot: human_judge_N
+    m = re.match(r"^human_judge[_\s-]*(\d+)$", lower)
+    if m:
+        return "slot_human_judge", None, int(m.group(1))
+
+    # Slot: reasoning_trace_N
+    m = re.match(r"^reasoning_trace[_\s-]*(\d+)$", lower)
+    if m:
+        return "slot_reasoning", None, int(m.group(1))
+
+    # Slot: ModelName_N (anything ending with _digits that isn't a known pattern)
+    m = re.match(r"^(.+?)[_\s-]+(\d+)$", raw)
+    if m:
+        name_part = m.group(1).strip()
+        slot_num = int(m.group(2))
+        name_lower = name_part.lower()
+        if name_lower not in ("llm_judge", "human_judge", "reasoning_trace",
+                              "selected_response", "selected_judge",
+                              "turn", "prompt", "response", "response_reference"):
+            return "slot_model", name_part, slot_num
+
+    # Metadata keys
+    _META_KEYS = {
+        "number_of_attempts_made", "total_hunts", "pass_rate", "hunt_mode",
+        "hunt_model", "judge_model", "judge_system_prompt",
+        "number_of_turns", "breaking_turn", "conversation_history",
+        "selected_response", "selected_judge",
+    }
+    if norm in _META_KEYS:
+        return "metadata", norm, None
+    # Turn-prefixed metadata (e.g. Turn_1_Judge_Model)
+    m_meta = re.match(r"^turn[_\s-]*\d+[_\s-]*(.+)$", lower)
+    if m_meta:
+        sub = re.sub(r"[\s_-]+", "_", m_meta.group(1).strip())
+        if sub in _META_KEYS:
+            return "metadata", sub, None
+
+    return "extra", None, None
+
+
+def _extract_preview(nb_json: dict) -> dict:
+    """
+    Extract ALL labeled content from a notebook: task sections, hunt slot
+    results, metadata, and any extra labeled cells.
     """
     cells = nb_json.get("cells") or []
     warnings: list = []
     cells_scanned = 0
-    prompt = ""
-    ideal_response = ""
-    response_reference = ""
+
+    empty_result = {
+        "prompt": "(no prompt)", "ideal_response": "", "criteria": [],
+        "slots": [], "metadata": {}, "extra_cells": [],
+        "warnings": warnings, "cells_scanned": 0, "has_structured_content": False,
+    }
 
     if not isinstance(nb_json, dict):
         warnings.append("Invalid notebook structure.")
-        return "(no prompt)", "", [], {
-            "warnings": warnings,
-            "cells_scanned": 0,
-            "has_structured_content": False,
-        }
-
+        return empty_result
     if not cells:
         warnings.append("Notebook has no cells, or file is not a valid .ipynb.")
-        return "(no prompt)", "", [], {
-            "warnings": warnings,
-            "cells_scanned": 0,
-            "has_structured_content": False,
-        }
+        return empty_result
 
     prompts: list[str] = []
     ideal_responses: list[str] = []
+    response_reference = ""
+    slot_data: dict[int, dict] = {}  # slot_num -> {model_name, model_response, llm_judge, ...}
+    meta: dict[str, str] = {}
+    extra: list[dict] = []
 
     for cell in cells:
         src = "".join(cell.get("source") or []).strip()
@@ -270,43 +320,73 @@ def _extract_preview(nb_json: dict) -> tuple[str, str, list, dict]:
         if not src:
             continue
 
-        key, content = _split_cell_section(src)
-        if not key:
+        label, body = _extract_bracket_heading(src)
+        if not label:
             continue
 
-        if key == "prompt":
-            prompts.append(content)
-        elif key == "response":
-            ideal_responses.append(content)
-        elif key == "response_reference" and not response_reference:
-            response_reference = content
+        cat, sub, slot_num = _classify_heading(label)
+
+        if cat == "task":
+            if sub == "prompt":
+                prompts.append(body)
+            elif sub == "response":
+                ideal_responses.append(body)
+            elif sub == "response_reference" and not response_reference:
+                response_reference = body
+
+        elif cat.startswith("slot_"):
+            sd = slot_data.setdefault(slot_num, {})
+            if cat == "slot_model":
+                sd["model_name"] = sub
+                sd["model_response"] = body
+            elif cat == "slot_llm_judge":
+                sd["llm_judge"] = body
+            elif cat == "slot_human_judge":
+                sd["human_judge"] = body
+            elif cat == "slot_reasoning":
+                sd["reasoning_trace"] = body
+
+        elif cat == "metadata":
+            meta[sub] = body
+
+        elif cat == "extra":
+            extra.append({"heading": label, "content": body})
 
     prompt = "\n\n---\n\n".join(prompts) if prompts else ""
     ideal_response = "\n\n---\n\n".join(ideal_responses) if ideal_responses else ""
-
     criteria = _parse_criteria(response_reference)
+
+    slots = []
+    for sn in sorted(slot_data.keys()):
+        sd = slot_data[sn]
+        slots.append({
+            "slot": sn,
+            "model_name": sd.get("model_name", ""),
+            "model_response": sd.get("model_response", ""),
+            "llm_judge": sd.get("llm_judge", ""),
+            "human_judge": sd.get("human_judge", ""),
+            "reasoning_trace": sd.get("reasoning_trace", ""),
+        })
+
     has_prompt = bool(prompt and prompt.strip() and prompt != "(no prompt)")
     has_ideal = bool(ideal_response.strip())
     has_crit = bool(criteria)
-    has_structured = has_prompt or has_ideal or has_crit
+    has_slots = bool(slots)
+    has_structured = has_prompt or has_ideal or has_crit or has_slots
 
     if not has_structured:
         warnings.append(
             "No labeled task sections found. Start cells with **[prompt]**, **[response]**, or **[response_reference]** "
             "(or markdown # [prompt]), or synonyms like [rubric] / [criteria]."
         )
-    else:
-        missing = []
-        if not has_prompt:
-            missing.append("**[prompt]**")
-        if not has_ideal:
-            missing.append("**[response]** (ideal answer)")
-        if not has_crit:
-            missing.append("criteria in **[response_reference]**")
-        if missing:
-            warnings.append("Missing or empty: " + ", ".join(missing) + ".")
 
-    return prompt or "(no prompt)", ideal_response, criteria, {
+    return {
+        "prompt": prompt or "(no prompt)",
+        "ideal_response": ideal_response,
+        "criteria": criteria,
+        "slots": slots,
+        "metadata": meta,
+        "extra_cells": extra,
         "warnings": warnings,
         "cells_scanned": cells_scanned,
         "has_structured_content": has_structured,

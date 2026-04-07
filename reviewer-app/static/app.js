@@ -262,13 +262,18 @@ function _renderNotebookPreviewBody(data) {
     warnings.length > 0
       ? `<div class="nbp-warnings" role="alert"><strong>Notice:</strong> ${warnings.map((w) => escapeHtml(w)).join(" ")}</div>`
       : "";
-  const meta =
+  const scanMeta =
     data.cells_scanned != null
-      ? `<p class="nbp-meta">Cells scanned in notebook: ${Number(data.cells_scanned)}</p>`
+      ? `<p class="nbp-meta">Cells scanned: ${Number(data.cells_scanned)}</p>`
       : "";
+
   const prompt = escapeHtml(data.prompt || "(no prompt)");
   const idealResponse = (data.ideal_response || "").trim();
   const criteria = data.criteria || [];
+  const slots = data.slots || [];
+  const meta = data.metadata || {};
+  const extraCells = data.extra_cells || [];
+
   const criteriaHtml =
     criteria.length > 0
       ? `<ul class="nbp-criteria-list">${criteria.map((c) => `<li><span class="criteria-id">${escapeHtml(c.id || "")}</span> ${escapeHtml(c.description || "")}</li>`).join("")}</ul>`
@@ -276,12 +281,50 @@ function _renderNotebookPreviewBody(data) {
   const idealHtml = idealResponse
     ? `<div class="nbp-section"><div class="nbp-section-label">Ideal Response</div><div class="nbp-ideal-response">${escapeHtml(idealResponse)}</div></div>`
     : "";
+
+  // Slots
+  let slotsHtml = "";
+  if (slots.length > 0) {
+    const slotCards = slots.map((s) => {
+      const name = escapeHtml(s.model_name || `Slot ${s.slot}`);
+      const resp = s.model_response ? `<div class="nbp-slot-field"><span class="nbp-slot-field-label">Model Response</span><div class="nbp-slot-field-body">${escapeHtml(s.model_response)}</div></div>` : "";
+      const lj = s.llm_judge ? `<div class="nbp-slot-field"><span class="nbp-slot-field-label">LLM Judge</span><div class="nbp-slot-field-body">${escapeHtml(s.llm_judge)}</div></div>` : "";
+      const hj = s.human_judge ? `<div class="nbp-slot-field"><span class="nbp-slot-field-label">Human Judge</span><div class="nbp-slot-field-body">${escapeHtml(s.human_judge)}</div></div>` : "";
+      const rt = s.reasoning_trace ? `<div class="nbp-slot-field"><span class="nbp-slot-field-label">Reasoning Trace</span><div class="nbp-slot-field-body">${escapeHtml(s.reasoning_trace)}</div></div>` : "";
+      return `<details class="nbp-slot-card"><summary class="nbp-slot-summary">Slot ${s.slot}: ${name}</summary><div class="nbp-slot-body">${resp}${lj}${hj}${rt}</div></details>`;
+    }).join("");
+    slotsHtml = `<div class="nbp-section"><div class="nbp-section-label">Hunt Results (${slots.length} slots)</div>${slotCards}</div>`;
+  }
+
+  // Metadata
+  let metaHtml = "";
+  const metaKeys = Object.keys(meta);
+  if (metaKeys.length > 0) {
+    const rows = metaKeys.map((k) => {
+      const label = k.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+      return `<tr><td class="nbp-meta-key">${escapeHtml(label)}</td><td>${escapeHtml(meta[k])}</td></tr>`;
+    }).join("");
+    metaHtml = `<div class="nbp-section"><div class="nbp-section-label">Summary / Metadata</div><table class="nbp-meta-table">${rows}</table></div>`;
+  }
+
+  // Extra cells
+  let extraHtml = "";
+  if (extraCells.length > 0) {
+    const items = extraCells.map((c) =>
+      `<details class="nbp-extra-cell"><summary>${escapeHtml(c.heading || "Cell")}</summary><div class="nbp-extra-body">${escapeHtml(c.content || "")}</div></details>`
+    ).join("");
+    extraHtml = `<div class="nbp-section"><div class="nbp-section-label">Other Sections (${extraCells.length})</div>${items}</div>`;
+  }
+
   return (
     warnBlock +
-    meta +
-    `<div class="nbp-section"><div class="nbp-section-label">Prompt</div><div class="nbp-text">${prompt}</div></div>
-    ${idealHtml}
-    <div class="nbp-section"><div class="nbp-section-label">Criteria / Rubric (${criteria.length})</div>${criteriaHtml}</div>`
+    scanMeta +
+    `<div class="nbp-section"><div class="nbp-section-label">Prompt</div><div class="nbp-text">${prompt}</div></div>` +
+    idealHtml +
+    `<div class="nbp-section"><div class="nbp-section-label">Criteria / Rubric (${criteria.length})</div>${criteriaHtml}</div>` +
+    slotsHtml +
+    metaHtml +
+    extraHtml
   );
 }
 

@@ -2407,6 +2407,49 @@ button[aria-busy="true"]::after {
     50% { opacity: 0.7; }
 }
 
+/* ── Notebook preview: slot cards ── */
+.nbp-slot-card {
+    border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
+    margin-bottom: var(--space-xs); overflow: hidden;
+}
+.nbp-slot-summary {
+    padding: 8px 12px; cursor: pointer; font-size: 0.82rem; font-weight: 600;
+    color: var(--text-primary); background: var(--bg-tertiary);
+    list-style: none; display: flex; align-items: center; gap: 6px;
+}
+.nbp-slot-summary::before { content: "\25B6"; font-size: 0.6rem; transition: transform 0.15s; }
+.nbp-slot-card[open] > .nbp-slot-summary::before { transform: rotate(90deg); }
+.nbp-slot-body { padding: 10px 14px; }
+.nbp-slot-field { margin-bottom: 10px; }
+.nbp-slot-field:last-child { margin-bottom: 0; }
+.nbp-slot-field-label {
+    display: block; font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--text-muted); margin-bottom: 3px;
+}
+.nbp-slot-field-body {
+    font-size: 0.82rem; line-height: 1.55; color: var(--text-secondary);
+    white-space: pre-wrap; word-break: break-word;
+}
+
+/* ── Notebook preview: metadata table ── */
+.nbp-meta-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.nbp-meta-table td { padding: 5px 10px; border-bottom: 1px solid var(--border-subtle); }
+.nbp-meta-key { font-weight: 600; color: var(--text-primary); white-space: nowrap; width: 1%; }
+
+/* ── Notebook preview: extra cells ── */
+.nbp-extra-cell {
+    border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
+    margin-bottom: var(--space-xs);
+}
+.nbp-extra-cell > summary {
+    padding: 6px 12px; cursor: pointer; font-size: 0.8rem; font-weight: 600;
+    color: var(--text-secondary); background: var(--bg-tertiary);
+}
+.nbp-extra-body {
+    padding: 10px 14px; font-size: 0.82rem; line-height: 1.5;
+    color: var(--text-secondary); white-space: pre-wrap; word-break: break-word;
+}
+
 /* Light theme overrides */
 [data-theme="light"] .council-bar { background: var(--bg-card); }
 [data-theme="light"] .council-detail { background: var(--bg-secondary); }
