@@ -196,6 +196,31 @@ if not _metrics_exposed:
 from resilience.health import health_live, health_ready, health_deep
 
 
+@app.get("/debug/role/{email}")
+async def _debug_role(email: str):
+    """Debug endpoint: check role lookup for an email. Remove in production."""
+    from pathlib import Path
+    team_path = Path(__file__).resolve().parent / "config" / "team.yaml"
+    exists = team_path.exists()
+    content = ""
+    if exists:
+        content = team_path.read_text()[:500]
+    try:
+        from agentic_reviewer.team_config import get_role, _load
+        data = _load()
+        role = get_role(email)
+        return {
+            "email": email,
+            "role": role,
+            "team_yaml_path": str(team_path),
+            "team_yaml_exists": exists,
+            "team_yaml_preview": content,
+            "super_admins": [sa.get("email") for sa in (data.get("super_admins") or [])],
+        }
+    except Exception as e:
+        return {"error": str(e), "team_yaml_path": str(team_path), "team_yaml_exists": exists}
+
+
 @app.get("/health/live")
 async def _health_live():
     return await health_live()
