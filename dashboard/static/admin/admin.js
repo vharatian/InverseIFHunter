@@ -5,10 +5,17 @@
 
 let currentUser = null;
 
+// Base path prefix — detects /staging or similar prefix from the current URL.
+// E.g. /staging/admin/ → _basePath = '/staging', /admin/ → _basePath = ''
+const _basePath = (() => {
+    const idx = window.location.pathname.indexOf('/admin');
+    return idx > 0 ? window.location.pathname.substring(0, idx) : '';
+})();
+
 // ─── Helpers ─────────────────────────────────────────────────────
 
 async function api(path, options = {}) {
-    const res = await fetch(`/api/admin/${path}`, {
+    const res = await fetch(`${_basePath}/api/admin/${path}`, {
         credentials: 'include',
         headers: { 'Content-Type': 'application/json', ...options.headers },
         ...options,
