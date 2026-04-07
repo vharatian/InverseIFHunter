@@ -4,11 +4,12 @@
 import { getEmail, setEmail, api, initVersionCheck } from "./js/api.js";
 import { showGate, showToast } from "./js/dom.js";
 import { escapeHtml } from "./js/task.js";
-import { initCouncil, resetCouncil } from "./js/council.js";
+import { initCouncil, resetCouncil, setNotebookUrl } from "./js/council.js";
 
 let currentSessionId = null;
 let currentTask = null;
 let _isLoadingTask = false;
+let _currentNotebookUrl = null;
 
 function _normalizeNotebookUrl(s) {
   let t = (s || "").trim();
@@ -116,6 +117,7 @@ async function loadNotebookOnly(url) {
   const fetchInput = document.getElementById("notebook-fetch-url");
   if (fetchInput) fetchInput.value = raw;
 
+  _currentNotebookUrl = raw;
   resetCouncil();
   const summaryEl = document.getElementById("council-summary");
   if (summaryEl) summaryEl.textContent = "";
@@ -329,6 +331,7 @@ function _renderNotebookPreviewBody(data) {
 }
 
 initCouncil(() => currentSessionId, null);
+setNotebookUrl(() => _currentNotebookUrl);
 initVersionCheck();
 
 if (getEmail()) {

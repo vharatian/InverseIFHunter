@@ -1,12 +1,14 @@
 """Reviewer-side LLM council: streams rule-by-rule QC results via SSE."""
 import json
 import logging
+import re
 import sys
 from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 from api.deps import require_reviewer
 from api.ih_pg import insert_reviewer_council_run
@@ -102,6 +104,135 @@ async def council_stream(
                     )
                     + "\n\n"
                 )
+
+    return StreamingResponse(
+        agen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+class NotebookCouncilRequest(BaseModel):
+    url: str
+
+
+def _parse_judge_grades(llm_judge_text: str) -> dict[str, str]:
+    """Extract per-criterion PASS/FAIL from LLM judge text like 'C1: PASS\nC2: FAIL'."""
+    grades = {}
+    for m in re.finditer(r"(C\d+)\s*[:：]\s*(PASS|FAIL)", llm_judge_text, re.IGNORECASE):
+        grades[m.group(1).upper()] = m.group(2).upper().lower()
+    return grades
+
+
+def _parse_human_grades(human_judge_text: str) -> dict[str, str]:
+    """Extract per-criterion grades from human judge text."""
+    grades = {}
+    for m in re.finditer(r"(C\d+)\s*[:：]\s*(PASS|FAIL)", human_judge_text, re.IGNORECASE):
+        grades[m.group(1).upper()] = m.group(2).upper().lower()
+    return grades
+
+
+def _build_snapshot_from_notebook(preview_data: dict):
+    """Build a TaskSnapshot directly from notebook preview data (no session needed)."""
+    from agentic_reviewer.schemas import TaskSnapshot, SelectedHunt, HumanReview
+
+    prompt = preview_data.get("prompt", "")
+    ideal_response = preview_data.get("ideal_response", "")
+    criteria = preview_data.get("criteria", [])
+    slots = preview_data.get("slots", [])
+    meta = preview_data.get("metadata", {})
+
+    reference = ""
+    if criteria:
+        reference = "\n".join(f"{c['id']}: {c['description']}" for c in criteria)
+
+    selected_hunts = []
+    human_reviews = []
+    for s in slots:
+        hid = s["slot"]
+        judge_grades = _parse_judge_grades(s.get("llm_judge", ""))
+        selected_hunts.append(SelectedHunt(
+            hunt_id=hid,
+            model=s.get("model_name", "unknown"),
+            response=s.get("model_response", ""),
+            judge_score=None,
+            judge_criteria=judge_grades,
+            judge_explanation=s.get("llm_judge", ""),
+            is_breaking=False,
+        ))
+        h_grades = _parse_human_grades(s.get("human_judge", ""))
+        human_reviews.append(HumanReview(
+            hunt_id=hid,
+            grades=h_grades,
+            explanation=s.get("human_judge", ""),
+            submitted=True,
+        ))
+
+    return TaskSnapshot(
+        checkpoint="final",
+        session_id="notebook-preview",
+        prompt=prompt,
+        criteria=criteria,
+        reference=reference,
+        ideal_response=ideal_response,
+        selected_hunts=selected_hunts,
+        human_reviews=human_reviews,
+        metadata={
+            "turn": 1,
+            "models_used": list({s.get("model_name", "") for s in slots if s.get("model_name")}),
+            "task_metadata": meta,
+        },
+    )
+
+
+@router.post("/notebook-council-stream")
+async def notebook_council_stream(
+    body: NotebookCouncilRequest,
+    reviewer: Annotated[str, Depends(require_reviewer)],
+):
+    """
+    Run LLM council QC against a notebook URL (no session required).
+    Fetches the notebook, parses all slots, builds a snapshot, then streams council.
+    """
+    from api.routes.notebook_preview import _fetch_notebook_json, _extract_preview
+
+    url = (body.url or "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="URL is required")
+
+    try:
+        nb_json = await _fetch_notebook_json(url)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not fetch notebook: {e}")
+
+    preview_data = _extract_preview(nb_json)
+
+    if not preview_data.get("slots"):
+        raise HTTPException(
+            status_code=422,
+            detail="No hunt result slots found in notebook. Council needs slot data to run.",
+        )
+
+    try:
+        snapshot = _build_snapshot_from_notebook(preview_data)
+    except Exception as e:
+        logger.warning("Notebook snapshot build failed: %s", e)
+        raise HTTPException(status_code=422, detail=f"Cannot build snapshot from notebook: {e}")
+
+    from agentic_reviewer.stream import stream_review_events
+
+    async def agen():
+        yield ": " + (" " * 2040) + "\n\n"
+        try:
+            for chunk in stream_review_events(snapshot):
+                yield chunk
+        except Exception as e:
+            logger.exception("Notebook council stream error")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
 
     return StreamingResponse(
         agen(),

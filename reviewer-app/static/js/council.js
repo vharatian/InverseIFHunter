@@ -159,6 +159,7 @@ function shortModel(id) {
 }
 
 let _getSessionId = () => null;
+let _getNotebookUrl = () => null;
 let _onApprove = null;
 let _state = { running: false, rules: {}, ruleOrder: [], abortCtrl: null, chairman: {} };
 
@@ -170,15 +171,15 @@ export function initCouncil(getSessionId, onApprove) {
   if (runBtn) {
     runBtn.addEventListener("click", () => {
       const sid = _getSessionId();
-      if (sid) runCouncil(sid);
-      else {
-        const nbOnly = document.getElementById("task-panel")?.dataset?.notebookOnly === "true";
-        showToast(
-          nbOnly
-            ? "Council only runs for a linked training session. This view is from the notebook file only."
-            : "Load a task (session ID from the trainer queue) first.",
-          "info",
-        );
+      if (sid) {
+        runCouncil(sid);
+      } else {
+        const nbUrl = _getNotebookUrl?.();
+        if (nbUrl) {
+          runNotebookCouncil(nbUrl);
+        } else {
+          showToast("Load a task or fetch a notebook first.", "info");
+        }
       }
     });
   }
@@ -221,6 +222,10 @@ export function resetCouncil() {
   _showRunBtn();
   document.querySelectorAll(".council-badge").forEach((b) => b.remove());
   document.querySelectorAll("[data-council-border]").forEach((el) => el.removeAttribute("data-council-border"));
+}
+
+export function setNotebookUrl(getUrl) {
+  _getNotebookUrl = getUrl;
 }
 
 export function autoRunCouncil(sessionId) {
@@ -342,6 +347,79 @@ async function runCouncil(sessionId) {
         }
       }
     }
+    const runBtn = document.getElementById("btn-run-council");
+    if (runBtn) runBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg> Re-run';
+  }
+}
+
+async function runNotebookCouncil(notebookUrl) {
+  if (_state.running) return;
+  _state.running = true;
+  _state.rules = {};
+  _state.ruleOrder = [];
+  _state.chairman = {};
+
+  const bar = document.getElementById("council-bar");
+  const slotsEl = document.getElementById("council-slots");
+  const summaryEl = document.getElementById("council-summary");
+  const detailEl = document.getElementById("council-detail");
+  const banner = document.getElementById("triage-banner");
+
+  if (bar) bar.className = "council-bar council-bar--running";
+  if (slotsEl) { slotsEl.innerHTML = ""; slotsEl.hidden = false; slotsEl.classList.add("council-slots--grid"); }
+  if (summaryEl) summaryEl.textContent = "Starting council (notebook mode)...";
+  if (detailEl) { detailEl.innerHTML = ""; detailEl.hidden = true; }
+  if (banner) { banner.innerHTML = ""; banner.hidden = true; }
+
+  _showStopBtn();
+  document.querySelectorAll(".council-badge").forEach((b) => b.remove());
+
+  const abortCtrl = new AbortController();
+  _state.abortCtrl = abortCtrl;
+
+  try {
+    const response = await fetch(`${API_BASE}/api/notebook-council-stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Reviewer-Email": getEmail() },
+      body: JSON.stringify({ url: notebookUrl }),
+      signal: abortCtrl.signal,
+    });
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({ detail: response.statusText }));
+      throw new Error(err.detail || `HTTP ${response.status}`);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const jsonStr = line.slice(6).trim();
+        if (!jsonStr) continue;
+        try {
+          _handleEvent(JSON.parse(jsonStr), slotsEl, summaryEl, detailEl);
+        } catch { /* skip malformed */ }
+      }
+    }
+  } catch (e) {
+    if (e.name === "AbortError") {
+      if (summaryEl) summaryEl.textContent = "Council stopped.";
+      if (bar) bar.className = "council-bar council-bar--idle";
+    } else {
+      if (summaryEl) summaryEl.textContent = `Error: ${e.message}`;
+      if (bar) bar.className = "council-bar council-bar--error";
+    }
+  } finally {
+    _state.running = false;
+    _showRunBtn();
     const runBtn = document.getElementById("btn-run-council");
     if (runBtn) runBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg> Re-run';
   }
