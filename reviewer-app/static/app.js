@@ -101,10 +101,8 @@ async function loadNotebookOnly(url) {
     panel.dataset.notebookOnly = "true";
   }
   if (banner) {
-    banner.hidden = false;
-    banner.className = "notebook-only-banner notebook-only-banner--info";
-    banner.innerHTML =
-      "<strong>Notebook preview.</strong> Content is loaded from the file at this link. Run Council is only available when a training session exists on this server (not used here).";
+    banner.hidden = true;
+    banner.textContent = "";
   }
   if (taskDisplayIdLabelEl) taskDisplayIdLabelEl.textContent = "Notebook URL";
   if (taskDisplayIdEl) taskDisplayIdEl.textContent = raw.length > 72 ? raw.slice(0, 72) + "\u2026" : raw;
@@ -121,7 +119,7 @@ async function loadNotebookOnly(url) {
 
   resetCouncil();
   const summaryEl = document.getElementById("council-summary");
-  if (summaryEl) summaryEl.textContent = "Notebook-only preview (no session).";
+  if (summaryEl) summaryEl.textContent = "";
 
   try {
     const data = await api("/api/notebook-preview", {
@@ -134,6 +132,7 @@ async function loadNotebookOnly(url) {
       taskContentEl.innerHTML = _renderNotebookPreviewBody(data);
     }
     if (banner && data.warnings && data.warnings.length) {
+      banner.hidden = false;
       banner.className = "notebook-only-banner notebook-only-banner--warn";
       banner.innerHTML =
         "<strong>Content check.</strong> " +

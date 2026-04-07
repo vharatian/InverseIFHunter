@@ -5,9 +5,14 @@ const EMAIL_KEY = "reviewer_email";
 const VERSION_CHECK_INTERVAL = 30000;
 let _currentVersion = null;
 let _pendingVersion = null;
-// Reviewer API lives under the same path as <base href> (injected by server, e.g. /staging/reviewer/).
+// API routes are mounted under the same path prefix as this page (e.g. /staging/reviewer).
+// Pathname wins over <base href> because the server often injects /reviewer/ even when deployed at /staging/reviewer/.
 export const API_BASE = (() => {
   if (typeof location === "undefined") return "/reviewer";
+  const normalized = ((location.pathname || "/").replace(/\/+$/, "") || "/").split("?")[0];
+  if (normalized.endsWith("/reviewer")) {
+    return normalized;
+  }
   try {
     const baseEl = document.querySelector("base[href]");
     if (baseEl) {
@@ -19,9 +24,8 @@ export const API_BASE = (() => {
   } catch (_) {
     /* fall through */
   }
-  const p = location.pathname || "";
-  const idx = p.indexOf("/reviewer");
-  if (idx >= 0) return p.substring(0, idx + "/reviewer".length).replace(/\/$/, "");
+  const idx = normalized.indexOf("/reviewer");
+  if (idx >= 0) return normalized.substring(0, idx + "/reviewer".length);
   return "/reviewer";
 })();
 
