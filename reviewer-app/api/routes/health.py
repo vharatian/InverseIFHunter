@@ -17,14 +17,19 @@ if _repo_root not in sys.path:
 router = APIRouter(tags=["health"])
 
 
+_cached_version = None
+
 @router.get("/api/version")
 async def version():
     """Return app version hash. Polled by the UI to detect code changes."""
-    try:
-        from main import APP_VERSION
-        return {"version": APP_VERSION}
-    except Exception:
-        return {"version": "unknown"}
+    global _cached_version
+    if _cached_version is None:
+        try:
+            from main import APP_VERSION
+            _cached_version = APP_VERSION
+        except Exception:
+            _cached_version = "1.0.0"
+    return {"version": _cached_version}
 
 
 @router.get("/health")

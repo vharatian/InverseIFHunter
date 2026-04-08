@@ -571,7 +571,7 @@ body {
 /* ── Task context (collapsible) ── */
 .task-context {
     border: 1px solid var(--border); border-radius: var(--radius-md);
-    margin-bottom: var(--space-md); background: var(--bg-card);
+    margin-bottom: var(--space-lg); background: var(--bg-card);
 }
 .task-context-summary {
     padding: 10px 16px; cursor: pointer; font-size: 0.82rem; font-weight: 600;
@@ -612,7 +612,7 @@ body {
 }
 
 /* ── Slot tab bar ── */
-.slot-viewer { margin-bottom: var(--space-md); }
+.slot-viewer { margin-bottom: var(--space-lg); }
 .slot-tabs-bar {
     display: flex; gap: 4px; padding: 8px 0;
     overflow-x: auto; scrollbar-width: none;
@@ -1573,8 +1573,7 @@ button[aria-busy="true"]::after {
     overflow: hidden;
 }
 .nbp-section {
-    padding: var(--space-md) var(--space-lg);
-    border-bottom: 1px solid var(--border-subtle);
+    padding: var(--space-md) 0;
 }
 .nbp-section:last-child { border-bottom: none; }
 .nbp-section-label {
@@ -1747,14 +1746,14 @@ button[aria-busy="true"]::after {
 /* Slots row */
 .council-slots {
     display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    padding: 0 var(--space-lg) var(--space-md);
+    flex-direction: column;
+    gap: 0;
+    padding: var(--space-sm) 0;
 }
 
 .council-slots--grid {
-    display: grid;
-    grid-template-columns: 1fr;
+    display: flex;
+    flex-direction: column;
     gap: 8px;
 }
 @media (min-width: 720px) {
@@ -2431,15 +2430,20 @@ button[aria-busy="true"]::after {
 /* ── Notebook preview: extra cells ── */
 .nbp-extra-cell {
     border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
-    margin-bottom: var(--space-xs);
+    margin-bottom: 6px; overflow: visible;
 }
 .nbp-extra-cell > summary {
-    padding: 6px 12px; cursor: pointer; font-size: 0.8rem; font-weight: 600;
-    color: var(--text-secondary); background: var(--bg-tertiary);
+    padding: 8px 14px; cursor: pointer; font-size: 0.78rem; font-weight: 600;
+    color: var(--text-muted); background: var(--bg-tertiary);
+    border-radius: var(--radius-md); list-style: none;
 }
+.nbp-extra-cell > summary::before { content: "\25B6 "; font-size: 0.55rem; }
+.nbp-extra-cell[open] > summary::before { content: "\25BC "; }
+.nbp-extra-cell[open] > summary { border-radius: var(--radius-md) var(--radius-md) 0 0; }
 .nbp-extra-body {
-    padding: 10px 14px; font-size: 0.82rem; line-height: 1.5;
+    padding: 12px 14px; font-size: 0.82rem; line-height: 1.55;
     color: var(--text-secondary); white-space: pre-wrap; word-break: break-word;
+    max-height: 300px; overflow-y: auto; scrollbar-width: thin;
 }
 
 /* ── Council: QC-style inline rule cards ── */
@@ -2449,7 +2453,7 @@ button[aria-busy="true"]::after {
 .council-progress-text { font-size: 0.78rem; color: var(--text-muted); margin-top: 3px; display: block; }
 .qc-rule-card {
     background: var(--bg-tertiary); border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-md); padding: 12px 14px; margin-bottom: 8px;
+    border-radius: var(--radius-md); padding: 14px 16px; margin-bottom: 10px;
 }
 .qc-rule-header { display: flex; justify-content: space-between; align-items: center; }
 .qc-rule-title { font-weight: 600; font-size: 0.88rem; color: var(--text-primary); }
@@ -2479,6 +2483,29 @@ button[aria-busy="true"]::after {
 .qc-rationale { margin-top: 8px; font-size: 0.8rem; color: var(--text-primary); white-space: pre-wrap; }
 .qc-issue-message { margin-top: 4px; font-size: 0.8rem; color: var(--danger, #ef4444); }
 .qc-issue-hint { margin-top: 2px; font-size: 0.78rem; color: var(--text-muted); font-style: italic; }
+.qc-rule-issue-block { margin-top: 8px; }
+
+/* ── Council model accordions ── */
+.council-models-accordion { margin-top: 10px; display: flex; flex-direction: column; gap: 4px; }
+.council-model-acc {
+    border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+.council-model-acc-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 6px 12px; cursor: pointer; background: var(--bg-card);
+    font-size: 0.78rem; list-style: none;
+}
+.council-model-acc-header::-webkit-details-marker { display: none; }
+.council-model-acc-name { font-weight: 600; color: var(--text-primary); }
+.council-chairman-header { background: var(--bg-tertiary); border-left: 2px solid var(--accent-primary); }
+.council-model-acc-body {
+    padding: 8px 12px; font-size: 0.8rem; line-height: 1.55;
+    color: var(--text-secondary); white-space: pre-wrap; word-break: break-word;
+    max-height: 250px; overflow-y: auto; scrollbar-width: thin;
+}
+.council-streaming { border-left: 2px solid var(--accent-primary); animation: streamPulse 1.5s ease infinite; }
+@keyframes streamPulse { 0%,100% { border-left-color: var(--accent-primary); } 50% { border-left-color: transparent; } }
 
 /* ── Mobile warning ── */
 .mobile-warning {

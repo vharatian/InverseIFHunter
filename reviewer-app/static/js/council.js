@@ -471,88 +471,90 @@ function _handleEvent(evt, slotsEl, summaryEl, detailEl) {
   }
   else if (type === "council_model_start") {
     const card = slotsEl?.querySelector(`[data-rule="${evt.rule_id}"]`);
-    if (card) {
-      let list = card.querySelector(".qc-council-list");
-      if (list) {
-        list.classList.remove("qc-council-waiting");
-        if (list.textContent.includes("Calling models")) list.textContent = "";
-        const span = document.createElement("span");
-        span.className = "qc-vote qc-vote-pending";
-        span.setAttribute("data-model-id", evt.model_id || "");
-        span.title = evt.model_id || "";
-        span.textContent = `${shortModel(evt.model_id || "?")}: …`;
-        list.appendChild(span);
-      }
+    if (!card) return;
+    let modelsDiv = card.querySelector(".council-models-accordion");
+    if (!modelsDiv) {
+      const oldList = card.querySelector(".qc-council-votes");
+      if (oldList) oldList.remove();
+      modelsDiv = document.createElement("div");
+      modelsDiv.className = "council-models-accordion";
+      card.appendChild(modelsDiv);
     }
+    const name = shortModel(evt.model_id || "?");
+    const acc = document.createElement("details");
+    acc.className = "council-model-acc";
+    acc.setAttribute("data-model-id", evt.model_id || "");
+    acc.open = true;
+    acc.innerHTML = `<summary class="council-model-acc-header"><span class="council-model-acc-name">${escapeHtml(name)}</span><span class="council-model-acc-vote qc-vote qc-vote-pending">thinking...</span></summary><div class="council-model-acc-body council-streaming"></div>`;
+    modelsDiv.appendChild(acc);
+    const rule = _state.rules[evt.rule_id];
+    if (rule) rule.models[evt.model_id] = { vote: null, status: "running", chunks: [] };
   }
   else if (type === "council_model_chunk") {
-    // live chunk — skip (only chairman reasoning shown)
+    const card = slotsEl?.querySelector(`[data-rule="${evt.rule_id}"]`);
+    if (!card) return;
+    const acc = card.querySelector(`.council-model-acc[data-model-id="${evt.model_id || ""}"]`);
+    if (acc) {
+      const body = acc.querySelector(".council-model-acc-body");
+      if (body) body.textContent += evt.chunk || "";
+    }
+    const rule = _state.rules[evt.rule_id];
+    if (rule?.models[evt.model_id]) rule.models[evt.model_id].chunks.push(evt.chunk || "");
   }
   else if (type === "council_model_verdict") {
     const card = slotsEl?.querySelector(`[data-rule="${evt.rule_id}"]`);
     if (card) {
-      const list = card.querySelector(".qc-council-list");
-      if (list) {
-        const span = [...list.querySelectorAll("span[data-model-id]")].find(
-          (s) => s.getAttribute("data-model-id") === (evt.model_id || ""),
-        );
-        const label = shortModel(evt.model_id || "?");
+      const acc = card.querySelector(`.council-model-acc[data-model-id="${evt.model_id || ""}"]`);
+      if (acc) {
+        const badge = acc.querySelector(".council-model-acc-vote");
         const vote = evt.vote || "?";
-        if (span) {
-          span.textContent = `${label}: ${vote}`;
-          span.className = `qc-vote qc-vote-${vote.toLowerCase()}`;
-        } else {
-          const ns = document.createElement("span");
-          ns.className = `qc-vote qc-vote-${vote.toLowerCase()}`;
-          ns.textContent = `${label}: ${vote}`;
-          list.appendChild(ns);
+        if (badge) {
+          badge.textContent = vote;
+          badge.className = `council-model-acc-vote qc-vote qc-vote-${vote.toLowerCase()}`;
         }
+        const body = acc.querySelector(".council-model-acc-body");
+        if (body) body.classList.remove("council-streaming");
+        if (evt.response) {
+          if (body) body.textContent = evt.response;
+        }
+        acc.open = false;
       }
     }
     const rule = _state.rules[evt.rule_id];
-    if (rule) rule.models[evt.model_id] = { vote: evt.vote, status: "done" };
+    if (rule) rule.models[evt.model_id] = { vote: evt.vote, status: "done", chunks: rule.models[evt.model_id]?.chunks || [] };
   }
   else if (type === "council_chairman_start") {
     const card = slotsEl?.querySelector(`[data-rule="${evt.rule_id}"]`);
-    if (card && !card.querySelector(".qc-chairman-section")) {
-      const section = document.createElement("div");
-      section.className = "qc-chairman-section";
-      section.innerHTML = `<div class="qc-council-title">Chairman (${escapeHtml(shortModel(evt.model_id || "?"))}):</div><div class="qc-chairman-rationale qc-council-waiting">Reasoning…</div><div class="qc-chairman-verdict qc-vote qc-vote-pending">…</div>`;
-      const votes = card.querySelector(".qc-council-votes");
-      if (votes) votes.after(section);
-      else card.appendChild(section);
-    }
+    if (!card) return;
+    let modelsDiv = card.querySelector(".council-models-accordion");
+    if (!modelsDiv) { modelsDiv = document.createElement("div"); modelsDiv.className = "council-models-accordion"; card.appendChild(modelsDiv); }
+    const name = shortModel(evt.model_id || "?");
+    const acc = document.createElement("details");
+    acc.className = "council-model-acc council-chairman-acc";
+    acc.setAttribute("data-model-id", "chairman");
+    acc.open = true;
+    acc.innerHTML = `<summary class="council-model-acc-header council-chairman-header"><span class="council-model-acc-name">Chairman: ${escapeHtml(name)}</span><span class="council-model-acc-vote qc-vote qc-vote-pending">deciding...</span></summary><div class="council-model-acc-body council-streaming"></div>`;
+    modelsDiv.appendChild(acc);
   }
   else if (type === "council_chairman_chunk") {
     const card = slotsEl?.querySelector(`[data-rule="${evt.rule_id}"]`);
-    if (card) {
-      const el = card.querySelector(".qc-chairman-rationale");
-      if (el) {
-        if (el.classList.contains("qc-council-waiting")) {
-          el.classList.remove("qc-council-waiting");
-          el.textContent = "";
-        }
-        el.textContent += evt.chunk || "";
-      }
+    if (!card) return;
+    const acc = card.querySelector('.council-model-acc[data-model-id="chairman"]');
+    if (acc) {
+      const body = acc.querySelector(".council-model-acc-body");
+      if (body) body.textContent += evt.chunk || "";
     }
   }
   else if (type === "council_chairman_verdict") {
     const card = slotsEl?.querySelector(`[data-rule="${evt.rule_id}"]`);
-    if (card) {
-      const section = card.querySelector(".qc-chairman-section");
-      if (section) {
-        const rationaleEl = section.querySelector(".qc-chairman-rationale");
-        const verdictEl = section.querySelector(".qc-chairman-verdict");
-        if (rationaleEl && evt.rationale) {
-          rationaleEl.classList.remove("qc-council-waiting");
-          rationaleEl.textContent = evt.rationale;
-        }
-        if (verdictEl) {
-          const v = evt.passed ? "PASS" : "FAIL";
-          verdictEl.textContent = v;
-          verdictEl.className = `qc-chairman-verdict qc-vote qc-vote-${v.toLowerCase()}`;
-        }
-      }
+    if (!card) return;
+    const acc = card.querySelector('.council-model-acc[data-model-id="chairman"]');
+    if (acc) {
+      const badge = acc.querySelector(".council-model-acc-vote");
+      const v = evt.passed ? "PASS" : "FAIL";
+      if (badge) { badge.textContent = v; badge.className = `council-model-acc-vote qc-vote qc-vote-${v.toLowerCase()}`; }
+      const body = acc.querySelector(".council-model-acc-body");
+      if (body) { body.classList.remove("council-streaming"); if (evt.rationale) body.textContent = evt.rationale; }
     }
   }
   else if (type === "rule_done") {
@@ -611,49 +613,40 @@ function _upsertRuleCard(container, ruleId) {
   const icon = status === "pass" ? "\u2713" : status === "fail" ? "\u2717" : "\u23F3";
   const statusText = status === "running" ? "Checking..." : status === "pass" ? "Passed" : "Failed";
 
-  let councilHtml = "";
-  const isCouncilRule = ["human_llm_grade_alignment", "metadata_prompt_alignment", "metadata_taxonomy_alignment", "human_explanation_justifies_grade", "safety_context_aware", "qc_cfa_criteria_valid"].includes(ruleId);
-  if (status === "running" && isCouncilRule && !card.querySelector(".qc-council-votes")) {
-    councilHtml = `<div class="qc-council-votes"><div class="qc-council-title">Council votes (live):</div><div class="qc-council-list qc-council-waiting">Calling models…</div></div>`;
+  // Update or create the header (never wipe the whole card — preserve live accordion DOM)
+  let header = card.querySelector(".qc-rule-header");
+  if (!header) {
+    header = document.createElement("div");
+    header.className = "qc-rule-header";
+    card.prepend(header);
   }
+  header.innerHTML = `<span class="qc-rule-title">${escapeHtml(label)}</span><span class="qc-rule-status qc-status-${status}">${icon} ${statusText}</span>`;
 
-  let issueHtml = "";
-  if (rule.issue?.message) issueHtml += `<div class="qc-issue-message">${escapeHtml(rule.issue.message)}</div>`;
-  if (rule.issue?.hint) issueHtml += `<div class="qc-issue-hint">Hint: ${escapeHtml(rule.issue.hint)}</div>`;
-  if (rule.rationale && status !== "running") issueHtml = `<div class="qc-rationale">${escapeHtml(rule.rationale)}</div>` + issueHtml;
-
-  if (status === "running") {
-    const existingCouncil = card.querySelector(".qc-council-votes, .qc-chairman-section");
-    if (existingCouncil) return;
+  let descEl = card.querySelector(".qc-rule-desc");
+  if (desc && !descEl) {
+    descEl = document.createElement("div");
+    descEl.className = "qc-rule-desc";
+    header.after(descEl);
   }
+  if (descEl) descEl.textContent = desc;
 
-  const headerHtml = `<div class="qc-rule-header"><span class="qc-rule-title">${escapeHtml(label)}</span><span class="qc-rule-status qc-status-${status}">${icon} ${statusText}</span></div>`;
-  const descHtml = desc ? `<div class="qc-rule-desc">${escapeHtml(desc)}</div>` : "";
-
+  // On rule_done: append issue/rationale below existing accordion
   if (status !== "running") {
-    const existingCouncilHtml = card.querySelector(".qc-council-votes, .qc-chairman-section");
-    const councilFragment = existingCouncilHtml ? "" : "";
-    card.innerHTML = headerHtml + descHtml;
-    if (existingCouncilHtml) {
-      const wrapper = document.createElement("div");
-      wrapper.innerHTML = headerHtml + descHtml;
-      card.replaceChildren(...wrapper.childNodes);
-    } else {
-      card.innerHTML = headerHtml + descHtml;
+    let issueBlock = card.querySelector(".qc-rule-issue-block");
+    if (!issueBlock && (rule.issue || rule.rationale)) {
+      issueBlock = document.createElement("div");
+      issueBlock.className = "qc-rule-issue-block";
+      card.appendChild(issueBlock);
     }
-    if (rule.councilVotes?.length) {
-      const votesDiv = document.createElement("div");
-      votesDiv.className = "qc-council-votes";
-      votesDiv.innerHTML = `<div class="qc-council-title">Council votes:</div><div class="qc-council-list">${rule.councilVotes.map((v) => `<span class="qc-vote qc-vote-${(v.vote || "").toLowerCase()}" title="${escapeHtml(v.model_id || v.model || "")}">${escapeHtml(shortModel(v.model_id || v.model || "?"))}: ${escapeHtml(v.vote || "?")}</span>`).join("")}</div>`;
-      card.appendChild(votesDiv);
+    if (issueBlock) {
+      let html = "";
+      if (rule.rationale) html += `<div class="qc-rationale">${escapeHtml(rule.rationale)}</div>`;
+      if (rule.issue?.message) html += `<div class="qc-issue-message">${escapeHtml(rule.issue.message)}</div>`;
+      if (rule.issue?.hint) html += `<div class="qc-issue-hint">${escapeHtml(rule.issue.hint)}</div>`;
+      issueBlock.innerHTML = html;
     }
-    if (issueHtml) {
-      const issueDiv = document.createElement("div");
-      issueDiv.innerHTML = issueHtml;
-      card.appendChild(issueDiv);
-    }
-  } else {
-    card.innerHTML = headerHtml + descHtml + councilHtml;
+    // Close all model accordions on completion for clean view
+    card.querySelectorAll(".council-model-acc").forEach((a) => { a.open = false; });
   }
 }
 
