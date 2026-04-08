@@ -14,6 +14,9 @@ defmodule ModelHunterEdgeWeb.ProxyController do
   plug :match
   plug :dispatch
 
+  @sse_timeout 300_000
+  @default_timeout 30_000
+
   match _ do
     request_path = conn.request_path
 
@@ -31,16 +34,18 @@ defmodule ModelHunterEdgeWeb.ProxyController do
 
     headers = build_proxy_headers(conn, trace_id, auth_user)
 
-    case Finch.build(method_atom(conn.method), target_url, headers, body)
-         |> Finch.request(ModelHunterEdge.Finch, receive_timeout: 30_000) do
-      {:ok, response} ->
-        conn
-        |> forward_set_cookie_headers(response.headers)
-        |> put_resp_content_type(get_content_type(response.headers))
-        |> Plug.Conn.put_resp_header("x-trace-id", trace_id)
-        |> send_resp(response.status, response.body)
+    req = Finch.build(method_atom(conn.method), target_url, headers, body)
 
-      {:error, %Finch.Error{reason: :timeout}} ->
+    # Check Accept header to pre-detect SSE requests for longer timeout
+    accept = List.first(Plug.Conn.get_req_header(conn, "accept")) || ""
+    is_sse_request = String.contains?(accept, "text/event-stream")
+    timeout = if is_sse_request, do: @sse_timeout, else: @default_timeout
+
+    case proxy_request(req, conn, trace_id, timeout) do
+      {:ok, conn} ->
+        conn
+
+      {:error, :timeout} ->
         Logger.warning(
           "Proxy timeout for #{conn.method} #{conn.request_path} trace=#{trace_id}"
         )
@@ -77,6 +82,78 @@ defmodule ModelHunterEdgeWeb.ProxyController do
             }
           })
         )
+    end
+  end
+
+  # Use Finch.stream/5: on headers, decide SSE (chunked) vs normal (buffer).
+  # Accumulator: {mode, status, resp_headers, conn_or_body_acc}
+  #   mode = :init | :sse | :buffer
+  defp proxy_request(req, conn, trace_id, timeout) do
+    init_acc = {:init, nil, nil, conn}
+
+    result =
+      Finch.stream(
+        req,
+        ModelHunterEdge.Finch,
+        init_acc,
+        fn
+          {:status, status}, {:init, _, _, conn} ->
+            {:init, status, nil, conn}
+
+          {:headers, resp_headers}, {:init, status, _, conn} ->
+            ct = get_content_type(resp_headers)
+
+            if String.starts_with?(ct, "text/event-stream") do
+              chunked_conn =
+                conn
+                |> forward_set_cookie_headers(resp_headers)
+                |> put_resp_content_type("text/event-stream")
+                |> Plug.Conn.put_resp_header("x-trace-id", trace_id)
+                |> Plug.Conn.put_resp_header("cache-control", "no-cache")
+                |> Plug.Conn.put_resp_header("x-accel-buffering", "no")
+                |> Plug.Conn.send_chunked(status)
+
+              {:sse, status, resp_headers, chunked_conn}
+            else
+              {:buffer, status, resp_headers, []}
+            end
+
+          {:data, chunk}, {:sse, status, hdrs, chunked_conn} ->
+            case Plug.Conn.chunk(chunked_conn, chunk) do
+              {:ok, new_conn} -> {:sse, status, hdrs, new_conn}
+              {:error, _} -> {:sse, status, hdrs, chunked_conn}
+            end
+
+          {:data, chunk}, {:buffer, status, hdrs, body_acc} ->
+            {:buffer, status, hdrs, [body_acc, chunk]}
+
+          _other, acc ->
+            acc
+        end,
+        receive_timeout: timeout
+      )
+
+    case result do
+      {:ok, {:sse, _status, _hdrs, final_conn}} ->
+        {:ok, final_conn}
+
+      {:ok, {:buffer, status, resp_headers, body_acc}} ->
+        body = IO.iodata_to_binary(body_acc)
+
+        final_conn =
+          conn
+          |> forward_set_cookie_headers(resp_headers)
+          |> put_resp_content_type(get_content_type(resp_headers))
+          |> Plug.Conn.put_resp_header("x-trace-id", trace_id)
+          |> send_resp(status, body)
+
+        {:ok, final_conn}
+
+      {:error, %Finch.Error{reason: :timeout}} ->
+        {:error, :timeout}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 

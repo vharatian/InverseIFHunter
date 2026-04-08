@@ -284,31 +284,50 @@ function _renderNotebookPreviewBody(data) {
     ? `<div class="nbp-section"><div class="nbp-section-label">Ideal Response</div><div class="nbp-ideal-response">${escapeHtml(idealResponse)}</div></div>`
     : "";
 
-  // Slots — card layout: response on left, judgments on right
+  // Slots — mth-style two-column cards
   let slotsHtml = "";
   if (slots.length > 0) {
     const slotCards = slots.map((s) => {
-      const name = escapeHtml(s.model_name || `Slot ${s.slot}`);
+      const name = escapeHtml(s.model_name || "Unknown");
       const resp = escapeHtml(s.model_response || "(no response)");
       const ljText = s.llm_judge || "";
       const hjText = s.human_judge || "";
       const rtText = s.reasoning_trace || "";
 
-      const judgments = [];
-      if (ljText) judgments.push(`<div class="slot-judge-block"><div class="slot-judge-label">LLM Judge</div><div class="slot-judge-body">${escapeHtml(ljText)}</div></div>`);
-      if (hjText) judgments.push(`<div class="slot-judge-block"><div class="slot-judge-label">Human Judge</div><div class="slot-judge-body">${escapeHtml(hjText)}</div></div>`);
-      if (rtText) judgments.push(`<div class="slot-judge-block slot-judge-trace"><div class="slot-judge-label">Reasoning Trace</div><div class="slot-judge-body">${escapeHtml(rtText)}</div></div>`);
-      const judgeCol = judgments.length ? judgments.join("") : `<span class="nbp-empty">No judgments</span>`;
+      const hasPass = ljText.toLowerCase().includes("pass") || hjText.toLowerCase().includes("pass");
+      const hasFail = ljText.toLowerCase().includes("fail") || hjText.toLowerCase().includes("fail");
+      const slotClass = hasFail ? "slot-fail" : hasPass ? "slot-pass" : "";
+      const dotClass = hasFail ? "dot-fail" : hasPass ? "dot-pass" : "";
 
-      return `<div class="slot-card">
-        <div class="slot-card-header"><span class="slot-card-num">Slot ${s.slot}</span><span class="slot-card-model">${name}</span></div>
-        <div class="slot-card-columns">
-          <div class="slot-col slot-col-response"><div class="slot-col-label">Model Response</div><div class="slot-col-body">${resp}</div></div>
-          <div class="slot-col slot-col-judges">${judgeCol}</div>
+      // Left: Human Judge
+      let leftHtml = "";
+      if (hjText) {
+        leftHtml += `<div class="slot-judgment-block slot-judgment-human"><div class="slot-judgment-title">Human Judge</div><div class="slot-judgment-body">${escapeHtml(hjText)}</div></div>`;
+      }
+      if (rtText) {
+        leftHtml += `<div class="slot-judgment-block"><div class="slot-judgment-title">Reasoning Trace</div><div class="slot-judgment-body">${escapeHtml(rtText)}</div></div>`;
+      }
+      if (!leftHtml) leftHtml = `<span class="nbp-empty">No human review</span>`;
+
+      // Right: Model Response + LLM Judge
+      let rightHtml = `<div class="slot-section"><div class="slot-section-label">Model Response</div><div class="task-slot-response">${resp}</div></div>`;
+      if (ljText) {
+        rightHtml += `<div class="slot-judgment-block slot-judgment-llm"><div class="slot-judgment-title">LLM Judge</div><div class="slot-judgment-body">${escapeHtml(ljText)}</div></div>`;
+      }
+
+      return `<div class="task-slot-card ${slotClass}">
+        <div class="task-slot-header">
+          <span class="slot-number">Slot ${s.slot}</span>
+          <span class="slot-model">${name}</span>
+          ${dotClass ? `<span class="slot-status-dot ${dotClass}"></span>` : ""}
+        </div>
+        <div class="task-slot-body">
+          <div class="slot-left">${leftHtml}</div>
+          <div class="slot-right">${rightHtml}</div>
         </div>
       </div>`;
     }).join("");
-    slotsHtml = `<div class="nbp-section"><div class="nbp-section-label">Hunt Results (${slots.length} slots)</div><div class="slot-grid">${slotCards}</div></div>`;
+    slotsHtml = `<div class="nbp-section"><div class="nbp-section-label">Hunt Results (${slots.length} slots)</div><div class="task-slots-grid">${slotCards}</div></div>`;
   }
 
   // Metadata

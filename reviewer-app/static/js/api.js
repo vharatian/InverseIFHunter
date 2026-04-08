@@ -1,6 +1,9 @@
 /**
  * API client: auth header, fetch wrapper, and version check for soft-reload.
  */
+if (typeof location !== "undefined" && location.search.includes("_v=")) {
+  history.replaceState(null, "", location.pathname);
+}
 const EMAIL_KEY = "reviewer_email";
 const VERSION_CHECK_INTERVAL = 30000;
 let _currentVersion = null;
