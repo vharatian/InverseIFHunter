@@ -131,6 +131,7 @@ async function loadNotebookOnly(url) {
       taskContentEl.classList.remove("loading-placeholder");
       taskContentEl.setAttribute("aria-busy", "false");
       taskContentEl.innerHTML = _renderNotebookPreviewBody(data);
+      _wireSlotTabs(taskContentEl);
     }
     if (banner && data.warnings && data.warnings.length) {
       banner.hidden = false;
@@ -248,6 +249,7 @@ document.getElementById("btn-fetch-notebook")?.addEventListener("click", async (
     statusEl.hidden = true;
     resultEl.hidden = false;
     resultEl.innerHTML = _renderNotebookPreviewBody(data);
+    _wireSlotTabs(resultEl);
   } catch (e) {
     statusEl.textContent = "Error: " + (e.message || "Could not fetch notebook.");
     statusEl.className = "notebook-fetch-status error";
@@ -260,15 +262,6 @@ document.getElementById("btn-fetch-notebook")?.addEventListener("click", async (
 
 function _renderNotebookPreviewBody(data) {
   const warnings = data.warnings || [];
-  const warnBlock =
-    warnings.length > 0
-      ? `<div class="nbp-warnings" role="alert"><strong>Notice:</strong> ${warnings.map((w) => escapeHtml(w)).join(" ")}</div>`
-      : "";
-  const scanMeta =
-    data.cells_scanned != null
-      ? `<p class="nbp-meta">Cells scanned: ${Number(data.cells_scanned)}</p>`
-      : "";
-
   const prompt = escapeHtml(data.prompt || "(no prompt)");
   const idealResponse = (data.ideal_response || "").trim();
   const criteria = data.criteria || [];
@@ -276,72 +269,77 @@ function _renderNotebookPreviewBody(data) {
   const meta = data.metadata || {};
   const extraCells = data.extra_cells || [];
 
-  const criteriaHtml =
-    criteria.length > 0
-      ? `<ul class="nbp-criteria-list">${criteria.map((c) => `<li><span class="criteria-id">${escapeHtml(c.id || "")}</span> ${escapeHtml(c.description || "")}</li>`).join("")}</ul>`
-      : `<span class="nbp-empty">No criteria found</span>`;
-  const idealHtml = idealResponse
-    ? `<div class="nbp-section"><div class="nbp-section-label">Ideal Response</div><div class="nbp-ideal-response">${escapeHtml(idealResponse)}</div></div>`
+  // --- Zone 0: Warnings ---
+  const warnBlock = warnings.length > 0
+    ? `<div class="nbp-warnings" role="alert"><strong>Notice:</strong> ${warnings.map((w) => escapeHtml(w)).join(" ")}</div>`
     : "";
 
-  // Slots — mth-style two-column cards
-  let slotsHtml = "";
+  // --- Zone 1: Task context (collapsible) ---
+  const criteriaHtml = criteria.length > 0
+    ? `<ul class="nbp-criteria-list">${criteria.map((c) => `<li><span class="criteria-id">${escapeHtml(c.id || "")}</span> ${escapeHtml(c.description || "")}</li>`).join("")}</ul>`
+    : `<span class="nbp-empty">No criteria found</span>`;
+  const idealBlock = idealResponse
+    ? `<div class="ctx-block"><div class="ctx-label">Ideal Response</div><div class="ctx-body">${escapeHtml(idealResponse)}</div></div>`
+    : "";
+  const taskContext = `<details class="task-context" open>
+    <summary class="task-context-summary">Task Context</summary>
+    <div class="task-context-body">
+      <div class="ctx-block"><div class="ctx-label">Prompt</div><div class="ctx-body">${prompt}</div></div>
+      ${idealBlock}
+      <div class="ctx-block"><div class="ctx-label">Criteria (${criteria.length})</div>${criteriaHtml}</div>
+    </div>
+  </details>`;
+
+  // --- Zone 2: Metadata chips ---
+  let metaChips = "";
+  const metaKeys = Object.keys(meta);
+  if (metaKeys.length > 0) {
+    const chips = metaKeys.map((k) => {
+      const label = k.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+      return `<span class="meta-chip"><span class="meta-chip-key">${escapeHtml(label)}</span><span class="meta-chip-val">${escapeHtml(meta[k])}</span></span>`;
+    }).join("");
+    metaChips = `<div class="meta-chips-bar">${chips}</div>`;
+  }
+
+  // --- Zone 3: Tabbed slots ---
+  let slotsBlock = "";
   if (slots.length > 0) {
-    const slotCards = slots.map((s) => {
+    const tabs = slots.map((s, i) => {
       const name = escapeHtml(s.model_name || "Unknown");
+      const lj = s.llm_judge || ""; const hj = s.human_judge || "";
+      const hasFail = lj.toLowerCase().includes("fail") || hj.toLowerCase().includes("fail");
+      const hasPass = lj.toLowerCase().includes("pass") || hj.toLowerCase().includes("pass");
+      const dot = hasFail ? "dot-fail" : hasPass ? "dot-pass" : "";
+      return `<button type="button" class="slot-tab${i === 0 ? " active" : ""}" data-slot="${s.slot}"><span class="slot-tab-num">${s.slot}</span><span class="slot-tab-model">${name}</span>${dot ? `<span class="slot-tab-dot ${dot}"></span>` : ""}</button>`;
+    }).join("");
+
+    const panels = slots.map((s, i) => {
       const resp = escapeHtml(s.model_response || "(no response)");
       const ljText = s.llm_judge || "";
       const hjText = s.human_judge || "";
       const rtText = s.reasoning_trace || "";
 
-      const hasPass = ljText.toLowerCase().includes("pass") || hjText.toLowerCase().includes("pass");
-      const hasFail = ljText.toLowerCase().includes("fail") || hjText.toLowerCase().includes("fail");
-      const slotClass = hasFail ? "slot-fail" : hasPass ? "slot-pass" : "";
-      const dotClass = hasFail ? "dot-fail" : hasPass ? "dot-pass" : "";
+      let rightHtml = "";
+      if (hjText) rightHtml += `<div class="slot-judgment-block slot-judgment-human"><div class="slot-judgment-title">Human Judge</div><div class="slot-judgment-body">${escapeHtml(hjText)}</div></div>`;
+      if (ljText) rightHtml += `<div class="slot-judgment-block slot-judgment-llm"><div class="slot-judgment-title">LLM Judge</div><div class="slot-judgment-body">${escapeHtml(ljText)}</div></div>`;
+      if (rtText) rightHtml += `<details class="slot-trace-details"><summary class="slot-trace-summary">Reasoning Trace</summary><div class="slot-judgment-body">${escapeHtml(rtText)}</div></details>`;
+      if (!rightHtml) rightHtml = `<span class="nbp-empty">No judgments</span>`;
 
-      // Left: Human Judge
-      let leftHtml = "";
-      if (hjText) {
-        leftHtml += `<div class="slot-judgment-block slot-judgment-human"><div class="slot-judgment-title">Human Judge</div><div class="slot-judgment-body">${escapeHtml(hjText)}</div></div>`;
-      }
-      if (rtText) {
-        leftHtml += `<div class="slot-judgment-block"><div class="slot-judgment-title">Reasoning Trace</div><div class="slot-judgment-body">${escapeHtml(rtText)}</div></div>`;
-      }
-      if (!leftHtml) leftHtml = `<span class="nbp-empty">No human review</span>`;
-
-      // Right: Model Response + LLM Judge
-      let rightHtml = `<div class="slot-section"><div class="slot-section-label">Model Response</div><div class="task-slot-response">${resp}</div></div>`;
-      if (ljText) {
-        rightHtml += `<div class="slot-judgment-block slot-judgment-llm"><div class="slot-judgment-title">LLM Judge</div><div class="slot-judgment-body">${escapeHtml(ljText)}</div></div>`;
-      }
-
-      return `<div class="task-slot-card ${slotClass}">
-        <div class="task-slot-header">
-          <span class="slot-number">Slot ${s.slot}</span>
-          <span class="slot-model">${name}</span>
-          ${dotClass ? `<span class="slot-status-dot ${dotClass}"></span>` : ""}
-        </div>
+      return `<div class="slot-tab-content" data-slot="${s.slot}"${i > 0 ? " hidden" : ""}>
         <div class="task-slot-body">
-          <div class="slot-left">${leftHtml}</div>
+          <div class="slot-left"><div class="slot-section"><div class="slot-section-label">Model Response</div><div class="task-slot-response">${resp}</div></div></div>
           <div class="slot-right">${rightHtml}</div>
         </div>
       </div>`;
     }).join("");
-    slotsHtml = `<div class="nbp-section"><div class="nbp-section-label">Hunt Results (${slots.length} slots)</div><div class="task-slots-grid">${slotCards}</div></div>`;
+
+    slotsBlock = `<div class="slot-viewer">
+      <div class="slot-tabs-bar" id="slot-tabs-bar">${tabs}</div>
+      <div class="slot-panels">${panels}</div>
+    </div>`;
   }
 
-  // Metadata
-  let metaHtml = "";
-  const metaKeys = Object.keys(meta);
-  if (metaKeys.length > 0) {
-    const rows = metaKeys.map((k) => {
-      const label = k.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-      return `<tr><td class="nbp-meta-key">${escapeHtml(label)}</td><td>${escapeHtml(meta[k])}</td></tr>`;
-    }).join("");
-    metaHtml = `<div class="nbp-section"><div class="nbp-section-label">Summary / Metadata</div><table class="nbp-meta-table">${rows}</table></div>`;
-  }
-
-  // Extra cells
+  // --- Zone 4: Extra cells ---
   let extraHtml = "";
   if (extraCells.length > 0) {
     const items = extraCells.map((c) =>
@@ -350,16 +348,22 @@ function _renderNotebookPreviewBody(data) {
     extraHtml = `<div class="nbp-section"><div class="nbp-section-label">Other Sections (${extraCells.length})</div>${items}</div>`;
   }
 
-  return (
-    warnBlock +
-    scanMeta +
-    `<div class="nbp-section"><div class="nbp-section-label">Prompt</div><div class="nbp-text">${prompt}</div></div>` +
-    idealHtml +
-    `<div class="nbp-section"><div class="nbp-section-label">Criteria / Rubric (${criteria.length})</div>${criteriaHtml}</div>` +
-    slotsHtml +
-    metaHtml +
-    extraHtml
-  );
+  return warnBlock + metaChips + taskContext + slotsBlock + extraHtml;
+}
+
+function _wireSlotTabs(container) {
+  const bar = container.querySelector("#slot-tabs-bar");
+  if (!bar) return;
+  bar.addEventListener("click", (e) => {
+    const tab = e.target.closest(".slot-tab");
+    if (!tab) return;
+    bar.querySelectorAll(".slot-tab").forEach((t) => t.classList.remove("active"));
+    tab.classList.add("active");
+    const panels = container.querySelectorAll(".slot-tab-content");
+    panels.forEach((p) => (p.hidden = true));
+    const target = container.querySelector(`.slot-tab-content[data-slot="${tab.dataset.slot}"]`);
+    if (target) target.hidden = false;
+  });
 }
 
 initCouncil(() => currentSessionId, null);
