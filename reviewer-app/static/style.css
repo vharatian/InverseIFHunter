@@ -76,16 +76,16 @@ body {
     min-height: 100vh;
     padding: var(--space-lg);
 }
-#app { max-width: 100%; width: 100%; margin: 0 auto; padding: 0 var(--space-xl); }
+#app { max-width: 100%; width: 100%; margin: 0 auto; padding: 0; }
 
 /* ── Header ── */
 .header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: var(--space-xl);
-    padding-bottom: var(--space-md);
+    padding: var(--space-sm) var(--space-lg);
     border-bottom: 1px solid var(--border);
+    background: var(--bg-card);
 }
 .header h1 {
     font-size: 1.2rem;
@@ -285,10 +285,7 @@ body {
 /* ── Main container ── */
 .main {
     background: var(--bg-secondary);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    padding: var(--space-xl) var(--space-2xl);
-    box-shadow: var(--shadow-sm);
+    padding: var(--space-md) var(--space-lg);
 }
 
 /* ── Nav ── */
@@ -616,21 +613,6 @@ body {
 .slot-right {
     padding: var(--space-lg); display: flex; flex-direction: column;
     gap: var(--space-lg); background: var(--bg-tertiary);
-    align-self: start;
-    max-height: calc(100vh - 3rem - 46px - 64px); /* subtract sticky action bar too */
-    overflow-y: auto;
-    border-radius: 0 0 var(--radius-lg) 0;
-    scrollbar-width: thin;
-    /* Scroll shadow indicator: subtle gradient at top when scrolled */
-    background-attachment: local, local, scroll, scroll;
-    background-image:
-        linear-gradient(var(--bg-tertiary) 30%, transparent),
-        linear-gradient(transparent, var(--bg-tertiary) 70%),
-        linear-gradient(rgba(0,0,0,0.08), transparent),
-        linear-gradient(transparent, rgba(0,0,0,0.08));
-    background-size: 100% 24px, 100% 24px, 100% 8px, 100% 8px;
-    background-position: top, bottom, top, bottom;
-    background-repeat: no-repeat;
 }
 .slot-right .slot-section {
     display: flex; flex-direction: column; flex: 1; min-height: 0;
@@ -643,7 +625,7 @@ body {
     font-size: 0.85rem; line-height: 1.65; color: var(--text-primary);
     white-space: pre-wrap; word-break: break-word; background: var(--bg-tertiary);
     border: 1px solid var(--border); border-radius: var(--radius-sm);
-    padding: var(--space-md);
+    padding: var(--space-md); max-height: 300px; overflow-y: auto;
 }
 .task-slot-response::-webkit-scrollbar { width: 4px; }
 .task-slot-response::-webkit-scrollbar-track { background: transparent; }
@@ -749,6 +731,11 @@ body {
     display: flex;
     align-items: center;
     gap: var(--space-sm);
+}
+.slot-judgment-body {
+    font-size: 0.82rem; line-height: 1.55; color: var(--text-secondary);
+    white-space: pre-wrap; word-break: break-word;
+    max-height: 200px; overflow-y: auto; scrollbar-width: thin;
 }
 .llm-score {
     font-weight: 600;
@@ -2407,73 +2394,7 @@ button[aria-busy="true"]::after {
     50% { opacity: 0.7; }
 }
 
-/* ── Notebook preview: slot cards (mth-branch design) ── */
-.task-slots-grid { display: flex; flex-direction: column; gap: var(--space-md); }
-.task-slot-card {
-    background: var(--bg-card); border: 1px solid var(--border);
-    border-radius: var(--radius-lg); overflow: visible;
-    transition: border-color 0.15s, box-shadow 0.15s;
-    border-left: 3px solid var(--border);
-}
-.task-slot-card:hover { border-color: var(--border-hover); }
-.task-slot-card.slot-pass { border-left-color: var(--success, #22c55e); }
-.task-slot-card.slot-fail { border-left-color: var(--danger, #ef4444); }
-.task-slot-header {
-    display: flex; align-items: center; gap: 10px;
-    padding: 10px 16px; background: var(--bg-tertiary);
-    border-bottom: 1px solid var(--border);
-    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-}
-.slot-number {
-    font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
-    color: var(--accent-primary); background: var(--accent-glow, rgba(99,102,241,0.1));
-    padding: 3px 8px; border-radius: var(--radius-sm);
-}
-.slot-model { font-size: 0.78rem; font-weight: 500; color: var(--text-secondary); font-family: var(--font-mono, monospace); }
-.slot-status-dot {
-    width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-left: auto;
-}
-.dot-pass { background: var(--success, #22c55e); box-shadow: 0 0 6px var(--success, #22c55e); }
-.dot-fail { background: var(--danger, #ef4444); box-shadow: 0 0 6px var(--danger, #ef4444); }
-.task-slot-body { display: grid; grid-template-columns: 1fr 1fr; min-height: 0; }
-.slot-left {
-    padding: 14px 16px; border-right: 1px solid var(--border);
-    display: flex; flex-direction: column; gap: 12px;
-}
-.slot-right {
-    padding: 14px 16px; display: flex; flex-direction: column; gap: 12px;
-    background: var(--bg-tertiary); max-height: 400px; overflow-y: auto;
-}
-.slot-section { display: flex; flex-direction: column; }
-.slot-section-label {
-    font-size: 0.68rem; font-weight: 600; text-transform: uppercase;
-    letter-spacing: 0.06em; color: var(--text-muted); margin-bottom: 6px;
-}
-.task-slot-response {
-    font-size: 0.82rem; line-height: 1.6; color: var(--text-primary);
-    white-space: pre-wrap; word-break: break-word; background: var(--bg-card);
-    border: 1px solid var(--border); border-radius: var(--radius-sm);
-    padding: 10px; max-height: 250px; overflow-y: auto;
-}
-.slot-judgment-block {
-    border: 1px solid var(--border); border-radius: var(--radius-md);
-    padding: 10px; background: var(--bg-secondary, var(--bg-card));
-}
-.slot-judgment-human { border-left: 2px solid var(--accent-primary, #6366f1); }
-.slot-judgment-llm { border-left: 2px solid var(--warning, #f59e0b); }
-.slot-judgment-title {
-    font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
-    letter-spacing: 0.06em; color: var(--text-muted); margin-bottom: 5px;
-}
-.slot-judgment-body {
-    font-size: 0.82rem; line-height: 1.5; color: var(--text-secondary);
-    white-space: pre-wrap; word-break: break-word;
-}
-@media (max-width: 900px) {
-    .task-slot-body { grid-template-columns: 1fr; }
-    .slot-left { border-right: none; border-bottom: 1px solid var(--border); }
-    .slot-right { max-height: none; overflow-y: visible; }
-}
+/* (duplicate slot CSS removed — styles are at lines ~573-835) */
 
 /* ── Notebook preview: metadata table ── */
 .nbp-meta-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
@@ -2531,6 +2452,21 @@ button[aria-busy="true"]::after {
 .qc-rationale { margin-top: 8px; font-size: 0.8rem; color: var(--text-primary); white-space: pre-wrap; }
 .qc-issue-message { margin-top: 4px; font-size: 0.8rem; color: var(--danger, #ef4444); }
 .qc-issue-hint { margin-top: 2px; font-size: 0.78rem; color: var(--text-muted); font-style: italic; }
+
+/* ── Mobile warning ── */
+.mobile-warning {
+    display: none; position: fixed; inset: 0; z-index: 9999;
+    background: var(--bg-primary); color: var(--text-primary);
+    flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; padding: var(--space-2xl); gap: var(--space-md);
+}
+.mobile-warning-icon { opacity: 0.5; }
+.mobile-warning p { font-size: 1.1rem; font-weight: 600; margin: 0; }
+.mobile-warning-sub { font-size: 0.85rem; color: var(--text-muted); font-weight: 400; }
+@media (max-width: 768px) {
+    .mobile-warning { display: flex; }
+    #app { display: none; }
+}
 
 /* Light theme overrides */
 [data-theme="light"] .council-bar { background: var(--bg-card); }
