@@ -570,14 +570,13 @@ body {
 
 /* ── Task context (collapsible) ── */
 .task-context {
-    border: 1px solid var(--border); border-radius: var(--radius-md);
+    border: 1px solid var(--border); border-radius: 0;
     margin-bottom: var(--space-lg); background: var(--bg-card);
 }
 .task-context-summary {
     padding: 10px 16px; cursor: pointer; font-size: 0.82rem; font-weight: 600;
     color: var(--text-primary); background: var(--bg-tertiary);
-    border-radius: var(--radius-md); list-style: none;
-    display: flex; align-items: center; gap: 6px;
+    list-style: none; display: flex; align-items: center; gap: 6px;
 }
 .task-context-summary::before { content: "\25BC"; font-size: 0.55rem; transition: transform 0.15s; }
 .task-context:not([open]) > .task-context-summary::before { transform: rotate(-90deg); }
@@ -623,7 +622,7 @@ body {
 .slot-tab {
     display: inline-flex; align-items: center; gap: 6px;
     padding: 8px 16px; border: 1px solid var(--border);
-    border-radius: 999px; background: var(--bg-card);
+    border-radius: 0; background: var(--bg-card);
     font-size: 0.78rem; font-weight: 500; color: var(--text-secondary);
     cursor: pointer; white-space: nowrap; transition: all 0.15s;
     font-family: var(--font-body);
@@ -643,7 +642,7 @@ body {
 .slot-panels { }
 .slot-tab-content { animation: fadeIn 0.2s ease; }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-.task-slot-body { display: grid; grid-template-columns: 55fr 45fr; min-height: 0; border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; }
+.task-slot-body { display: grid; grid-template-columns: 55fr 45fr; min-height: 0; border: 1px solid var(--border); overflow: hidden; }
 .slot-left {
     padding: 16px; border-right: 1px solid var(--border);
     display: flex; flex-direction: column; gap: 12px;

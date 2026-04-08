@@ -163,40 +163,44 @@ def stream_review_events(snapshot):
                     raise
             else:
                 passed = True
-                for event in run_council_streaming(prompt, rule_id):
-                    if event[0] == "prompt":
-                        _, p = event
-                        yield f"data: {json.dumps({'type': 'council_prompt', 'rule_id': rule_id, 'prompt': p})}\n\n"
-                    elif event[0] == "model_start":
-                        _, model_id = event
-                        yield f"data: {json.dumps({'type': 'council_model_start', 'rule_id': rule_id, 'model_id': model_id})}\n\n"
-                    elif event[0] == "model_chunk":
-                        _, model_id, chunk = event
-                        yield f"data: {json.dumps({'type': 'council_model_chunk', 'rule_id': rule_id, 'model_id': model_id, 'chunk': chunk})}\n\n"
-                    elif event[0] == "model_verdict":
-                        _, model_id, vote_str, full_response = event
-                        council_responses[model_id] = full_response or ""
-                        yield f"data: {json.dumps({'type': 'council_model_verdict', 'rule_id': rule_id, 'model_id': model_id, 'vote': vote_str, 'response': full_response})}\n\n"
-                        votes.append((model_id, True if vote_str == "PASS" else False if vote_str == "FAIL" else None))
-                    elif event[0] == "chairman_start":
-                        _, ch_model = event
-                        chairman_model_id = ch_model
-                        yield f"data: {json.dumps({'type': 'council_chairman_start', 'rule_id': rule_id, 'model_id': ch_model})}\n\n"
-                    elif event[0] == "chairman_chunk":
-                        _, ch_model, ch_chunk = event
-                        yield f"data: {json.dumps({'type': 'council_chairman_chunk', 'rule_id': rule_id, 'model_id': ch_model, 'chunk': ch_chunk})}\n\n"
-                    elif event[0] == "chairman_verdict":
-                        _, ch_passed, ch_rationale = event
-                        passed = ch_passed
-                        chairman_rationale = ch_rationale or ""
-                        chairman_verdict_str = "PASS" if passed else "FAIL"
-                        yield f"data: {json.dumps({'type': 'council_chairman_verdict', 'rule_id': rule_id, 'passed': passed, 'rationale': chairman_rationale})}\n\n"
-                    elif event[0] == "complete":
-                        _, passed, votes = event
-
-                issue = None
-                if not passed:
-                    issue = build_council_issue(rule_id, snapshot, votes, params)
+                try:
+                    for event in run_council_streaming(prompt, rule_id):
+                        if event[0] == "prompt":
+                            _, p = event
+                            yield f"data: {json.dumps({'type': 'council_prompt', 'rule_id': rule_id, 'prompt': p})}\n\n"
+                        elif event[0] == "model_start":
+                            _, model_id = event
+                            yield f"data: {json.dumps({'type': 'council_model_start', 'rule_id': rule_id, 'model_id': model_id})}\n\n"
+                        elif event[0] == "model_chunk":
+                            _, model_id, chunk = event
+                            yield f"data: {json.dumps({'type': 'council_model_chunk', 'rule_id': rule_id, 'model_id': model_id, 'chunk': chunk})}\n\n"
+                        elif event[0] == "model_verdict":
+                            _, model_id, vote_str, full_response = event
+                            council_responses[model_id] = full_response or ""
+                            yield f"data: {json.dumps({'type': 'council_model_verdict', 'rule_id': rule_id, 'model_id': model_id, 'vote': vote_str, 'response': full_response})}\n\n"
+                            votes.append((model_id, True if vote_str == "PASS" else False if vote_str == "FAIL" else None))
+                        elif event[0] == "chairman_start":
+                            _, ch_model = event
+                            chairman_model_id = ch_model
+                            yield f"data: {json.dumps({'type': 'council_chairman_start', 'rule_id': rule_id, 'model_id': ch_model})}\n\n"
+                        elif event[0] == "chairman_chunk":
+                            _, ch_model, ch_chunk = event
+                            yield f"data: {json.dumps({'type': 'council_chairman_chunk', 'rule_id': rule_id, 'model_id': ch_model, 'chunk': ch_chunk})}\n\n"
+                        elif event[0] == "chairman_verdict":
+                            _, ch_passed, ch_rationale = event
+                            passed = ch_passed
+                            chairman_rationale = ch_rationale or ""
+                            chairman_verdict_str = "PASS" if passed else "FAIL"
+                            yield f"data: {json.dumps({'type': 'council_chairman_verdict', 'rule_id': rule_id, 'passed': passed, 'rationale': chairman_rationale})}\n\n"
+                        elif event[0] == "complete":
+                            _, passed, votes = event
+                    issue = None
+                    if not passed:
+                        issue = build_council_issue(rule_id, snapshot, votes, params)
+                except Exception as e:
+                    logger.exception("Council streaming failed for rule %s", rule_id)
+                    passed = False
+                    issue = ReviewIssue(rule_id=rule_id, message=f"Council error: {e}", hint="Network or API issue. Try re-running.")
         else:
             try:
                 issue = run_rule(rule_id, snapshot, params)

@@ -558,8 +558,9 @@ def call_model_sync(
         "HTTP-Referer": "http://localhost:8000",
         "X-Title": "Agentic Reviewer",
     }
+    sync_timeout = httpx.Timeout(connect=30.0, read=timeout, write=30.0, pool=30.0)
     try:
-        with httpx.Client(timeout=timeout) as client:
+        with httpx.Client(timeout=sync_timeout) as client:
             resp = client.post(OPENROUTER_URL, headers=headers, json=payload)
             resp.raise_for_status()
             data = resp.json()
@@ -567,6 +568,9 @@ def call_model_sync(
         err = e.response.text if e.response else str(e)
         logger.warning("OpenRouter HTTP error for %s: %s", model, err)
         return "", err
+    except httpx.ReadTimeout:
+        logger.warning("OpenRouter read timeout for %s after %ss", model, timeout)
+        return "", f"Model {model} timed out after {timeout}s"
     except Exception as e:
         logger.warning("OpenRouter call failed for %s: %s", model, e)
         return "", str(e)
@@ -603,8 +607,9 @@ def call_model_streaming(
         "HTTP-Referer": "http://localhost:8000",
         "X-Title": "Agentic Reviewer",
     }
+    stream_timeout = httpx.Timeout(connect=30.0, read=timeout, write=30.0, pool=30.0)
     try:
-        with httpx.Client(timeout=timeout) as client:
+        with httpx.Client(timeout=stream_timeout) as client:
             with client.stream("POST", OPENROUTER_URL, headers=headers, json=payload) as resp:
                 resp.raise_for_status()
                 for line in resp.iter_lines():
@@ -628,6 +633,9 @@ def call_model_streaming(
         err = e.response.text if e.response else str(e)
         logger.warning("OpenRouter HTTP error for %s: %s", model, err)
         yield ("", err)
+    except httpx.ReadTimeout:
+        logger.warning("OpenRouter read timeout for %s after %ss", model, timeout)
+        yield ("", f"Model {model} timed out after {timeout}s")
     except Exception as e:
         logger.warning("OpenRouter stream failed for %s: %s", model, e)
         yield ("", str(e))
