@@ -32,6 +32,24 @@ async def version():
     return {"version": _cached_version}
 
 
+@router.get("/api/council-models")
+async def council_models():
+    """Return council model list + chairman from config for dynamic UI."""
+    try:
+        from agentic_reviewer.config_loader import get_agentic_council
+        cfg = get_agentic_council()
+        models = []
+        for m in cfg.get("models") or []:
+            if isinstance(m, dict) and m.get("enabled", True):
+                models.append(m.get("id", ""))
+            elif isinstance(m, str):
+                models.append(m)
+        chairman = cfg.get("chairman_model", "")
+        return {"models": models, "chairman": chairman}
+    except Exception:
+        return {"models": [], "chairman": ""}
+
+
 @router.get("/health")
 async def health():
     """Liveness: app is running."""

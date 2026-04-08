@@ -67,28 +67,52 @@ export function restoreCouncilFromTask(lastCouncil) {
   _handleEvent(complete, slotsEl, summaryEl, detailEl);
 }
 
-const MODEL_SHORT = {
-  "openai/gpt-5.2": "GPT-5.2",
-  "anthropic/claude-sonnet-4.6": "Sonnet 4.6",
-  "anthropic/claude-opus-4.6": "Opus 4.6",
-  "google/gemini-3-pro-preview": "Gemini 3",
-  "google/gemini-3.1-pro-preview": "Gemini 3.1",
-  "x-ai/grok-4": "Grok 4",
+// Dynamic model maps — populated from /api/council-models on init, with fallbacks
+let MODEL_SHORT = {};
+let MODEL_INITIALS = {};
+let MODEL_COLORS = {};
+
+const _PROVIDER_COLORS = {
+  openai: "#10a37f", anthropic: "#d97706", google: "#4285f4", "x-ai": "#ef4444",
 };
-const MODEL_INITIALS = {
-  "openai/gpt-5.2": "G", "anthropic/claude-sonnet-4.6": "S",
-  "anthropic/claude-opus-4.6": "O", "google/gemini-3-pro-preview": "Ge",
-  "google/gemini-3.1-pro-preview": "Ge", "x-ai/grok-4": "Gr",
-};
-const MODEL_COLORS = {
-  "openai/gpt-5.2": "#10a37f", "anthropic/claude-sonnet-4.6": "#d97706",
-  "anthropic/claude-opus-4.6": "#7c3aed", "google/gemini-3-pro-preview": "#4285f4",
-  "google/gemini-3.1-pro-preview": "#4285f4", "x-ai/grok-4": "#ef4444",
-};
+const _PROVIDER_SPECIAL = { opus: "#7c3aed" };
+
+function _deriveModelMeta(modelId) {
+  const parts = modelId.split("/");
+  const provider = parts[0] || "";
+  const name = parts.slice(1).join("/") || modelId;
+  const short = name.replace(/-preview$/, "").replace(/\./g, ".").split("-").map((w) => w[0]?.toUpperCase() + w.slice(1)).join(" ").replace(/\s+/g, " ").trim();
+  const initial = short.replace(/[^A-Z0-9]/gi, "").slice(0, 2) || "?";
+  let color = _PROVIDER_COLORS[provider] || "#6366f1";
+  for (const [k, c] of Object.entries(_PROVIDER_SPECIAL)) {
+    if (name.includes(k)) { color = c; break; }
+  }
+  return { short, initial, color };
+}
+
+async function _loadCouncilModels() {
+  try {
+    const data = await api("/api/council-models");
+    const all = [...(data.models || [])];
+    if (data.chairman) all.push(data.chairman);
+    for (const mid of all) {
+      if (!mid || MODEL_SHORT[mid]) continue;
+      const m = _deriveModelMeta(mid);
+      MODEL_SHORT[mid] = m.short;
+      MODEL_INITIALS[mid] = m.initial;
+      MODEL_COLORS[mid] = m.color;
+    }
+  } catch { /* fallback to derive on-the-fly */ }
+}
+
 function _modelAvatar(mid) {
-  const init = MODEL_INITIALS[mid] || (shortModel(mid) || "?")[0];
-  const color = MODEL_COLORS[mid] || "#6366f1";
-  return `<span class="chat-avatar" style="background:${color}">${escapeHtml(init)}</span>`;
+  if (!MODEL_INITIALS[mid]) {
+    const m = _deriveModelMeta(mid);
+    MODEL_SHORT[mid] = m.short;
+    MODEL_INITIALS[mid] = m.initial;
+    MODEL_COLORS[mid] = m.color;
+  }
+  return `<span class="chat-avatar" style="background:${MODEL_COLORS[mid]}">${escapeHtml(MODEL_INITIALS[mid])}</span>`;
 }
 
 const RULE_SHORT_LABELS = {
@@ -171,7 +195,13 @@ const RULES_REFERENCE = [
 ];
 
 function shortModel(id) {
-  return MODEL_SHORT[id] || id.split("/").pop();
+  if (!MODEL_SHORT[id]) {
+    const m = _deriveModelMeta(id);
+    MODEL_SHORT[id] = m.short;
+    MODEL_INITIALS[id] = m.initial;
+    MODEL_COLORS[id] = m.color;
+  }
+  return MODEL_SHORT[id];
 }
 
 let _getSessionId = () => null;
@@ -182,6 +212,7 @@ let _state = { running: false, rules: {}, ruleOrder: [], abortCtrl: null, chairm
 export function initCouncil(getSessionId, onApprove) {
   _getSessionId = getSessionId;
   _onApprove = onApprove;
+  _loadCouncilModels();
 
   const runBtn = document.getElementById("btn-run-council");
   if (runBtn) {
