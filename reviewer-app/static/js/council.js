@@ -3,7 +3,7 @@
  * Auto-run council, SSE streaming, verdict bar, triage modes (green/amber/red),
  * inline badges, stop button, chairman streaming, comprehensive rules modal.
  */
-import { getEmail, api, API_BASE } from "./api.js";
+import { getEmail, api, API_BASE, onCouncilComplete as _notifyUpdateSystem } from "./api.js";
 import { escapeHtml } from "./task.js";
 import { showModal, showToast } from "./dom.js";
 
@@ -627,6 +627,7 @@ function _handleEvent(evt, slotsEl, summaryEl, detailEl) {
         ? `<span class="council-summary-pass">${passCount}/${total} passed</span> — All checks clear`
         : `<span class="council-summary-fail">${passCount}/${total} passed</span> — ${issues.length} issue${issues.length > 1 ? "s" : ""} found`;
     }
+    _notifyUpdateSystem();
   }
   else if (type === "error") {
     if (summaryEl) summaryEl.textContent = `Error: ${evt.message}`;

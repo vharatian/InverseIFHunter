@@ -1,10 +1,10 @@
 /**
  * Slim reviewer: auth, fetch notebook by Colab/Drive URL only (no session DB lookup).
  */
-import { getEmail, setEmail, api, initVersionCheck } from "./js/api.js";
+import { getEmail, setEmail, api, initVersionCheck, setCouncilRunningCheck, onCouncilComplete } from "./js/api.js";
 import { showGate, showToast } from "./js/dom.js";
 import { escapeHtml } from "./js/task.js";
-import { initCouncil, resetCouncil, setNotebookUrl } from "./js/council.js";
+import { initCouncil, resetCouncil, setNotebookUrl, getCouncilState } from "./js/council.js";
 
 let currentSessionId = null;
 let currentTask = null;
@@ -419,6 +419,7 @@ function _wireSlotTabs(container) {
 
 initCouncil(() => currentSessionId, null);
 setNotebookUrl(() => _currentNotebookUrl);
+setCouncilRunningCheck(() => getCouncilState().running);
 initVersionCheck();
 
 if (getEmail()) {

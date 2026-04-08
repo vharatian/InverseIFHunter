@@ -96,32 +96,76 @@ export async function api(path, options = {}, retryOptions = {}) {
   throw lastErr;
 }
 
+let _isCouncilRunning = () => false;
+let _updatePending = false;
+
+export function setCouncilRunningCheck(fn) {
+  _isCouncilRunning = fn;
+}
+
 export async function checkVersion() {
   try {
     const res = await fetch(`${API_BASE}/api/version`, { cache: "no-store" });
     const data = await res.json();
     if (_currentVersion === null) {
       _currentVersion = data.version;
-    } else if (data.version !== _currentVersion) {
+    } else if (data.version !== _currentVersion && !_updatePending) {
       _pendingVersion = data.version;
-      _showUpdateBanner();
+      _updatePending = true;
+      _tryShowUpdateModal();
     }
   } catch { /* server may be restarting */ }
 }
 
-let _indicatorWired = false;
+function _tryShowUpdateModal() {
+  if (!_updatePending) return;
+  if (_isCouncilRunning()) {
+    const btn = document.getElementById("reviewerUpdateIndicator");
+    if (btn) { btn.classList.remove("hidden"); btn.textContent = "Update queued..."; }
+    return;
+  }
+  _showUpdateModal();
+}
 
-function _showUpdateBanner() {
-  const btn = document.getElementById("reviewerUpdateIndicator");
-  if (!btn) return;
-  btn.classList.remove("hidden");
-  if (_indicatorWired) return;
-  _indicatorWired = true;
-  btn.addEventListener("click", () => {
-    if (confirm("A new version is available. Refresh now?")) {
-      location.reload();
-    }
+export function onCouncilComplete() {
+  if (_updatePending) _showUpdateModal();
+}
+
+function _showUpdateModal() {
+  let overlay = document.getElementById("update-modal-overlay");
+  if (overlay) { overlay.hidden = false; return; }
+
+  overlay = document.createElement("div");
+  overlay.id = "update-modal-overlay";
+  overlay.className = "update-modal-overlay";
+  overlay.innerHTML = `
+    <div class="update-modal">
+      <div class="update-modal-icon">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      </div>
+      <h3 class="update-modal-title">Update Available</h3>
+      <p class="update-modal-msg">A new version of the reviewer app is ready.</p>
+      <p class="update-modal-warn">Updating will reload the page and reset your current view. Make sure you've finished any active task before updating.</p>
+      <div class="update-modal-actions">
+        <button type="button" class="update-modal-btn update-modal-btn--later" id="update-later">Later</button>
+        <button type="button" class="update-modal-btn update-modal-btn--now" id="update-now">Update Now</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  document.getElementById("update-now").addEventListener("click", () => location.reload());
+  document.getElementById("update-later").addEventListener("click", () => {
+    overlay.hidden = true;
+    const btn = document.getElementById("reviewerUpdateIndicator");
+    if (btn) { btn.classList.remove("hidden"); btn.textContent = "Update"; }
   });
+
+  const btn = document.getElementById("reviewerUpdateIndicator");
+  if (btn) {
+    btn.classList.remove("hidden");
+    btn.textContent = "Update";
+    btn.onclick = () => { overlay.hidden = false; };
+  }
 }
 
 export function initVersionCheck() {

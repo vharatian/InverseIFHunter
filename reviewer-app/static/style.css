@@ -2531,6 +2531,34 @@ button[aria-busy="true"]::after {
 .chat-msg--chairman { margin-top: 4px; padding-top: 8px; border-top: 1px solid var(--border-subtle); }
 @keyframes streamPulse { 0%,100% { border-left-color: var(--accent-primary); } 50% { border-left-color: transparent; } }
 
+/* ── Update modal ── */
+.update-modal-overlay {
+    position: fixed; inset: 0; z-index: 10000;
+    background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);
+    display: flex; align-items: center; justify-content: center;
+}
+.update-modal {
+    background: var(--bg-card); border: 1px solid var(--border);
+    padding: 32px; max-width: 420px; width: 90%; text-align: center;
+}
+.update-modal-icon { margin-bottom: 12px; color: var(--accent-primary); }
+.update-modal-title { font-size: 1.1rem; font-weight: 700; color: var(--text-primary); margin-bottom: 8px; }
+.update-modal-msg { font-size: 0.88rem; color: var(--text-secondary); margin-bottom: 8px; }
+.update-modal-warn {
+    font-size: 0.8rem; color: var(--warning, #f59e0b); padding: 8px 12px;
+    background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.2);
+    margin-bottom: 16px;
+}
+.update-modal-actions { display: flex; gap: 8px; justify-content: center; }
+.update-modal-btn {
+    padding: 8px 24px; font-size: 0.85rem; font-weight: 600; cursor: pointer;
+    border: 1px solid var(--border); font-family: var(--font-body);
+}
+.update-modal-btn--later { background: var(--bg-tertiary); color: var(--text-secondary); }
+.update-modal-btn--later:hover { background: var(--bg-hover); }
+.update-modal-btn--now { background: var(--accent-primary); color: #fff; border-color: var(--accent-primary); }
+.update-modal-btn--now:hover { filter: brightness(1.1); }
+
 /* ── Mobile warning ── */
 .mobile-warning {
     display: none; position: fixed; inset: 0; z-index: 9999;
