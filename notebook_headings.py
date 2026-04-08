@@ -78,3 +78,12 @@ METADATA_KEYS = frozenset({
     "selected_response",
     "selected_judge",
 })
+
+# Keys hidden from reviewer app display (too verbose / not useful for review)
+HIDDEN_FROM_REVIEWER = frozenset({
+    "judge_system_prompt",
+    "judge_prompt_template",
+    "selected_response",
+    "selected_judge",
+    "conversation_history",
+})

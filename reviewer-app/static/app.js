@@ -260,6 +260,57 @@ document.getElementById("btn-fetch-notebook")?.addEventListener("click", async (
   }
 });
 
+function _formatJudgment(title, rawText, cssClass) {
+  const grades = [];
+  let explanation = "";
+  let score = "";
+
+  // Parse "C1: PASS", "C2: FAIL" patterns
+  const gradeRe = /\b(C\d+)\s*[:：]\s*(PASS|FAIL|MISSING)\b/gi;
+  let m;
+  while ((m = gradeRe.exec(rawText)) !== null) {
+    grades.push({ id: m[1].toUpperCase(), val: m[2].toUpperCase() });
+  }
+  // Also parse JSON grades: {"C1": "PASS", "C2": "FAIL"}
+  if (grades.length === 0) {
+    const jsonMatch = rawText.match(/\{[^}]*"C\d+"[^}]*\}/);
+    if (jsonMatch) {
+      try {
+        const parsed = JSON.parse(jsonMatch[0]);
+        for (const [k, v] of Object.entries(parsed)) {
+          if (/^C\d+$/i.test(k)) grades.push({ id: k.toUpperCase(), val: String(v).toUpperCase() });
+        }
+      } catch {}
+    }
+  }
+
+  // Extract score
+  const scoreMatch = rawText.match(/\*?\*?Score\*?\*?:?\s*(\d+)/i);
+  if (scoreMatch) score = scoreMatch[1];
+
+  // Extract explanation (after "Explanation:" or after the grades block)
+  const expMatch = rawText.match(/\*?\*?Explanation\*?\*?:?\s*\n?([\s\S]*)/i);
+  if (expMatch) {
+    explanation = expMatch[1].replace(/```json[\s\S]*?```/g, "").trim();
+  } else {
+    // Fallback: remove grade lines and JSON blocks, show the rest
+    explanation = rawText
+      .replace(/```json[\s\S]*?```/g, "")
+      .replace(/\*\*[^*]+\*\*:?/g, "")
+      .replace(/\b(C\d+)\s*[:：]\s*(PASS|FAIL|MISSING)\b/gi, "")
+      .replace(/\{[^}]*"C\d+"[^}]*\}/g, "")
+      .trim();
+  }
+
+  const gradePills = grades.length > 0
+    ? `<div class="judge-grades">${grades.map((g) => `<span class="judge-grade judge-grade--${g.val.toLowerCase()}">${escapeHtml(g.id)}: ${g.val}</span>`).join("")}</div>`
+    : "";
+  const scoreHtml = score ? `<span class="judge-score-pill">Score: ${escapeHtml(score)}</span>` : "";
+  const expHtml = explanation ? `<div class="judge-explanation">${escapeHtml(explanation)}</div>` : "";
+
+  return `<div class="slot-judgment-block ${cssClass}"><div class="slot-judgment-title">${escapeHtml(title)} ${scoreHtml}</div>${gradePills}${expHtml}</div>`;
+}
+
 function _renderNotebookPreviewBody(data) {
   const warnings = data.warnings || [];
   const prompt = escapeHtml(data.prompt || "(no prompt)");
@@ -274,19 +325,19 @@ function _renderNotebookPreviewBody(data) {
     ? `<div class="nbp-warnings" role="alert"><strong>Notice:</strong> ${warnings.map((w) => escapeHtml(w)).join(" ")}</div>`
     : "";
 
-  // --- Zone 1: Task context (collapsible) ---
+  // --- Zone 1: Task context (distinct colored blocks) ---
   const criteriaHtml = criteria.length > 0
     ? `<ul class="nbp-criteria-list">${criteria.map((c) => `<li><span class="criteria-id">${escapeHtml(c.id || "")}</span> ${escapeHtml(c.description || "")}</li>`).join("")}</ul>`
     : `<span class="nbp-empty">No criteria found</span>`;
   const idealBlock = idealResponse
-    ? `<div class="ctx-block"><div class="ctx-label">Ideal Response</div><div class="ctx-body">${escapeHtml(idealResponse)}</div></div>`
+    ? `<div class="ctx-block ctx-block--ideal"><div class="ctx-label">Ideal Response</div><div class="ctx-body">${escapeHtml(idealResponse)}</div></div>`
     : "";
   const taskContext = `<details class="task-context" open>
     <summary class="task-context-summary">Task Context</summary>
     <div class="task-context-body">
-      <div class="ctx-block"><div class="ctx-label">Prompt</div><div class="ctx-body">${prompt}</div></div>
+      <div class="ctx-block ctx-block--prompt"><div class="ctx-label">Prompt</div><div class="ctx-body">${prompt}</div></div>
       ${idealBlock}
-      <div class="ctx-block"><div class="ctx-label">Criteria (${criteria.length})</div>${criteriaHtml}</div>
+      <div class="ctx-block ctx-block--criteria"><div class="ctx-label">Criteria (${criteria.length})</div>${criteriaHtml}</div>
     </div>
   </details>`;
 
@@ -320,8 +371,8 @@ function _renderNotebookPreviewBody(data) {
       const rtText = s.reasoning_trace || "";
 
       let rightHtml = "";
-      if (hjText) rightHtml += `<div class="slot-judgment-block slot-judgment-human"><div class="slot-judgment-title">Human Judge</div><div class="slot-judgment-body">${escapeHtml(hjText)}</div></div>`;
-      if (ljText) rightHtml += `<div class="slot-judgment-block slot-judgment-llm"><div class="slot-judgment-title">LLM Judge</div><div class="slot-judgment-body">${escapeHtml(ljText)}</div></div>`;
+      if (hjText) rightHtml += _formatJudgment("Human Judge", hjText, "slot-judgment-human");
+      if (ljText) rightHtml += _formatJudgment("LLM Judge", ljText, "slot-judgment-llm");
       if (rtText) rightHtml += `<details class="slot-trace-details"><summary class="slot-trace-summary">Reasoning Trace</summary><div class="slot-judgment-body">${escapeHtml(rtText)}</div></details>`;
       if (!rightHtml) rightHtml = `<span class="nbp-empty">No judgments</span>`;
 

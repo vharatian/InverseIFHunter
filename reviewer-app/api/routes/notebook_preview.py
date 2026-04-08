@@ -19,7 +19,7 @@ from api.deps import require_reviewer
 _repo_root = str(Path(__file__).resolve().parents[3])
 if _repo_root not in sys.path:
     sys.path.insert(0, _repo_root)
-from notebook_headings import TASK_ALIASES, METADATA_KEYS
+from notebook_headings import TASK_ALIASES, METADATA_KEYS, HIDDEN_FROM_REVIEWER
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["notebook_preview"])
@@ -345,10 +345,13 @@ def _extract_preview(nb_json: dict) -> dict:
                 sd["reasoning_trace"] = body
 
         elif cat == "metadata":
-            meta[sub] = body
+            if sub not in HIDDEN_FROM_REVIEWER:
+                meta[sub] = body
 
         elif cat == "extra":
-            extra.append({"heading": label, "content": body})
+            label_norm = re.sub(r"[\s_-]+", "_", label.strip().lower())
+            if label_norm not in HIDDEN_FROM_REVIEWER:
+                extra.append({"heading": label, "content": body})
 
     prompt = "\n\n---\n\n".join(prompts) if prompts else ""
     ideal_response = "\n\n---\n\n".join(ideal_responses) if ideal_responses else ""

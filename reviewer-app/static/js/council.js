@@ -72,8 +72,24 @@ const MODEL_SHORT = {
   "anthropic/claude-sonnet-4.6": "Sonnet 4.6",
   "anthropic/claude-opus-4.6": "Opus 4.6",
   "google/gemini-3-pro-preview": "Gemini 3",
+  "google/gemini-3.1-pro-preview": "Gemini 3.1",
   "x-ai/grok-4": "Grok 4",
 };
+const MODEL_INITIALS = {
+  "openai/gpt-5.2": "G", "anthropic/claude-sonnet-4.6": "S",
+  "anthropic/claude-opus-4.6": "O", "google/gemini-3-pro-preview": "Ge",
+  "google/gemini-3.1-pro-preview": "Ge", "x-ai/grok-4": "Gr",
+};
+const MODEL_COLORS = {
+  "openai/gpt-5.2": "#10a37f", "anthropic/claude-sonnet-4.6": "#d97706",
+  "anthropic/claude-opus-4.6": "#7c3aed", "google/gemini-3-pro-preview": "#4285f4",
+  "google/gemini-3.1-pro-preview": "#4285f4", "x-ai/grok-4": "#ef4444",
+};
+function _modelAvatar(mid) {
+  const init = MODEL_INITIALS[mid] || (shortModel(mid) || "?")[0];
+  const color = MODEL_COLORS[mid] || "#6366f1";
+  return `<span class="chat-avatar" style="background:${color}">${escapeHtml(init)}</span>`;
+}
 
 const RULE_SHORT_LABELS = {
   model_consistency: "Model Check",
@@ -472,30 +488,28 @@ function _handleEvent(evt, slotsEl, summaryEl, detailEl) {
   else if (type === "council_model_start") {
     const card = slotsEl?.querySelector(`[data-rule="${evt.rule_id}"]`);
     if (!card) return;
-    let modelsDiv = card.querySelector(".council-models-accordion");
-    if (!modelsDiv) {
-      const oldList = card.querySelector(".qc-council-votes");
-      if (oldList) oldList.remove();
-      modelsDiv = document.createElement("div");
-      modelsDiv.className = "council-models-accordion";
-      card.appendChild(modelsDiv);
+    let thread = card.querySelector(".chat-thread");
+    if (!thread) {
+      thread = document.createElement("div");
+      thread.className = "chat-thread";
+      card.appendChild(thread);
     }
-    const name = shortModel(evt.model_id || "?");
-    const acc = document.createElement("details");
-    acc.className = "council-model-acc";
-    acc.setAttribute("data-model-id", evt.model_id || "");
-    acc.open = true;
-    acc.innerHTML = `<summary class="council-model-acc-header"><span class="council-model-acc-name">${escapeHtml(name)}</span><span class="council-model-acc-vote qc-vote qc-vote-pending">thinking...</span></summary><div class="council-model-acc-body council-streaming"></div>`;
-    modelsDiv.appendChild(acc);
+    const mid = evt.model_id || "";
+    const msg = document.createElement("div");
+    msg.className = "chat-msg";
+    msg.setAttribute("data-model-id", mid);
+    msg.innerHTML = `${_modelAvatar(mid)}<div class="chat-bubble chat-bubble--streaming"><div class="chat-sender">${escapeHtml(shortModel(mid))}<span class="chat-verdict qc-vote qc-vote-pending">thinking...</span></div><div class="chat-body"></div></div>`;
+    thread.appendChild(msg);
+    msg.scrollIntoView({ behavior: "smooth", block: "nearest" });
     const rule = _state.rules[evt.rule_id];
-    if (rule) rule.models[evt.model_id] = { vote: null, status: "running", chunks: [] };
+    if (rule) rule.models[mid] = { vote: null, status: "running", chunks: [] };
   }
   else if (type === "council_model_chunk") {
     const card = slotsEl?.querySelector(`[data-rule="${evt.rule_id}"]`);
     if (!card) return;
-    const acc = card.querySelector(`.council-model-acc[data-model-id="${evt.model_id || ""}"]`);
-    if (acc) {
-      const body = acc.querySelector(".council-model-acc-body");
+    const msg = card.querySelector(`.chat-msg[data-model-id="${evt.model_id || ""}"]`);
+    if (msg) {
+      const body = msg.querySelector(".chat-body");
       if (body) body.textContent += evt.chunk || "";
     }
     const rule = _state.rules[evt.rule_id];
@@ -504,20 +518,17 @@ function _handleEvent(evt, slotsEl, summaryEl, detailEl) {
   else if (type === "council_model_verdict") {
     const card = slotsEl?.querySelector(`[data-rule="${evt.rule_id}"]`);
     if (card) {
-      const acc = card.querySelector(`.council-model-acc[data-model-id="${evt.model_id || ""}"]`);
-      if (acc) {
-        const badge = acc.querySelector(".council-model-acc-vote");
+      const msg = card.querySelector(`.chat-msg[data-model-id="${evt.model_id || ""}"]`);
+      if (msg) {
+        const badge = msg.querySelector(".chat-verdict");
         const vote = evt.vote || "?";
-        if (badge) {
-          badge.textContent = vote;
-          badge.className = `council-model-acc-vote qc-vote qc-vote-${vote.toLowerCase()}`;
-        }
-        const body = acc.querySelector(".council-model-acc-body");
-        if (body) body.classList.remove("council-streaming");
+        if (badge) { badge.textContent = vote; badge.className = `chat-verdict qc-vote qc-vote-${vote.toLowerCase()}`; }
+        const bubble = msg.querySelector(".chat-bubble");
+        if (bubble) bubble.classList.remove("chat-bubble--streaming");
         if (evt.response) {
+          const body = msg.querySelector(".chat-body");
           if (body) body.textContent = evt.response;
         }
-        acc.open = false;
       }
     }
     const rule = _state.rules[evt.rule_id];
@@ -526,35 +537,39 @@ function _handleEvent(evt, slotsEl, summaryEl, detailEl) {
   else if (type === "council_chairman_start") {
     const card = slotsEl?.querySelector(`[data-rule="${evt.rule_id}"]`);
     if (!card) return;
-    let modelsDiv = card.querySelector(".council-models-accordion");
-    if (!modelsDiv) { modelsDiv = document.createElement("div"); modelsDiv.className = "council-models-accordion"; card.appendChild(modelsDiv); }
-    const name = shortModel(evt.model_id || "?");
-    const acc = document.createElement("details");
-    acc.className = "council-model-acc council-chairman-acc";
-    acc.setAttribute("data-model-id", "chairman");
-    acc.open = true;
-    acc.innerHTML = `<summary class="council-model-acc-header council-chairman-header"><span class="council-model-acc-name">Chairman: ${escapeHtml(name)}</span><span class="council-model-acc-vote qc-vote qc-vote-pending">deciding...</span></summary><div class="council-model-acc-body council-streaming"></div>`;
-    modelsDiv.appendChild(acc);
+    let thread = card.querySelector(".chat-thread");
+    if (!thread) { thread = document.createElement("div"); thread.className = "chat-thread"; card.appendChild(thread); }
+    const mid = evt.model_id || "";
+    const msg = document.createElement("div");
+    msg.className = "chat-msg chat-msg--chairman";
+    msg.setAttribute("data-model-id", "chairman");
+    msg.innerHTML = `${_modelAvatar(mid)}<div class="chat-bubble chat-bubble--chairman chat-bubble--streaming"><div class="chat-sender">Chairman: ${escapeHtml(shortModel(mid))}<span class="chat-verdict qc-vote qc-vote-pending">deciding...</span></div><div class="chat-body"></div></div>`;
+    thread.appendChild(msg);
+    msg.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
   else if (type === "council_chairman_chunk") {
     const card = slotsEl?.querySelector(`[data-rule="${evt.rule_id}"]`);
     if (!card) return;
-    const acc = card.querySelector('.council-model-acc[data-model-id="chairman"]');
-    if (acc) {
-      const body = acc.querySelector(".council-model-acc-body");
+    const msg = card.querySelector('.chat-msg[data-model-id="chairman"]');
+    if (msg) {
+      const body = msg.querySelector(".chat-body");
       if (body) body.textContent += evt.chunk || "";
     }
   }
   else if (type === "council_chairman_verdict") {
     const card = slotsEl?.querySelector(`[data-rule="${evt.rule_id}"]`);
     if (!card) return;
-    const acc = card.querySelector('.council-model-acc[data-model-id="chairman"]');
-    if (acc) {
-      const badge = acc.querySelector(".council-model-acc-vote");
+    const msg = card.querySelector('.chat-msg[data-model-id="chairman"]');
+    if (msg) {
+      const badge = msg.querySelector(".chat-verdict");
       const v = evt.passed ? "PASS" : "FAIL";
-      if (badge) { badge.textContent = v; badge.className = `council-model-acc-vote qc-vote qc-vote-${v.toLowerCase()}`; }
-      const body = acc.querySelector(".council-model-acc-body");
-      if (body) { body.classList.remove("council-streaming"); if (evt.rationale) body.textContent = evt.rationale; }
+      if (badge) { badge.textContent = v; badge.className = `chat-verdict qc-vote qc-vote-${v.toLowerCase()}`; }
+      const bubble = msg.querySelector(".chat-bubble");
+      if (bubble) bubble.classList.remove("chat-bubble--streaming");
+      if (evt.rationale) {
+        const body = msg.querySelector(".chat-body");
+        if (body) body.textContent = evt.rationale;
+      }
     }
   }
   else if (type === "rule_done") {
