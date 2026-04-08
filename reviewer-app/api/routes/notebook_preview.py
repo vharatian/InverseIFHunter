@@ -7,6 +7,7 @@ POST /api/notebook-preview  — fetch a notebook from a Google Drive / Colab URL
 Heading registry: notebook_headings.py
 """
 import logging
+import re
 import sys
 from pathlib import Path
 from typing import Annotated
