@@ -2429,21 +2429,22 @@ button[aria-busy="true"]::after {
 
 /* ── Notebook preview: extra cells ── */
 .nbp-extra-cell {
-    border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
-    margin-bottom: 6px; overflow: visible;
+    border: 1px solid var(--border-subtle); border-radius: 0;
+    margin-bottom: 0; border-bottom: none;
 }
+.nbp-extra-cell:last-child { border-bottom: 1px solid var(--border-subtle); }
 .nbp-extra-cell > summary {
     padding: 8px 14px; cursor: pointer; font-size: 0.78rem; font-weight: 600;
     color: var(--text-muted); background: var(--bg-tertiary);
-    border-radius: var(--radius-md); list-style: none;
+    list-style: none;
 }
 .nbp-extra-cell > summary::before { content: "\25B6 "; font-size: 0.55rem; }
 .nbp-extra-cell[open] > summary::before { content: "\25BC "; }
-.nbp-extra-cell[open] > summary { border-radius: var(--radius-md) var(--radius-md) 0 0; }
 .nbp-extra-body {
     padding: 12px 14px; font-size: 0.82rem; line-height: 1.55;
     color: var(--text-secondary); white-space: pre-wrap; word-break: break-word;
     max-height: 300px; overflow-y: auto; scrollbar-width: thin;
+    border-top: 1px solid var(--border-subtle);
 }
 
 /* ── Council: QC-style inline rule cards ── */

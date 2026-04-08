@@ -537,8 +537,8 @@ def call_model_sync(
     prompt: str,
     model: str,
     *,
-    max_tokens: int = 512,
-    timeout: float = 60.0,
+    max_tokens: int = 2048,
+    timeout: float = 180.0,
 ) -> Tuple[str, Optional[str]]:
     """
     Call OpenRouter model synchronously. Returns (response_text, error).
@@ -580,8 +580,8 @@ def call_model_streaming(
     prompt: str,
     model: str,
     *,
-    max_tokens: int = 512,
-    timeout: float = 120.0,
+    max_tokens: int = 2048,
+    timeout: float = 180.0,
 ):
     """
     Call OpenRouter model with streaming. Yields (chunk, error) — chunk is text, error is str or None.

@@ -630,22 +630,22 @@ function _upsertRuleCard(container, ruleId) {
   }
   if (descEl) descEl.textContent = desc;
 
-  // On rule_done: append issue/rationale below existing accordion
+  // On rule_done: append issue (skip rationale if issue message exists — they duplicate)
   if (status !== "running") {
     let issueBlock = card.querySelector(".qc-rule-issue-block");
-    if (!issueBlock && (rule.issue || rule.rationale)) {
+    const hasIssue = rule.issue?.message;
+    const hasHint = rule.issue?.hint;
+    if (!issueBlock && (hasIssue || hasHint)) {
       issueBlock = document.createElement("div");
       issueBlock.className = "qc-rule-issue-block";
       card.appendChild(issueBlock);
     }
     if (issueBlock) {
       let html = "";
-      if (rule.rationale) html += `<div class="qc-rationale">${escapeHtml(rule.rationale)}</div>`;
-      if (rule.issue?.message) html += `<div class="qc-issue-message">${escapeHtml(rule.issue.message)}</div>`;
-      if (rule.issue?.hint) html += `<div class="qc-issue-hint">${escapeHtml(rule.issue.hint)}</div>`;
+      if (hasIssue) html += `<div class="qc-issue-message">${escapeHtml(rule.issue.message)}</div>`;
+      if (hasHint) html += `<div class="qc-issue-hint">${escapeHtml(rule.issue.hint)}</div>`;
       issueBlock.innerHTML = html;
     }
-    // Close all model accordions on completion for clean view
     card.querySelectorAll(".council-model-acc").forEach((a) => { a.open = false; });
   }
 }
