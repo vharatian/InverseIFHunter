@@ -14,8 +14,8 @@ defmodule ModelHunterEdgeWeb.ProxyController do
   plug :match
   plug :dispatch
 
-  @sse_timeout 300_000
-  @default_timeout 30_000
+  @sse_timeout 600_000
+  @default_timeout 60_000
 
   match _ do
     request_path = conn.request_path
@@ -149,6 +149,19 @@ defmodule ModelHunterEdgeWeb.ProxyController do
 
         {:ok, final_conn}
 
+      # SSE stream that was partially sent before error — connection already chunked
+      {:error, _exception, {:sse, _status, _hdrs, final_conn}} ->
+        {:ok, final_conn}
+
+      # Buffered request that errored mid-stream before any data sent
+      {:error, _exception, {:buffer, _status, _hdrs, _body_acc}} ->
+        {:error, :timeout}
+
+      # Error before headers arrived
+      {:error, _exception, {:init, _, _, _conn}} ->
+        {:error, :timeout}
+
+      # 2-tuple errors (Finch.Error)
       {:error, %Finch.Error{reason: :timeout}} ->
         {:error, :timeout}
 
