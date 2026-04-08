@@ -520,8 +520,8 @@ body {
 /* ── Section cards ── */
 .section-card {
     background: var(--bg-card); border: 1px solid var(--border);
-    border-radius: var(--radius-lg); margin-bottom: var(--space-lg);
-    overflow: hidden; transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+    border-radius: 0; margin-bottom: var(--space-lg);
+    overflow: visible; transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 .section-card:hover { border-color: var(--border-hover); }
 .section-card-header {
@@ -1494,8 +1494,8 @@ button[aria-busy="true"]::after {
     margin-bottom: var(--space-xl);
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    overflow: hidden;
+    border-radius: 0;
+    overflow: visible;
 }
 .notebook-fetch-header {
     display: flex;
@@ -1568,8 +1568,8 @@ button[aria-busy="true"]::after {
 .notebook-fetch-result {
     margin-top: var(--space-md);
     border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    overflow: hidden;
+    border-radius: 0;
+    overflow: visible;
 }
 .nbp-section {
     padding: var(--space-md) 0;
@@ -1774,7 +1774,7 @@ button[aria-busy="true"]::after {
     margin-bottom: var(--space-lg);
     padding: var(--space-lg);
     border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
+    border-radius: 0;
     background: var(--bg-card);
 }
 .reviewer-fetch-row {
@@ -1863,7 +1863,7 @@ button[aria-busy="true"]::after {
 .notebook-only-banner {
     margin: 0 0 var(--space-md);
     padding: var(--space-md) var(--space-lg);
-    border-radius: var(--radius-md);
+    border-radius: 0;
     font-size: 0.88rem;
     line-height: 1.45;
     border: 1px solid var(--border);
