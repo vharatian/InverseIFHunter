@@ -121,7 +121,11 @@ function _tryShowUpdateModal() {
   if (!_updatePending) return;
   if (_isCouncilRunning()) {
     const btn = document.getElementById("reviewerUpdateIndicator");
-    if (btn) { btn.classList.remove("hidden"); btn.textContent = "Update queued..."; }
+    if (btn) {
+      btn.classList.remove("hidden");
+      btn.textContent = "Update queued...";
+      btn.onclick = null;
+    }
     return;
   }
   _showUpdateModal();
@@ -147,24 +151,25 @@ function _showUpdateModal() {
       <p class="update-modal-msg">A new version of the reviewer app is ready.</p>
       <p class="update-modal-warn">Updating will reload the page and reset your current view. Make sure you've finished any active task before updating.</p>
       <div class="update-modal-actions">
-        <button type="button" class="update-modal-btn update-modal-btn--later" id="update-later">Later</button>
-        <button type="button" class="update-modal-btn update-modal-btn--now" id="update-now">Update Now</button>
+        <button type="button" class="update-modal-btn update-modal-btn--later">Later</button>
+        <button type="button" class="update-modal-btn update-modal-btn--now">Update Now</button>
       </div>
     </div>`;
   document.body.appendChild(overlay);
 
-  document.getElementById("update-now").addEventListener("click", () => location.reload());
-  document.getElementById("update-later").addEventListener("click", () => {
+  overlay.querySelector(".update-modal-btn--now").addEventListener("click", () => location.reload());
+  overlay.querySelector(".update-modal-btn--later").addEventListener("click", () => {
     overlay.hidden = true;
-    const btn = document.getElementById("reviewerUpdateIndicator");
-    if (btn) { btn.classList.remove("hidden"); btn.textContent = "Update"; }
   });
 
-  const btn = document.getElementById("reviewerUpdateIndicator");
-  if (btn) {
-    btn.classList.remove("hidden");
-    btn.textContent = "Update";
-    btn.onclick = () => { overlay.hidden = false; };
+  // Replace header button to kill any old event listeners
+  const oldBtn = document.getElementById("reviewerUpdateIndicator");
+  if (oldBtn) {
+    const newBtn = oldBtn.cloneNode(true);
+    newBtn.classList.remove("hidden");
+    newBtn.textContent = "Update";
+    newBtn.addEventListener("click", () => { overlay.hidden = false; });
+    oldBtn.replaceWith(newBtn);
   }
 }
 

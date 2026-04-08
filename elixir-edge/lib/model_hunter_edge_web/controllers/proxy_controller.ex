@@ -14,7 +14,7 @@ defmodule ModelHunterEdgeWeb.ProxyController do
   plug :match
   plug :dispatch
 
-  @sse_timeout 600_000
+  @sse_timeout 1_200_000
   @default_timeout 60_000
 
   match _ do
@@ -36,9 +36,9 @@ defmodule ModelHunterEdgeWeb.ProxyController do
 
     req = Finch.build(method_atom(conn.method), target_url, headers, body)
 
-    # Check Accept header to pre-detect SSE requests for longer timeout
     accept = List.first(Plug.Conn.get_req_header(conn, "accept")) || ""
-    is_sse_request = String.contains?(accept, "text/event-stream")
+    is_sse_request = String.contains?(accept, "text/event-stream") or
+                     String.contains?(request_path, "-stream")
     timeout = if is_sse_request, do: @sse_timeout, else: @default_timeout
 
     case proxy_request(req, conn, trace_id, timeout) do
