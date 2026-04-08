@@ -2407,29 +2407,47 @@ button[aria-busy="true"]::after {
     50% { opacity: 0.7; }
 }
 
-/* ── Notebook preview: slot cards ── */
-.nbp-slot-card {
+/* ── Notebook preview: slot cards (response + judges side-by-side) ── */
+.slot-grid { display: flex; flex-direction: column; gap: var(--space-sm); }
+.slot-card {
     border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
-    margin-bottom: var(--space-xs); overflow: hidden;
+    overflow: hidden;
 }
-.nbp-slot-summary {
-    padding: 8px 12px; cursor: pointer; font-size: 0.82rem; font-weight: 600;
-    color: var(--text-primary); background: var(--bg-tertiary);
-    list-style: none; display: flex; align-items: center; gap: 6px;
+.slot-card-header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 14px; background: var(--bg-tertiary);
+    font-size: 0.82rem; font-weight: 600;
 }
-.nbp-slot-summary::before { content: "\25B6"; font-size: 0.6rem; transition: transform 0.15s; }
-.nbp-slot-card[open] > .nbp-slot-summary::before { transform: rotate(90deg); }
-.nbp-slot-body { padding: 10px 14px; }
-.nbp-slot-field { margin-bottom: 10px; }
-.nbp-slot-field:last-child { margin-bottom: 0; }
-.nbp-slot-field-label {
-    display: block; font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+.slot-card-num {
+    background: var(--accent-primary); color: #fff; font-size: 0.7rem; font-weight: 700;
+    padding: 2px 8px; border-radius: 999px;
+}
+.slot-card-model { color: var(--text-primary); }
+.slot-card-columns {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 1px;
+    background: var(--border-subtle);
+}
+@media (max-width: 700px) { .slot-card-columns { grid-template-columns: 1fr; } }
+.slot-col { padding: 12px 14px; background: var(--bg-card); }
+.slot-col-label {
+    font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--text-muted); margin-bottom: 6px;
+}
+.slot-col-body {
+    font-size: 0.82rem; line-height: 1.55; color: var(--text-secondary);
+    white-space: pre-wrap; word-break: break-word; max-height: 300px; overflow-y: auto;
+}
+.slot-judge-block { margin-bottom: 10px; }
+.slot-judge-block:last-child { margin-bottom: 0; }
+.slot-judge-label {
+    font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
     letter-spacing: 0.04em; color: var(--text-muted); margin-bottom: 3px;
 }
-.nbp-slot-field-body {
-    font-size: 0.82rem; line-height: 1.55; color: var(--text-secondary);
+.slot-judge-body {
+    font-size: 0.82rem; line-height: 1.5; color: var(--text-secondary);
     white-space: pre-wrap; word-break: break-word;
 }
+.slot-judge-trace { opacity: 0.7; }
 
 /* ── Notebook preview: metadata table ── */
 .nbp-meta-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
@@ -2449,6 +2467,44 @@ button[aria-busy="true"]::after {
     padding: 10px 14px; font-size: 0.82rem; line-height: 1.5;
     color: var(--text-secondary); white-space: pre-wrap; word-break: break-word;
 }
+
+/* ── Council: QC-style inline rule cards ── */
+.council-progress-wrap { margin: 8px 0; }
+.council-progress-bar { height: 5px; background: var(--bg-tertiary); border-radius: 3px; overflow: hidden; }
+.council-progress-fill { height: 100%; background: var(--accent-primary); width: 0%; transition: width 0.3s ease; }
+.council-progress-text { font-size: 0.78rem; color: var(--text-muted); margin-top: 3px; display: block; }
+.qc-rule-card {
+    background: var(--bg-tertiary); border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md); padding: 12px 14px; margin-bottom: 8px;
+}
+.qc-rule-header { display: flex; justify-content: space-between; align-items: center; }
+.qc-rule-title { font-weight: 600; font-size: 0.88rem; color: var(--text-primary); }
+.qc-rule-status { font-size: 0.82rem; font-weight: 600; }
+.qc-status-running { color: var(--text-muted); }
+.qc-status-pass { color: var(--success, #22c55e); }
+.qc-status-fail { color: var(--danger, #ef4444); }
+.qc-rule-desc { font-size: 0.8rem; color: var(--text-secondary); margin-top: 4px; }
+.qc-council-votes { margin-top: 10px; }
+.qc-council-title { font-size: 0.75rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 5px; }
+.qc-council-list { display: flex; flex-wrap: wrap; gap: 5px; }
+.qc-council-list.qc-council-waiting { color: var(--text-muted); font-size: 0.8rem; font-style: italic; }
+.qc-vote {
+    padding: 3px 8px; border-radius: var(--radius-sm); font-size: 0.75rem; font-weight: 600;
+    background: var(--bg-card); color: var(--text-secondary);
+}
+.qc-vote-pass { background: rgba(34,197,94,0.12); color: var(--success, #22c55e); }
+.qc-vote-fail { background: rgba(239,68,68,0.12); color: var(--danger, #ef4444); }
+.qc-vote-pending { color: var(--text-muted); font-style: italic; }
+.qc-vote-unclear { background: var(--bg-card); color: var(--text-muted); }
+.qc-chairman-section { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border-subtle); }
+.qc-chairman-rationale {
+    font-size: 0.82rem; color: var(--text-secondary); white-space: pre-wrap;
+    word-break: break-word; margin: 4px 0; max-height: 200px; overflow-y: auto;
+}
+.qc-chairman-verdict { display: inline-block; margin-top: 4px; }
+.qc-rationale { margin-top: 8px; font-size: 0.8rem; color: var(--text-primary); white-space: pre-wrap; }
+.qc-issue-message { margin-top: 4px; font-size: 0.8rem; color: var(--danger, #ef4444); }
+.qc-issue-hint { margin-top: 2px; font-size: 0.78rem; color: var(--text-muted); font-style: italic; }
 
 /* Light theme overrides */
 [data-theme="light"] .council-bar { background: var(--bg-card); }

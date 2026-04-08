@@ -116,7 +116,7 @@ function _showUpdateBanner() {
   _indicatorWired = true;
   btn.addEventListener("click", () => {
     if (confirm("A new version is available. Refresh now?")) {
-      window.location.href = window.location.pathname + "?_v=" + Date.now();
+      location.reload();
     }
   });
 }

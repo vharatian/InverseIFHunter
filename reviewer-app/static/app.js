@@ -284,18 +284,31 @@ function _renderNotebookPreviewBody(data) {
     ? `<div class="nbp-section"><div class="nbp-section-label">Ideal Response</div><div class="nbp-ideal-response">${escapeHtml(idealResponse)}</div></div>`
     : "";
 
-  // Slots
+  // Slots — card layout: response on left, judgments on right
   let slotsHtml = "";
   if (slots.length > 0) {
     const slotCards = slots.map((s) => {
       const name = escapeHtml(s.model_name || `Slot ${s.slot}`);
-      const resp = s.model_response ? `<div class="nbp-slot-field"><span class="nbp-slot-field-label">Model Response</span><div class="nbp-slot-field-body">${escapeHtml(s.model_response)}</div></div>` : "";
-      const lj = s.llm_judge ? `<div class="nbp-slot-field"><span class="nbp-slot-field-label">LLM Judge</span><div class="nbp-slot-field-body">${escapeHtml(s.llm_judge)}</div></div>` : "";
-      const hj = s.human_judge ? `<div class="nbp-slot-field"><span class="nbp-slot-field-label">Human Judge</span><div class="nbp-slot-field-body">${escapeHtml(s.human_judge)}</div></div>` : "";
-      const rt = s.reasoning_trace ? `<div class="nbp-slot-field"><span class="nbp-slot-field-label">Reasoning Trace</span><div class="nbp-slot-field-body">${escapeHtml(s.reasoning_trace)}</div></div>` : "";
-      return `<details class="nbp-slot-card"><summary class="nbp-slot-summary">Slot ${s.slot}: ${name}</summary><div class="nbp-slot-body">${resp}${lj}${hj}${rt}</div></details>`;
+      const resp = escapeHtml(s.model_response || "(no response)");
+      const ljText = s.llm_judge || "";
+      const hjText = s.human_judge || "";
+      const rtText = s.reasoning_trace || "";
+
+      const judgments = [];
+      if (ljText) judgments.push(`<div class="slot-judge-block"><div class="slot-judge-label">LLM Judge</div><div class="slot-judge-body">${escapeHtml(ljText)}</div></div>`);
+      if (hjText) judgments.push(`<div class="slot-judge-block"><div class="slot-judge-label">Human Judge</div><div class="slot-judge-body">${escapeHtml(hjText)}</div></div>`);
+      if (rtText) judgments.push(`<div class="slot-judge-block slot-judge-trace"><div class="slot-judge-label">Reasoning Trace</div><div class="slot-judge-body">${escapeHtml(rtText)}</div></div>`);
+      const judgeCol = judgments.length ? judgments.join("") : `<span class="nbp-empty">No judgments</span>`;
+
+      return `<div class="slot-card">
+        <div class="slot-card-header"><span class="slot-card-num">Slot ${s.slot}</span><span class="slot-card-model">${name}</span></div>
+        <div class="slot-card-columns">
+          <div class="slot-col slot-col-response"><div class="slot-col-label">Model Response</div><div class="slot-col-body">${resp}</div></div>
+          <div class="slot-col slot-col-judges">${judgeCol}</div>
+        </div>
+      </div>`;
     }).join("");
-    slotsHtml = `<div class="nbp-section"><div class="nbp-section-label">Hunt Results (${slots.length} slots)</div>${slotCards}</div>`;
+    slotsHtml = `<div class="nbp-section"><div class="nbp-section-label">Hunt Results (${slots.length} slots)</div><div class="slot-grid">${slotCards}</div></div>`;
   }
 
   // Metadata

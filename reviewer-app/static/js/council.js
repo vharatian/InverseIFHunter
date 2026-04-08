@@ -199,10 +199,14 @@ export function initCouncil(getSessionId, onApprove) {
 
 export function resetCouncil() {
   if (_state.abortCtrl) _state.abortCtrl.abort();
-  _state = { running: false, rules: {}, ruleOrder: [], abortCtrl: null, chairman: {} };
+  _state = { running: false, rules: {}, ruleOrder: [], abortCtrl: null, chairman: {}, totalRules: 0, rulesDone: 0 };
 
   const bar = document.getElementById("council-bar");
-  if (bar) bar.className = "council-bar council-bar--idle";
+  if (bar) {
+    bar.className = "council-bar council-bar--idle";
+    const pw = bar.querySelector(".council-progress-wrap");
+    if (pw) pw.remove();
+  }
 
   const slots = document.getElementById("council-slots");
   if (slots) { slots.innerHTML = ""; slots.hidden = true; }
@@ -215,9 +219,6 @@ export function resetCouncil() {
 
   const banner = document.getElementById("triage-banner");
   if (banner) { banner.innerHTML = ""; banner.hidden = true; }
-
-  const taskContent = document.getElementById("task-content");
-  if (taskContent) taskContent.classList.remove("task-content--collapsed");
 
   _showRunBtn();
   document.querySelectorAll(".council-badge").forEach((b) => b.remove());
@@ -251,12 +252,38 @@ function _showStopBtn() {
   if (stopBtn) stopBtn.hidden = false;
 }
 
+function _updateProgress(done, total, complete) {
+  const bar = document.getElementById("council-bar");
+  const summaryEl = document.getElementById("council-summary");
+  if (!bar) return;
+  let progressWrap = bar.querySelector(".council-progress-wrap");
+  if (!progressWrap) {
+    progressWrap = document.createElement("div");
+    progressWrap.className = "council-progress-wrap";
+    progressWrap.innerHTML = '<div class="council-progress-bar"><div class="council-progress-fill"></div></div><span class="council-progress-text"></span>';
+    const header = bar.querySelector(".council-bar-header");
+    if (header) header.after(progressWrap);
+  }
+  const fill = progressWrap.querySelector(".council-progress-fill");
+  const text = progressWrap.querySelector(".council-progress-text");
+  if (complete) {
+    if (fill) fill.style.width = "100%";
+    if (text) text.textContent = `All ${total} rules checked.`;
+  } else if (total > 0) {
+    const pct = Math.round((done / total) * 100);
+    if (fill) fill.style.width = `${pct}%`;
+    if (text) text.textContent = `Checking ${done + 1} of ${total}…`;
+  }
+}
+
 async function runCouncil(sessionId) {
   if (_state.running) return;
   _state.running = true;
   _state.rules = {};
   _state.ruleOrder = [];
   _state.chairman = {};
+  _state.totalRules = 0;
+  _state.rulesDone = 0;
 
   const bar = document.getElementById("council-bar");
   const slotsEl = document.getElementById("council-slots");
@@ -268,7 +295,7 @@ async function runCouncil(sessionId) {
   if (slotsEl) {
     slotsEl.innerHTML = "";
     slotsEl.hidden = false;
-    slotsEl.classList.add("council-slots--grid");
+    slotsEl.classList.remove("council-slots--grid");
   }
   if (summaryEl) summaryEl.textContent = "Starting council...";
   if (detailEl) { detailEl.innerHTML = ""; detailEl.hidden = true; }
@@ -358,6 +385,8 @@ async function runNotebookCouncil(notebookUrl) {
   _state.rules = {};
   _state.ruleOrder = [];
   _state.chairman = {};
+  _state.totalRules = 0;
+  _state.rulesDone = 0;
 
   const bar = document.getElementById("council-bar");
   const slotsEl = document.getElementById("council-slots");
@@ -366,7 +395,7 @@ async function runNotebookCouncil(notebookUrl) {
   const banner = document.getElementById("triage-banner");
 
   if (bar) bar.className = "council-bar council-bar--running";
-  if (slotsEl) { slotsEl.innerHTML = ""; slotsEl.hidden = false; slotsEl.classList.add("council-slots--grid"); }
+  if (slotsEl) { slotsEl.innerHTML = ""; slotsEl.hidden = false; slotsEl.classList.remove("council-slots--grid"); }
   if (summaryEl) summaryEl.textContent = "Starting council (notebook mode)...";
   if (detailEl) { detailEl.innerHTML = ""; detailEl.hidden = true; }
   if (banner) { banner.innerHTML = ""; banner.hidden = true; }
@@ -433,36 +462,97 @@ function _handleEvent(evt, slotsEl, summaryEl, detailEl) {
     _state.rules[evt.rule_id] = {
       id: evt.rule_id, description: evt.description, status: "running",
       models: {}, passed: null, councilVotes: [], chairman: null, issue: null,
+      content_checked: evt.content_checked || "",
     };
-    _renderSlot(slotsEl, evt.rule_id);
+    _state.totalRules = (_state.totalRules || 0) + 1;
+    _updateProgress(_state.rulesDone || 0, _state.totalRules, false);
+    _upsertRuleCard(slotsEl, evt.rule_id);
     if (summaryEl) summaryEl.textContent = `Checking: ${evt.description}`;
   }
   else if (type === "council_model_start") {
-    const rule = _state.rules[evt.rule_id];
-    if (rule) { rule.models[evt.model_id] = { status: "running", chunks: [], vote: null }; _updateDetailForRule(detailEl, evt.rule_id); }
+    const card = slotsEl?.querySelector(`[data-rule="${evt.rule_id}"]`);
+    if (card) {
+      let list = card.querySelector(".qc-council-list");
+      if (list) {
+        list.classList.remove("qc-council-waiting");
+        if (list.textContent.includes("Calling models")) list.textContent = "";
+        const span = document.createElement("span");
+        span.className = "qc-vote qc-vote-pending";
+        span.setAttribute("data-model-id", evt.model_id || "");
+        span.title = evt.model_id || "";
+        span.textContent = `${shortModel(evt.model_id || "?")}: …`;
+        list.appendChild(span);
+      }
+    }
   }
   else if (type === "council_model_chunk") {
-    const rule = _state.rules[evt.rule_id];
-    if (rule?.models[evt.model_id]) { rule.models[evt.model_id].chunks.push(evt.chunk); _updateDetailForRule(detailEl, evt.rule_id); }
+    // live chunk — skip (only chairman reasoning shown)
   }
   else if (type === "council_model_verdict") {
+    const card = slotsEl?.querySelector(`[data-rule="${evt.rule_id}"]`);
+    if (card) {
+      const list = card.querySelector(".qc-council-list");
+      if (list) {
+        const span = [...list.querySelectorAll("span[data-model-id]")].find(
+          (s) => s.getAttribute("data-model-id") === (evt.model_id || ""),
+        );
+        const label = shortModel(evt.model_id || "?");
+        const vote = evt.vote || "?";
+        if (span) {
+          span.textContent = `${label}: ${vote}`;
+          span.className = `qc-vote qc-vote-${vote.toLowerCase()}`;
+        } else {
+          const ns = document.createElement("span");
+          ns.className = `qc-vote qc-vote-${vote.toLowerCase()}`;
+          ns.textContent = `${label}: ${vote}`;
+          list.appendChild(ns);
+        }
+      }
+    }
     const rule = _state.rules[evt.rule_id];
-    if (rule?.models[evt.model_id]) { rule.models[evt.model_id].status = "done"; rule.models[evt.model_id].vote = evt.vote; _updateDetailForRule(detailEl, evt.rule_id); }
+    if (rule) rule.models[evt.model_id] = { vote: evt.vote, status: "done" };
   }
   else if (type === "council_chairman_start") {
-    const rule = _state.rules[evt.rule_id];
-    if (rule) { rule.chairman = { model: evt.model_id, status: "running", chunks: [], passed: null, rationale: "" }; _updateDetailForRule(detailEl, evt.rule_id); }
+    const card = slotsEl?.querySelector(`[data-rule="${evt.rule_id}"]`);
+    if (card && !card.querySelector(".qc-chairman-section")) {
+      const section = document.createElement("div");
+      section.className = "qc-chairman-section";
+      section.innerHTML = `<div class="qc-council-title">Chairman (${escapeHtml(shortModel(evt.model_id || "?"))}):</div><div class="qc-chairman-rationale qc-council-waiting">Reasoning…</div><div class="qc-chairman-verdict qc-vote qc-vote-pending">…</div>`;
+      const votes = card.querySelector(".qc-council-votes");
+      if (votes) votes.after(section);
+      else card.appendChild(section);
+    }
   }
   else if (type === "council_chairman_chunk") {
-    const rule = _state.rules[evt.rule_id];
-    if (rule?.chairman) { rule.chairman.chunks.push(evt.chunk); _updateDetailForRule(detailEl, evt.rule_id); }
+    const card = slotsEl?.querySelector(`[data-rule="${evt.rule_id}"]`);
+    if (card) {
+      const el = card.querySelector(".qc-chairman-rationale");
+      if (el) {
+        if (el.classList.contains("qc-council-waiting")) {
+          el.classList.remove("qc-council-waiting");
+          el.textContent = "";
+        }
+        el.textContent += evt.chunk || "";
+      }
+    }
   }
   else if (type === "council_chairman_verdict") {
-    const rule = _state.rules[evt.rule_id];
-    if (rule) {
-      if (!rule.chairman) rule.chairman = {};
-      Object.assign(rule.chairman, { status: "done", passed: evt.passed, rationale: evt.rationale || "" });
-      _updateDetailForRule(detailEl, evt.rule_id);
+    const card = slotsEl?.querySelector(`[data-rule="${evt.rule_id}"]`);
+    if (card) {
+      const section = card.querySelector(".qc-chairman-section");
+      if (section) {
+        const rationaleEl = section.querySelector(".qc-chairman-rationale");
+        const verdictEl = section.querySelector(".qc-chairman-verdict");
+        if (rationaleEl && evt.rationale) {
+          rationaleEl.classList.remove("qc-council-waiting");
+          rationaleEl.textContent = evt.rationale;
+        }
+        if (verdictEl) {
+          const v = evt.passed ? "PASS" : "FAIL";
+          verdictEl.textContent = v;
+          verdictEl.className = `qc-chairman-verdict qc-vote qc-vote-${v.toLowerCase()}`;
+        }
+      }
     }
   }
   else if (type === "rule_done") {
@@ -471,27 +561,24 @@ function _handleEvent(evt, slotsEl, summaryEl, detailEl) {
       rule.status = "done"; rule.passed = evt.passed;
       rule.councilVotes = evt.council_votes || [];
       rule.issue = evt.issue; rule.rationale = evt.rationale;
-      if (evt.chairman_model && !rule.chairman) {
-        rule.chairman = { model: evt.chairman_model, verdict: evt.chairman_verdict, rationale: evt.chairman_rationale || "", status: "done", passed: evt.chairman_verdict === "PASS" };
-      }
     }
-    _renderSlot(slotsEl, evt.rule_id);
-    _injectBadges(evt.rule_id, evt.passed);
-    _updateSummary(summaryEl);
+    _state.rulesDone = (_state.rulesDone || 0) + 1;
+    _updateProgress(_state.rulesDone, _state.totalRules || _state.ruleOrder.length, false);
+    _upsertRuleCard(slotsEl, evt.rule_id);
   }
   else if (type === "complete") {
     const bar = document.getElementById("council-bar");
     const passed = evt.passed;
     const issues = evt.issues || [];
+    const total = _state.ruleOrder.length;
+    const passCount = _state.ruleOrder.filter((r) => _state.rules[r]?.passed).length;
+    _updateProgress(total, total, true);
     if (bar) bar.className = `council-bar council-bar--complete ${passed ? "council-bar--all-pass" : "council-bar--has-fail"}`;
     if (summaryEl) {
-      const total = _state.ruleOrder.length;
-      const passCount = _state.ruleOrder.filter((r) => _state.rules[r]?.passed).length;
       summaryEl.innerHTML = passed
-        ? `<span class="council-summary-pass">${passCount}/${total} passed</span> &mdash; All checks clear`
-        : `<span class="council-summary-fail">${passCount}/${total} passed</span> &mdash; ${issues.length} issue${issues.length > 1 ? "s" : ""} found`;
+        ? `<span class="council-summary-pass">${passCount}/${total} passed</span> — All checks clear`
+        : `<span class="council-summary-fail">${passCount}/${total} passed</span> — ${issues.length} issue${issues.length > 1 ? "s" : ""} found`;
     }
-    _applyTriageMode(issues);
   }
   else if (type === "error") {
     if (summaryEl) summaryEl.textContent = `Error: ${evt.message}`;
@@ -503,6 +590,70 @@ function _handleEvent(evt, slotsEl, summaryEl, detailEl) {
   }
   else if (type === "status") {
     if (summaryEl) summaryEl.textContent = evt.message || "";
+  }
+}
+
+function _upsertRuleCard(container, ruleId) {
+  if (!container) return;
+  const rule = _state.rules[ruleId];
+  if (!rule) return;
+  let card = container.querySelector(`[data-rule="${ruleId}"]`);
+  if (!card) {
+    card = document.createElement("div");
+    card.className = "qc-rule-card";
+    card.setAttribute("data-rule", ruleId);
+    container.appendChild(card);
+  }
+
+  const label = RULE_SHORT_LABELS[ruleId] || ruleId;
+  const desc = rule.description || "";
+  const status = rule.passed === true ? "pass" : rule.passed === false ? "fail" : "running";
+  const icon = status === "pass" ? "\u2713" : status === "fail" ? "\u2717" : "\u23F3";
+  const statusText = status === "running" ? "Checking..." : status === "pass" ? "Passed" : "Failed";
+
+  let councilHtml = "";
+  const isCouncilRule = ["human_llm_grade_alignment", "metadata_prompt_alignment", "metadata_taxonomy_alignment", "human_explanation_justifies_grade", "safety_context_aware", "qc_cfa_criteria_valid"].includes(ruleId);
+  if (status === "running" && isCouncilRule && !card.querySelector(".qc-council-votes")) {
+    councilHtml = `<div class="qc-council-votes"><div class="qc-council-title">Council votes (live):</div><div class="qc-council-list qc-council-waiting">Calling models…</div></div>`;
+  }
+
+  let issueHtml = "";
+  if (rule.issue?.message) issueHtml += `<div class="qc-issue-message">${escapeHtml(rule.issue.message)}</div>`;
+  if (rule.issue?.hint) issueHtml += `<div class="qc-issue-hint">Hint: ${escapeHtml(rule.issue.hint)}</div>`;
+  if (rule.rationale && status !== "running") issueHtml = `<div class="qc-rationale">${escapeHtml(rule.rationale)}</div>` + issueHtml;
+
+  if (status === "running") {
+    const existingCouncil = card.querySelector(".qc-council-votes, .qc-chairman-section");
+    if (existingCouncil) return;
+  }
+
+  const headerHtml = `<div class="qc-rule-header"><span class="qc-rule-title">${escapeHtml(label)}</span><span class="qc-rule-status qc-status-${status}">${icon} ${statusText}</span></div>`;
+  const descHtml = desc ? `<div class="qc-rule-desc">${escapeHtml(desc)}</div>` : "";
+
+  if (status !== "running") {
+    const existingCouncilHtml = card.querySelector(".qc-council-votes, .qc-chairman-section");
+    const councilFragment = existingCouncilHtml ? "" : "";
+    card.innerHTML = headerHtml + descHtml;
+    if (existingCouncilHtml) {
+      const wrapper = document.createElement("div");
+      wrapper.innerHTML = headerHtml + descHtml;
+      card.replaceChildren(...wrapper.childNodes);
+    } else {
+      card.innerHTML = headerHtml + descHtml;
+    }
+    if (rule.councilVotes?.length) {
+      const votesDiv = document.createElement("div");
+      votesDiv.className = "qc-council-votes";
+      votesDiv.innerHTML = `<div class="qc-council-title">Council votes:</div><div class="qc-council-list">${rule.councilVotes.map((v) => `<span class="qc-vote qc-vote-${(v.vote || "").toLowerCase()}" title="${escapeHtml(v.model_id || v.model || "")}">${escapeHtml(shortModel(v.model_id || v.model || "?"))}: ${escapeHtml(v.vote || "?")}</span>`).join("")}</div>`;
+      card.appendChild(votesDiv);
+    }
+    if (issueHtml) {
+      const issueDiv = document.createElement("div");
+      issueDiv.innerHTML = issueHtml;
+      card.appendChild(issueDiv);
+    }
+  } else {
+    card.innerHTML = headerHtml + descHtml + councilHtml;
   }
 }
 
@@ -607,96 +758,6 @@ function _autoExpandFailedSections(failedRuleIds) {
       body.classList.add("collapsed");
     }
   });
-}
-
-// ── Slot rendering ─────────────────────────────────────────────────────
-
-function _renderSlot(container, ruleId) {
-  if (!container) return;
-  const rule = _state.rules[ruleId];
-  if (!rule) return;
-  let slot = container.querySelector(`[data-rule-id="${ruleId}"]`);
-  if (!slot) {
-    slot = document.createElement("button");
-    slot.type = "button";
-    slot.setAttribute("data-rule-id", ruleId);
-    slot.addEventListener("click", () => _toggleRuleDetail(ruleId));
-    container.appendChild(slot);
-  }
-  const label = RULE_SHORT_LABELS[ruleId] || ruleId;
-  if (rule.status === "running") {
-    slot.className = "council-slot council-slot--running";
-    slot.innerHTML = `<span class="council-slot-indicator"><span class="council-spinner-sm"></span></span><span class="council-slot-label">${escapeHtml(label)}</span>`;
-  } else if (rule.status === "stopped") {
-    slot.className = "council-slot council-slot--stopped";
-    slot.innerHTML = `<span class="council-slot-indicator council-slot-dot--stopped"></span><span class="council-slot-label">${escapeHtml(label)}</span><span class="council-slot-verdict">STOPPED</span>`;
-  } else if (rule.passed) {
-    slot.className = "council-slot council-slot--pass";
-    slot.innerHTML = `<span class="council-slot-indicator council-slot-dot--pass"></span><span class="council-slot-label">${escapeHtml(label)}</span><span class="council-slot-verdict">PASS</span>`;
-  } else {
-    slot.className = "council-slot council-slot--fail";
-    slot.innerHTML = `<span class="council-slot-indicator council-slot-dot--fail"></span><span class="council-slot-label">${escapeHtml(label)}</span><span class="council-slot-verdict">FAIL</span>`;
-  }
-}
-
-function _toggleRuleDetail(ruleId) {
-  const detailEl = document.getElementById("council-detail");
-  if (!detailEl) return;
-  if (detailEl.dataset.activeRule === ruleId && !detailEl.hidden) {
-    detailEl.hidden = true; detailEl.dataset.activeRule = ""; return;
-  }
-  detailEl.dataset.activeRule = ruleId;
-  detailEl.hidden = false;
-  _renderFullDetail(detailEl, ruleId);
-}
-
-function _updateDetailForRule(detailEl, ruleId) {
-  if (!detailEl || detailEl.hidden || detailEl.dataset.activeRule !== ruleId) return;
-  _renderFullDetail(detailEl, ruleId);
-}
-
-function _renderFullDetail(detailEl, ruleId) {
-  const rule = _state.rules[ruleId];
-  if (!rule) return;
-  const label = RULE_SHORT_LABELS[ruleId] || ruleId;
-
-  let html = `<div class="council-detail-header">
-    <span class="council-detail-title">${escapeHtml(label)}</span>
-    <span class="council-detail-desc">${escapeHtml(rule.description || "")}</span>
-    <button type="button" class="council-detail-close" onclick="this.closest('.council-detail').hidden=true">&times;</button>
-  </div><div class="council-detail-models">`;
-
-  for (const [modelId, m] of Object.entries(rule.models)) {
-    const name = shortModel(modelId);
-    const voteBadge = m.vote ? `<span class="council-vote-badge council-vote-badge--${m.vote.toLowerCase()}">${m.vote}</span>` : m.status === "running" ? `<span class="council-vote-badge council-vote-badge--pending"><span class="council-spinner-sm"></span></span>` : "";
-    const reasoning = m.chunks.join("");
-    const reasoningHtml = reasoning ? `<div class="council-model-reasoning">${escapeHtml(reasoning)}</div>` : m.status === "running" ? `<div class="council-model-reasoning council-model-reasoning--streaming"><span class="council-cursor"></span></div>` : "";
-    html += `<div class="council-model-row"><div class="council-model-header"><span class="council-model-name">${escapeHtml(name)}</span>${voteBadge}</div>${reasoningHtml}</div>`;
-  }
-  html += `</div>`;
-
-  const ch = rule.chairman;
-  if (ch) {
-    const chName = ch.model ? shortModel(ch.model) : "Chairman";
-    const chReasoning = (ch.chunks || []).join("");
-    const chStatus = ch.status || "running";
-    const chVerdictBadge = chStatus === "done" ? `<span class="council-vote-badge council-vote-badge--${ch.passed ? "pass" : "fail"}">${ch.passed ? "PASS" : "FAIL"}</span>` : `<span class="council-vote-badge council-vote-badge--pending"><span class="council-spinner-sm"></span></span>`;
-    let chReasoningHtml = chReasoning ? `<div class="council-chairman-rationale">${escapeHtml(chReasoning)}${chStatus === "running" ? '<span class="council-cursor"></span>' : ""}</div>` : ch.rationale ? `<div class="council-chairman-rationale">${escapeHtml(ch.rationale)}</div>` : chStatus === "running" ? `<div class="council-chairman-rationale council-model-reasoning--streaming"><span class="council-cursor"></span></div>` : "";
-    html += `<div class="council-chairman"><div class="council-chairman-header"><span class="council-chairman-label">Chairman: ${escapeHtml(chName)}</span>${chVerdictBadge}</div>${chReasoningHtml}</div>`;
-  }
-
-  if (rule.issue) {
-    html += `<div class="council-issue"><div class="council-issue-msg">${escapeHtml(rule.issue.message || "")}</div>${rule.issue.hint ? `<div class="council-issue-hint">${escapeHtml(rule.issue.hint)}</div>` : ""}</div>`;
-  }
-  detailEl.innerHTML = html;
-}
-
-function _updateSummary(summaryEl) {
-  if (!summaryEl) return;
-  const total = _state.ruleOrder.length;
-  const done = _state.ruleOrder.filter((r) => _state.rules[r]?.status === "done").length;
-  const running = _state.ruleOrder.find((r) => _state.rules[r]?.status === "running");
-  if (running) summaryEl.textContent = `Checking (${done}/${total}): ${_state.rules[running]?.description || running}`;
 }
 
 function _injectBadges(ruleId, passed) {
