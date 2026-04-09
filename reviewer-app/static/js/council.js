@@ -613,6 +613,7 @@ function _handleEvent(evt, slotsEl, summaryEl, detailEl) {
     if (rule) {
       rule.status = "done"; rule.passed = evt.passed;
       rule.councilVotes = evt.council_votes || [];
+      rule.councilResponses = evt.council_responses || {};
       rule.issue = evt.issue; rule.rationale = evt.rationale;
     }
     _state.rulesDone = (_state.rulesDone || 0) + 1;
@@ -709,8 +710,24 @@ function _upsertRuleCard(container, ruleId) {
   }
   if (descEl) descEl.textContent = desc;
 
-  // On rule_done: append issue (skip rationale if issue message exists — they duplicate)
   if (status !== "running") {
+    // Build retroactive chat thread if council votes exist but no thread was rendered
+    if (rule.councilVotes?.length && !card.querySelector(".chat-thread")) {
+      const responses = rule.councilResponses || {};
+      const thread = document.createElement("div");
+      thread.className = "chat-thread";
+      for (const v of rule.councilVotes) {
+        const mid = v.model_id || v.model || "";
+        const vote = v.vote || "?";
+        const reasoning = responses[mid] || rule.models?.[mid]?.chunks?.join("") || "";
+        const msg = document.createElement("div");
+        msg.className = "chat-msg";
+        msg.innerHTML = `${_modelAvatar(mid)}<div class="chat-bubble"><div class="chat-sender">${escapeHtml(shortModel(mid))}<span class="chat-verdict qc-vote qc-vote-${vote.toLowerCase()}">${vote}</span></div>${reasoning ? `<div class="chat-body">${escapeHtml(reasoning)}</div>` : ""}</div>`;
+        thread.appendChild(msg);
+      }
+      card.appendChild(thread);
+    }
+
     let issueBlock = card.querySelector(".qc-rule-issue-block");
     const hasIssue = rule.issue?.message;
     const hasHint = rule.issue?.hint;
@@ -725,7 +742,6 @@ function _upsertRuleCard(container, ruleId) {
       if (hasHint) html += `<div class="qc-issue-hint">${escapeHtml(rule.issue.hint)}</div>`;
       issueBlock.innerHTML = html;
     }
-    card.querySelectorAll(".council-model-acc").forEach((a) => { a.open = false; });
   }
 }
 

@@ -252,12 +252,11 @@ def stream_review_events(snapshot):
         if rule_id in COUNCIL_RULES:
             council_votes = [{"model": m, "model_id": m, "vote": "PASS" if v else "FAIL" if v is False else "unclear"} for m, v in votes]
             rule_done_payload["council_votes"] = council_votes
+            rule_done_payload["council_responses"] = council_responses
             if chairman_model_id and chairman_verdict_str is not None:
                 rule_done_payload["chairman_model"] = chairman_model_id
                 rule_done_payload["chairman_verdict"] = chairman_verdict_str
                 rule_done_payload["chairman_rationale"] = chairman_rationale or ""
-            else:
-                rule_done_payload["council_responses"] = council_responses
         yield f"data: {json.dumps(rule_done_payload)}\n\n"
 
     eval_slots = build_eval_slots(snapshot)
