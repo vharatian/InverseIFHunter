@@ -136,6 +136,7 @@ def stream_review_events(snapshot):
     issues_out = []
     evaluation = None
     rules = get_rules_for_checkpoint(snapshot.checkpoint)
+    yield f"data: {json.dumps({'type': 'council_init', 'total_rules': len(rules)})}\n\n"
 
     for rule_def in rules:
         rule_id = rule_def.get("id", "?")

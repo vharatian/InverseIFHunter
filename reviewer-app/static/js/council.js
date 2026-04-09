@@ -315,11 +315,13 @@ function _updateProgress(done, total, complete) {
   const text = progressWrap.querySelector(".council-progress-text");
   if (complete) {
     if (fill) fill.style.width = "100%";
-    if (text) text.textContent = `All ${total} rules checked.`;
+    if (text) text.textContent = `${total} of ${total} rules checked`;
   } else if (total > 0) {
     const pct = Math.round((done / total) * 100);
     if (fill) fill.style.width = `${pct}%`;
-    if (text) text.textContent = `Checking ${done + 1} of ${total}…`;
+    if (text) text.textContent = `${done} of ${total} completed — checking rule ${done + 1}…`;
+  } else {
+    if (text) text.textContent = "Starting council…";
   }
 }
 
@@ -504,15 +506,18 @@ async function runNotebookCouncil(notebookUrl) {
 function _handleEvent(evt, slotsEl, summaryEl, detailEl) {
   const type = evt.type;
 
-  if (type === "rule_start") {
+  if (type === "council_init") {
+    _state.totalRules = evt.total_rules || 0;
+    _updateProgress(0, _state.totalRules, false);
+  }
+  else if (type === "rule_start") {
     _state.ruleOrder.push(evt.rule_id);
     _state.rules[evt.rule_id] = {
       id: evt.rule_id, description: evt.description, status: "running",
       models: {}, passed: null, councilVotes: [], chairman: null, issue: null,
       content_checked: evt.content_checked || "",
     };
-    _state.totalRules = (_state.totalRules || 0) + 1;
-    _updateProgress(_state.rulesDone || 0, _state.totalRules, false);
+    _updateProgress(_state.rulesDone || 0, _state.totalRules || 0, false);
     _upsertRuleCard(slotsEl, evt.rule_id);
     if (summaryEl) summaryEl.textContent = `Checking: ${evt.description}`;
   }
