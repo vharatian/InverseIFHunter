@@ -347,7 +347,7 @@ export function showSkeletons() {
 
 // ── Task card ───────────────────────────────────────────────────
 
-const JOURNEY_STEPS = ['Load', 'Hunt', 'Select', 'Review', 'QC', 'Submit', 'Approved'];
+const JOURNEY_STEPS = ['Load', 'Hunt', 'Select', 'Review', 'Submit'];
 
 function buildTaskCard(t, showJourney) {
     const card = document.createElement('div');
@@ -441,10 +441,8 @@ function buildJourneyTrail(t) {
 }
 
 function computeStep(t) {
-    if (t.review_status === 'approved') return 6;
-    if (t.review_status === 'submitted') return 5;
-    if (t.qc_done) return 5;
-    if (t.review_count >= 4) return 4;
+    if (t.review_status === 'submitted') return 4;
+    if (t.review_count >= 4) return 3;
     if (t.completed_hunts > 0 && t.review_count > 0) return 3;
     if (t.completed_hunts > 0) return 2;
     if (t.total_hunts > 0) return 1;
@@ -475,7 +473,9 @@ async function _confirmDeleteSession(sessionId, label) {
 // ── Helpers ─────────────────────────────────────────────────────
 
 function taskLabel(t) {
-    return t.task_display_id || t.session_id.slice(0, 10);
+    if (t.task_display_id) return t.task_display_id;
+    if (t.prompt_preview) return t.prompt_preview.slice(0, 50);
+    return t.session_id.slice(0, 10);
 }
 
 function stageLabel(t) {
@@ -485,9 +485,7 @@ function stageLabel(t) {
         'Hunting in progress…',
         'Select 4 responses',
         'Human review in progress',
-        'Quality check needed',
-        'Ready to submit for review',
-        'Approved',
+        'Ready to submit',
     ];
     return labels[step] || '';
 }
