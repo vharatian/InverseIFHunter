@@ -106,6 +106,10 @@ COUNCIL_RULES = {
     "human_explanation_justifies_grade",
     "safety_context_aware",
     "qc_cfa_criteria_valid",
+    "prompt_taxonomy_domain_alignment",
+    "no_imaginary_constraints",
+    "overall_criteria_quality",
+    "human_explanation_quality",
 }
 
 
