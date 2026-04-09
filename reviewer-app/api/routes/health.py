@@ -18,11 +18,17 @@ router = APIRouter(tags=["health"])
 
 
 def _compute_version():
-    """Content-based hash of reviewer-app source files."""
+    """Content-based hash of all files that affect the reviewer app."""
     import hashlib, glob
     base = str(Path(__file__).resolve().parents[2])
+    repo = str(Path(__file__).resolve().parents[3])
     h = hashlib.md5()
-    for pat in [f"{base}/static/**/*.js", f"{base}/static/**/*.css", f"{base}/static/**/*.html", f"{base}/api/**/*.py"]:
+    for pat in [
+        f"{base}/static/**/*.js", f"{base}/static/**/*.css", f"{base}/static/**/*.html",
+        f"{base}/api/**/*.py", f"{base}/services/**/*.py", f"{base}/config/**/*.py",
+        f"{repo}/agentic_reviewer/**/*.py", f"{repo}/providers/**/*.py",
+        f"{repo}/config/*.yaml", f"{repo}/notebook_headings.py",
+    ]:
         for f in sorted(glob.glob(pat, recursive=True)):
             try:
                 with open(f, "rb") as fh:
