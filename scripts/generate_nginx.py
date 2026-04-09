@@ -88,6 +88,9 @@ server {{
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-Prefix {stg};
+        proxy_read_timeout 1200;
+        proxy_send_timeout 1200;
+        proxy_buffering off;
     }}
 
     # ── Production Grafana ───────────────────────────────────────────
@@ -110,6 +113,9 @@ server {{
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-Real-IP $remote_addr;
+        proxy_read_timeout 1200;
+        proxy_send_timeout 1200;
+        proxy_buffering off;
     }}
 }}
 """
