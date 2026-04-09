@@ -19,6 +19,10 @@ def get_council_prompt(rule_id, snapshot, params):
         "human_explanation_justifies_grade": "agentic_reviewer.rules.human_explanation_justifies_grade",
         "safety_context_aware": "agentic_reviewer.rules.safety_context_aware",
         "qc_cfa_criteria_valid": "agentic_reviewer.rules.qc_cfa_criteria_valid",
+        "prompt_taxonomy_domain_alignment": "agentic_reviewer.rules.prompt_taxonomy_domain_alignment",
+        "no_imaginary_constraints": "agentic_reviewer.rules.no_imaginary_constraints",
+        "overall_criteria_quality": "agentic_reviewer.rules.overall_criteria_quality",
+        "human_explanation_quality": "agentic_reviewer.rules.human_explanation_quality",
     }
     mod = __import__(mods[rule_id], fromlist=["get_council_prompt"])
     fn = getattr(mod, "get_council_prompt")
