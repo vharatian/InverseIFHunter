@@ -17,18 +17,25 @@ if _repo_root not in sys.path:
 router = APIRouter(tags=["health"])
 
 
-_cached_version = None
+def _compute_version():
+    """Content-based hash of reviewer-app source files."""
+    import hashlib, glob
+    base = str(Path(__file__).resolve().parents[2])
+    h = hashlib.md5()
+    for pat in [f"{base}/static/**/*.js", f"{base}/static/**/*.css", f"{base}/static/**/*.html", f"{base}/api/**/*.py"]:
+        for f in sorted(glob.glob(pat, recursive=True)):
+            try:
+                with open(f, "rb") as fh:
+                    h.update(fh.read())
+            except OSError:
+                pass
+    return f"rev.{h.hexdigest()[:10]}"
+
+_cached_version = _compute_version()
 
 @router.get("/api/version")
 async def version():
     """Return app version hash. Polled by the UI to detect code changes."""
-    global _cached_version
-    if _cached_version is None:
-        try:
-            from main import APP_VERSION
-            _cached_version = APP_VERSION
-        except Exception:
-            _cached_version = "1.0.0"
     return {"version": _cached_version}
 
 
