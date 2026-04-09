@@ -634,6 +634,33 @@ function _handleEvent(evt, slotsEl, summaryEl, detailEl) {
     }
     _notifyUpdateSystem();
   }
+  else if (type === "overall_start") {
+    const container = slotsEl || document.getElementById("council-slots");
+    if (container) {
+      let card = container.querySelector(".overall-card");
+      if (!card) {
+        card = document.createElement("div");
+        card.className = "overall-card";
+        card.innerHTML = `<div class="overall-card-header">${_modelAvatar(evt.model || "")}<span class="overall-card-title">Overall Assessment</span><span class="overall-card-badge">analyzing...</span></div><div class="overall-card-body overall-streaming"></div>`;
+        container.appendChild(card);
+      }
+    }
+  }
+  else if (type === "overall_chunk") {
+    const body = (slotsEl || document.getElementById("council-slots"))?.querySelector(".overall-card-body");
+    if (body) body.textContent += evt.chunk || "";
+  }
+  else if (type === "overall_done") {
+    const card = (slotsEl || document.getElementById("council-slots"))?.querySelector(".overall-card");
+    if (card) {
+      const body = card.querySelector(".overall-card-body");
+      if (body) { body.classList.remove("overall-streaming"); if (evt.summary) body.textContent = evt.summary; }
+      const badge = card.querySelector(".overall-card-badge");
+      const text = (evt.summary || "").toUpperCase();
+      const rating = text.startsWith("EXCELLENT") ? "excellent" : text.startsWith("GOOD") ? "good" : text.startsWith("NEEDS") ? "needs-work" : text.startsWith("POOR") ? "poor" : "neutral";
+      if (badge) { badge.textContent = rating.replace("-", " ").toUpperCase(); badge.className = `overall-card-badge overall-badge--${rating}`; }
+    }
+  }
   else if (type === "error") {
     if (summaryEl) summaryEl.textContent = `Error: ${evt.message}`;
     const bar = document.getElementById("council-bar");

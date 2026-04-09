@@ -109,6 +109,32 @@ COUNCIL_RULES = {
 }
 
 
+def _build_overall_summary_prompt(snapshot, issues, pass_count, total_rules):
+    """Build prompt for chairman to summarize overall task quality."""
+    lines = [
+        f"You are a senior QA reviewer. A task was checked against {total_rules} quality rules.",
+        f"{pass_count} passed, {len(issues)} failed.",
+        "",
+        "TASK PROMPT (first 500 chars):",
+        (snapshot.prompt or "")[:500],
+        "",
+        "FAILED RULES:",
+    ]
+    for issue in issues:
+        rid = issue.get("rule_id", "?")
+        msg = issue.get("message", "")[:200]
+        lines.append(f"  - {rid}: {msg}")
+    lines.extend([
+        "",
+        "Write a brief overall assessment (3-5 sentences). Rate the task quality as one of:",
+        "  EXCELLENT (all pass), GOOD (1-2 minor issues), NEEDS WORK (3+ issues), POOR (critical failures).",
+        "",
+        "Format: Start with the rating on its own line (EXCELLENT/GOOD/NEEDS WORK/POOR),",
+        "then your brief assessment.",
+    ])
+    return "\n".join(lines)
+
+
 def stream_review_events(snapshot):
     """Sync generator: run rules one by one, yield SSE events. Council rules stream votes live."""
     from agentic_reviewer.rule_engine import get_rules_for_checkpoint, run_rule
@@ -247,12 +273,38 @@ def stream_review_events(snapshot):
             i["details"] = {**evaluation, "council_votes": existing.get("council_votes", []), **existing}
 
     from datetime import datetime, timezone
+    total_rules = len(rules)
+    pass_count = total_rules - len(issues_out)
     result = {
         "type": "complete",
         "passed": len(issues_out) == 0,
         "issues": issues_out,
         "evaluation": evaluation,
         "checkpoint": "final",
+        "total_rules": total_rules,
+        "pass_count": pass_count,
         "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
     yield f"data: {json.dumps(result)}\n\n"
+
+    # Overall performance summary via chairman LLM call
+    try:
+        from agentic_reviewer.config_loader import get_agentic_council
+        from providers.openrouter import call_model_streaming as _stream_model
+        council_config = get_agentic_council()
+        chairman = (council_config.get("chairman_model") or "").strip()
+        if chairman and issues_out:
+            summary_prompt = _build_overall_summary_prompt(
+                snapshot, issues_out, pass_count, total_rules,
+            )
+            yield f"data: {json.dumps({'type': 'overall_start', 'model': chairman})}\n\n"
+            full = []
+            for chunk, err in _stream_model(summary_prompt, chairman, max_tokens=1024, timeout=120.0):
+                if err:
+                    break
+                if chunk:
+                    full.append(chunk)
+                    yield f"data: {json.dumps({'type': 'overall_chunk', 'chunk': chunk})}\n\n"
+            yield f"data: {json.dumps({'type': 'overall_done', 'summary': ''.join(full)})}\n\n"
+    except Exception as e:
+        logger.warning("Overall summary failed: %s", e)
