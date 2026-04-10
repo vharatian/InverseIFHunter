@@ -182,17 +182,32 @@ export function triggerColabConfetti() {
 }
 
 
-export function showToast(message, type = 'info') {
-    const toast = document.createElement('div');
-    toast.className = `alert alert-${type === 'info' ? 'warning' : type} fade-in`;
-    toast.style.cssText += 'pointer-events: auto; white-space: nowrap;';
-    toast.innerHTML = `<span>${message}</span>`;
+const _TOAST_KIND = new Set(['success', 'error', 'warning', 'info']);
 
-    elements.toastContainer.appendChild(toast);
+export function showToast(message, type = 'info') {
+    const dock = elements.toastContainer;
+    if (!dock) return;
+
+    const kind = _TOAST_KIND.has(type) ? type : 'info';
+    const toast = document.createElement('div');
+    toast.className = `mh-toast mh-toast--${kind} fade-in`;
+    toast.setAttribute('role', 'status');
+
+    const bar = document.createElement('span');
+    bar.className = 'mh-toast__bar';
+    bar.setAttribute('aria-hidden', 'true');
+
+    const msg = document.createElement('span');
+    msg.className = 'mh-toast__msg';
+    msg.textContent = message;
+
+    toast.appendChild(bar);
+    toast.appendChild(msg);
+    dock.appendChild(toast);
 
     setTimeout(() => {
         toast.style.opacity = '0';
-        toast.style.transform = 'translateY(-8px)';
+        toast.style.transform = 'translateY(-6px)';
         setTimeout(() => toast.remove(), 300);
     }, 4000);
 }
@@ -204,19 +219,44 @@ export function showToast(message, type = 'info') {
  * @param {() => void|Promise<void>} onRetry - Callback when Retry is clicked
  */
 export function showToastWithRetry(message, hint, onRetry) {
-    const toast = document.createElement('div');
-    toast.className = 'alert alert-error fade-in toast-with-retry';
-    toast.style.cssText += 'pointer-events: auto; white-space: nowrap;';
-    toast.innerHTML = `
-        <div class="toast-retry-content">
-            <span>${escapeHtml(message)}</span>
-            ${hint ? `<span class="toast-hint">${escapeHtml(hint)}</span>` : ''}
-            <button type="button" class="btn btn-sm btn-outline toast-retry-btn">Retry</button>
-        </div>
-    `;
-    elements.toastContainer.appendChild(toast);
+    const dock = elements.toastContainer;
+    if (!dock) return;
 
-    const retryBtn = toast.querySelector('.toast-retry-btn');
+    const toast = document.createElement('div');
+    toast.className = 'mh-toast mh-toast--error toast-with-retry fade-in';
+
+    const bar = document.createElement('span');
+    bar.className = 'mh-toast__bar';
+    bar.setAttribute('aria-hidden', 'true');
+
+    const body = document.createElement('div');
+    body.className = 'mh-toast__body';
+
+    const content = document.createElement('div');
+    content.className = 'toast-retry-content';
+
+    const msgSpan = document.createElement('span');
+    msgSpan.textContent = message;
+    content.appendChild(msgSpan);
+
+    if (hint) {
+        const hintSpan = document.createElement('span');
+        hintSpan.className = 'toast-hint';
+        hintSpan.textContent = hint;
+        content.appendChild(hintSpan);
+    }
+
+    const retryBtn = document.createElement('button');
+    retryBtn.type = 'button';
+    retryBtn.className = 'btn btn-sm btn-outline toast-retry-btn';
+    retryBtn.textContent = 'Retry';
+    content.appendChild(retryBtn);
+
+    body.appendChild(content);
+    toast.appendChild(bar);
+    toast.appendChild(body);
+    dock.appendChild(toast);
+
     retryBtn.addEventListener('click', () => {
         toast.remove();
         if (typeof onRetry === 'function') onRetry();
@@ -225,7 +265,7 @@ export function showToastWithRetry(message, hint, onRetry) {
     setTimeout(() => {
         if (toast.parentNode) {
             toast.style.opacity = '0';
-            toast.style.transform = 'translateX(20px)';
+            toast.style.transform = 'translateY(-6px)';
             setTimeout(() => toast.remove(), 300);
         }
     }, 8000);
