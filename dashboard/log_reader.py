@@ -114,6 +114,34 @@ class EnhancedLogReader:
                 return v
         return ""
 
+    def _merge_session_created_from_events(
+        self,
+        events: List[Dict],
+        base_ctx: Optional[Dict[str, Dict[str, str]]] = None,
+    ) -> Dict[str, Dict[str, str]]:
+        """
+        Merge session_created rows from an event list into context.
+        Events are newest-first; first session_created per session_id wins (newest).
+        """
+        out: Dict[str, Dict[str, str]] = {k: dict(v) for k, v in (base_ctx or {}).items()}
+        seen_sid: Set[str] = set()
+        for event in events:
+            if event.get("type") != "session_created":
+                continue
+            d = event.get("data") or {}
+            sid = d.get("session_id")
+            if not sid or sid in seen_sid:
+                continue
+            seen_sid.add(sid)
+            te = (d.get("trainer_email") or "").strip().lower()
+            cu = self._pick_colab_url(d)
+            cur = out.setdefault(sid, {"trainer_email": "", "colab_url": ""})
+            if te:
+                cur["trainer_email"] = te
+            if cu:
+                cur["colab_url"] = cu
+        return out
+
     def _load_session_context(self) -> Dict[str, Dict[str, str]]:
         """session_id -> {trainer_email, colab_url}. Disk wins for conflicts; telemetry fills missing."""
         now = datetime.utcnow()
@@ -175,14 +203,6 @@ class EnhancedLogReader:
         s = {e.strip().lower() for e in trainer_emails if e and str(e).strip()}
         return s if s else None
 
-    def _session_matches_trainer_filter(
-        self, session_id: str, ctx: Dict[str, Dict[str, str]], allowed: Set[str]
-    ) -> bool:
-        if not session_id:
-            return False
-        email = (ctx.get(session_id) or {}).get("trainer_email") or ""
-        return bool(email) and email in allowed
-
     def _event_matches_trainer_filter(
         self, event: Dict[str, Any], ctx: Dict[str, Dict[str, str]], allowed: Optional[Set[str]]
     ) -> bool:
@@ -191,7 +211,12 @@ class EnhancedLogReader:
         sid = (event.get("data") or {}).get("session_id")
         if not sid:
             return True
-        return self._session_matches_trainer_filter(sid, ctx, allowed)
+        email = (event.get("trainer_email") or "").strip().lower()
+        if not email:
+            email = (ctx.get(sid) or {}).get("trainer_email") or ""
+        if not email:
+            email = ((event.get("data") or {}).get("trainer_email") or "").strip().lower()
+        return bool(email) and email in allowed
 
     def _enrich_row_session_fields(
         self,
@@ -377,11 +402,14 @@ class EnhancedLogReader:
             read_cap = max(read_cap, limit * 200, 5000)
         read_cap = min(read_cap, 50000)
 
-        events = self._read_events(limit=read_cap)
+        raw_events = self._read_events(limit=read_cap)
         if event_type:
-            events = [e for e in events if e.get("type") == event_type]
+            events = [e for e in raw_events if e.get("type") == event_type]
+        else:
+            events = raw_events
 
         ctx = self._load_session_context()
+        ctx = self._merge_session_created_from_events(raw_events, ctx)
         allowed = self._normalize_trainer_emails_filter(trainer_emails)
 
         out: List[Dict] = []
@@ -391,10 +419,13 @@ class EnhancedLogReader:
             sid = (ev.get("data") or {}).get("session_id")
             if sid:
                 sc = ctx.get(sid) or {}
-                if sc.get("trainer_email"):
-                    ev["trainer_email"] = sc["trainer_email"]
-                if sc.get("colab_url"):
-                    ev["colab_url"] = sc["colab_url"]
+                data = ev.get("data") or {}
+                te = sc.get("trainer_email") or (data.get("trainer_email") or "").strip().lower()
+                if te:
+                    ev["trainer_email"] = te
+                cu = sc.get("colab_url") or self._pick_colab_url(data)
+                if cu:
+                    ev["colab_url"] = cu
             if allowed is not None and not self._event_matches_trainer_filter(ev, ctx, allowed):
                 continue
             out.append(ev)
@@ -601,6 +632,7 @@ class EnhancedLogReader:
         events = self._read_events(since=since)
         trainer_mapping = self._load_trainer_mapping()
         ctx = self._load_session_context()
+        ctx = self._merge_session_created_from_events(events, ctx)
         allowed = self._normalize_trainer_emails_filter(trainer_emails)
 
         hunts = []
@@ -609,7 +641,11 @@ class EnhancedLogReader:
                 continue
             data = event.get("data", {})
             session_id = data.get("session_id", "")
-            if allowed is not None and not self._session_matches_trainer_filter(session_id, ctx, allowed):
+            if allowed is not None and not self._event_matches_trainer_filter(
+                {"data": data, "trainer_email": (ctx.get(session_id) or {}).get("trainer_email", "")},
+                ctx,
+                allowed,
+            ):
                 continue
             row = {
                 "timestamp": event.get("ts"),
@@ -643,6 +679,7 @@ class EnhancedLogReader:
         events = self._read_events(since=since)
         trainer_mapping = self._load_trainer_mapping()
         ctx = self._load_session_context()
+        ctx = self._merge_session_created_from_events(events, ctx)
         allowed = self._normalize_trainer_emails_filter(trainer_emails)
 
         breaks = []
@@ -653,7 +690,11 @@ class EnhancedLogReader:
             if not data.get("is_breaking"):
                 continue
             session_id = data.get("session_id", "")
-            if allowed is not None and not self._session_matches_trainer_filter(session_id, ctx, allowed):
+            if allowed is not None and not self._event_matches_trainer_filter(
+                {"data": data, "trainer_email": (ctx.get(session_id) or {}).get("trainer_email", "")},
+                ctx,
+                allowed,
+            ):
                 continue
             row = {
                 "timestamp": event.get("ts"),
@@ -684,6 +725,7 @@ class EnhancedLogReader:
         since = datetime.utcnow() - timedelta(hours=hours)
         events = self._read_events(since=since)
         ctx = self._load_session_context()
+        ctx = self._merge_session_created_from_events(events, ctx)
         allowed = self._normalize_trainer_emails_filter(trainer_emails)
 
         failures = []
@@ -693,7 +735,11 @@ class EnhancedLogReader:
 
             if event_type == "api_call_end" and not data.get("success"):
                 session_id = data.get("session_id") or ""
-                if allowed is not None and not self._session_matches_trainer_filter(session_id, ctx, allowed):
+                if allowed is not None and not self._event_matches_trainer_filter(
+                    {"data": data, "trainer_email": (ctx.get(session_id) or {}).get("trainer_email", "")},
+                    ctx,
+                    allowed,
+                ):
                     continue
                 row = {
                     "timestamp": event.get("ts"),
@@ -709,7 +755,11 @@ class EnhancedLogReader:
 
             elif event_type == "hunt_result" and data.get("error"):
                 session_id = data.get("session_id", "")
-                if allowed is not None and not self._session_matches_trainer_filter(session_id, ctx, allowed):
+                if allowed is not None and not self._event_matches_trainer_filter(
+                    {"data": data, "trainer_email": (ctx.get(session_id) or {}).get("trainer_email", "")},
+                    ctx,
+                    allowed,
+                ):
                     continue
                 row = {
                     "timestamp": event.get("ts"),
@@ -737,6 +787,7 @@ class EnhancedLogReader:
         since = datetime.utcnow() - timedelta(hours=hours)
         events = self._read_events(since=since)
         ctx = self._load_session_context()
+        ctx = self._merge_session_created_from_events(events, ctx)
         allowed = self._normalize_trainer_emails_filter(trainer_emails)
 
         calls = []
@@ -745,7 +796,11 @@ class EnhancedLogReader:
                 continue
             data = event.get("data", {})
             session_id = data.get("session_id") or ""
-            if allowed is not None and not self._session_matches_trainer_filter(session_id, ctx, allowed):
+            if allowed is not None and not self._event_matches_trainer_filter(
+                {"data": data, "trainer_email": (ctx.get(session_id) or {}).get("trainer_email", "")},
+                ctx,
+                allowed,
+            ):
                 continue
             model = data.get("model", "unknown")
             tokens_in = data.get("tokens_in") or 0

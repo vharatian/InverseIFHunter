@@ -19,7 +19,7 @@ import {
     getIncompleteReviewIssues,
     getIncompleteReviewsModalMessage 
 } from './utils.js';
-import { showToast, showError, showNextBlindJudge } from './celebrations.js';
+import { showToast, showError, showNextBlindJudge } from './celebrations.js?v=42';
 import { hideModelLockedIndicator } from './editors.js';
 import { showMultiTurnDecision, updateTurnAwareUI } from './multiturn.js';
 import { showAppModal } from './api.js';
@@ -34,7 +34,7 @@ import {
     normalizeReviewRowNumber,
     syncAlignmentSlotDisplays,
 } from './alignment.js';
-import { playHuntComplete, playHuntCompleteEmpty } from './sounds.js';
+import { playHuntComplete, playHuntCompleteEmpty } from './sounds.js?v=42';
 
 // ============== Hunt Result Classification Helpers ==============
 // SINGLE SOURCE OF TRUTH for break/pass/error classification on the frontend.

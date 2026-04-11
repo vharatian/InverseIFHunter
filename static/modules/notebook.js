@@ -24,7 +24,7 @@ import {
     getModelDisplayName,
     parseCriteriaToJSON
 } from './utils.js';
-import { showToast, showError, triggerColabConfetti } from './celebrations.js';
+import { showToast, showError, triggerColabConfetti } from './celebrations.js?v=42';
 import { clearPreviousResults, formatJudgeCriteriaDisplay, warmupConnections, setReviewModeButtonsDisabled } from './results.js';
 import { 
     validateModelMatch, 
@@ -34,7 +34,7 @@ import {
     hideModelLockedIndicator
 } from './editors.js';
 import { showAppModal, showPasswordPrompt } from './api.js';
-import { playFetchSuccess, playFetchError, playFinalSubmission, playFinalSubmissionError } from './sounds.js';
+import { playFetchSuccess, playFetchError, playFinalSubmission, playFinalSubmissionError } from './sounds.js?v=42';
 import { activateAdminMode } from './adminMode.js';
 import { runQualityCheckOverlay } from './qualityCheckOverlay.js';
 import { renderQCPersistentSection } from './qcPersistentSection.js';

@@ -18,7 +18,7 @@ import {
     escapeHtml 
 } from './utils.js';
 import { state, setActivePhase } from './state.js';
-import { showToast } from './celebrations.js';
+import { showToast } from './celebrations.js?v=42';
 import { 
     handleHuntComplete, 
     fetchAllResponses, 
@@ -26,7 +26,7 @@ import {
 } from './results.js';
 import { showMultiTurnDecision, updateTurnAwareUI } from './multiturn.js';
 import { syncActiveRunToNotebook } from './testbed.js';
-import { playHuntStart } from './sounds.js';
+import { playHuntStart } from './sounds.js?v=42';
 import { connectHuntChannel, disconnectHuntChannel } from './huntChannel.js';
 
 // ── Hunt timer & aurora — purely visual, no logic impact ──────────────────

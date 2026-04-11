@@ -8,7 +8,7 @@
 
 import { elements } from './dom.js';
 import { state } from './state.js';
-import { showToast, showError } from './celebrations.js';
+import { showToast, showError } from './celebrations.js?v=42';
 import { validatePromptLength } from './editors.js';
 import { updateOriginalNotebookWithCell } from './notebook.js';
 import { fetchConfigFromAPI, adminBypass } from './config.js';

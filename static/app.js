@@ -6,17 +6,17 @@
  */
 
 // Base Modules
-import { elements } from './modules/dom.js';
-import { initTheme, toggleTheme } from './modules/theme.js';
-import { state, resetTurnState } from './modules/state.js';
-import { showTestbed, hideTestbed, initTestbed, resetTestbed, goBackToNotebook, syncActiveRunToNotebook } from './modules/testbed.js';
+import { elements } from './modules/dom.js?v=42';
+import { initTheme, toggleTheme } from './modules/theme.js?v=42';
+import { state, resetTurnState } from './modules/state.js?v=42';
+import { showTestbed, hideTestbed, initTestbed, resetTestbed, goBackToNotebook, syncActiveRunToNotebook } from './modules/testbed.js?v=42';
 
 // Auth & API
-import { initTrainerRegistration, startHeartbeat } from './modules/auth.js';
-import { initVersionCheck, showAppModal } from './modules/api.js';
+import { initTrainerRegistration, startHeartbeat } from './modules/auth.js?v=42';
+import { initVersionCheck, showAppModal } from './modules/api.js?v=42';
 
 // Feature Modules
-import { initHuntNumberControls, initHuntModeDropdown, initHuntConfigUI, startHunt } from './modules/hunt.js';
+import { initHuntNumberControls, initHuntModeDropdown, initHuntConfigUI, startHunt } from './modules/hunt.js?v=42';
 import { 
     initFileUpload,
     fetchFromUrl, 
@@ -28,7 +28,7 @@ import {
     updateAdminModeIndicator,
     refreshValidationState,
     submitToColab
-} from './modules/notebook.js';
+} from './modules/notebook.js?v=42';
 import { 
     closeResponseSlideout,
     closeGradingSlideout,
@@ -38,18 +38,18 @@ import {
     handleChangeSelection,
     handleRefreshAlignmentClick,
     initSelectionSectionCollapse
-} from './modules/results.js';
-import { initMultiTurnListeners, initCalibrationListeners, syncTurnUI } from './modules/multiturn.js';
-import { updateModelOptions } from './modules/editors.js';
-import { initAutosave, initNextTurnAutosave, initGradingAutosave, resetAllStatuses } from './modules/autosave.js';
-import { handleHumanJudgment, showNextBlindJudge, showToast, showError } from './modules/celebrations.js';
-import { updateCriteriaButtonsState } from './modules/utils.js';
-import { initReviewSync, refreshReviewSync } from './modules/reviewSync.js';
-import { initTrainerQueue, showQueueView, showTaskView } from './modules/trainerQueue.js';
-import { initNotifications } from './modules/notifications.js';
-import { hydrateSession, clearSectionLocks } from './modules/sessionHydrator.js';
-import { initOfflineQueue } from './modules/offlineQueue.js';
-import { initAdminMode, deactivateAdminMode } from './modules/adminMode.js';
+} from './modules/results.js?v=42';
+import { initMultiTurnListeners, initCalibrationListeners, syncTurnUI } from './modules/multiturn.js?v=42';
+import { updateModelOptions } from './modules/editors.js?v=42';
+import { initAutosave, initNextTurnAutosave, initGradingAutosave, resetAllStatuses } from './modules/autosave.js?v=42';
+import { handleHumanJudgment, showNextBlindJudge, showToast, showError } from './modules/celebrations.js?v=42';
+import { updateCriteriaButtonsState } from './modules/utils.js?v=42';
+import { initReviewSync, refreshReviewSync } from './modules/reviewSync.js?v=42';
+import { initTrainerQueue, showQueueView, showTaskView } from './modules/trainerQueue.js?v=42';
+import { initNotifications } from './modules/notifications.js?v=42';
+import { hydrateSession, clearSectionLocks } from './modules/sessionHydrator.js?v=42';
+import { initOfflineQueue } from './modules/offlineQueue.js?v=42';
+import { initAdminMode, deactivateAdminMode } from './modules/adminMode.js?v=42';
 
 // Clean cache-busting query param from URL (left over by version-update hard refresh)
 if (window.location.search.includes('_v=')) {

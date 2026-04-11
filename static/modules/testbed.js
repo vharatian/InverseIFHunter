@@ -13,10 +13,10 @@
 import { state } from './state.js';
 import { PROVIDER_MODELS, getProviderModels, getJudgeModels, getConfigValue, adminBypass } from './config.js';
 import { escapeHtml } from './utils.js';
-import { showToast } from './celebrations.js';
+import { showToast } from './celebrations.js?v=42';
 import { parseCriteria, validateModelReferenceAndCriteria, progressiveSaveToColab } from './notebook.js';
 import { parseCriteriaToJSON } from './utils.js';
-import { playJudgeSuccess, playJudgeError } from './sounds.js';
+import { playJudgeSuccess, playJudgeError } from './sounds.js?v=42';
 
 const DEFAULT_JUDGE_SYSTEM_PROMPT = `Your role is that of a meticulous instruction-following grading teacher. Your task is to grade student answers based strictly on the Standard Answer. You must evaluate whether the student completely fulfills the requirement. You will be provide one requirement
 

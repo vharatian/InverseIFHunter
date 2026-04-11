@@ -325,7 +325,8 @@ async function loadEvents() {
         const icon = getEventIcon(event.type);
         const time = new Date(event.ts).toLocaleTimeString();
         const details = formatEventDetails(event);
-        const colabUrl = event.colab_url || '';
+        const d = event.data || {};
+        const colabUrl = (event.colab_url || d.colab_url || d.url || '').trim();
         const viewTask = colabUrl
             ? `<a class="event-view-task" href="${escapeHtml(colabUrl)}" target="_blank" rel="noopener noreferrer">View task</a>`
             : '';

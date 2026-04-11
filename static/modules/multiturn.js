@@ -16,12 +16,12 @@ import {
     getTurnColorClass,
     getModelDisplayName
 } from './utils.js';
-import { showToast, showError } from './celebrations.js';
+import { showToast, showError } from './celebrations.js?v=42';
 import { fetchAllResponses, fetchAllResponsesAndShowSelection, isResultBreaking, isResultPassing, isResultError } from './results.js';
 import { renderPriorConversationBanner, enableNavTestbedButton, resetTestbed, showTestbed, syncActiveRunToNotebook } from './testbed.js';
 import { progressiveSaveToColab } from './notebook.js';
 import { validatePromptLength } from './editors.js';
-import { playEndTask, playEndTaskError, playNextTurn, playNextTurnError } from './sounds.js';
+import { playEndTask, playEndTaskError, playNextTurn, playNextTurnError } from './sounds.js?v=42';
 // It uses showCalibrationPanel internally, so no import needed if it's in the same file.
 // It uses startHunt (for calibration).
 import { updateHuntLimitUI, resetHuntNumberToDefault } from './hunt.js';

@@ -10,7 +10,7 @@
  */
 
 import { state } from './state.js';
-import { showToast } from './celebrations.js';
+import { showToast } from './celebrations.js?v=42';
 
 /**
  * Get trainer info from localStorage.

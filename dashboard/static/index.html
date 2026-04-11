@@ -25,10 +25,6 @@
                        onkeypress="if(event.key==='Enter') performSearch()">
                 <button onclick="performSearch()">🔍</button>
             </div>
-            <div class="trainer-filter-box" title="Filter Details tabs and Live feed by trainer email(s). Comma-separated.">
-                <input type="text" id="trainerEmailsFilter" placeholder="Trainer emails (comma-separated)"
-                       onchange="onTrainerEmailsChange()" onkeydown="if(event.key==='Enter'){onTrainerEmailsChange();}">
-            </div>
             <select id="timeRange" onchange="refreshAll()">
                 <option value="1">Last 1 hour</option>
                 <option value="6">Last 6 hours</option>
@@ -133,7 +129,14 @@
             </div>
 
             <!-- Live Feed -->
-            <div class="panel">
+            <div class="panel live-feed-panel">
+                <div class="live-feed-toolbar">
+                    <label class="live-feed-toolbar-label" for="trainerEmailsFilter">Trainer emails</label>
+                    <input type="text" id="trainerEmailsFilter" class="live-feed-toolbar-input"
+                           placeholder="Comma-separated — filters feed and Details"
+                           title="Filter Live feed and Details tabs by trainer email(s)"
+                           onchange="onTrainerEmailsChange()" onkeydown="if(event.key==='Enter'){onTrainerEmailsChange();}">
+                </div>
                 <div class="panel-header">
                     <h3>📡 Live Event Feed</h3>
                     <select id="eventFilter" onchange="loadEvents()">
