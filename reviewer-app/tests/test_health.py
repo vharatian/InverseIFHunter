@@ -31,3 +31,8 @@ def test_queue_without_header_returns_403():
 def test_queue_with_empty_allowlist_returns_403():
     r = client.get("/api/queue", headers={"X-Reviewer-Email": "any@example.com"})
     assert r.status_code == 403
+
+
+def test_auth_session_without_header_returns_403():
+    r = client.get("/reviewer/api/auth/session")
+    assert r.status_code == 403

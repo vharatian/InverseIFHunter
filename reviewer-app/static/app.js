@@ -4,6 +4,7 @@
 import { getEmail, setEmail, api, initVersionCheck, setCouncilRunningCheck } from "./js/api.js";
 import { showGate, showToast } from "./js/dom.js";
 import { escapeHtml } from "./js/task.js";
+import { deriveModelMeta } from "./js/council/councilModels.js";
 import { initCouncil, resetCouncil, setNotebookUrl, getCouncilState } from "./js/council.js";
 
 let currentSessionId = null;
@@ -171,22 +172,27 @@ document.getElementById("btn-continue")?.addEventListener("click", async () => {
   const btn = document.getElementById("btn-continue");
   const email = (input?.value || "").trim();
   if (!email) {
-    errEl.textContent = "Enter your email.";
-    errEl.hidden = false;
+    if (errEl) {
+      errEl.textContent = "Enter your email.";
+      errEl.hidden = false;
+    }
     return;
   }
-  errEl.hidden = true;
-  btn.disabled = true;
-  btn.setAttribute("aria-busy", "true");
+  if (errEl) errEl.hidden = true;
+  if (btn) {
+    btn.disabled = true;
+    btn.setAttribute("aria-busy", "true");
+  }
   setEmail(email);
   try {
-    await api("/api/queue");
-    document.getElementById("reviewer-email").textContent = email;
+    await api("/api/auth/session", {}, { timeoutMs: 25_000, retries: 1 });
+    const emailSpan = document.getElementById("reviewer-email");
+    if (emailSpan) emailSpan.textContent = email;
     showGate(false);
     showToast("Signed in as " + email, "success");
   } catch (e) {
     setEmail("");
-    errEl.textContent =
+    const msg =
       e.message && e.message.includes("timed out")
         ? "The server took too long to respond. Try again, or contact your lead if this keeps happening."
         : e.message &&
@@ -196,10 +202,15 @@ document.getElementById("btn-continue")?.addEventListener("click", async () => {
               e.message.includes("Not an allowed"))
           ? "This email isn't on the list. Ask your lead for help."
           : e.message || "Something went wrong. Try again.";
-    errEl.hidden = false;
+    if (errEl) {
+      errEl.textContent = msg;
+      errEl.hidden = false;
+    }
   } finally {
-    btn.disabled = false;
-    btn.setAttribute("aria-busy", "false");
+    if (btn) {
+      btn.disabled = false;
+      btn.setAttribute("aria-busy", "false");
+    }
   }
 });
 
@@ -408,6 +419,34 @@ function _renderNotebookPreviewBody(data) {
   return warnBlock + metaChips + taskContext + slotsBlock + extraHtml;
 }
 
+async function hydrateGateCouncilFooter() {
+  const wrap = document.getElementById("gate-model-chips");
+  const labelEl = document.getElementById("gate-footer-label");
+  if (!wrap) return;
+  try {
+    const data = await api("/api/council-models", {}, { timeoutMs: 15_000, retries: 1 });
+    const raw = data.models || [];
+    const models = raw
+      .map((m) => (typeof m === "string" ? m : m && m.id))
+      .filter(Boolean);
+    if (!models.length) return;
+    wrap.replaceChildren();
+    for (const mid of models) {
+      const { short } = deriveModelMeta(mid);
+      const span = document.createElement("span");
+      span.className = "gate-model-chip";
+      span.textContent = short;
+      wrap.appendChild(span);
+    }
+    if (labelEl) {
+      const n = models.length;
+      labelEl.textContent = `Powered by ${n}-model LLM council`;
+    }
+  } catch {
+    /* keep static HTML */
+  }
+}
+
 function _wireSlotTabs(container) {
   const bar = container.querySelector("#slot-tabs-bar");
   if (!bar) return;
@@ -427,6 +466,7 @@ initCouncil(() => currentSessionId, null);
 setNotebookUrl(() => _currentNotebookUrl);
 setCouncilRunningCheck(() => getCouncilState().running);
 initVersionCheck();
+hydrateGateCouncilFooter();
 
 if (getEmail()) {
   document.getElementById("reviewer-email").textContent = getEmail();

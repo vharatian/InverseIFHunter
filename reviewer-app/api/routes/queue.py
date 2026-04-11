@@ -11,6 +11,12 @@ from services.queue_service import get_queue_with_summaries, get_queue_status_co
 router = APIRouter(prefix="/api", tags=["queue"])
 
 
+@router.get("/auth/session")
+async def auth_session(_reviewer: Annotated[str, Depends(require_reviewer)]):
+    """Allowlist check only (no Redis queue scan). Used for reviewer sign-in."""
+    return {"ok": True, "reviewer": _reviewer}
+
+
 @router.get("/queue")
 async def get_queue(
     _reviewer: Annotated[str, Depends(require_reviewer)],

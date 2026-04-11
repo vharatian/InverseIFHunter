@@ -201,7 +201,11 @@ body {
     font-size: 0.82rem;
     letter-spacing: 0.02em;
 }
-.gate-form { text-align: left; }
+.gate-form {
+    text-align: left;
+    position: relative;
+    z-index: 1;
+}
 .gate-label {
     display: block;
     font-size: 0.75rem;
@@ -226,6 +230,8 @@ body {
 .gate input::placeholder { color: var(--text-muted); }
 .gate input:focus { outline: none; border-color: var(--accent-primary); box-shadow: 0 0 0 3px var(--accent-glow); }
 .gate button {
+    position: relative;
+    z-index: 1;
     width: 100%;
     padding: 0.7rem 1.25rem;
     background: var(--accent-primary);
