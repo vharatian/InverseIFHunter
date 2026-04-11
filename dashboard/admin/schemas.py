@@ -71,6 +71,15 @@ class AddAdminRequest(BaseModel):
     def validate_email(cls, v: str) -> str:
         return _check_email(v)
 
+class AddSuperAdminRequest(BaseModel):
+    email: str
+    name: str = ""
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        return _check_email(v)
+
 class CreatePodRequest(BaseModel):
     pod_id: str = Field(..., pattern=r"^[a-z0-9_]+$", min_length=1, max_length=50)
     name: str = Field(..., min_length=1, max_length=100)

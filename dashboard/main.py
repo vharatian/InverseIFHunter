@@ -9,7 +9,7 @@ Run: python dashboard/main.py
 import os
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Query
@@ -78,11 +78,14 @@ async def get_overview(hours: int = Query(default=24, ge=1, le=720)):
 @app.get("/api/events")
 async def get_events(
     limit: int = Query(default=50, ge=1, le=200),
-    event_type: Optional[str] = Query(default=None)
+    event_type: Optional[str] = Query(default=None),
+    trainer_emails: Optional[List[str]] = Query(default=None),
 ):
     """Get recent events."""
     log_reader = get_log_reader()
-    events = log_reader.get_recent_events(limit=limit, event_type=event_type)
+    events = log_reader.get_recent_events(
+        limit=limit, event_type=event_type, trainer_emails=trainer_emails
+    )
     return {"count": len(events), "events": events}
 
 
@@ -133,44 +136,56 @@ async def get_costs(hours: int = Query(default=24, ge=1, le=720)):
 @app.get("/api/hunts")
 async def get_detailed_hunts(
     hours: int = Query(default=24, ge=1, le=720),
-    limit: int = Query(default=50, ge=1, le=200)
+    limit: int = Query(default=50, ge=1, le=200),
+    trainer_emails: Optional[List[str]] = Query(default=None),
 ):
     """Get detailed hunts."""
     log_reader = get_log_reader()
-    hunts = log_reader.get_detailed_hunts(hours=hours, limit=limit)
+    hunts = log_reader.get_detailed_hunts(
+        hours=hours, limit=limit, trainer_emails=trainer_emails
+    )
     return {"count": len(hunts), "hunts": hunts}
 
 
 @app.get("/api/calls")
 async def get_detailed_calls(
     hours: int = Query(default=24, ge=1, le=720),
-    limit: int = Query(default=100, ge=1, le=500)
+    limit: int = Query(default=100, ge=1, le=500),
+    trainer_emails: Optional[List[str]] = Query(default=None),
 ):
     """Get detailed API calls."""
     log_reader = get_log_reader()
-    calls = log_reader.get_detailed_api_calls(hours=hours, limit=limit)
+    calls = log_reader.get_detailed_api_calls(
+        hours=hours, limit=limit, trainer_emails=trainer_emails
+    )
     return {"count": len(calls), "calls": calls}
 
 
 @app.get("/api/breaks")
 async def get_breaks(
     hours: int = Query(default=168, ge=1, le=720),
-    limit: int = Query(default=50, ge=1, le=200)
+    limit: int = Query(default=50, ge=1, le=200),
+    trainer_emails: Optional[List[str]] = Query(default=None),
 ):
     """Get breaks list."""
     log_reader = get_log_reader()
-    breaks = log_reader.get_breaks_list(hours=hours, limit=limit)
+    breaks = log_reader.get_breaks_list(
+        hours=hours, limit=limit, trainer_emails=trainer_emails
+    )
     return {"count": len(breaks), "breaks": breaks}
 
 
 @app.get("/api/failures")
 async def get_failures(
     hours: int = Query(default=168, ge=1, le=720),
-    limit: int = Query(default=50, ge=1, le=200)
+    limit: int = Query(default=50, ge=1, le=200),
+    trainer_emails: Optional[List[str]] = Query(default=None),
 ):
     """Get failures list."""
     log_reader = get_log_reader()
-    failures = log_reader.get_failures_list(hours=hours, limit=limit)
+    failures = log_reader.get_failures_list(
+        hours=hours, limit=limit, trainer_emails=trainer_emails
+    )
     return {"count": len(failures), "failures": failures}
 
 

@@ -101,11 +101,17 @@ function renderTeam(data, container) {
     let h = '';
     const su = isSuper();
 
-    if (data.super_admins?.length) {
-        h += `<div class="card"><h3>Super Admins</h3>${data.super_admins.map(sa =>
-            `<span class="trainer-chip"><span class="role-badge super" style="margin:0">SA</span> ${esc(sa.email || sa.name)}</span>`
-        ).join('')}</div>`;
+    const superAdmins = data.super_admins || [];
+    h += `<div class="card"><h3>Super Admins</h3>`;
+    if (superAdmins.length) {
+        h += superAdmins.map(sa =>
+            `<span class="trainer-chip"><span class="role-badge super" style="margin:0">SA</span> ${esc(sa.email)}${sa.name ? ` (${esc(sa.name)})` : ''}${su ? `<button class="remove-btn" data-action="remove-super-admin" data-email="${esc(sa.email)}">&times;</button>` : ''}</span>`
+        ).join('');
+    } else {
+        h += '<p class="empty-state">No super admins yet.</p>';
     }
+    if (su) h += `<div class="inline-form" data-form="add-super-admin"><input type="email" placeholder="superadmin@example.com" data-field="email" /><input type="text" placeholder="Name" data-field="name" style="max-width:120px" /><button class="btn btn-sm">Add</button></div>`;
+    h += '</div>';
 
     const admins = data.admins || [];
     h += `<div class="card"><h3>Admins</h3>`;
@@ -156,6 +162,13 @@ async function handleTeamAction(action, params) {
             case 'add-admin':
                 await api('team/admins', { method: 'POST', body: JSON.stringify({ email: params.email, name: params.name || '', pods: [] }) });
                 toast('Admin added'); break;
+            case 'add-super-admin':
+                await api('team/super-admins', { method: 'POST', body: JSON.stringify({ email: params.email, name: params.name || '' }) });
+                toast('Super admin added'); break;
+            case 'remove-super-admin':
+                if (!confirm(`Remove super admin ${params.email}?`)) return;
+                await api(`team/super-admins/${encodeURIComponent(params.email)}`, { method: 'DELETE' });
+                toast('Super admin removed'); break;
             case 'create-pod':
                 await api('team/pods', { method: 'POST', body: JSON.stringify({ pod_id: params.pod_id, name: params.name }) });
                 toast('Pod created'); break;
@@ -678,6 +691,7 @@ function init() {
 
         if (action === 'remove-trainer') { handleTeamAction('remove-trainer', { pod: t.dataset.pod, email: t.dataset.email }); return; }
         if (action === 'remove-admin') { handleTeamAction('remove-admin', { email: t.dataset.email }); return; }
+        if (action === 'remove-super-admin') { handleTeamAction('remove-super-admin', { email: t.dataset.email }); return; }
         if (action === 'set-reviewer') { handleTeamAction('set-reviewer', { pod: t.dataset.pod }); return; }
         if (action === 'remove-dashboard-admin') { handleAdminsAction('remove-dashboard-admin', { email: t.dataset.email }); return; }
         if (action === 'remove-test-account') { handleAdminsAction('remove-test-account', { email: t.dataset.email }); return; }
@@ -698,6 +712,7 @@ function init() {
             form.querySelectorAll('[data-field]').forEach(inp => { fields[inp.dataset.field] = inp.value.trim(); });
             if (ft === 'add-trainer') { if (!fields.email) { toast('Email required', 'error'); return; } handleTeamAction('add-trainer', { pod: form.dataset.pod, email: fields.email }); }
             else if (ft === 'add-admin') { if (!fields.email) { toast('Email required', 'error'); return; } handleTeamAction('add-admin', { email: fields.email, name: fields.name }); }
+            else if (ft === 'add-super-admin') { if (!fields.email) { toast('Email required', 'error'); return; } handleTeamAction('add-super-admin', { email: fields.email, name: fields.name }); }
             else if (ft === 'create-pod') { if (!fields.pod_id || !fields.name) { toast('Both fields required', 'error'); return; } handleTeamAction('create-pod', { pod_id: fields.pod_id, name: fields.name }); }
             else if (ft === 'add-dashboard-admin') { if (!fields.email) { toast('Email required', 'error'); return; } handleAdminsAction('add-dashboard-admin', { email: fields.email, name: fields.name }); }
             else if (ft === 'add-test-account') { if (!fields.email) { toast('Email required', 'error'); return; } handleAdminsAction('add-test-account', { email: fields.email, name: fields.name }); }

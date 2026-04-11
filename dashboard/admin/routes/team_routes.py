@@ -7,6 +7,7 @@ from admin.schemas import (
     AddTrainerRequest,
     SetReviewerRequest,
     AddAdminRequest,
+    AddSuperAdminRequest,
     CreatePodRequest,
 )
 from admin.services import team_service
@@ -55,6 +56,26 @@ async def add_admin(body: AddAdminRequest, _=Depends(verify_super_admin)):
     """Add an admin."""
     try:
         team_service.add_admin(body.email, body.name, body.pods)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
+
+
+@router.post("/super-admins")
+async def add_super_admin(body: AddSuperAdminRequest, _=Depends(verify_super_admin)):
+    """Add a team super admin in team.yaml (trainer/reviewer role). Dashboard login is separate: Dashboard Admins tab or ADMIN_PASSWORD."""
+    try:
+        team_service.add_super_admin(body.email, body.name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
+
+
+@router.delete("/super-admins/{email}")
+async def remove_super_admin(email: str, _=Depends(verify_super_admin)):
+    """Remove a team super admin."""
+    try:
+        team_service.remove_super_admin(email)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"ok": True}

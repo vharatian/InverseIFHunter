@@ -254,7 +254,8 @@ async def fetch_notebook(http_request: Request, request: NotebookURLRequest):
             "notebook": parsed.filename,
             "source": "url",
             "trainer_email": trainer_email or None,
-            "trainer_name": trainer_name or None
+            "trainer_name": trainer_name or None,
+            "colab_url": (request.url or "").strip() or None,
         })
         
         try:
@@ -351,6 +352,7 @@ async def create_notebook(http_request: Request, request: CreateNotebookRequest)
             "source": "create",
             "file_id": file_id,
             "trainer_email": trainer_email or None,
+            "colab_url": (notebook_url or "").strip() or None,
         })
 
         try:

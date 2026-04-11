@@ -3,6 +3,7 @@
  */
 
 const API_BASE = window.BASE_PATH || '';
+const TRAINER_EMAILS_STORAGE_KEY = 'dashboard_trainer_emails';
 let timelineChart = null;
 let modelBreakChart = null;
 let modelUsageChart = null;
@@ -61,10 +62,25 @@ function loadSectionData(sectionId) {
 
 // ============== Data Loading ==============
 
+function trainerEmailsQuery() {
+    const el = document.getElementById('trainerEmailsFilter');
+    const raw = el ? el.value : (localStorage.getItem(TRAINER_EMAILS_STORAGE_KEY) || '');
+    const emails = String(raw).split(/[,;\n]+/).map(s => s.trim()).filter(Boolean);
+    return emails.map(e => `&trainer_emails=${encodeURIComponent(e)}`).join('');
+}
+
+function onTrainerEmailsChange() {
+    const el = document.getElementById('trainerEmailsFilter');
+    if (el) localStorage.setItem(TRAINER_EMAILS_STORAGE_KEY, el.value.trim());
+    refreshAll();
+}
+
 async function fetchAPI(endpoint) {
     try {
         const hours = document.getElementById('timeRange').value;
-        const url = `${API_BASE}/api/${endpoint}${endpoint.includes('?') ? '&' : '?'}hours=${hours}`;
+        const te = trainerEmailsQuery();
+        const sep = endpoint.includes('?') ? '&' : '?';
+        const url = `${API_BASE}/api/${endpoint}${sep}hours=${hours}${te}`;
         const response = await fetch(url);
         return await response.json();
     } catch (error) {
@@ -309,6 +325,10 @@ async function loadEvents() {
         const icon = getEventIcon(event.type);
         const time = new Date(event.ts).toLocaleTimeString();
         const details = formatEventDetails(event);
+        const colabUrl = event.colab_url || '';
+        const viewTask = colabUrl
+            ? `<a class="event-view-task" href="${escapeHtml(colabUrl)}" target="_blank" rel="noopener noreferrer">View task</a>`
+            : '';
         
         return `
             <div class="event-item">
@@ -317,6 +337,7 @@ async function loadEvents() {
                     <div class="event-type">${event.type.replace(/_/g, ' ')}</div>
                     <div class="event-details">${details}</div>
                 </div>
+                <div class="event-actions">${viewTask}</div>
                 <span class="event-time">${time}</span>
             </div>
         `;
@@ -654,6 +675,8 @@ function formatDetailItem(item, type) {
                     </div>
                     <div class="detail-meta">
                         <span>🏷️ ${item.trainer_id || item.session_id}</span>
+                        ${item.trainer_email ? `<span class="trainer-email">${escapeHtml(item.trainer_email)}</span>` : ''}
+                        ${item.colab_url ? `<a class="detail-colab-link" href="${escapeHtml(item.colab_url)}" target="_blank" rel="noopener noreferrer">View task</a>` : ''}
                         <span class="detail-time">${time}</span>
                     </div>
                 </div>
@@ -674,6 +697,8 @@ function formatDetailItem(item, type) {
                     </div>
                     <div class="detail-meta">
                         <span>🏷️ ${item.trainer_id || item.session_id}</span>
+                        ${item.trainer_email ? `<span class="trainer-email">${escapeHtml(item.trainer_email)}</span>` : ''}
+                        ${item.colab_url ? `<a class="detail-colab-link" href="${escapeHtml(item.colab_url)}" target="_blank" rel="noopener noreferrer">View task</a>` : ''}
                         <span class="detail-time">${time}</span>
                     </div>
                 </div>
@@ -691,6 +716,8 @@ function formatDetailItem(item, type) {
                         <span>📥 ${item.tokens_in || 0} in</span>
                         <span>📤 ${item.tokens_out || 0} out</span>
                         <span>💰 $${item.cost?.toFixed(6) || '0'}</span>
+                        ${item.trainer_email ? `<span class="trainer-email">${escapeHtml(item.trainer_email)}</span>` : ''}
+                        ${item.colab_url ? `<a class="detail-colab-link" href="${escapeHtml(item.colab_url)}" target="_blank" rel="noopener noreferrer">View task</a>` : ''}
                         <span class="detail-time">${time}</span>
                     </div>
                 </div>
@@ -706,6 +733,8 @@ function formatDetailItem(item, type) {
                     <div class="detail-content">${escapeHtml(item.error) || 'Unknown error'}</div>
                     <div class="detail-meta">
                         <span>🏷️ ${item.session_id || 'N/A'}</span>
+                        ${item.trainer_email ? `<span class="trainer-email">${escapeHtml(item.trainer_email)}</span>` : ''}
+                        ${item.colab_url ? `<a class="detail-colab-link" href="${escapeHtml(item.colab_url)}" target="_blank" rel="noopener noreferrer">View task</a>` : ''}
                         <span class="detail-time">${time}</span>
                     </div>
                 </div>
@@ -766,6 +795,11 @@ function refreshAll() {
 // ============== Initialize ==============
 
 document.addEventListener('DOMContentLoaded', () => {
+    const te = document.getElementById('trainerEmailsFilter');
+    if (te) {
+        const saved = localStorage.getItem(TRAINER_EMAILS_STORAGE_KEY);
+        if (saved) te.value = saved;
+    }
     // Initial load
     loadSectionData('overview');
     loadRealtimeStats();

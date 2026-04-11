@@ -9,7 +9,7 @@ import os
 import re
 import hashlib
 from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Set
 from pathlib import Path
 from collections import defaultdict
 import threading
@@ -59,6 +59,9 @@ class EnhancedLogReader:
         # Trainer mapping cache
         self._trainer_cache: Dict[str, str] = {}
         self._trainer_cache_time: Optional[datetime] = None
+        # session_id -> {trainer_email, colab_url} (disk preferred; telemetry fills gaps)
+        self._session_context_cache: Dict[str, Dict[str, str]] = {}
+        self._session_context_cache_time: Optional[datetime] = None
     
     def _extract_trainer_id_legacy(self, url: str, filename: str) -> str:
         """Legacy: Extract trainer identifier from Colab URL (fallback)."""
@@ -102,6 +105,105 @@ class EnhancedLogReader:
         self._trainer_cache = mapping
         self._trainer_cache_time = now
         return mapping
+
+    @staticmethod
+    def _pick_colab_url(data: Dict[str, Any]) -> str:
+        for k in ("colab_url", "url"):
+            v = (data.get(k) or "").strip()
+            if v:
+                return v
+        return ""
+
+    def _load_session_context(self) -> Dict[str, Dict[str, str]]:
+        """session_id -> {trainer_email, colab_url}. Disk wins for conflicts; telemetry fills missing."""
+        now = datetime.utcnow()
+        if (
+            self._session_context_cache_time
+            and (now - self._session_context_cache_time).total_seconds() < 60
+        ):
+            return self._session_context_cache
+
+        ctx: Dict[str, Dict[str, str]] = {}
+
+        if self.storage_path.exists():
+            for session_file in self.storage_path.glob("*.json"):
+                sid = session_file.stem
+                try:
+                    with open(session_file, "r") as f:
+                        data = json.load(f)
+                    email = (data.get("trainer_email") or "").strip().lower()
+                    colab = self._pick_colab_url(data)
+                    ctx[sid] = {"trainer_email": email, "colab_url": colab}
+                except Exception:
+                    continue
+
+        if self.log_path.exists():
+            try:
+                with open(self.log_path, "r") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            event = json.loads(line)
+                            if event.get("type") != "session_created":
+                                continue
+                            d = event.get("data") or {}
+                            sid = d.get("session_id")
+                            if not sid:
+                                continue
+                            cur = ctx.setdefault(sid, {"trainer_email": "", "colab_url": ""})
+                            te = (d.get("trainer_email") or "").strip().lower()
+                            if te and not cur["trainer_email"]:
+                                cur["trainer_email"] = te
+                            cu = self._pick_colab_url(d)
+                            if cu and not cur["colab_url"]:
+                                cur["colab_url"] = cu
+                        except (json.JSONDecodeError, ValueError):
+                            continue
+            except Exception:
+                pass
+
+        self._session_context_cache = ctx
+        self._session_context_cache_time = now
+        return ctx
+
+    @staticmethod
+    def _normalize_trainer_emails_filter(trainer_emails: Optional[List[str]]) -> Optional[Set[str]]:
+        if not trainer_emails:
+            return None
+        s = {e.strip().lower() for e in trainer_emails if e and str(e).strip()}
+        return s if s else None
+
+    def _session_matches_trainer_filter(
+        self, session_id: str, ctx: Dict[str, Dict[str, str]], allowed: Set[str]
+    ) -> bool:
+        if not session_id:
+            return False
+        email = (ctx.get(session_id) or {}).get("trainer_email") or ""
+        return bool(email) and email in allowed
+
+    def _event_matches_trainer_filter(
+        self, event: Dict[str, Any], ctx: Dict[str, Dict[str, str]], allowed: Optional[Set[str]]
+    ) -> bool:
+        if allowed is None:
+            return True
+        sid = (event.get("data") or {}).get("session_id")
+        if not sid:
+            return True
+        return self._session_matches_trainer_filter(sid, ctx, allowed)
+
+    def _enrich_row_session_fields(
+        self,
+        session_id: str,
+        row: Dict[str, Any],
+        ctx: Dict[str, Dict[str, str]],
+    ) -> None:
+        sc = ctx.get(session_id) or {}
+        row["trainer_email"] = sc.get("trainer_email") or ""
+        cu = sc.get("colab_url") or ""
+        if cu:
+            row["colab_url"] = cu
     
     def _read_events(self, since: Optional[datetime] = None, limit: Optional[int] = None) -> List[Dict]:
         """Read events from log file."""
@@ -263,17 +365,43 @@ class EnhancedLogReader:
         
         return stats
     
-    def get_recent_events(self, limit: int = 50, event_type: Optional[str] = None) -> List[Dict]:
-        """Get recent events."""
-        events = self._read_events(limit=limit * 2 if event_type else limit)
-        
+    def get_recent_events(
+        self,
+        limit: int = 50,
+        event_type: Optional[str] = None,
+        trainer_emails: Optional[List[str]] = None,
+    ) -> List[Dict]:
+        """Get recent events with optional trainer_email/colab_url enrichment and trainer filter."""
+        read_cap = limit * 2 if event_type else limit
+        if trainer_emails and self._normalize_trainer_emails_filter(trainer_emails):
+            read_cap = max(read_cap, limit * 200, 5000)
+        read_cap = min(read_cap, 50000)
+
+        events = self._read_events(limit=read_cap)
         if event_type:
-            events = [e for e in events if e.get("type") == event_type][:limit]
-        
+            events = [e for e in events if e.get("type") == event_type]
+
+        ctx = self._load_session_context()
+        allowed = self._normalize_trainer_emails_filter(trainer_emails)
+
+        out: List[Dict] = []
         for event in events:
-            event.pop("_ts", None)
-        
-        return events[:limit]
+            ev = dict(event)
+            ev.pop("_ts", None)
+            sid = (ev.get("data") or {}).get("session_id")
+            if sid:
+                sc = ctx.get(sid) or {}
+                if sc.get("trainer_email"):
+                    ev["trainer_email"] = sc["trainer_email"]
+                if sc.get("colab_url"):
+                    ev["colab_url"] = sc["colab_url"]
+            if allowed is not None and not self._event_matches_trainer_filter(ev, ctx, allowed):
+                continue
+            out.append(ev)
+            if len(out) >= limit:
+                break
+
+        return out
     
     def get_timeline(self, hours: int = 24, bucket_minutes: int = 60) -> Dict[str, List]:
         """Get event counts over time."""
@@ -462,121 +590,187 @@ class EnhancedLogReader:
         
         return sorted_sessions[:limit]
     
-    def get_detailed_hunts(self, hours: int = 24, limit: int = 50) -> List[Dict]:
+    def get_detailed_hunts(
+        self,
+        hours: int = 24,
+        limit: int = 50,
+        trainer_emails: Optional[List[str]] = None,
+    ) -> List[Dict]:
         """Get detailed hunt results."""
         since = datetime.utcnow() - timedelta(hours=hours)
         events = self._read_events(since=since)
         trainer_mapping = self._load_trainer_mapping()
-        
+        ctx = self._load_session_context()
+        allowed = self._normalize_trainer_emails_filter(trainer_emails)
+
         hunts = []
         for event in events:
-            if event.get("type") == "hunt_result":
-                data = event.get("data", {})
-                session_id = data.get("session_id", "")
-                hunts.append({
-                    "timestamp": event.get("ts"),
-                    "session_id": session_id,
-                    "trainer_id": trainer_mapping.get(session_id, "unknown"),
-                    "hunt_id": data.get("hunt_id"),
-                    "model": data.get("model"),
-                    "score": data.get("score"),
-                    "is_breaking": data.get("is_breaking"),
-                    "error": data.get("error"),
-                    "response_preview": data.get("response_preview"),
-                    "reasoning_preview": data.get("reasoning_preview"),
-                    "criteria": data.get("criteria"),
-                    "judge_explanation": data.get("judge_explanation")
-                })
-        
-        return hunts[:limit]
+            if event.get("type") != "hunt_result":
+                continue
+            data = event.get("data", {})
+            session_id = data.get("session_id", "")
+            if allowed is not None and not self._session_matches_trainer_filter(session_id, ctx, allowed):
+                continue
+            row = {
+                "timestamp": event.get("ts"),
+                "session_id": session_id,
+                "trainer_id": trainer_mapping.get(session_id, "unknown"),
+                "hunt_id": data.get("hunt_id"),
+                "model": data.get("model"),
+                "score": data.get("score"),
+                "is_breaking": data.get("is_breaking"),
+                "error": data.get("error"),
+                "response_preview": data.get("response_preview"),
+                "reasoning_preview": data.get("reasoning_preview"),
+                "criteria": data.get("criteria"),
+                "judge_explanation": data.get("judge_explanation"),
+            }
+            self._enrich_row_session_fields(session_id, row, ctx)
+            hunts.append(row)
+            if len(hunts) >= limit:
+                break
+
+        return hunts
     
-    def get_breaks_list(self, hours: int = 168, limit: int = 50) -> List[Dict]:
+    def get_breaks_list(
+        self,
+        hours: int = 168,
+        limit: int = 50,
+        trainer_emails: Optional[List[str]] = None,
+    ) -> List[Dict]:
         """Get list of breaking responses."""
         since = datetime.utcnow() - timedelta(hours=hours)
         events = self._read_events(since=since)
         trainer_mapping = self._load_trainer_mapping()
-        
+        ctx = self._load_session_context()
+        allowed = self._normalize_trainer_emails_filter(trainer_emails)
+
         breaks = []
         for event in events:
-            if event.get("type") == "hunt_result":
-                data = event.get("data", {})
-                if data.get("is_breaking"):
-                    session_id = data.get("session_id", "")
-                    breaks.append({
-                        "timestamp": event.get("ts"),
-                        "session_id": session_id,
-                        "trainer_id": trainer_mapping.get(session_id, "unknown"),
-                        "hunt_id": data.get("hunt_id"),
-                        "model": data.get("model"),
-                        "score": data.get("score"),
-                        "response_preview": data.get("response_preview"),
-                        "reasoning_preview": data.get("reasoning_preview"),
-                        "criteria": data.get("criteria"),
-                        "judge_explanation": data.get("judge_explanation")
-                    })
-        
-        return breaks[:limit]
+            if event.get("type") != "hunt_result":
+                continue
+            data = event.get("data", {})
+            if not data.get("is_breaking"):
+                continue
+            session_id = data.get("session_id", "")
+            if allowed is not None and not self._session_matches_trainer_filter(session_id, ctx, allowed):
+                continue
+            row = {
+                "timestamp": event.get("ts"),
+                "session_id": session_id,
+                "trainer_id": trainer_mapping.get(session_id, "unknown"),
+                "hunt_id": data.get("hunt_id"),
+                "model": data.get("model"),
+                "score": data.get("score"),
+                "response_preview": data.get("response_preview"),
+                "reasoning_preview": data.get("reasoning_preview"),
+                "criteria": data.get("criteria"),
+                "judge_explanation": data.get("judge_explanation"),
+            }
+            self._enrich_row_session_fields(session_id, row, ctx)
+            breaks.append(row)
+            if len(breaks) >= limit:
+                break
+
+        return breaks
     
-    def get_failures_list(self, hours: int = 168, limit: int = 50) -> List[Dict]:
+    def get_failures_list(
+        self,
+        hours: int = 168,
+        limit: int = 50,
+        trainer_emails: Optional[List[str]] = None,
+    ) -> List[Dict]:
         """Get list of failures."""
         since = datetime.utcnow() - timedelta(hours=hours)
         events = self._read_events(since=since)
-        
+        ctx = self._load_session_context()
+        allowed = self._normalize_trainer_emails_filter(trainer_emails)
+
         failures = []
         for event in events:
             event_type = event.get("type")
             data = event.get("data", {})
-            
+
             if event_type == "api_call_end" and not data.get("success"):
-                failures.append({
+                session_id = data.get("session_id") or ""
+                if allowed is not None and not self._session_matches_trainer_filter(session_id, ctx, allowed):
+                    continue
+                row = {
                     "timestamp": event.get("ts"),
                     "type": "api_call",
                     "provider": data.get("provider"),
                     "model": data.get("model"),
                     "error": data.get("error"),
-                    "session_id": data.get("session_id")
-                })
-            
+                    "session_id": session_id or None,
+                }
+                if session_id:
+                    self._enrich_row_session_fields(session_id, row, ctx)
+                failures.append(row)
+
             elif event_type == "hunt_result" and data.get("error"):
-                failures.append({
+                session_id = data.get("session_id", "")
+                if allowed is not None and not self._session_matches_trainer_filter(session_id, ctx, allowed):
+                    continue
+                row = {
                     "timestamp": event.get("ts"),
                     "type": "hunt",
                     "model": data.get("model"),
                     "error": data.get("error"),
-                    "session_id": data.get("session_id"),
-                    "hunt_id": data.get("hunt_id")
-                })
-        
-        return failures[:limit]
+                    "session_id": session_id,
+                    "hunt_id": data.get("hunt_id"),
+                }
+                self._enrich_row_session_fields(session_id, row, ctx)
+                failures.append(row)
+
+            if len(failures) >= limit:
+                break
+
+        return failures
     
-    def get_detailed_api_calls(self, hours: int = 24, limit: int = 100) -> List[Dict]:
+    def get_detailed_api_calls(
+        self,
+        hours: int = 24,
+        limit: int = 100,
+        trainer_emails: Optional[List[str]] = None,
+    ) -> List[Dict]:
         """Get detailed API calls."""
         since = datetime.utcnow() - timedelta(hours=hours)
         events = self._read_events(since=since)
-        
+        ctx = self._load_session_context()
+        allowed = self._normalize_trainer_emails_filter(trainer_emails)
+
         calls = []
         for event in events:
-            if event.get("type") == "api_call_end":
-                data = event.get("data", {})
-                model = data.get("model", "unknown")
-                tokens_in = data.get("tokens_in") or 0
-                tokens_out = data.get("tokens_out") or 0
-                cost = self._calculate_cost(model, tokens_in, tokens_out) if (tokens_in or tokens_out) else 0
-                
-                calls.append({
-                    "timestamp": event.get("ts"),
-                    "provider": data.get("provider"),
-                    "model": model,
-                    "latency_ms": data.get("latency_ms"),
-                    "success": data.get("success"),
-                    "error": data.get("error"),
-                    "tokens_in": tokens_in,
-                    "tokens_out": tokens_out,
-                    "cost": cost,
-                    "session_id": data.get("session_id")
-                })
-        
-        return calls[:limit]
+            if event.get("type") != "api_call_end":
+                continue
+            data = event.get("data", {})
+            session_id = data.get("session_id") or ""
+            if allowed is not None and not self._session_matches_trainer_filter(session_id, ctx, allowed):
+                continue
+            model = data.get("model", "unknown")
+            tokens_in = data.get("tokens_in") or 0
+            tokens_out = data.get("tokens_out") or 0
+            cost = self._calculate_cost(model, tokens_in, tokens_out) if (tokens_in or tokens_out) else 0
+
+            row = {
+                "timestamp": event.get("ts"),
+                "provider": data.get("provider"),
+                "model": model,
+                "latency_ms": data.get("latency_ms"),
+                "success": data.get("success"),
+                "error": data.get("error"),
+                "tokens_in": tokens_in,
+                "tokens_out": tokens_out,
+                "cost": cost,
+                "session_id": data.get("session_id"),
+            }
+            if session_id:
+                self._enrich_row_session_fields(session_id, row, ctx)
+            calls.append(row)
+            if len(calls) >= limit:
+                break
+
+        return calls
     
     def search_events(self, query: str, hours: int = 168, limit: int = 100) -> List[Dict]:
         """Search across all events."""

@@ -148,6 +148,30 @@ def set_reviewer(pod_id: str, email: str, name: str = "") -> None:
     _save(data)
 
 
+def add_super_admin(email: str, name: str = "") -> None:
+    """Append to team.yaml super_admins (trainer/reviewer apps). Not dashboard cookie auth."""
+    em = _validate_email(email)
+    data = _load_raw()
+    if em in _all_emails(data):
+        raise ValueError(f"Email '{em}' already exists in team config")
+    data.setdefault("super_admins", []).append(
+        {"email": em, "name": name or em.split("@")[0]}
+    )
+    _save(data)
+
+
+def remove_super_admin(email: str) -> None:
+    """Remove a super admin. Raises ValueError if not found."""
+    em = _validate_email(email)
+    data = _load_raw()
+    sas = data.get("super_admins") or []
+    new_sas = [a for a in sas if _norm(a.get("email", "")) != em]
+    if len(new_sas) == len(sas):
+        raise ValueError(f"Super admin '{em}' not found")
+    data["super_admins"] = new_sas
+    _save(data)
+
+
 def add_admin(email: str, name: str = "", pods: Optional[List[str]] = None) -> None:
     """Add an admin entry. Raises ValueError on bad input."""
     em = _validate_email(email)

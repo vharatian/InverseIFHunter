@@ -25,6 +25,10 @@
                        onkeypress="if(event.key==='Enter') performSearch()">
                 <button onclick="performSearch()">🔍</button>
             </div>
+            <div class="trainer-filter-box" title="Filter Details tabs and Live feed by trainer email(s). Comma-separated.">
+                <input type="text" id="trainerEmailsFilter" placeholder="Trainer emails (comma-separated)"
+                       onchange="onTrainerEmailsChange()" onkeydown="if(event.key==='Enter'){onTrainerEmailsChange();}">
+            </div>
             <select id="timeRange" onchange="refreshAll()">
                 <option value="1">Last 1 hour</option>
                 <option value="6">Last 6 hours</option>
