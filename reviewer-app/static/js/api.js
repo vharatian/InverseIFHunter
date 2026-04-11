@@ -8,6 +8,8 @@ if (typeof location !== "undefined" && location.search.includes("_v=")) {
 }
 const EMAIL_KEY = "reviewer_email";
 const VERSION_CHECK_INTERVAL = 30000;
+/** Stay under Elixir proxy receive_timeout (60s) so the client fails first with a clear message. */
+const DEFAULT_FETCH_TIMEOUT_MS = 55_000;
 // API routes are mounted under the same path prefix as this page (e.g. /staging/reviewer).
 // Pathname wins over <base href> because the server often injects /reviewer/ even when deployed at /staging/reviewer/.
 export const API_BASE = (() => {
@@ -50,12 +52,13 @@ export function headers() {
 /**
  * @param {string} path
  * @param {{ method?: string; body?: string; headers?: Record<string,string> }} [options]
- * @param {{ retries?: number; retryDelay?: number; retryOn?: (res: Response) => boolean }} [retryOptions]
+ * @param {{ retries?: number; retryDelay?: number; retryOn?: (res: Response) => boolean; timeoutMs?: number }} [retryOptions]
  * @returns {Promise<any>}
  */
 export async function api(path, options = {}, retryOptions = {}) {
   const maxRetries = retryOptions.retries ?? 3;
   const baseDelay = retryOptions.retryDelay ?? 1000;
+  const timeoutMs = retryOptions.timeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS;
 
   let lastErr;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -63,11 +66,16 @@ export async function api(path, options = {}, retryOptions = {}) {
       // Exponential backoff: 1s, 2s, 4s
       await new Promise((r) => setTimeout(r, baseDelay * Math.pow(2, attempt - 1)));
     }
+    const { signal: _ignoreSignal, ...fetchOptions } = options;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const res = await fetch(API_BASE + path, {
-        ...options,
+        ...fetchOptions,
+        signal: controller.signal,
         headers: { ...headers(), ...(options.headers || {}) },
       });
+      clearTimeout(timeoutId);
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }));
         const d = err.detail;
@@ -85,7 +93,14 @@ export async function api(path, options = {}, retryOptions = {}) {
       if (res.status === 204) return null;
       return await res.json();
     } catch (e) {
+      clearTimeout(timeoutId);
       lastErr = e;
+      const aborted =
+        (e && e.name === "AbortError") ||
+        (typeof DOMException !== "undefined" && e instanceof DOMException && e.name === "AbortError");
+      if (aborted) {
+        throw new Error("Request timed out. Check your connection and try again.");
+      }
       // Only retry on network/fetch errors (TypeError), not on HTTP errors (Error)
       const isNetworkError = e instanceof TypeError;
       if (!isNetworkError || attempt === maxRetries) {

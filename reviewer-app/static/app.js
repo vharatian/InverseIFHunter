@@ -187,9 +187,15 @@ document.getElementById("btn-continue")?.addEventListener("click", async () => {
   } catch (e) {
     setEmail("");
     errEl.textContent =
-      e.message && (e.message.includes("allowlist") || e.message.includes("Missing") || e.message.includes("403") || e.message.includes("Not an allowed"))
-        ? "This email isn't on the list. Ask your lead for help."
-        : (e.message || "Something went wrong. Try again.");
+      e.message && e.message.includes("timed out")
+        ? "The server took too long to respond. Try again, or contact your lead if this keeps happening."
+        : e.message &&
+            (e.message.includes("allowlist") ||
+              e.message.includes("Missing") ||
+              e.message.includes("403") ||
+              e.message.includes("Not an allowed"))
+          ? "This email isn't on the list. Ask your lead for help."
+          : e.message || "Something went wrong. Try again.";
     errEl.hidden = false;
   } finally {
     btn.disabled = false;
