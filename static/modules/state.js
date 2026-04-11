@@ -124,7 +124,7 @@ export function resetTurnState() {
 export function setActivePhase(phase) {
     state.activePhase = phase;
     if (!state.sessionId) return;
-    fetch(`/api/session/${state.sessionId}/phase`, {
+    fetch(`api/session/${state.sessionId}/phase`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phase }),

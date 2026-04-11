@@ -18,7 +18,7 @@ import {
     escapeHtml 
 } from './utils.js';
 import { state, setActivePhase } from './state.js';
-import { showToast } from './celebrations.js?v=42';
+import { showToast } from './celebrations.js?v=43';
 import { 
     handleHuntComplete, 
     fetchAllResponses, 
@@ -26,7 +26,7 @@ import {
 } from './results.js';
 import { showMultiTurnDecision, updateTurnAwareUI } from './multiturn.js';
 import { syncActiveRunToNotebook } from './testbed.js';
-import { playHuntStart } from './sounds.js?v=42';
+import { playHuntStart } from './sounds.js?v=43';
 import { connectHuntChannel, disconnectHuntChannel } from './huntChannel.js';
 
 // ── Hunt timer & aurora — purely visual, no logic impact ──────────────────
@@ -493,7 +493,7 @@ export async function startHunt() {
 
         if (cells.length > 0) {
             try {
-                const cellResp = await fetch(`/api/update-notebook-cells/${state.sessionId}`, {
+                const cellResp = await fetch(`api/update-notebook-cells/${state.sessionId}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ cells, session_only: true })
@@ -511,7 +511,7 @@ export async function startHunt() {
         hunt_offset: huntOffset  // Tell backend where to start hunt_ids
     };
     try {
-        const cfgResp = await fetch(`/api/update-config/${state.sessionId}`, {
+        const cfgResp = await fetch(`api/update-config/${state.sessionId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(configWithOffset)
@@ -570,7 +570,7 @@ export async function startHunt() {
       },
       onError: (data) => {
         if (state.isHunting) {
-          fetch(`/api/results/${state.sessionId}`)
+          fetch(`api/results/${state.sessionId}`)
             .then(r => r.ok ? r.json() : Promise.reject())
             .then(recoveryData => {
               if (recoveryData.results && recoveryData.results.length > 0) {

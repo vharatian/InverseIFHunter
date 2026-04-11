@@ -10,7 +10,7 @@
  */
 
 import { state } from './state.js';
-import { showToast } from './celebrations.js?v=42';
+import { showToast } from './celebrations.js?v=43';
 
 /**
  * Get trainer info from localStorage.
@@ -60,7 +60,7 @@ export async function registerTrainer(name, email) {
     
     // Register with backend (fire-and-forget, don't block on failure)
     try {
-        await fetch('/api/register-trainer', {
+        await fetch('api/register-trainer', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name, email })
@@ -143,7 +143,7 @@ export function startHeartbeat() {
         const email = localStorage.getItem('trainer_email');
         const sessionId = state.sessionId ?? null;
         if (document.visibilityState === 'visible' && sessionId && email) {
-            fetch('/api/heartbeat', {
+            fetch('api/heartbeat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ session_id: sessionId, trainer_email: email })

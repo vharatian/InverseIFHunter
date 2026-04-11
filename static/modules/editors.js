@@ -9,7 +9,7 @@
 import { elements } from './dom.js';
 import { state } from './state.js';
 import { renderInsightTip } from './utils.js';
-import { showToast } from './celebrations.js?v=42';
+import { showToast } from './celebrations.js?v=43';
 import { getProviderModels, getJudgeModels, getConfigValue, adminBypass } from './config.js';
 import { validateModelReferenceAndCriteria } from './notebook.js';
 

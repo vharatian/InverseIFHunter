@@ -16,7 +16,7 @@ export async function refreshTrainerInbox() {
     if (!container || !listEl) return;
 
     try {
-        const res = await fetch('/api/trainer-inbox', { cache: 'no-store' });
+        const res = await fetch('api/trainer-inbox', { cache: 'no-store' });
         if (!res.ok) { container.classList.add('hidden'); return; }
         const data = await res.json();
         const tasks = data.tasks || [];

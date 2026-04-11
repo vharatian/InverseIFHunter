@@ -271,7 +271,7 @@ async function streamQualityCheck(overlay, panel, sessionId, selectedHuntIds, hu
     let totalRules = 0;
     let rulesDone = 0;
 
-    const res = await fetch(`/api/review-final-stream/${sessionId}`, {
+    const res = await fetch(`api/review-final-stream/${sessionId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

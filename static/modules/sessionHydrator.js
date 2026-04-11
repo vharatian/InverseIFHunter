@@ -28,7 +28,7 @@ import { syncTurnUI } from './multiturn.js';
  * @returns {Promise<{ok: boolean, reviewStatus: string, revisionFlags: string[]}>}
  */
 export async function hydrateSession(sessionId) {
-    const res = await fetch(`/api/session/${sessionId}/full-state`, { cache: 'no-store' });
+    const res = await fetch(`api/session/${sessionId}/full-state`, { cache: 'no-store' });
     if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.detail || `Failed to load session (${res.status})`);

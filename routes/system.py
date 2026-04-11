@@ -20,7 +20,7 @@ _INDEX_HTML = _STATIC_DIR / "index.html"
 _MAINTENANCE_HTML = _STATIC_DIR / "maintenance.html"
 
 from fastapi import APIRouter, Request
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 
 import services.redis_session as redis_store
 
@@ -35,6 +35,34 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["system"])
+
+
+def _path_prefix(request: Request) -> str:
+    """Strip from X-Forwarded-Prefix (nginx staging) or ASGI root_path."""
+    p = (request.headers.get("x-forwarded-prefix") or "").strip()
+    if not p:
+        p = (request.scope.get("root_path") or "").strip()
+    p = p.rstrip("/")
+    if not p:
+        return ""
+    if not p.startswith("/") or any(c in p for c in ('"', "'", "<", ">", "\n", "\r")):
+        return ""
+    return p
+
+
+def _html_with_base(html_path: Path, request: Request) -> str:
+    """Inject <base href> so /staging/ resolves static/* and api/* under the prefix."""
+    content = html_path.read_text(encoding="utf-8")
+    if "<base " in content.lower():
+        return content
+    prefix = _path_prefix(request)
+    base_href = f"{prefix}/" if prefix else "/"
+    base_tag = f'<base href="{base_href}">'
+    return content.replace("<head>", f"<head>\n    {base_tag}\n", 1)
+
+
+def _trainer_index_html(request: Request) -> str:
+    return _html_with_base(_INDEX_HTML, request)
 
 
 # ============== Maintenance Mode ==============
@@ -117,9 +145,9 @@ async def get_version():
 # ============== Maintenance / Frontend ==============
 
 @router.get("/maintenance")
-async def maintenance_page():
+async def maintenance_page(request: Request):
     """Serve the maintenance/downtime page."""
-    return FileResponse(str(_MAINTENANCE_HTML))
+    return HTMLResponse(_html_with_base(_MAINTENANCE_HTML, request), media_type="text/html")
 
 
 @router.post("/api/toggle-maintenance")
@@ -142,14 +170,14 @@ async def root(request: Request):
     """Serve the main frontend page or redirect to maintenance."""
     try:
         if is_maintenance_mode():
-            return FileResponse(str(_MAINTENANCE_HTML))
+            return HTMLResponse(_html_with_base(_MAINTENANCE_HTML, request), media_type="text/html")
         if not _INDEX_HTML.exists():
             logger.error("index.html not found at %s (static_dir=%s)", _INDEX_HTML, _STATIC_DIR)
             return JSONResponse(
                 status_code=500,
                 content={"detail": f"index.html not found at {_INDEX_HTML}"}
             )
-        return FileResponse(str(_INDEX_HTML))
+        return HTMLResponse(_trainer_index_html(request), media_type="text/html")
     except Exception as e:
         logger.exception("Error serving root: %s", e)
         raise

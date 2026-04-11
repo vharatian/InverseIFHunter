@@ -11,7 +11,7 @@
 
 import { state } from './state.js';
 import { getConfigValue, fetchConfigFromAPI, adminBypass, ADMIN_MODE_PASSWORD } from './config.js';
-import { showToast } from './celebrations.js?v=42';
+import { showToast } from './celebrations.js?v=43';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 const DRAG_THRESHOLD = 80;          // px of downward drag to trigger

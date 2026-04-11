@@ -19,7 +19,7 @@ import {
     getIncompleteReviewIssues,
     getIncompleteReviewsModalMessage 
 } from './utils.js';
-import { showToast, showError, showNextBlindJudge } from './celebrations.js?v=42';
+import { showToast, showError, showNextBlindJudge } from './celebrations.js?v=43';
 import { hideModelLockedIndicator } from './editors.js';
 import { showMultiTurnDecision, updateTurnAwareUI } from './multiturn.js';
 import { showAppModal } from './api.js';
@@ -34,7 +34,7 @@ import {
     normalizeReviewRowNumber,
     syncAlignmentSlotDisplays,
 } from './alignment.js';
-import { playHuntComplete, playHuntCompleteEmpty } from './sounds.js?v=42';
+import { playHuntComplete, playHuntCompleteEmpty } from './sounds.js?v=43';
 
 // ============== Hunt Result Classification Helpers ==============
 // SINGLE SOURCE OF TRUTH for break/pass/error classification on the frontend.
@@ -982,7 +982,7 @@ export function handleHuntComplete(data) {
  */
 export async function fetchAllResponses(options = {}) {
     try {
-        const response = await fetch(`/api/results/${state.sessionId}`, { cache: 'no-store' });
+        const response = await fetch(`api/results/${state.sessionId}`, { cache: 'no-store' });
         if (!response.ok) {
             throw new Error(`Failed to fetch results: ${response.status}`);
         }
@@ -1035,7 +1035,7 @@ export async function fetchAllResponses(options = {}) {
 export async function fetchAllResponsesAndShowSelection(completedHunts, breaksFound) {
     try {
         // Fetch all results from the session
-        const response = await fetch(`/api/results/${state.sessionId}`, { cache: 'no-store' });
+        const response = await fetch(`api/results/${state.sessionId}`, { cache: 'no-store' });
         if (!response.ok) throw new Error(`Failed to fetch results: ${response.status}`);
         const data = await response.json();
         
@@ -1185,7 +1185,7 @@ export async function exportNotebook() {
         await persistTrainerUi();
         
         // Send human reviews to backend first
-        const reviewData = await fetch(`/api/save-reviews/${state.sessionId}`, {
+        const reviewData = await fetch(`api/save-reviews/${state.sessionId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ reviews: state.humanReviews || {} })
@@ -1197,7 +1197,7 @@ export async function exportNotebook() {
         }
         
         // Now export the notebook with all data
-        const exportUrl = `/api/export-notebook/${state.sessionId}?include_reasoning=true`;
+        const exportUrl = `api/export-notebook/${state.sessionId}?include_reasoning=true`;
         
         // Create a temporary link and click it
         const a = document.createElement('a');
@@ -1585,7 +1585,7 @@ export function htmlToPlainText(element) {
  */
 export async function warmupConnections() {
     try {
-        const response = await fetch('/api/warmup-connections', {
+        const response = await fetch('api/warmup-connections', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
         });
@@ -2473,7 +2473,7 @@ export async function revealLLMJudgments() {
 export async function displayBreakingResults() {
     try {
         // Use new review-results endpoint that selects 4 responses
-        const response = await fetch(`/api/review-results/${state.sessionId}`);
+        const response = await fetch(`api/review-results/${state.sessionId}`);
         if (!response.ok) throw new Error(`Failed to fetch review results: ${response.status}`);
         const data = await response.json();
         
@@ -2698,7 +2698,7 @@ export async function submitHumanReview(huntId, card, slotNum, rowNumber) {
             }
         };
         
-        const saveResponse = await fetch(`/api/save-reviews/${state.sessionId}`, {
+        const saveResponse = await fetch(`api/save-reviews/${state.sessionId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ reviews: reviewForBackend, auto_save: true })

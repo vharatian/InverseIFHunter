@@ -31,7 +31,7 @@ export async function refreshReviewSync(sessionId) {
     }
 
     try {
-        const res = await fetch(`/api/session/${sid}`, { cache: 'no-store' });
+        const res = await fetch(`api/session/${sid}`, { cache: 'no-store' });
         if (!res.ok) {
             block.classList.add('hidden');
             return;
@@ -151,7 +151,7 @@ async function submitForReview(sessionId) {
     const btn = document.getElementById('submitForReviewBtn');
     if (btn) btn.disabled = true;
     try {
-        const res = await fetch(`/api/session/${sessionId}/submit-for-review`, { method: 'POST' });
+        const res = await fetch(`api/session/${sessionId}/submit-for-review`, { method: 'POST' });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.detail || res.statusText);
         await refreshReviewSync(sessionId);
@@ -165,7 +165,7 @@ async function acknowledgeFeedback(sessionId) {
     const btn = document.getElementById('acknowledgeFeedbackBtn');
     if (btn) btn.disabled = true;
     try {
-        const res = await fetch(`/api/session/${sessionId}/acknowledge`, { method: 'POST' });
+        const res = await fetch(`api/session/${sessionId}/acknowledge`, { method: 'POST' });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.detail || res.statusText);
         await refreshReviewSync(sessionId);
@@ -179,7 +179,7 @@ async function resubmitForReview(sessionId) {
     const btn = document.getElementById('resubmitForReviewBtn');
     if (btn) btn.disabled = true;
     try {
-        const res = await fetch(`/api/session/${sessionId}/resubmit`, { method: 'POST' });
+        const res = await fetch(`api/session/${sessionId}/resubmit`, { method: 'POST' });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.detail || res.statusText);
         if (data.escalated) {

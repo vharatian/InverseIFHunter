@@ -346,7 +346,7 @@
 
         async function toggleMaintenanceMode() {
             try {
-                const response = await fetch('/api/toggle-maintenance', {
+                const response = await fetch('api/toggle-maintenance', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' }
                 });

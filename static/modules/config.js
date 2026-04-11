@@ -17,7 +17,7 @@ let _apiConfig = null;
 export async function fetchConfigFromAPI() {
     for (let attempt = 0; attempt < 2; attempt++) {
         try {
-            const r = await fetch('/api/config?_t=' + Date.now(), { cache: 'no-store' });
+            const r = await fetch('api/config?_t=' + Date.now(), { cache: 'no-store' });
             if (r.ok) { _apiConfig = await r.json(); return _apiConfig; }
         } catch (_) {}
         if (attempt === 0) await new Promise(r => setTimeout(r, 500));

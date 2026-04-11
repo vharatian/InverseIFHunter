@@ -6,17 +6,17 @@
  */
 
 // Base Modules
-import { elements } from './modules/dom.js?v=42';
-import { initTheme, toggleTheme } from './modules/theme.js?v=42';
-import { state, resetTurnState } from './modules/state.js?v=42';
-import { showTestbed, hideTestbed, initTestbed, resetTestbed, goBackToNotebook, syncActiveRunToNotebook } from './modules/testbed.js?v=42';
+import { elements } from './modules/dom.js?v=43';
+import { initTheme, toggleTheme } from './modules/theme.js?v=43';
+import { state, resetTurnState } from './modules/state.js?v=43';
+import { showTestbed, hideTestbed, initTestbed, resetTestbed, goBackToNotebook, syncActiveRunToNotebook } from './modules/testbed.js?v=43';
 
 // Auth & API
-import { initTrainerRegistration, startHeartbeat } from './modules/auth.js?v=42';
-import { initVersionCheck, showAppModal } from './modules/api.js?v=42';
+import { initTrainerRegistration, startHeartbeat } from './modules/auth.js?v=43';
+import { initVersionCheck, showAppModal } from './modules/api.js?v=43';
 
 // Feature Modules
-import { initHuntNumberControls, initHuntModeDropdown, initHuntConfigUI, startHunt } from './modules/hunt.js?v=42';
+import { initHuntNumberControls, initHuntModeDropdown, initHuntConfigUI, startHunt } from './modules/hunt.js?v=43';
 import { 
     initFileUpload,
     fetchFromUrl, 
@@ -28,7 +28,7 @@ import {
     updateAdminModeIndicator,
     refreshValidationState,
     submitToColab
-} from './modules/notebook.js?v=42';
+} from './modules/notebook.js?v=43';
 import { 
     closeResponseSlideout,
     closeGradingSlideout,
@@ -38,18 +38,18 @@ import {
     handleChangeSelection,
     handleRefreshAlignmentClick,
     initSelectionSectionCollapse
-} from './modules/results.js?v=42';
-import { initMultiTurnListeners, initCalibrationListeners, syncTurnUI } from './modules/multiturn.js?v=42';
-import { updateModelOptions } from './modules/editors.js?v=42';
-import { initAutosave, initNextTurnAutosave, initGradingAutosave, resetAllStatuses } from './modules/autosave.js?v=42';
-import { handleHumanJudgment, showNextBlindJudge, showToast, showError } from './modules/celebrations.js?v=42';
-import { updateCriteriaButtonsState } from './modules/utils.js?v=42';
-import { initReviewSync, refreshReviewSync } from './modules/reviewSync.js?v=42';
-import { initTrainerQueue, showQueueView, showTaskView } from './modules/trainerQueue.js?v=42';
-import { initNotifications } from './modules/notifications.js?v=42';
-import { hydrateSession, clearSectionLocks } from './modules/sessionHydrator.js?v=42';
-import { initOfflineQueue } from './modules/offlineQueue.js?v=42';
-import { initAdminMode, deactivateAdminMode } from './modules/adminMode.js?v=42';
+} from './modules/results.js?v=43';
+import { initMultiTurnListeners, initCalibrationListeners, syncTurnUI } from './modules/multiturn.js?v=43';
+import { updateModelOptions } from './modules/editors.js?v=43';
+import { initAutosave, initNextTurnAutosave, initGradingAutosave, resetAllStatuses } from './modules/autosave.js?v=43';
+import { handleHumanJudgment, showNextBlindJudge, showToast, showError } from './modules/celebrations.js?v=43';
+import { updateCriteriaButtonsState } from './modules/utils.js?v=43';
+import { initReviewSync, refreshReviewSync } from './modules/reviewSync.js?v=43';
+import { initTrainerQueue, showQueueView, showTaskView } from './modules/trainerQueue.js?v=43';
+import { initNotifications } from './modules/notifications.js?v=43';
+import { hydrateSession, clearSectionLocks } from './modules/sessionHydrator.js?v=43';
+import { initOfflineQueue } from './modules/offlineQueue.js?v=43';
+import { initAdminMode, deactivateAdminMode } from './modules/adminMode.js?v=43';
 
 // Clean cache-busting query param from URL (left over by version-update hard refresh)
 if (window.location.search.includes('_v=')) {
@@ -417,7 +417,7 @@ async function restoreSession() {
     if (!savedSessionId) return;
     
     try {
-        const response = await fetch(`/api/session/${savedSessionId}`, { cache: 'no-store' });
+        const response = await fetch(`api/session/${savedSessionId}`, { cache: 'no-store' });
         if (response.ok) {
             await response.json(); // validate body; UI uses turn-status + hydrate on open-task
             state.sessionId = savedSessionId;

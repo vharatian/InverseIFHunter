@@ -16,12 +16,12 @@ import {
     getTurnColorClass,
     getModelDisplayName
 } from './utils.js';
-import { showToast, showError } from './celebrations.js?v=42';
+import { showToast, showError } from './celebrations.js?v=43';
 import { fetchAllResponses, fetchAllResponsesAndShowSelection, isResultBreaking, isResultPassing, isResultError } from './results.js';
 import { renderPriorConversationBanner, enableNavTestbedButton, resetTestbed, showTestbed, syncActiveRunToNotebook } from './testbed.js';
 import { progressiveSaveToColab } from './notebook.js';
 import { validatePromptLength } from './editors.js';
-import { playEndTask, playEndTaskError, playNextTurn, playNextTurnError } from './sounds.js?v=42';
+import { playEndTask, playEndTaskError, playNextTurn, playNextTurnError } from './sounds.js?v=43';
 // It uses showCalibrationPanel internally, so no import needed if it's in the same file.
 // It uses startHunt (for calibration).
 import { updateHuntLimitUI, resetHuntNumberToDefault } from './hunt.js';
@@ -595,7 +595,7 @@ export function renderTurnContent(container, turn) {
 export async function handleMarkBreaking() {
     try {
         // Call mark-breaking API
-        const response = await fetch(`/api/mark-breaking/${state.sessionId}`, {
+        const response = await fetch(`api/mark-breaking/${state.sessionId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
         });
@@ -765,7 +765,7 @@ async function useIdealResponseAndAdvance() {
     const { prompt: currentPrompt, criteria: currentCriteria } = _readPromptAndCriteriaFromDOM();
 
     try {
-        const res = await fetch(`/api/advance-turn/${state.sessionId}`, {
+        const res = await fetch(`api/advance-turn/${state.sessionId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -963,7 +963,7 @@ export async function selectGoodResponse(response) {
     const { prompt: currentPrompt, criteria: currentCriteria } = _readPromptAndCriteriaFromDOM();
 
     try {
-        const res = await fetch(`/api/advance-turn/${state.sessionId}`, {
+        const res = await fetch(`api/advance-turn/${state.sessionId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1039,7 +1039,7 @@ export async function calibrationGenerateOne() {
     if (regenBtn) regenBtn.disabled = true;
 
     try {
-        const res = await fetch(`/api/generate-single-stream/${state.sessionId}`, {
+        const res = await fetch(`api/generate-single-stream/${state.sessionId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({})
@@ -1123,7 +1123,7 @@ export async function calibrationJudge() {
     if (loadingEl) { loadingEl.classList.remove('hidden'); loadingText.textContent = 'Running judge...'; }
 
     try {
-        const res = await fetch(`/api/judge-calibration-stream/${state.sessionId}`, {
+        const res = await fetch(`api/judge-calibration-stream/${state.sessionId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ response_text: _calibrationResponse })
@@ -1265,7 +1265,7 @@ export async function startNextTurn() {
     }
 
     try {
-        const response = await fetch(`/api/advance-turn/${state.sessionId}`, {
+        const response = await fetch(`api/advance-turn/${state.sessionId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({

@@ -116,7 +116,7 @@ function updateProgress(panel, rulesDone, totalRules, isComplete) {
  * Stream QC and render into parent. Returns { passed, issues, evaluation, total_rules, rules_data }.
  */
 async function streamQualityCheckInline(panel, rulesEl, sessionId, selectedHuntIds, humanReviews) {
-    const res = await fetch(`/api/review-final-stream/${sessionId}`, {
+    const res = await fetch(`api/review-final-stream/${sessionId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

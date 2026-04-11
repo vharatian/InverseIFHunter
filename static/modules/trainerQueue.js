@@ -84,7 +84,7 @@ export function initTrainerQueue({ onOpenTask, onNewTask }) {
 export async function refreshQueue() {
     try {
         const email = localStorage.getItem('trainer_email') || '';
-        const res = await fetch('/api/trainer-queue', {
+        const res = await fetch('api/trainer-queue', {
             cache: 'no-store',
             headers: email ? { 'X-Trainer-Email': email } : {},
         });
@@ -455,7 +455,7 @@ async function _confirmDeleteSession(sessionId, label) {
     if (!confirm(`Delete session "${label}" (${sessionId})?\n\nThis removes it from Redis and PostgreSQL. Cannot be undone.`)) return;
     try {
         const pwd = getConfigValue('admin_mode_password', ADMIN_MODE_PASSWORD);
-        const res = await fetch(`/api/admin/session/${sessionId}`, {
+        const res = await fetch(`api/admin/session/${sessionId}`, {
             method: 'DELETE',
             headers: { 'X-Admin-Password': localStorage.getItem('modelHunter_adminPwd') || pwd },
         });

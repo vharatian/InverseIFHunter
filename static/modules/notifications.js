@@ -45,7 +45,7 @@ async function _fetchAndRender() {
     const email = _getEmail();
     if (!email) return;
     try {
-        const res = await fetch('/api/notifications', { headers: _headers() });
+        const res = await fetch('api/notifications', { headers: _headers() });
         if (!res.ok) return;
         const data = await res.json();
         _renderBadge(data.unread_count || 0);
@@ -106,14 +106,14 @@ function _togglePanel() {
 
 async function _markRead(notifId) {
     try {
-        await fetch(`/api/notifications/${notifId}/read`, { method: 'POST', headers: _headers() });
+        await fetch(`api/notifications/${notifId}/read`, { method: 'POST', headers: _headers() });
         _fetchAndRender();
     } catch { /* silent */ }
 }
 
 async function _markAllRead() {
     try {
-        const res = await fetch('/api/notifications/read-all', { method: 'POST', headers: _headers() });
+        const res = await fetch('api/notifications/read-all', { method: 'POST', headers: _headers() });
         if (res.ok) {
             _renderBadge(0);
             await _fetchAndRender();

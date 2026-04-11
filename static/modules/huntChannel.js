@@ -4,9 +4,19 @@
  * Falls back to SSE (/api/hunt-stream/:sessionId, Python) if WebSocket is unavailable.
  * onError path may recover via polling (/api/results/:sessionId) from hunt.js callbacks.
  */
-import { Socket } from '/static/vendor/phoenix.mjs';
+import { Socket } from '../vendor/phoenix.mjs?v=43';
 
 let socket = null;
+
+function _socketPath() {
+  const b = document.querySelector('base');
+  if (!b || !b.href) return '/socket';
+  try {
+    return new URL('socket', b.href).pathname;
+  } catch {
+    return '/socket';
+  }
+}
 let huntChannel = null;
 let sseFallback = null;
 
@@ -31,7 +41,7 @@ export function connectHuntChannel(sessionId, userEmail, callbacks) {
   }
 
   try {
-    socket = new Socket('/socket', {
+    socket = new Socket(_socketPath(), {
       params: { user_email: userEmail }
     });
     socket.connect();
@@ -127,7 +137,7 @@ function fallbackToSse(sessionId, callbacks) {
     return false;
   }
 
-  const eventSource = new EventSource(`/api/hunt-stream/${sessionId}`);
+  const eventSource = new EventSource(`api/hunt-stream/${sessionId}`);
   sseFallback = eventSource;
 
   eventSource.addEventListener('hunt_start', (event) => {

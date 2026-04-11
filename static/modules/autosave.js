@@ -8,7 +8,7 @@
 
 import { elements } from './dom.js';
 import { state } from './state.js';
-import { showToast, showError } from './celebrations.js?v=42';
+import { showToast, showError } from './celebrations.js?v=43';
 import { validatePromptLength } from './editors.js';
 import { updateOriginalNotebookWithCell } from './notebook.js';
 import { fetchConfigFromAPI, adminBypass } from './config.js';
@@ -187,7 +187,7 @@ async function performBatchSave() {
 
     try {
         const res = await fetchWithRetry(
-            `/api/update-notebook-cells/${state.sessionId}`,
+            `api/update-notebook-cells/${state.sessionId}`,
             {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -207,7 +207,7 @@ async function performBatchSave() {
             ['prompt', 'response', 'modelref', 'judge'].forEach((f) => setStatus(f, STATUS.UNSAVED, null));
             await enqueue({
                 type: 'save-cells',
-                url: `/api/update-notebook-cells/${state.sessionId}`,
+                url: `api/update-notebook-cells/${state.sessionId}`,
                 options: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cells, session_only: true }) },
                 sessionId: state.sessionId,
             });
@@ -399,7 +399,7 @@ async function saveGradingDraft(huntId) {
 
     try {
         const res = await fetchWithRetry(
-            `/api/save-reviews/${state.sessionId}`,
+            `api/save-reviews/${state.sessionId}`,
             {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -416,7 +416,7 @@ async function saveGradingDraft(huntId) {
             setStatus(fieldId, STATUS.UNSAVED);
             await enqueue({
                 type: 'save-reviews',
-                url: `/api/save-reviews/${state.sessionId}`,
+                url: `api/save-reviews/${state.sessionId}`,
                 options: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reviews, auto_save: true }) },
                 sessionId: state.sessionId,
             });

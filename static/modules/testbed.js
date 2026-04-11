@@ -13,10 +13,10 @@
 import { state } from './state.js';
 import { PROVIDER_MODELS, getProviderModels, getJudgeModels, getConfigValue, adminBypass } from './config.js';
 import { escapeHtml } from './utils.js';
-import { showToast } from './celebrations.js?v=42';
+import { showToast } from './celebrations.js?v=43';
 import { parseCriteria, validateModelReferenceAndCriteria, progressiveSaveToColab } from './notebook.js';
 import { parseCriteriaToJSON } from './utils.js';
-import { playJudgeSuccess, playJudgeError } from './sounds.js?v=42';
+import { playJudgeSuccess, playJudgeError } from './sounds.js?v=43';
 
 const DEFAULT_JUDGE_SYSTEM_PROMPT = `Your role is that of a meticulous instruction-following grading teacher. Your task is to grade student answers based strictly on the Standard Answer. You must evaluate whether the student completely fulfills the requirement. You will be provide one requirement
 
@@ -1512,7 +1512,7 @@ async function triggerGenerate(run) {
     if (run.id === activeRunId) renderActiveTab();
 
     try {
-        const res = await fetch(`/api/generate-single-stream/${state.sessionId}`, {
+        const res = await fetch(`api/generate-single-stream/${state.sessionId}`, {
             method:  'POST',
             headers: { 'Content-Type': 'application/json' },
             body:    JSON.stringify({
@@ -1644,7 +1644,7 @@ async function triggerJudge(run) {
     try {
         const criteriaForJudge = chipsToString(left.criteriaChips);
 
-        const res = await fetch(`/api/judge-calibration-stream/${state.sessionId}`, {
+        const res = await fetch(`api/judge-calibration-stream/${state.sessionId}`, {
             method:  'POST',
             headers: { 'Content-Type': 'application/json' },
             body:    JSON.stringify({
@@ -2434,7 +2434,7 @@ async function saveRunToTurn() {
         }
 
         const colabUrl = (state.notebook?.url || document.getElementById('colabUrlInput')?.value || '').trim() || undefined;
-        const saveRes = await fetch(`/api/update-notebook-cells/${state.sessionId}`, {
+        const saveRes = await fetch(`api/update-notebook-cells/${state.sessionId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ cells: colabCells, session_only: false, colab_url: colabUrl }),
@@ -2442,7 +2442,7 @@ async function saveRunToTurn() {
 
         // If JSP was skipped from Colab save, still update the backend session for judging
         if (left.judgePrompt && !jspChangedOrFirst) {
-            fetch(`/api/update-notebook-cells/${state.sessionId}`, {
+            fetch(`api/update-notebook-cells/${state.sessionId}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -2472,7 +2472,7 @@ async function saveRunToTurn() {
             return;
         }
         const judgeRes = await fetch(
-            `/api/judge-reference-stream/${state.sessionId}?skip_colab_refresh=true&judge_model=${encodeURIComponent(_activeRunJudgeModel)}`,
+            `api/judge-reference-stream/${state.sessionId}?skip_colab_refresh=true&judge_model=${encodeURIComponent(_activeRunJudgeModel)}`,
             { method: 'POST' }
         );
         if (!judgeRes.ok) {

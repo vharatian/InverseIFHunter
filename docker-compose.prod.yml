@@ -38,8 +38,11 @@ services:
       PORT: "8000"
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       DATABASE_URL: postgresql+asyncpg://${PG_USER:-mh}:${PG_PASSWORD}@postgres:5432/${PG_DATABASE:-model_hunter}
+      TELEMETRY_LOG_PATH: /app/.telemetry/events.jsonl
     volumes:
       - ./config:/app/config
+      - telemetry-data:/app/.telemetry
+      - storage-data:/app/.storage
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/live')"]
       interval: 30s
@@ -70,9 +73,13 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       DATABASE_URL: postgresql+asyncpg://${PG_USER:-mh}:${PG_PASSWORD}@postgres:5432/${PG_DATABASE:-model_hunter}
+      TELEMETRY_LOG_PATH: /app/.telemetry/events.jsonl
+      SESSION_STORAGE_PATH: /app/.storage
     volumes:
       - ./config:/config
       - ./agentic_reviewer:/agentic_reviewer:ro
+      - telemetry-data:/app/.telemetry:ro
+      - storage-data:/app/.storage
     depends_on:
       postgres:
         condition: service_healthy
@@ -190,6 +197,8 @@ volumes:
   redisdata:
   promdata:
   grafdata:
+  telemetry-data:
+  storage-data:
 
 networks:
   mh-network:

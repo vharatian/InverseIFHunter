@@ -139,7 +139,7 @@ async function _canReplay(entry) {
     if (!actionTypes.has(entry.type)) return true;
 
     try {
-        const res = await fetch(`/api/session/${entry.session_id}`, { cache: 'no-store' });
+        const res = await fetch(`api/session/${entry.session_id}`, { cache: 'no-store' });
         if (!res.ok) return false;
         const data = await res.json();
         const status = data.review_status || 'draft';

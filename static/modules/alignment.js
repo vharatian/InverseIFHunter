@@ -305,7 +305,7 @@ export async function persistTrainerUi() {
         alignment_last_snapshot: state.alignmentLastSnapshot,
     };
     try {
-        await fetch(`/api/save-reviews/${state.sessionId}`, {
+        await fetch(`api/save-reviews/${state.sessionId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ reviews: {}, trainer_ui, auto_save: true }),

@@ -146,7 +146,7 @@ export function showPasswordPrompt(options) {
 }
 
 const _versionCheck = createIndicatorClickVersionCheck({
-    versionUrl: '/api/version',
+    versionUrl: 'api/version',
     intervalMs: VERSION_CHECK_INTERVAL,
     indicatorId: 'updateIndicator',
     showModal: async () =>

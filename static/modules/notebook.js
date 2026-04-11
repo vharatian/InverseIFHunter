@@ -24,7 +24,7 @@ import {
     getModelDisplayName,
     parseCriteriaToJSON
 } from './utils.js';
-import { showToast, showError, triggerColabConfetti } from './celebrations.js?v=42';
+import { showToast, showError, triggerColabConfetti } from './celebrations.js?v=43';
 import { clearPreviousResults, formatJudgeCriteriaDisplay, warmupConnections, setReviewModeButtonsDisabled } from './results.js';
 import { 
     validateModelMatch, 
@@ -34,7 +34,7 @@ import {
     hideModelLockedIndicator
 } from './editors.js';
 import { showAppModal, showPasswordPrompt } from './api.js';
-import { playFetchSuccess, playFetchError, playFinalSubmission, playFinalSubmissionError } from './sounds.js?v=42';
+import { playFetchSuccess, playFetchError, playFinalSubmission, playFinalSubmissionError } from './sounds.js?v=43';
 import { activateAdminMode } from './adminMode.js';
 import { runQualityCheckOverlay } from './qualityCheckOverlay.js';
 import { renderQCPersistentSection } from './qcPersistentSection.js';
@@ -76,7 +76,7 @@ async function _refreshSaveBtnFromStatus() {
     }
     if (!state.sessionId) return;
     try {
-        const res = await fetch(`/api/session/${state.sessionId}`, { cache: 'no-store' });
+        const res = await fetch(`api/session/${state.sessionId}`, { cache: 'no-store' });
         if (!res.ok) return;
         const data = await res.json();
         const status = data.review_status || 'draft';
@@ -159,7 +159,7 @@ export async function runProceedToQualityCheck() {
             if (result.overridden) showToast('Save proceeded with human override.', 'info');
             // Mark QC done so Submit for review becomes available
             try {
-                await fetch(`/api/session/${state.sessionId}/mark-qc-done`, { method: 'POST' });
+                await fetch(`api/session/${state.sessionId}/mark-qc-done`, { method: 'POST' });
                 const { refreshReviewSync } = await import('./reviewSync.js');
                 refreshReviewSync(state.sessionId);
             } catch (_) { /* ignore */ }
@@ -189,7 +189,7 @@ async function runQualityCheckBeforeSave(selectedHuntIds, humanReviews) {
         const parent = document.getElementById('qcPersistentParent');
         if (parent) renderQCPersistentSection(parent, payload, state.sessionId);
         try {
-            await fetch(`/api/session/${state.sessionId}/mark-qc-done`, { method: 'POST' });
+            await fetch(`api/session/${state.sessionId}/mark-qc-done`, { method: 'POST' });
             const { refreshReviewSync } = await import('./reviewSync.js');
             refreshReviewSync(state.sessionId);
         } catch (_) { /* ignore */ }
@@ -212,7 +212,7 @@ import { resetAllStatuses } from './autosave.js';
  */
 export async function syncTurnStatusFromBackend(sessionId) {
     try {
-        const res = await fetch(`/api/turn-status/${sessionId}`);
+        const res = await fetch(`api/turn-status/${sessionId}`);
         if (!res.ok) return;
         const data = await res.json();
         if (!data.is_multi_turn || !data.turns?.length) return;
@@ -439,7 +439,7 @@ export async function uploadFile(file, forceNew = false) {
             headers['X-Trainer-Email'] = trainerInfo.email;
             headers['X-Trainer-Name'] = trainerInfo.name;
         }
-        let url = '/api/upload-notebook';
+        let url = 'api/upload-notebook';
         if (forceNew) url += '?force_new=true';
         const response = await fetch(url, {
             method: 'POST',
@@ -521,7 +521,7 @@ export async function fetchFromUrl(forceNew = false) {
         elements.fetchUrlBtn.textContent = 'Fetching...';
         
         const trainerInfo = getTrainerInfo();
-        const response = await fetch('/api/fetch-notebook', {
+        const response = await fetch('api/fetch-notebook', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url, trainer_email: trainerInfo?.email, trainer_name: trainerInfo?.name, force_new: forceNew })
@@ -578,7 +578,7 @@ export async function createNotebook() {
         showToast('Creating notebook in Google Drive...', 'info');
 
         const trainerInfo = getTrainerInfo();
-        const response = await fetch('/api/create-notebook', {
+        const response = await fetch('api/create-notebook', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -879,7 +879,7 @@ export async function progressiveSaveToColab(cells) {
     if (!colabUrl) return { success: false, message: 'No Colab URL' };
 
     try {
-        const res = await fetch(`/api/progressive-save/${state.sessionId}`, {
+        const res = await fetch(`api/progressive-save/${state.sessionId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ cells, colab_url: colabUrl }),
@@ -902,7 +902,7 @@ export async function saveToDrive() {
     // ===== VALIDATION: Reviewer must have approved before Colab save =====
     if (!(state.adminMode && adminBypass('reviewer_approval'))) {
         try {
-            const statusRes = await fetch(`/api/session/${state.sessionId}`, { cache: 'no-store' });
+            const statusRes = await fetch(`api/session/${state.sessionId}`, { cache: 'no-store' });
             if (statusRes.ok) {
                 const statusData = await statusRes.json();
                 const reviewStatus = statusData.review_status || 'draft';
@@ -1070,7 +1070,7 @@ export async function saveToDrive() {
         if (!originalNotebookJson && state.sessionId) {
             console.warn('originalNotebookJson missing, attempting to fetch from session storage...');
             try {
-                const response = await fetch(`/api/get-original-notebook/${state.sessionId}`);
+                const response = await fetch(`api/get-original-notebook/${state.sessionId}`);
                 if (response.ok) {
                     const data = await response.json();
                     originalNotebookJson = data.original_notebook_json;
@@ -1126,7 +1126,7 @@ export async function saveToDrive() {
         };
         
         // Send snapshot to new endpoint
-        const response = await fetch('/api/save-snapshot', {
+        const response = await fetch('api/save-snapshot', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(snapshot)
@@ -1944,7 +1944,7 @@ export async function saveCell(cellType) {
             btn.textContent = 'Saving...';
         }
         
-        const response = await fetch(`/api/update-notebook-cell/${state.sessionId}`, {
+        const response = await fetch(`api/update-notebook-cell/${state.sessionId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -2043,7 +2043,7 @@ export async function saveAllCells() {
             elements.saveAllBtn.textContent = 'Saving...';
         }
         
-        const response = await fetch(`/api/update-notebook-cells/${state.sessionId}`, {
+        const response = await fetch(`api/update-notebook-cells/${state.sessionId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ cells: cellsToSave })
@@ -2457,7 +2457,7 @@ export async function saveAndJudgeResponse() {
         }
         
         // Step 1: Save to Colab
-        const saveResponse = await fetch(`/api/update-response/${state.sessionId}`, {
+        const saveResponse = await fetch(`api/update-response/${state.sessionId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ response: newResponse })
@@ -2475,7 +2475,7 @@ export async function saveAndJudgeResponse() {
         btn.textContent = 'Judging...';
 
         // Step 2: Judge via streaming SSE
-        const judgeResponse = await fetch(`/api/judge-reference-stream/${state.sessionId}`, { method: 'POST' });
+        const judgeResponse = await fetch(`api/judge-reference-stream/${state.sessionId}`, { method: 'POST' });
         if (!judgeResponse.ok) {
             if (judgeResponse.status === 404) {
                 showToast('Session expired. Please reload the notebook.', 'error');
@@ -2635,7 +2635,7 @@ export async function judgeReferenceResponse() {
             resultDiv.classList.add('hidden');
         }
         
-        const response = await fetch(`/api/judge-reference-stream/${state.sessionId}`, { method: 'POST' });
+        const response = await fetch(`api/judge-reference-stream/${state.sessionId}`, { method: 'POST' });
         if (!response.ok) {
             if (response.status === 404) {
                 showToast('Session expired. Please reload notebook.', 'error');
@@ -2776,7 +2776,7 @@ export async function saveResponseOnly() {
         btn.disabled = true;
         btn.textContent = 'Saving...';
         
-        const saveResponse = await fetch(`/api/update-response/${state.sessionId}`, {
+        const saveResponse = await fetch(`api/update-response/${state.sessionId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ response: newResponse })
