@@ -4,7 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Model Hunter Dashboard v2</title>
-    <script>window.BASE_PATH = window.location.pathname.includes('/dashboard') ? '/dashboard' : '';</script>
+    <script>
+    /* Public path to the dashboard app: /dashboard or /staging/dashboard (must include staging prefix). Direct :8001 uses ''. */
+    window.BASE_PATH = (function () {
+        if (location.port === '8001' || String(location.port) === '8001') return '';
+        var p = (location.pathname || '/').replace(/\/+$/, '') || '/';
+        var i = p.indexOf('/dashboard');
+        if (i === -1) return '';
+        return p.slice(0, i + '/dashboard'.length);
+    })();
+    </script>
     <link rel="stylesheet" href="static/style.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
@@ -352,7 +361,10 @@
            <span id="lastUpdate">--</span></p>
     </footer>
 
-    <script type="module" src="static/version-init.js"></script>
+    <script type="module">
+    const base = window.BASE_PATH || '';
+    import(base + '/static/version-init.js').catch(function (e) { console.error('[dashboard] version-init failed', e); });
+    </script>
     <script src="static/dashboard.js"></script>
 </body>
 </html>

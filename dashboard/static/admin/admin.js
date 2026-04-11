@@ -12,6 +12,12 @@ const _basePath = (() => {
     return idx > 0 ? window.location.pathname.substring(0, idx) : '';
 })();
 
+/** Dashboard service public prefix for Elixir: /dashboard or /staging/dashboard. Direct :8001 uses ''. */
+function _dashboardServicePrefix() {
+    if (location.port === '8001' || String(location.port) === '8001') return '';
+    return _basePath ? `${_basePath}/dashboard` : '/dashboard';
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────
 
 async function api(path, options = {}) {
@@ -721,23 +727,25 @@ function init() {
 }
 
 function initAdminVersionCheck() {
-    const base = _basePath;
-    import(`${base}/updates-assets/version-check.mjs`).then(({ createIndicatorClickVersionCheck, showSimpleUpdateModal }) => {
-        const vc = createIndicatorClickVersionCheck({
-            versionUrl: `${base}/api/version`,
-            intervalMs: 30000,
-            indicatorId: 'adminUpdateIndicator',
-            showModal: async () =>
-                showSimpleUpdateModal({
-                    title: 'New update available',
-                    message:
-                        'A new version of the admin panel is ready.\n\nRefreshing will reload the page and reset your current view.',
-                    confirmLabel: 'Update now',
-                    cancelLabel: 'Not now',
-                }),
-        });
-        vc.initVersionCheck();
-    });
+    const d = _dashboardServicePrefix();
+    import(`${d}/updates-assets/version-check.mjs`)
+        .then(({ createIndicatorClickVersionCheck, showSimpleUpdateModal }) => {
+            const vc = createIndicatorClickVersionCheck({
+                versionUrl: `${d}/api/version`,
+                intervalMs: 30000,
+                indicatorId: 'adminUpdateIndicator',
+                showModal: async () =>
+                    showSimpleUpdateModal({
+                        title: 'New update available',
+                        message:
+                            'A new version of the admin panel is ready.\n\nRefreshing will reload the page and reset your current view.',
+                        confirmLabel: 'Update now',
+                        cancelLabel: 'Not now',
+                    }),
+            });
+            vc.initVersionCheck();
+        })
+        .catch((e) => console.error('[admin version-check]', e));
 }
 
 if (document.readyState === 'loading') {
