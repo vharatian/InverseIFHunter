@@ -720,8 +720,30 @@ function init() {
     });
 }
 
+function initAdminVersionCheck() {
+    const base = _basePath;
+    import(`${base}/updates-assets/version-check.mjs`).then(({ createIndicatorClickVersionCheck, showSimpleUpdateModal }) => {
+        const vc = createIndicatorClickVersionCheck({
+            versionUrl: `${base}/api/version`,
+            intervalMs: 30000,
+            indicatorId: 'adminUpdateIndicator',
+            showModal: async () =>
+                showSimpleUpdateModal({
+                    title: 'New update available',
+                    message:
+                        'A new version of the admin panel is ready.\n\nRefreshing will reload the page and reset your current view.',
+                    confirmLabel: 'Update now',
+                    cancelLabel: 'Not now',
+                }),
+        });
+        vc.initVersionCheck();
+    });
+}
+
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
 } else {
     init();
 }
+
+initAdminVersionCheck();

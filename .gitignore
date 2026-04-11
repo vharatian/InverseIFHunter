@@ -36,6 +36,9 @@ debug.log
 # Node (if ever needed)
 node_modules/
 
+# Per-app changelog under updates/ (local only; do not push)
+updates/*.md
+
 # Docs (except READMEs and DEPLOYMENT.md)
 *.md
 !README.md

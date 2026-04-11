@@ -28,6 +28,8 @@ def _compute_version():
         f"{base}/api/**/*.py", f"{base}/services/**/*.py", f"{base}/config/**/*.py",
         f"{repo}/agentic_reviewer/**/*.py", f"{repo}/providers/**/*.py",
         f"{repo}/config/*.yaml", f"{repo}/notebook_headings.py",
+        f"{repo}/static/js/updates/**/*.mjs",
+        f"{repo}/updates/*.md",
     ]:
         for f in sorted(glob.glob(pat, recursive=True)):
             try:

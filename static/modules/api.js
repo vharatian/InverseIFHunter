@@ -8,65 +8,7 @@
 
 import { VERSION_CHECK_INTERVAL } from './config.js';
 import { escapeHtml } from './utils.js';
-
-// ============== Version Check & Update Indicator ==============
-let currentVersion = null;
-let pendingUpdateVersion = null;
-let _indicatorWired = false;
-
-export async function checkVersion() {
-    try {
-        const response = await fetch('/api/version');
-        const data = await response.json();
-
-        if (currentVersion === null) {
-            currentVersion = data.version;
-        } else if (data.version !== currentVersion) {
-            pendingUpdateVersion = data.version;
-            _showUpdateIndicator();
-        }
-    } catch (e) {
-        // Silently fail - server might be updating
-    }
-}
-
-export function hasPendingUpdate() {
-    return pendingUpdateVersion !== null;
-}
-
-function _hardRefresh() {
-    window.location.href = window.location.pathname + '?_v=' + Date.now();
-}
-
-function _showUpdateIndicator() {
-    const btn = document.getElementById('updateIndicator');
-    if (!btn) return;
-    btn.classList.remove('hidden');
-
-    if (_indicatorWired) return;
-    _indicatorWired = true;
-
-    btn.addEventListener('click', async () => {
-        const confirmed = await showAppModal({
-            title: 'New Update Available',
-            message:
-                'A new version of Model Hunter is ready.\n\n' +
-                'Refreshing will reload the app and any unsaved progress will be lost.\n\n' +
-                'Tip: If you are in the middle of a task, finish and submit it first. ' +
-                'Update before starting your next task, not during one.',
-            buttons: [
-                { label: 'Not Now', primary: false, value: false },
-                { label: 'Update Now', primary: true, value: true },
-            ],
-        });
-        if (confirmed) _hardRefresh();
-    });
-}
-
-function _hideUpdateIndicator() {
-    const btn = document.getElementById('updateIndicator');
-    if (btn) btn.classList.add('hidden');
-}
+import { createIndicatorClickVersionCheck } from '../js/updates/version-check.mjs';
 
 /**
  * Centered modal with blurred backdrop. Use instead of alert/confirm for consistent UX.
@@ -203,10 +145,33 @@ export function showPasswordPrompt(options) {
     });
 }
 
-/**
- * Initialize version checking. Called on DOMContentLoaded.
- */
+const _versionCheck = createIndicatorClickVersionCheck({
+    versionUrl: '/api/version',
+    intervalMs: VERSION_CHECK_INTERVAL,
+    indicatorId: 'updateIndicator',
+    showModal: async () =>
+        showAppModal({
+            title: 'New Update Available',
+            message:
+                'A new version of Model Hunter is ready.\n\n' +
+                'Refreshing will reload the app and any unsaved progress will be lost.\n\n' +
+                'Tip: If you are in the middle of a task, finish and submit it first. ' +
+                'Update before starting your next task, not during one.',
+            buttons: [
+                { label: 'Not Now', primary: false, value: false },
+                { label: 'Update Now', primary: true, value: true },
+            ],
+        }),
+});
+
+export async function checkVersion() {
+    return _versionCheck.checkVersion();
+}
+
+export function hasPendingUpdate() {
+    return _versionCheck.hasPendingUpdate();
+}
+
 export function initVersionCheck() {
-    checkVersion();
-    setInterval(checkVersion, VERSION_CHECK_INTERVAL);
+    return _versionCheck.initVersionCheck();
 }

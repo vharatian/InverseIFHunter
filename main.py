@@ -80,6 +80,8 @@ def _compute_app_version():
         os.path.join(base, "reviewer-app", "static", "**", "*.css"),
         os.path.join(base, "reviewer-app", "static", "**", "*.html"),
         os.path.join(base, "reviewer-app", "api", "**", "*.py"),
+        os.path.join(base, "updates", "*.md"),
+        os.path.join(base, "static", "js", "updates", "**", "*.mjs"),
     ]
     content_hash = _hashlib.md5()
     for pat in patterns:

@@ -36,6 +36,10 @@
                 <option value="72">Last 3 days</option>
                 <option value="168">Last 7 days</option>
             </select>
+            <button class="update-indicator hidden" id="dashboardUpdateIndicator" type="button" title="Update available">
+                <span class="update-indicator-dot"></span>
+                <span class="update-indicator-label">Update</span>
+            </button>
             <button id="refreshBtn" onclick="refreshAll()">⟳ Refresh</button>
         </div>
     </header>
@@ -345,6 +349,7 @@
            <span id="lastUpdate">--</span></p>
     </footer>
 
+    <script type="module" src="static/version-init.js"></script>
     <script src="static/dashboard.js"></script>
 </body>
 </html>

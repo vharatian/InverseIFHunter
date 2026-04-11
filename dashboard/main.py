@@ -6,6 +6,9 @@ and ML-ready insights.
 
 Run: python dashboard/main.py
 """
+import glob as _glob
+import hashlib as _hashlib
+import json
 import os
 import sys
 from pathlib import Path
@@ -14,7 +17,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Query
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from log_reader import get_log_reader
@@ -64,6 +67,51 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _compute_dashboard_version() -> str:
+    """Content hash for soft-reload detection (static, Python, changelog notes)."""
+    dash_root = Path(__file__).resolve().parent
+    repo_root = dash_root.parent
+    content_hash = _hashlib.md5()
+    patterns = [
+        str(dash_root / "static" / "**" / "*.html"),
+        str(dash_root / "static" / "**" / "*.js"),
+        str(dash_root / "static" / "**" / "*.css"),
+        str(dash_root / "**" / "*.py"),
+        str(repo_root / "updates" / "*.md"),
+    ]
+    for pat in patterns:
+        for f in sorted(_glob.glob(pat, recursive=True)):
+            try:
+                with open(f, "rb") as fh:
+                    content_hash.update(fh.read())
+            except OSError:
+                pass
+    return f"dash.{content_hash.hexdigest()[:10]}"
+
+
+_updates_js = Path(__file__).resolve().parent.parent / "static" / "js" / "updates"
+if _updates_js.is_dir():
+    app.mount(
+        "/updates-assets",
+        StaticFiles(directory=str(_updates_js)),
+        name="updates-assets",
+    )
+
+
+@app.get("/api/version")
+async def get_app_version():
+    """Version for soft-reload detection; recomputed each request."""
+    version = _compute_dashboard_version()
+    return Response(
+        content=json.dumps({"version": version}),
+        media_type="application/json",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
+        },
+    )
 
 
 # ============== Original Endpoints ==============

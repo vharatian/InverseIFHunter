@@ -1,13 +1,13 @@
 /**
  * API client: auth header, fetch wrapper, and version check for soft-reload.
  */
+import { createReviewerAutoModalVersionCheck } from "/static/js/updates/version-check.mjs";
+
 if (typeof location !== "undefined" && location.search.includes("_v=")) {
   history.replaceState(null, "", location.pathname);
 }
 const EMAIL_KEY = "reviewer_email";
 const VERSION_CHECK_INTERVAL = 30000;
-let _currentVersion = null;
-let _pendingVersion = null;
 // API routes are mounted under the same path prefix as this page (e.g. /staging/reviewer).
 // Pathname wins over <base href> because the server often injects /reviewer/ even when deployed at /staging/reviewer/.
 export const API_BASE = (() => {
@@ -97,42 +97,9 @@ export async function api(path, options = {}, retryOptions = {}) {
 }
 
 let _isCouncilRunning = () => false;
-let _updatePending = false;
 
 export function setCouncilRunningCheck(fn) {
   _isCouncilRunning = fn;
-}
-
-export async function checkVersion() {
-  try {
-    const res = await fetch(`${API_BASE}/api/version`, { cache: "no-store" });
-    const data = await res.json();
-    if (_currentVersion === null) {
-      _currentVersion = data.version;
-    } else if (data.version !== _currentVersion && !_updatePending) {
-      _pendingVersion = data.version;
-      _updatePending = true;
-      _tryShowUpdateModal();
-    }
-  } catch { /* server may be restarting */ }
-}
-
-function _tryShowUpdateModal() {
-  if (!_updatePending) return;
-  if (_isCouncilRunning()) {
-    const btn = document.getElementById("reviewerUpdateIndicator");
-    if (btn) {
-      btn.classList.remove("hidden");
-      btn.textContent = "Update queued...";
-      btn.onclick = null;
-    }
-    return;
-  }
-  _showUpdateModal();
-}
-
-export function onCouncilComplete() {
-  if (_updatePending) _showUpdateModal();
 }
 
 function _showUpdateModal() {
@@ -173,7 +140,29 @@ function _showUpdateModal() {
   }
 }
 
+const _reviewerVc = createReviewerAutoModalVersionCheck({
+  versionUrl: `${API_BASE}/api/version`,
+  intervalMs: VERSION_CHECK_INTERVAL,
+  shouldDefer: () => _isCouncilRunning(),
+  onQueued: () => {
+    const btn = document.getElementById("reviewerUpdateIndicator");
+    if (btn) {
+      btn.classList.remove("hidden");
+      btn.textContent = "Update queued...";
+      btn.onclick = null;
+    }
+  },
+  showOverlay: _showUpdateModal,
+});
+
+export async function checkVersion() {
+  return _reviewerVc.checkVersion();
+}
+
 export function initVersionCheck() {
-  checkVersion();
-  setInterval(checkVersion, VERSION_CHECK_INTERVAL);
+  return _reviewerVc.initVersionCheck();
+}
+
+export function onCouncilComplete() {
+  return _reviewerVc.onCouncilComplete();
 }
