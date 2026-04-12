@@ -84,12 +84,12 @@ function _updateGateEmailFeedback() {
   fb.hidden = false;
   if (_isPlausibleEmail(t)) {
     fb.className = "gate-email-feedback gate-email-feedback--valid";
-    fb.textContent = "Format looks good. Sign in checks whether this address is allowed.";
+    fb.textContent = "Looks good. Press Sign in next.";
     input.classList.add("gate-input--valid");
     input.setAttribute("aria-invalid", "false");
   } else {
     fb.className = "gate-email-feedback gate-email-feedback--invalid";
-    fb.textContent = "That does not look like a complete email address (need name@domain).";
+    fb.textContent = "That doesn't look like a full email. Use something like you@company.com.";
     input.classList.add("gate-input--invalid");
     input.setAttribute("aria-invalid", "true");
   }
@@ -216,7 +216,7 @@ document.getElementById("btn-continue")?.addEventListener("click", async () => {
   }
   if (!_isPlausibleEmail(email)) {
     if (errEl) {
-      errEl.textContent = "Fix the email format before signing in.";
+      errEl.textContent = "Fix your email, then press Sign in.";
       errEl.hidden = false;
     }
     _updateGateEmailFeedback();
@@ -486,7 +486,8 @@ async function hydrateGateCouncilFooter() {
     const models = raw
       .map((m) => (typeof m === "string" ? m : m && m.id))
       .filter(Boolean);
-    if (!models.length) return;
+    const chairmanId = String(data.chairman || "").trim();
+    if (!models.length && !chairmanId) return;
     wrap.replaceChildren();
     for (const mid of models) {
       const { short } = deriveModelMeta(mid);
@@ -495,9 +496,24 @@ async function hydrateGateCouncilFooter() {
       span.textContent = short;
       wrap.appendChild(span);
     }
+    if (chairmanId) {
+      const { short } = deriveModelMeta(chairmanId);
+      const span = document.createElement("span");
+      span.className = "gate-model-chip gate-model-chip--chairman";
+      span.title = "Chairman — final say when the council disagrees";
+      span.innerHTML =
+        '<span class="chairman-tag" aria-hidden="true">C</span> ' + escapeHtml(short);
+      wrap.appendChild(span);
+    }
     if (labelEl) {
       const n = models.length;
-      labelEl.textContent = `Powered by ${n}-model LLM council`;
+      if (n && chairmanId) {
+        labelEl.textContent = `Powered by ${n}-model council + chairman`;
+      } else if (n) {
+        labelEl.textContent = `Powered by ${n}-model LLM council`;
+      } else {
+        labelEl.textContent = "Chairman";
+      }
     }
   } catch {
     /* keep static HTML */

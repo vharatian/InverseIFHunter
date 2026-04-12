@@ -191,15 +191,9 @@ body {
 .gate-title {
     font-size: 1.35rem;
     font-weight: 700;
-    margin-bottom: 4px;
+    margin-bottom: var(--space-xl);
     color: var(--text-primary);
     letter-spacing: -0.01em;
-}
-.gate-subtitle {
-    margin: 0 0 var(--space-xl);
-    color: var(--text-muted);
-    font-size: 0.82rem;
-    letter-spacing: 0.02em;
 }
 .gate-form {
     text-align: left;
@@ -302,6 +296,28 @@ body {
     border: 1px solid var(--border-subtle);
     color: var(--text-secondary);
     letter-spacing: 0.02em;
+}
+.gate-model-chip--chairman {
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+    background: var(--accent-glow);
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+.gate .chairman-tag {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--accent-primary);
+    color: #fff;
+    font-size: 0.5rem;
+    font-weight: 800;
+    line-height: 1;
+    flex-shrink: 0;
 }
 .error { color: var(--danger); margin-top: var(--space-sm); font-size: 0.85rem; }
 .gate .error {
