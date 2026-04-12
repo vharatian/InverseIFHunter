@@ -229,6 +229,22 @@ body {
 }
 .gate input::placeholder { color: var(--text-muted); }
 .gate input:focus { outline: none; border-color: var(--accent-primary); box-shadow: 0 0 0 3px var(--accent-glow); }
+.gate input.gate-input--invalid {
+    border-color: var(--danger);
+    box-shadow: 0 0 0 3px var(--danger-bg);
+}
+.gate input.gate-input--valid:not(:focus) {
+    border-color: color-mix(in srgb, var(--success) 55%, transparent);
+}
+.gate-email-feedback {
+    margin: calc(-1 * var(--space-sm)) 0 var(--space-md);
+    font-size: 0.82rem;
+    line-height: 1.35;
+    text-align: left;
+    min-height: 1.35em;
+}
+.gate-email-feedback--invalid { color: var(--danger); }
+.gate-email-feedback--valid { color: var(--success); }
 .gate button {
     position: relative;
     z-index: 1;
@@ -288,6 +304,16 @@ body {
     letter-spacing: 0.02em;
 }
 .error { color: var(--danger); margin-top: var(--space-sm); font-size: 0.85rem; }
+.gate .error {
+    margin-top: var(--space-md);
+    margin-bottom: 0;
+    padding: 0.65rem 0.75rem;
+    border-radius: var(--radius-md);
+    background: var(--danger-bg);
+    border: 1px solid rgba(239, 68, 68, 0.35);
+    text-align: left;
+    font-weight: 500;
+}
 .status { font-size: 0.78rem; margin-top: var(--space-sm); color: var(--text-secondary); }
 
 /* ── Main container ── */

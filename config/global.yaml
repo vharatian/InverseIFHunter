@@ -322,6 +322,7 @@ idempotency:
 reviewer:
   allowed_emails:
   - tyler@turing.com
+  - maruthi@turing.com
   agent:
     model: anthropic/claude-opus-4.6
     max_tokens: 2048

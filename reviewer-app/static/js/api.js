@@ -1,7 +1,7 @@
 /**
  * API client: auth header, fetch wrapper, and version check for soft-reload.
  */
-import { createReviewerAutoModalVersionCheck } from "/static/js/updates/version-check.mjs";
+import { createReviewerAutoModalVersionCheck } from "./updates/version-check.mjs";
 
 if (typeof location !== "undefined" && location.search.includes("_v=")) {
   history.replaceState(null, "", location.pathname);

@@ -35,7 +35,8 @@
       <p class="gate-subtitle">Paste a Colab or Drive notebook link to load content</p>
       <div class="gate-form">
         <label class="gate-label" for="email-input">Email address</label>
-        <input type="email" id="email-input" placeholder="you@company.com" aria-label="Your email" autocomplete="email" />
+        <input type="email" id="email-input" placeholder="you@company.com" aria-label="Your email" autocomplete="email" aria-describedby="gate-email-feedback" />
+        <p id="gate-email-feedback" class="gate-email-feedback" hidden role="status" aria-live="polite"></p>
         <button type="button" id="btn-continue" aria-busy="false">
           <span class="btn-continue-text">Sign in</span>
           <svg class="btn-continue-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>

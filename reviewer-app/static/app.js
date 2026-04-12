@@ -60,6 +60,41 @@ function _hideLookupMatches() {
   if (box) box.hidden = true;
 }
 
+/** Loose but useful check before hitting the server. */
+function _isPlausibleEmail(s) {
+  const t = (s || "").trim();
+  if (!t || t.length > 254) return false;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i.test(t);
+}
+
+function _updateGateEmailFeedback() {
+  const input = document.getElementById("email-input");
+  const fb = document.getElementById("gate-email-feedback");
+  if (!input || !fb) return;
+  const raw = input.value;
+  const t = raw.trim();
+  input.classList.remove("gate-input--invalid", "gate-input--valid");
+  if (!t) {
+    fb.hidden = true;
+    fb.textContent = "";
+    fb.className = "gate-email-feedback";
+    input.removeAttribute("aria-invalid");
+    return;
+  }
+  fb.hidden = false;
+  if (_isPlausibleEmail(t)) {
+    fb.className = "gate-email-feedback gate-email-feedback--valid";
+    fb.textContent = "Format looks good. Sign in checks whether this address is allowed.";
+    input.classList.add("gate-input--valid");
+    input.setAttribute("aria-invalid", "false");
+  } else {
+    fb.className = "gate-email-feedback gate-email-feedback--invalid";
+    fb.textContent = "That does not look like a complete email address (need name@domain).";
+    input.classList.add("gate-input--invalid");
+    input.setAttribute("aria-invalid", "true");
+  }
+}
+
 async function resolveAndLoad(query) {
   const raw = (query || "").trim();
   if (!raw) {
@@ -176,6 +211,16 @@ document.getElementById("btn-continue")?.addEventListener("click", async () => {
       errEl.textContent = "Enter your email.";
       errEl.hidden = false;
     }
+    _updateGateEmailFeedback();
+    return;
+  }
+  if (!_isPlausibleEmail(email)) {
+    if (errEl) {
+      errEl.textContent = "Fix the email format before signing in.";
+      errEl.hidden = false;
+    }
+    _updateGateEmailFeedback();
+    input?.focus();
     return;
   }
   if (errEl) errEl.hidden = true;
@@ -214,6 +259,17 @@ document.getElementById("btn-continue")?.addEventListener("click", async () => {
   }
 });
 
+document.getElementById("email-input")?.addEventListener("input", () => {
+  const errEl = document.getElementById("gate-error");
+  if (errEl && !errEl.hidden) {
+    errEl.hidden = true;
+    errEl.textContent = "";
+  }
+  _updateGateEmailFeedback();
+});
+document.getElementById("email-input")?.addEventListener("blur", () => {
+  _updateGateEmailFeedback();
+});
 document.getElementById("email-input")?.addEventListener("keydown", (e) => {
   if (e.key === "Enter") document.getElementById("btn-continue")?.click();
 });
@@ -229,6 +285,7 @@ document.getElementById("btn-change-email")?.addEventListener("click", () => {
   if (input) {
     input.value = prevEmail;
     input.focus();
+    _updateGateEmailFeedback();
   }
 });
 
