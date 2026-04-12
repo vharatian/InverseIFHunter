@@ -218,6 +218,16 @@ class EnhancedLogReader:
             email = ((event.get("data") or {}).get("trainer_email") or "").strip().lower()
         return bool(email) and email in allowed
 
+    def _filter_events_by_trainer_emails(
+        self, events: List[Dict[str, Any]], trainer_emails: Optional[List[str]]
+    ) -> List[Dict[str, Any]]:
+        allowed = self._normalize_trainer_emails_filter(trainer_emails)
+        if allowed is None:
+            return events
+        ctx = self._load_session_context()
+        ctx = self._merge_session_created_from_events(events, ctx)
+        return [e for e in events if self._event_matches_trainer_filter(e, ctx, allowed)]
+
     def _enrich_row_session_fields(
         self,
         session_id: str,
@@ -280,11 +290,18 @@ class EnhancedLogReader:
     
     # ============== Original Methods (Backward Compatible) ==============
     
-    def get_overview(self, hours: int = 24) -> Dict[str, Any]:
+    def get_overview(
+        self, hours: int = 24, trainer_emails: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
         """Get overview statistics."""
         since = datetime.utcnow() - timedelta(hours=hours)
         events = self._read_events(since=since)
-        
+        allowed = self._normalize_trainer_emails_filter(trainer_emails)
+        ctx = self._load_session_context()
+        ctx = self._merge_session_created_from_events(events, ctx)
+        if allowed is not None:
+            events = [e for e in events if self._event_matches_trainer_filter(e, ctx, allowed)]
+
         stats = {
             "active_sessions": 0,
             "total_sessions": 0,
@@ -320,8 +337,13 @@ class EnhancedLogReader:
             
             if event_type == "session_created":
                 stats["total_sessions"] += 1
-                if session_id and session_id in trainer_mapping:
-                    active_trainers.add(trainer_mapping[session_id])
+                if session_id:
+                    if allowed is not None:
+                        te = (ctx.get(session_id) or {}).get("trainer_email") or ""
+                        if te:
+                            active_trainers.add(te)
+                    elif session_id in trainer_mapping:
+                        active_trainers.add(trainer_mapping[session_id])
             
             elif event_type == "hunt_start":
                 stats["total_hunts"] += 1
@@ -434,11 +456,17 @@ class EnhancedLogReader:
 
         return out
     
-    def get_timeline(self, hours: int = 24, bucket_minutes: int = 60) -> Dict[str, List]:
+    def get_timeline(
+        self,
+        hours: int = 24,
+        bucket_minutes: int = 60,
+        trainer_emails: Optional[List[str]] = None,
+    ) -> Dict[str, List]:
         """Get event counts over time."""
         since = datetime.utcnow() - timedelta(hours=hours)
         events = self._read_events(since=since)
-        
+        events = self._filter_events_by_trainer_emails(events, trainer_emails)
+
         buckets = defaultdict(lambda: {
             "api_calls": 0, "hunts": 0, "sessions": 0, "errors": 0, "breaks": 0
         })
@@ -976,30 +1004,24 @@ class EnhancedLogReader:
             "criteria": analysis
         }
     
-    def get_activity_heatmap(self, hours: int = 168) -> Dict[str, Any]:
-        """
-        Get activity heatmap (hour x day of week).
-        """
+    def get_weekday_hunt_activity(
+        self, hours: int = 168, trainer_emails: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """Hunt results per weekday (clearer than hour×day heatmap for sparse data)."""
         since = datetime.utcnow() - timedelta(hours=hours)
         events = self._read_events(since=since)
-        
-        # Initialize heatmap (7 days x 24 hours)
-        heatmap = [[0 for _ in range(24)] for _ in range(7)]
-        
+        events = self._filter_events_by_trainer_emails(events, trainer_emails)
+        counts = [0] * 7
         for event in events:
-            ts = event.get("_ts")
-            if not ts:
+            if event.get("type") != "hunt_result":
                 continue
-            
-            day = ts.weekday()  # 0=Monday
-            hour = ts.hour
-            heatmap[day][hour] += 1
-        
+            ts = event.get("_ts")
+            if ts:
+                counts[ts.weekday()] += 1
         return {
             "time_window_hours": hours,
             "days": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
-            "hours": list(range(24)),
-            "data": heatmap
+            "hunt_results": counts,
         }
     
     def get_realtime_stats(self) -> Dict[str, Any]:

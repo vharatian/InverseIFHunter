@@ -45,12 +45,12 @@ LOG_PATH = os.getenv("TELEMETRY_LOG_PATH", None)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print(f"📊 Model Hunter Enhanced Dashboard starting on port {DASHBOARD_PORT}...")
+    print(f"Model Hunter Enhanced Dashboard starting on port {DASHBOARD_PORT}...")
     log_reader = get_log_reader(LOG_PATH)
     print(f"   Reading logs from: {log_reader.log_path}")
     print(f"   Session storage: {log_reader.storage_path}")
     yield
-    print("📊 Dashboard shutting down...")
+    print("Dashboard shutting down...")
 
 
 app = FastAPI(
@@ -117,10 +117,13 @@ async def get_app_version():
 # ============== Original Endpoints ==============
 
 @app.get("/api/overview")
-async def get_overview(hours: int = Query(default=24, ge=1, le=720)):
+async def get_overview(
+    hours: int = Query(default=24, ge=1, le=720),
+    trainer_emails: Optional[List[str]] = Query(default=None),
+):
     """Get overview statistics."""
     log_reader = get_log_reader()
-    return log_reader.get_overview(hours=hours)
+    return log_reader.get_overview(hours=hours, trainer_emails=trainer_emails)
 
 
 @app.get("/api/events")
@@ -140,11 +143,14 @@ async def get_events(
 @app.get("/api/timeline")
 async def get_timeline(
     hours: int = Query(default=24, ge=1, le=168),
-    bucket_minutes: int = Query(default=60, ge=5, le=360)
+    bucket_minutes: int = Query(default=60, ge=5, le=360),
+    trainer_emails: Optional[List[str]] = Query(default=None),
 ):
     """Get event timeline."""
     log_reader = get_log_reader()
-    return log_reader.get_timeline(hours=hours, bucket_minutes=bucket_minutes)
+    return log_reader.get_timeline(
+        hours=hours, bucket_minutes=bucket_minutes, trainer_emails=trainer_emails
+    )
 
 
 @app.get("/api/models")
@@ -260,13 +266,16 @@ async def get_criteria_analysis(hours: int = Query(default=168, ge=1, le=720)):
     return log_reader.get_criteria_analysis(hours=hours)
 
 
-@app.get("/api/heatmap")
-async def get_activity_heatmap(hours: int = Query(default=168, ge=1, le=720)):
-    """
-    Get activity heatmap (hour x day of week).
-    """
+@app.get("/api/weekday_activity")
+async def get_weekday_activity(
+    hours: int = Query(default=168, ge=1, le=720),
+    trainer_emails: Optional[List[str]] = Query(default=None),
+):
+    """Hunt results aggregated by weekday (trainer filter applies)."""
     log_reader = get_log_reader()
-    return log_reader.get_activity_heatmap(hours=hours)
+    return log_reader.get_weekday_hunt_activity(
+        hours=hours, trainer_emails=trainer_emails
+    )
 
 
 @app.get("/api/realtime")

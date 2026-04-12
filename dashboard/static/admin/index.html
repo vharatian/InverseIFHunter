@@ -229,6 +229,210 @@
         .section-header h2 { font-size: 1.1rem; font-weight: 700; margin-bottom: 0.15rem; }
         .section-header p { color: var(--text-secondary); font-size: 0.8rem; }
 
+        .sr-only {
+            position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+            overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+        }
+
+        /* ── Team management ──────────────────────────────────── */
+        .team-shell { display: flex; flex-direction: column; gap: 1.25rem; }
+        .team-stats {
+            display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.65rem;
+        }
+        .team-stat {
+            background: linear-gradient(145deg, var(--bg-card), var(--bg-tertiary));
+            border: 1px solid var(--border); border-radius: var(--radius-lg);
+            padding: 0.85rem 1rem; text-align: center;
+            box-shadow: var(--shadow-sm);
+        }
+        .team-stat-value { display: block; font-size: 1.35rem; font-weight: 700; color: var(--text-primary); line-height: 1.2; }
+        .team-stat-label { font-size: 0.65rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); }
+
+        .team-global-grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem;
+        }
+        .team-role-card {
+            background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-xl);
+            overflow: hidden; box-shadow: var(--shadow-md);
+            border-left: 3px solid var(--team-accent, var(--accent-primary));
+        }
+        .team-role-card.team-role-super { --team-accent: #ef4444; }
+        .team-role-card.team-role-admin { --team-accent: #3b82f6; }
+        .team-role-card.team-create-pod-card {
+            --team-accent: #a855f7; border-style: dashed; background: linear-gradient(160deg, var(--bg-card), rgba(168, 85, 247, 0.04));
+        }
+        .team-role-card-head {
+            display: flex; align-items: flex-start; gap: 0.65rem;
+            padding: 1rem 1.1rem 0.75rem;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        .team-role-icon {
+            width: 2rem; height: 2rem; border-radius: var(--radius-md);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 0.85rem; color: var(--team-accent);
+            background: color-mix(in srgb, var(--team-accent) 18%, transparent);
+        }
+        .team-role-card-head h3 { font-size: 0.95rem; font-weight: 700; margin: 0; }
+        .team-role-desc { font-size: 0.72rem; color: var(--text-muted); margin: 0.2rem 0 0; line-height: 1.35; }
+        .team-role-body { padding: 0.75rem 1rem 1rem; }
+        .team-member-list { display: flex; flex-direction: column; gap: 0.35rem; }
+        .team-member-row {
+            display: flex; align-items: center; gap: 0.6rem;
+            padding: 0.5rem 0.65rem; border-radius: var(--radius-md);
+            background: var(--bg-surface); border: 1px solid var(--border-subtle);
+        }
+        .team-member-avatar {
+            width: 34px; height: 34px; border-radius: 10px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 0.68rem; font-weight: 800; flex-shrink: 0;
+        }
+        .team-member-avatar.super { background: var(--danger-bg); color: var(--danger); }
+        .team-member-avatar.admin { background: var(--accent-glow); color: var(--accent-primary); }
+        .team-member-avatar.reviewer { background: rgba(34, 197, 94, 0.12); color: var(--success); }
+        .team-member-body { flex: 1; min-width: 0; }
+        .team-member-email { font-size: 0.78rem; font-weight: 500; word-break: break-all; }
+        .team-member-name { font-size: 0.68rem; color: var(--text-muted); margin-top: 0.1rem; }
+        .team-member-badge {
+            font-size: 0.58rem; font-weight: 800; letter-spacing: 0.06em;
+            padding: 0.15rem 0.4rem; border-radius: 4px; flex-shrink: 0;
+        }
+        .team-member-badge.super { background: var(--danger-bg); color: var(--danger); }
+        .team-member-badge.admin { background: var(--accent-glow); color: var(--accent-primary); }
+        .team-member-remove {
+            background: none; border: none; color: var(--text-muted); cursor: pointer;
+            font-size: 1.1rem; line-height: 1; padding: 0.2rem; border-radius: 4px;
+            transition: color var(--transition-fast), background var(--transition-fast);
+        }
+        .team-member-remove:hover { color: var(--danger); background: var(--danger-bg); }
+
+        .team-empty {
+            text-align: center; padding: 1.25rem 0.75rem;
+            border: 1px dashed var(--border); border-radius: var(--radius-md);
+            background: rgba(255,255,255,0.02);
+        }
+        .team-empty.inline { padding: 0.65rem; text-align: left; }
+        .team-empty-title { display: block; font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.25rem; }
+        .team-empty-hint { font-size: 0.72rem; color: var(--text-muted); line-height: 1.4; }
+
+        .team-add-form {
+            display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; align-items: center;
+        }
+        .team-add-form input { flex: 1; min-width: 140px; padding: 0.45rem 0.65rem; font-size: 0.8rem; }
+        .team-add-btn { flex-shrink: 0; min-width: 4.5rem; }
+        .create-pod-form input { min-width: 120px; }
+
+        .team-pods-heading {
+            font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em;
+            color: var(--text-muted); margin: 0.25rem 0 0;
+        }
+        .team-pods {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1rem;
+        }
+        .pod-card {
+            background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: var(--radius-xl); padding: 0; overflow: hidden;
+            box-shadow: var(--shadow-md);
+        }
+        .pod-card-head {
+            display: flex; align-items: flex-start; justify-content: space-between; gap: 0.5rem;
+            padding: 1rem 1.1rem; background: linear-gradient(180deg, var(--bg-surface), var(--bg-card));
+            border-bottom: 1px solid var(--border);
+        }
+        .pod-card-title { display: flex; flex-direction: column; gap: 0.35rem; min-width: 0; }
+        .pod-card-title h3 { font-size: 0.95rem; font-weight: 700; margin: 0; }
+        .pod-id-pill {
+            display: inline-block; width: fit-content; font-family: var(--font-mono); font-size: 0.65rem;
+            color: var(--accent-primary); background: var(--accent-glow);
+            padding: 0.15rem 0.45rem; border-radius: 999px; font-weight: 500;
+        }
+        .pod-trainer-count { font-size: 0.65rem; font-weight: 600; color: var(--text-muted); white-space: nowrap; }
+
+        .pod-reviewer-block { padding: 0.85rem 1.1rem; border-bottom: 1px solid var(--border-subtle); }
+        .pod-reviewer-label {
+            display: block; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); margin-bottom: 0.45rem;
+        }
+        .pod-reviewer-main { display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap; }
+        .pod-reviewer-none { font-size: 0.8rem; color: var(--text-muted); font-style: italic; flex: 1; }
+        .pod-change-rev { flex-shrink: 0; }
+
+        .pod-trainer-tools { padding: 0.5rem 1.1rem 0; }
+        .pod-trainer-filter {
+            width: 100%; padding: 0.4rem 0.65rem; font-size: 0.75rem;
+            background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm);
+            color: var(--text-primary);
+        }
+        .trainer-chip-list {
+            display: flex; flex-wrap: wrap; gap: 0.35rem; padding: 0.65rem 1.1rem 0.85rem; align-items: center;
+        }
+        .trainer-more-details { width: 100%; margin-top: 0.25rem; }
+        .trainer-more-details summary {
+            cursor: pointer; font-size: 0.72rem; font-weight: 600; color: var(--accent-primary);
+            list-style: none; padding: 0.25rem 0;
+        }
+        .trainer-more-details summary::-webkit-details-marker { display: none; }
+        .trainer-more-inner { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.35rem; }
+        .pod-add-trainer { padding: 0 1.1rem 1rem; margin-top: 0; }
+
+        /* ── Modal ────────────────────────────────────────────── */
+        .modal-overlay {
+            position: fixed; inset: 0; z-index: 10000;
+            background: rgba(0, 0, 0, 0.72); backdrop-filter: blur(6px);
+            display: flex; align-items: center; justify-content: center; padding: 1rem;
+        }
+        .modal-overlay.hidden { display: none; }
+        .modal-panel {
+            background: var(--bg-card); border: 1px solid var(--border-hover);
+            border-radius: var(--radius-xl); padding: 1.5rem; width: 100%; max-width: 400px;
+            box-shadow: var(--shadow-lg), var(--shadow-glow-blue);
+        }
+        .modal-title { font-size: 1.1rem; font-weight: 700; margin-bottom: 0.25rem; }
+        .modal-sub { font-size: 0.75rem; color: var(--text-muted); font-family: var(--font-mono); margin-bottom: 1rem; }
+        .modal-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1.25rem; }
+
+        /* ── Config shell & toolbar ───────────────────────────── */
+        .config-shell { display: flex; flex-direction: column; gap: 0.85rem; }
+        .config-toolbar {
+            position: sticky; top: 92px; z-index: 40;
+            display: flex; flex-wrap: wrap; align-items: center; gap: 0.65rem;
+            padding: 0.65rem 0; margin: 0 -0.25rem;
+            background: linear-gradient(180deg, var(--bg-primary) 70%, transparent);
+        }
+        .config-toolbar-search-wrap { flex: 1; min-width: 200px; }
+        .config-search-input {
+            width: 100%; padding: 0.5rem 0.75rem 0.5rem 2rem; font-size: 0.8rem;
+            border-radius: var(--radius-md); border: 1px solid var(--border);
+            background: var(--bg-input) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' fill='%23606060' viewBox='0 0 24 24'%3E%3Cpath d='M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z'/%3E%3C/svg%3E") 0.65rem center no-repeat;
+        }
+        .config-toolbar-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; }
+
+        .config-jump {
+            display: flex; flex-wrap: wrap; gap: 0.35rem; padding-bottom: 0.25rem;
+            border-bottom: 1px solid var(--border-subtle); margin-bottom: 0.25rem;
+        }
+        .config-jump-link {
+            font-size: 0.68rem; font-weight: 600; text-decoration: none; color: var(--text-secondary);
+            padding: 0.25rem 0.55rem; border-radius: 999px; border: 1px solid var(--border);
+            background: var(--bg-secondary); transition: all var(--transition-fast);
+        }
+        .config-jump-link:hover { color: var(--accent-primary); border-color: var(--accent-primary); background: var(--accent-glow); }
+
+        .config-section { scroll-margin-top: 6.5rem; }
+
+        .config-section-header-main { display: flex; align-items: center; gap: 0.65rem; min-width: 0; }
+        .config-section-accent-bar {
+            width: 4px; height: 1.75rem; border-radius: 2px; flex-shrink: 0;
+            background: var(--accent-primary);
+        }
+        .config-section--general .config-section-accent-bar { background: #64748b; }
+        .config-section--alignment .config-section-accent-bar { background: #22c55e; }
+        .config-section--app .config-section-accent-bar { background: #3b82f6; }
+        .config-section--hunt .config-section-accent-bar { background: #f59e0b; }
+        .config-section--features .config-section-accent-bar { background: #a855f7; }
+        .config-section--review .config-section-accent-bar { background: #ec4899; }
+        .config-section--taskidentity .config-section-accent-bar { background: #14b8a6; }
+        .config-section--reviewer .config-section-accent-bar { background: #06b6d4; }
+        .config-section--secrets .config-section-accent-bar { background: #ef4444; }
+
         /* ── Cards ────────────────────────────────────────────── */
         .card {
             background: var(--bg-card);
@@ -496,12 +700,34 @@
             .content-area { padding: 1rem; }
             .summary-cards { grid-template-columns: 1fr 1fr; }
             .app-header, .tab-bar { padding: 0 0.75rem; }
+            .team-stats { grid-template-columns: repeat(2, 1fr); }
+            .team-pods { grid-template-columns: 1fr; }
         }
     </style>
 </head>
 <body>
 
     <div id="toast-container"></div>
+
+    <div id="team-reviewer-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="reviewer-modal-title">
+        <div class="modal-panel">
+            <h2 id="reviewer-modal-title" class="modal-title">Reviewer</h2>
+            <p class="modal-sub" id="reviewer-modal-pod-label"></p>
+            <input type="hidden" id="reviewer-modal-pod" />
+            <div class="form-group">
+                <label for="reviewer-modal-email">Email</label>
+                <input type="email" id="reviewer-modal-email" placeholder="reviewer@example.com" autocomplete="off" />
+            </div>
+            <div class="form-group">
+                <label for="reviewer-modal-name">Display name (optional)</label>
+                <input type="text" id="reviewer-modal-name" placeholder="Name" autocomplete="off" />
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-ghost" data-reviewer-dismiss>Cancel</button>
+                <button type="button" class="btn" id="reviewer-modal-save">Save</button>
+            </div>
+        </div>
+    </div>
 
     <!-- Login Gate -->
     <div id="login-gate">
@@ -597,6 +823,6 @@
         </div>
     </div>
 
-    <script type="module" src="static/admin.js?v=5"></script>
+    <script type="module" src="static/admin.js?v=6"></script>
 </body>
 </html>

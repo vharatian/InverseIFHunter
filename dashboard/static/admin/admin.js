@@ -55,6 +55,11 @@ function esc(str) {
     return d.innerHTML;
 }
 
+function _initials(email, name) {
+    if (name) return name.split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 2);
+    return (email || '?').slice(0, 2).toUpperCase();
+}
+
 function isSuper() { return currentUser && currentUser.is_super; }
 
 // ─── Auth ────────────────────────────────────────────────────────
@@ -103,45 +108,139 @@ async function loadTeam() {
     catch (e) { c.innerHTML = `<div class="error-msg">${esc(e.message)}</div>`; }
 }
 
+function _teamMemberRow({ email, name, roleClass, badge, su, removeAction }) {
+    const nm = name || '';
+    return `<div class="team-member-row" data-member-email="${esc(email)}">
+        <div class="team-member-avatar ${roleClass}">${esc(_initials(email, nm))}</div>
+        <div class="team-member-body">
+            <div class="team-member-email">${esc(email)}</div>
+            ${nm ? `<div class="team-member-name">${esc(nm)}</div>` : ''}
+        </div>
+        <span class="team-member-badge ${roleClass}">${badge}</span>
+        ${su ? `<button type="button" class="team-member-remove" data-action="${removeAction}" data-email="${esc(email)}" title="Remove">&times;</button>` : ''}
+    </div>`;
+}
+
 function renderTeam(data, container) {
     let h = '';
     const su = isSuper();
-
+    const pods = data.pods || [];
+    const trainerTotal = pods.reduce((n, p) => n + (p.trainers?.length || 0), 0);
     const superAdmins = data.super_admins || [];
-    h += `<div class="card"><h3>Super Admins</h3>`;
-    if (superAdmins.length) {
-        h += superAdmins.map(sa =>
-            `<span class="trainer-chip"><span class="role-badge super" style="margin:0">SA</span> ${esc(sa.email)}${sa.name ? ` (${esc(sa.name)})` : ''}${su ? `<button class="remove-btn" data-action="remove-super-admin" data-email="${esc(sa.email)}">&times;</button>` : ''}</span>`
-        ).join('');
-    } else {
-        h += '<p class="empty-state">No super admins yet.</p>';
-    }
-    if (su) h += `<div class="inline-form" data-form="add-super-admin"><input type="email" placeholder="superadmin@example.com" data-field="email" /><input type="text" placeholder="Name" data-field="name" style="max-width:120px" /><button class="btn btn-sm">Add</button></div>`;
-    h += '</div>';
-
     const admins = data.admins || [];
-    h += `<div class="card"><h3>Admins</h3>`;
-    if (admins.length) {
-        h += admins.map(a => `<span class="trainer-chip"><span class="role-badge admin" style="margin:0">A</span> ${esc(a.email)}${a.name ? ` (${esc(a.name)})` : ''}${su ? `<button class="remove-btn" data-action="remove-admin" data-email="${esc(a.email)}">&times;</button>` : ''}</span>`).join('');
-    } else {
-        h += '<p class="empty-state">No admins yet.</p>';
-    }
-    if (su) h += `<div class="inline-form" data-form="add-admin"><input type="email" placeholder="admin@example.com" data-field="email" /><input type="text" placeholder="Name" data-field="name" style="max-width:120px" /><button class="btn btn-sm">Add</button></div>`;
-    h += '</div>';
 
-    (data.pods || []).forEach(pod => {
-        const rev = pod.reviewer;
-        h += `<div class="card" data-pod="${esc(pod.pod_id)}">
-            <h3>${esc(pod.name)} <span style="color:var(--text-muted);font-size:0.7rem;font-weight:400">${esc(pod.pod_id)}</span></h3>
-            <div class="pod-meta">Reviewer: ${rev ? `${esc(rev.email)}${rev.name ? ` (${esc(rev.name)})` : ''}` : '<em>None</em>'}${su ? ` <button class="btn btn-xs btn-ghost" data-action="set-reviewer" data-pod="${esc(pod.pod_id)}">Change</button>` : ''}</div>
-            <div><strong style="font-size:0.8rem">Trainers (${pod.trainers.length})</strong><div style="margin-top:0.2rem">${pod.trainers.length ? pod.trainers.map(t => `<span class="trainer-chip">${esc(t)}${su ? `<button class="remove-btn" data-action="remove-trainer" data-pod="${esc(pod.pod_id)}" data-email="${esc(t)}">&times;</button>` : ''}</span>`).join('') : '<span class="empty-state">No trainers</span>'}</div>${su ? `<div class="inline-form" data-form="add-trainer" data-pod="${esc(pod.pod_id)}"><input type="email" placeholder="trainer@example.com" data-field="email" /><button class="btn btn-sm">Add</button></div>` : ''}</div>
+    h += `<div class="team-shell">
+        <div class="team-stats">
+            <div class="team-stat"><span class="team-stat-value">${pods.length}</span><span class="team-stat-label">Pods</span></div>
+            <div class="team-stat"><span class="team-stat-value">${trainerTotal}</span><span class="team-stat-label">Trainers</span></div>
+            <div class="team-stat"><span class="team-stat-value">${superAdmins.length}</span><span class="team-stat-label">Super admins</span></div>
+            <div class="team-stat"><span class="team-stat-value">${admins.length}</span><span class="team-stat-label">Admins</span></div>
+        </div>
+        <div class="team-global-grid">`;
+
+    h += `<article class="team-role-card team-role-super">
+        <header class="team-role-card-head"><span class="team-role-icon" aria-hidden="true">◆</span><div><h3>Super admins</h3><p class="team-role-desc">Full platform access</p></div></header>
+        <div class="team-role-body">`;
+    if (superAdmins.length) {
+        h += `<div class="team-member-list">${superAdmins.map(sa => _teamMemberRow({
+            email: sa.email, name: sa.name || '', roleClass: 'super', badge: 'SA', su, removeAction: 'remove-super-admin',
+        })).join('')}</div>`;
+    } else {
+        h += `<div class="team-empty"><span class="team-empty-title">No super admins</span><span class="team-empty-hint">Add someone who can manage all teams and config.</span></div>`;
+    }
+    if (su) {
+        h += `<div class="team-add-form" data-form="add-super-admin">
+            <label class="sr-only" for="sa-email">Email</label><input id="sa-email" type="email" placeholder="Email" data-field="email" autocomplete="off" />
+            <label class="sr-only" for="sa-name">Name</label><input id="sa-name" type="text" placeholder="Display name" data-field="name" autocomplete="off" />
+            <button type="button" class="btn btn-sm team-add-btn">Add</button>
         </div>`;
+    }
+    h += `</div></article>`;
+
+    h += `<article class="team-role-card team-role-admin">
+        <header class="team-role-card-head"><span class="team-role-icon" aria-hidden="true">◇</span><div><h3>Admins</h3><p class="team-role-desc">Org-wide, pod assignments optional</p></div></header>
+        <div class="team-role-body">`;
+    if (admins.length) {
+        h += `<div class="team-member-list">${admins.map(a => _teamMemberRow({
+            email: a.email, name: a.name || '', roleClass: 'admin', badge: 'A', su, removeAction: 'remove-admin',
+        })).join('')}</div>`;
+    } else {
+        h += `<div class="team-empty"><span class="team-empty-title">No admins yet</span><span class="team-empty-hint">Admins help run pods without super-admin powers.</span></div>`;
+    }
+    if (su) {
+        h += `<div class="team-add-form" data-form="add-admin">
+            <label class="sr-only" for="ad-email">Email</label><input id="ad-email" type="email" placeholder="Email" data-field="email" autocomplete="off" />
+            <label class="sr-only" for="ad-name">Name</label><input id="ad-name" type="text" placeholder="Display name" data-field="name" autocomplete="off" />
+            <button type="button" class="btn btn-sm team-add-btn">Add</button>
+        </div>`;
+    }
+    h += `</div></article></div>`;
+
+    h += `<h3 class="team-pods-heading">Pods &amp; trainers</h3><div class="team-pods">`;
+
+    pods.forEach(pod => {
+        const rev = pod.reviewer;
+        const trainers = pod.trainers || [];
+        const firstN = 12;
+        const vis = trainers.slice(0, firstN);
+        const more = trainers.slice(firstN);
+        h += `<article class="pod-card" data-pod="${esc(pod.pod_id)}">
+            <header class="pod-card-head">
+                <div class="pod-card-title"><h3>${esc(pod.name)}</h3><span class="pod-id-pill" title="Pod id">${esc(pod.pod_id)}</span></div>
+                <span class="pod-trainer-count">${trainers.length} trainer${trainers.length !== 1 ? 's' : ''}</span>
+            </header>
+            <div class="pod-reviewer-block">
+                <span class="pod-reviewer-label">Reviewer</span>
+                <div class="pod-reviewer-main">
+                    ${rev
+            ? `<div class="team-member-row pod-reviewer-row" style="flex:1;border:0;padding:0;background:transparent">
+                        <div class="team-member-avatar reviewer">${esc(_initials(rev.email, rev.name || ''))}</div>
+                        <div class="team-member-body"><div class="team-member-email">${esc(rev.email)}</div>${rev.name ? `<div class="team-member-name">${esc(rev.name)}</div>` : ''}</div>
+                       </div>`
+            : `<span class="pod-reviewer-none">Unassigned</span>`}
+                    ${su ? `<button type="button" class="btn btn-xs btn-ghost pod-change-rev" data-action="set-reviewer" data-pod="${esc(pod.pod_id)}" data-rev-email="${rev ? esc(rev.email) : ''}" data-rev-name="${rev && rev.name ? esc(rev.name) : ''}">${rev ? 'Change' : 'Assign'}</button>` : ''}
+                </div>
+            </div>
+            ${trainers.length ? `<div class="pod-trainer-tools"><input type="search" class="pod-trainer-filter" placeholder="Filter trainers…" data-pod-filter="${esc(pod.pod_id)}" aria-label="Filter trainers" /></div>` : ''}
+            <div class="trainer-chip-list" data-pod-chips="${esc(pod.pod_id)}">`;
+        if (!trainers.length) {
+            h += `<span class="team-empty inline"><span class="team-empty-hint">No trainers in this pod yet.</span></span>`;
+        } else {
+            vis.forEach(t => {
+                h += `<span class="trainer-chip" data-trainer-email="${esc(t)}">${esc(t)}${su ? `<button type="button" class="remove-btn" data-action="remove-trainer" data-pod="${esc(pod.pod_id)}" data-email="${esc(t)}" aria-label="Remove ${esc(t)}">&times;</button>` : ''}</span>`;
+            });
+            if (more.length) {
+                h += `<details class="trainer-more-details"><summary>+${more.length} more</summary><div class="trainer-more-inner">`;
+                more.forEach(t => {
+                    h += `<span class="trainer-chip" data-trainer-email="${esc(t)}">${esc(t)}${su ? `<button type="button" class="remove-btn" data-action="remove-trainer" data-pod="${esc(pod.pod_id)}" data-email="${esc(t)}" aria-label="Remove ${esc(t)}">&times;</button>` : ''}</span>`;
+                });
+                h += `</div></details>`;
+            }
+        }
+        h += `</div>`;
+        if (su) {
+            h += `<div class="team-add-form pod-add-trainer" data-form="add-trainer" data-pod="${esc(pod.pod_id)}">
+                <input type="email" placeholder="trainer@example.com" data-field="email" autocomplete="off" />
+                <button type="button" class="btn btn-sm team-add-btn">Add trainer</button>
+            </div>`;
+        }
+        h += `</article>`;
     });
 
+    h += `</div>`;
+
     if (su) {
-        h += `<div class="card" style="border-style:dashed"><h3>Create Pod</h3><div class="inline-form" data-form="create-pod"><input type="text" placeholder="pod_id (lowercase)" data-field="pod_id" style="max-width:140px" /><input type="text" placeholder="Display name" data-field="name" /><button class="btn btn-sm">Create</button></div></div>`;
+        h += `<article class="team-role-card team-create-pod-card">
+            <header class="team-role-card-head"><span class="team-role-icon" aria-hidden="true">+</span><div><h3>Create pod</h3><p class="team-role-desc">Lowercase id and a display name</p></div></header>
+            <div class="team-add-form create-pod-form" data-form="create-pod">
+                <input type="text" placeholder="pod_id (lowercase)" data-field="pod_id" autocomplete="off" />
+                <input type="text" placeholder="Display name" data-field="name" autocomplete="off" />
+                <button type="button" class="btn btn-sm team-add-btn">Create</button>
+            </div>
+        </article>`;
     }
 
+    h += `</div>`;
     container.innerHTML = h;
 }
 
@@ -154,13 +253,6 @@ async function handleTeamAction(action, params) {
             case 'remove-trainer':
                 await api(`team/pods/${encodeURIComponent(params.pod)}/trainers/${encodeURIComponent(params.email)}`, { method: 'DELETE' });
                 toast('Trainer removed'); break;
-            case 'set-reviewer': {
-                const email = prompt('Reviewer email:');
-                if (!email) return;
-                const name = prompt('Reviewer name (optional):') || '';
-                await api(`team/pods/${encodeURIComponent(params.pod)}/reviewer`, { method: 'PUT', body: JSON.stringify({ email, name }) });
-                toast('Reviewer updated'); break;
-            }
             case 'remove-admin':
                 if (!confirm(`Remove admin ${params.email}?`)) return;
                 await api(`team/admins/${encodeURIComponent(params.email)}`, { method: 'DELETE' });
@@ -286,12 +378,51 @@ function _renderNestedDict(obj, prefix, sectionName) {
     return h;
 }
 
+function _configSectionDomId(slug) {
+    return `config-section-${String(slug || 'general').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'general'}`;
+}
+
+function applyConfigSearch(query) {
+    const root = document.getElementById('config-content');
+    if (!root) return;
+    const q = query.trim().toLowerCase();
+    root.querySelectorAll('.config-section').forEach(sec => {
+        if (!q) { sec.style.display = ''; return; }
+        const t = sec.textContent.toLowerCase();
+        sec.style.display = t.includes(q) ? '' : 'none';
+    });
+}
+
+let _configSearchTimer;
+function scheduleConfigSearch(value) {
+    clearTimeout(_configSearchTimer);
+    _configSearchTimer = setTimeout(() => applyConfigSearch(value), 100);
+}
+
 function renderConfig(data, container) {
     let h = '';
-    if (isSuper()) h += `<div style="margin-bottom:0.75rem;display:flex;justify-content:flex-end"><button class="btn btn-ghost btn-sm" id="config-reload-btn">Reload cache</button></div>`;
-
     const sections = Object.entries(data).filter(([, v]) => typeof v === 'object' && v !== null && !Array.isArray(v));
     const topLevel = Object.entries(data).filter(([, v]) => typeof v !== 'object' || v === null || Array.isArray(v));
+
+    const jumpSlugs = [];
+    if (topLevel.length) jumpSlugs.push({ label: 'General', slug: 'general' });
+    sections.forEach(([name]) => jumpSlugs.push({ label: name, slug: name }));
+
+    h += `<div class="config-shell">
+        <div class="config-toolbar">
+            <div class="config-toolbar-search-wrap">
+                <input type="search" class="config-search-input" id="config-search" placeholder="Search sections and keys…" autocomplete="off" />
+            </div>
+            <div class="config-toolbar-actions">
+                <button type="button" class="btn btn-ghost btn-sm" data-action="config-expand-all">Expand all</button>
+                <button type="button" class="btn btn-ghost btn-sm" data-action="config-collapse-all">Collapse all</button>
+                ${isSuper() ? '<button type="button" class="btn btn-ghost btn-sm" id="config-reload-btn">Reload cache</button>' : ''}
+            </div>
+        </div>`;
+    if (jumpSlugs.length) {
+        h += `<nav class="config-jump" aria-label="Jump to section">${jumpSlugs.map(({ label, slug }) =>
+            `<a class="config-jump-link" href="#${_configSectionDomId(slug)}">${esc(label)}</a>`).join('')}</nav>`;
+    }
 
     function renderEntry(key, val, prefix) {
         const fullKey = prefix ? `${prefix}.${key}` : key;
@@ -327,27 +458,33 @@ function renderConfig(data, container) {
         return '';
     }
 
-    function renderSection(name, entries, prefix, collapsed) {
+    function renderSection(name, entries, prefix, collapsed, slugForId) {
         const editableCount = entries.reduce((c, [, v]) => c + (_isLeaf(v) && isSuper() ? 1 : 0) + (typeof v === 'object' && v !== null && !Array.isArray(v) ? Object.values(v).filter(_isLeaf).length : 0), 0);
-        return `<div class="config-section" data-config-section="${esc(prefix)}">
-            <div class="config-section-header${collapsed ? ' collapsed' : ''}" onclick="this.classList.toggle('collapsed');this.nextElementSibling.classList.toggle('collapsed')">
-                <h3>${esc(name)} <span class="count-badge">${entries.length} keys${isSuper() && editableCount ? ` · ${editableCount} editable` : ''}</span></h3>
-                <span class="chevron">&#x25BC;</span>
+        const sid = _configSectionDomId(slugForId !== undefined ? slugForId : prefix);
+        const accent = String(slugForId !== undefined ? slugForId : (prefix || 'general')).toLowerCase().replace(/[^a-z0-9]/g, '') || 'general';
+        return `<div class="config-section config-section--${esc(accent)}" id="${sid}" data-config-section="${esc(prefix)}">
+            <div class="config-section-header${collapsed ? ' collapsed' : ''}" role="button" tabindex="0" aria-expanded="${collapsed ? 'false' : 'true'}" onclick="this.classList.toggle('collapsed');this.nextElementSibling.classList.toggle('collapsed');this.setAttribute('aria-expanded',(!this.classList.contains('collapsed')).toString())">
+                <div class="config-section-header-main"><span class="config-section-accent-bar" aria-hidden="true"></span>
+                <h3>${esc(name)} <span class="count-badge">${entries.length} keys${isSuper() && editableCount ? ` · ${editableCount} editable` : ''}</span></h3></div>
+                <span class="chevron" aria-hidden="true">&#x25BC;</span>
             </div>
             <div class="config-section-body${collapsed ? ' collapsed' : ''}">
                 ${entries.map(([k, v]) => renderEntry(k, v, prefix)).join('')}
-                ${isSuper() ? `<div class="config-actions"><button class="btn btn-sm btn-success" data-action="save-config-section" data-section="${esc(prefix)}">Save ${esc(name)}</button></div>` : ''}
+                ${isSuper() ? `<div class="config-actions"><button type="button" class="btn btn-sm btn-success" data-action="save-config-section" data-section="${esc(prefix)}">Save ${esc(name)}</button></div>` : ''}
             </div>
         </div>`;
     }
 
-    if (topLevel.length) h += renderSection('General', topLevel, '', false);
+    if (topLevel.length) h += renderSection('General', topLevel, '', false, 'general');
     const important = ['alignment', 'app', 'hunt', 'features', 'review', 'task_identity', 'reviewer'];
     sections.forEach(([name, obj]) => {
-        h += renderSection(name, Object.entries(obj), name, !important.includes(name));
+        h += renderSection(name, Object.entries(obj), name, !important.includes(name), name);
     });
 
+    h += '</div>';
     container.innerHTML = h;
+    const searchEl = document.getElementById('config-search');
+    if (searchEl) searchEl.value = '';
 }
 
 async function saveConfigSection(sectionName) {
@@ -512,11 +649,6 @@ async function loadDashboardAdmins() {
         ]);
         renderDashboardAdmins(c, admins, testAccounts);
     } catch (e) { c.innerHTML = `<div class="error-msg">${esc(e.message)}</div>`; }
-}
-
-function _initials(email, name) {
-    if (name) return name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
-    return (email || '?').slice(0, 2).toUpperCase();
 }
 
 function renderDashboardAdmins(c, admins, testAccounts) {
@@ -691,29 +823,70 @@ function init() {
     document.getElementById('logout-btn').addEventListener('click', logout);
     document.getElementById('tab-nav').addEventListener('click', e => { const b = e.target.closest('.tab-btn'); if (b?.dataset.tab) showTab(b.dataset.tab); });
 
-    document.addEventListener('click', e => {
-        const t = e.target;
-        const action = t.dataset?.action;
+    document.addEventListener('input', e => {
+        if (e.target.classList?.contains('pod-trainer-filter')) {
+            const card = e.target.closest('.pod-card');
+            const q = e.target.value.trim().toLowerCase();
+            if (!card) return;
+            const root = card.querySelector('.trainer-chip-list');
+            if (!root) return;
+            const det = root.querySelector('.trainer-more-details');
+            if (!q) {
+                root.querySelectorAll('.trainer-chip').forEach(chip => { chip.style.display = ''; });
+                if (det) det.style.display = '';
+            } else {
+                root.querySelectorAll('.trainer-chip').forEach(chip => {
+                    const em = (chip.dataset.trainerEmail || '').toLowerCase();
+                    chip.style.display = em.includes(q) ? '' : 'none';
+                });
+                if (det) {
+                    const any = [...det.querySelectorAll('.trainer-chip')].some(c => c.style.display !== 'none');
+                    det.open = any;
+                    det.style.display = any ? '' : 'none';
+                }
+            }
+        }
+        if (e.target.id === 'config-search') scheduleConfigSearch(e.target.value);
+    });
 
-        if (action === 'remove-trainer') { handleTeamAction('remove-trainer', { pod: t.dataset.pod, email: t.dataset.email }); return; }
-        if (action === 'remove-admin') { handleTeamAction('remove-admin', { email: t.dataset.email }); return; }
-        if (action === 'remove-super-admin') { handleTeamAction('remove-super-admin', { email: t.dataset.email }); return; }
-        if (action === 'set-reviewer') { handleTeamAction('set-reviewer', { pod: t.dataset.pod }); return; }
-        if (action === 'remove-dashboard-admin') { handleAdminsAction('remove-dashboard-admin', { email: t.dataset.email }); return; }
-        if (action === 'remove-test-account') { handleAdminsAction('remove-test-account', { email: t.dataset.email }); return; }
-        if (action === 'save-config-section') { saveConfigSection(t.dataset.section); return; }
-        if (t.id === 'config-reload-btn') { api('config/reload', { method: 'POST' }).then(() => { toast('Cache reloaded'); loadConfig(); }).catch(e => toast(e.message, 'error')); return; }
-        if (action === 'remove-array-item') { _handleArrayAction('remove', t.dataset.arrayKey, parseInt(t.dataset.idx)); return; }
-        if (action === 'add-array-item') { _handleArrayAction('add', t.dataset.arrayKey); return; }
-        if (action === 'remove-chip') { _handleChipAction('remove', t.dataset.chipKey, parseInt(t.dataset.idx)); return; }
+    document.addEventListener('click', e => {
+        const act = e.target.closest('[data-action]');
+        const action = act?.dataset?.action;
+        const t = e.target;
+
+        if (action === 'remove-trainer') { handleTeamAction('remove-trainer', { pod: act.dataset.pod, email: act.dataset.email }); return; }
+        if (action === 'remove-admin') { handleTeamAction('remove-admin', { email: act.dataset.email }); return; }
+        if (action === 'remove-super-admin') { handleTeamAction('remove-super-admin', { email: act.dataset.email }); return; }
+        if (action === 'set-reviewer') {
+            openTeamReviewerModal(act.dataset.pod, act.dataset.revEmail || '', act.dataset.revName || '');
+            return;
+        }
+        if (action === 'remove-dashboard-admin') { handleAdminsAction('remove-dashboard-admin', { email: act.dataset.email }); return; }
+        if (action === 'remove-test-account') { handleAdminsAction('remove-test-account', { email: act.dataset.email }); return; }
+        if (action === 'save-config-section') { saveConfigSection(act.dataset.section); return; }
+        if (action === 'config-expand-all') {
+            document.querySelectorAll('#config-content .config-section-header').forEach(h => { h.classList.remove('collapsed'); h.setAttribute('aria-expanded', 'true'); });
+            document.querySelectorAll('#config-content .config-section-body').forEach(b => b.classList.remove('collapsed'));
+            return;
+        }
+        if (action === 'config-collapse-all') {
+            document.querySelectorAll('#config-content .config-section-header').forEach(h => { h.classList.add('collapsed'); h.setAttribute('aria-expanded', 'false'); });
+            document.querySelectorAll('#config-content .config-section-body').forEach(b => b.classList.add('collapsed'));
+            return;
+        }
+        if (t.id === 'config-reload-btn' || act?.id === 'config-reload-btn') { api('config/reload', { method: 'POST' }).then(() => { toast('Cache reloaded'); loadConfig(); }).catch(err => toast(err.message, 'error')); return; }
+        if (action === 'remove-array-item') { _handleArrayAction('remove', act.dataset.arrayKey, parseInt(act.dataset.idx, 10)); return; }
+        if (action === 'add-array-item') { _handleArrayAction('add', act.dataset.arrayKey); return; }
+        if (action === 'remove-chip') { _handleChipAction('remove', act.dataset.chipKey, parseInt(act.dataset.idx, 10)); return; }
         if (action === 'add-chip') {
-            const input = document.querySelector(`[data-chip-input="${t.dataset.chipKey}"]`);
-            if (input?.value.trim()) { _handleChipAction('add', t.dataset.chipKey, null, input.value); }
+            const input = document.querySelector(`[data-chip-input="${act.dataset.chipKey}"]`);
+            if (input?.value.trim()) { _handleChipAction('add', act.dataset.chipKey, null, input.value); }
             return;
         }
 
-        const form = t.closest('[data-form]');
-        if (form && t.tagName === 'BUTTON') {
+        const formBtn = e.target.closest('[data-form] button');
+        const form = formBtn?.closest('[data-form]');
+        if (form && formBtn) {
             const ft = form.dataset.form, fields = {};
             form.querySelectorAll('[data-field]').forEach(inp => { fields[inp.dataset.field] = inp.value.trim(); });
             if (ft === 'add-trainer') { if (!fields.email) { toast('Email required', 'error'); return; } handleTeamAction('add-trainer', { pod: form.dataset.pod, email: fields.email }); }
@@ -723,6 +896,47 @@ function init() {
             else if (ft === 'add-dashboard-admin') { if (!fields.email) { toast('Email required', 'error'); return; } handleAdminsAction('add-dashboard-admin', { email: fields.email, name: fields.name }); }
             else if (ft === 'add-test-account') { if (!fields.email) { toast('Email required', 'error'); return; } handleAdminsAction('add-test-account', { email: fields.email, name: fields.name }); }
         }
+    });
+
+    wireTeamReviewerModal();
+}
+
+function openTeamReviewerModal(podId, email, name) {
+    const modal = document.getElementById('team-reviewer-modal');
+    if (!modal) return;
+    document.getElementById('reviewer-modal-pod').value = podId || '';
+    const sub = document.getElementById('reviewer-modal-pod-label');
+    if (sub) sub.textContent = podId ? `Pod: ${podId}` : '';
+    document.getElementById('reviewer-modal-email').value = email || '';
+    document.getElementById('reviewer-modal-name').value = name || '';
+    modal.classList.remove('hidden');
+    document.getElementById('reviewer-modal-email')?.focus();
+}
+
+function closeTeamReviewerModal() {
+    document.getElementById('team-reviewer-modal')?.classList.add('hidden');
+}
+
+function wireTeamReviewerModal() {
+    const modal = document.getElementById('team-reviewer-modal');
+    if (!modal || modal.dataset.wired === '1') return;
+    modal.dataset.wired = '1';
+    modal.querySelector('[data-reviewer-dismiss]')?.addEventListener('click', closeTeamReviewerModal);
+    modal.querySelector('#reviewer-modal-save')?.addEventListener('click', async () => {
+        const pod = document.getElementById('reviewer-modal-pod').value;
+        const em = document.getElementById('reviewer-modal-email').value.trim();
+        const nm = document.getElementById('reviewer-modal-name').value.trim();
+        if (!em) { toast('Reviewer email required', 'error'); return; }
+        try {
+            await api(`team/pods/${encodeURIComponent(pod)}/reviewer`, { method: 'PUT', body: JSON.stringify({ email: em, name: nm }) });
+            toast('Reviewer updated');
+            closeTeamReviewerModal();
+            loadTeam();
+        } catch (err) { toast(err.message, 'error'); }
+    });
+    modal.addEventListener('click', e => { if (e.target === modal) closeTeamReviewerModal(); });
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape' && !document.getElementById('team-reviewer-modal')?.classList.contains('hidden')) closeTeamReviewerModal();
     });
 }
 

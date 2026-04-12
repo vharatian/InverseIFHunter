@@ -5,32 +5,35 @@
 const API_BASE = window.BASE_PATH || '';
 const TRAINER_EMAILS_STORAGE_KEY = 'dashboard_trainer_emails';
 let timelineChart = null;
+let weekdayChart = null;
 let modelBreakChart = null;
 let modelUsageChart = null;
 let refreshInterval = null;
 
 // ============== Section Navigation ==============
 
-function showSection(sectionId) {
-    // Hide all sections
+function showSection(sectionId, tabButtonEl) {
     document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    
-    // Show selected section
-    document.getElementById(`section-${sectionId}`).classList.add('active');
-    event.target.classList.add('active');
-    
-    // Load section data
+
+    const section = document.getElementById(`section-${sectionId}`);
+    if (section) section.classList.add('active');
+    if (tabButtonEl && tabButtonEl.classList.contains('tab-btn')) {
+        tabButtonEl.classList.add('active');
+    }
+
     loadSectionData(sectionId);
 }
 
-function showSubTab(tabId) {
+function showSubTab(tabId, subTabButtonEl) {
     document.querySelectorAll('.sub-content').forEach(c => c.classList.remove('active'));
     document.querySelectorAll('.sub-tab').forEach(b => b.classList.remove('active'));
-    
+
     document.getElementById(`subtab-${tabId}`).classList.add('active');
-    event.target.classList.add('active');
-    
+    if (subTabButtonEl && subTabButtonEl.classList.contains('sub-tab')) {
+        subTabButtonEl.classList.add('active');
+    }
+
     loadDetailTab(tabId);
 }
 
@@ -39,7 +42,7 @@ function loadSectionData(sectionId) {
         case 'overview':
             loadOverview();
             loadTimeline();
-            loadHeatmap();
+            loadWeekdayActivity();
             loadEvents();
             break;
         case 'trainers':
@@ -270,42 +273,81 @@ async function loadTimeline() {
     });
 }
 
-async function loadHeatmap() {
-    const data = await fetchAPI('heatmap');
-    if (!data) return;
-    
-    const heatmapData = [{
-        z: data.data,
-        x: data.hours,
-        y: data.days,
-        type: 'heatmap',
-        colorscale: [
-            [0, '#1e293b'],
-            [0.5, '#6366f1'],
-            [1, '#ef4444']
-        ],
-        showscale: true,
-        colorbar: {
-            tickfont: { color: '#94a3b8' }
+async function loadWeekdayActivity() {
+    const data = await fetchAPI('weekday_activity');
+    if (!data || !data.days || !data.hunt_results) return;
+
+    const canvas = document.getElementById('weekdayChart');
+    if (!canvas) return;
+    const wrap = canvas.parentElement;
+    let emptyMsg = wrap.querySelector('.empty-state');
+    const total = data.hunt_results.reduce((a, b) => a + b, 0);
+    if (total === 0) {
+        if (weekdayChart) {
+            weekdayChart.destroy();
+            weekdayChart = null;
         }
-    }];
-    
-    const layout = {
-        paper_bgcolor: 'transparent',
-        plot_bgcolor: 'transparent',
-        margin: { t: 20, b: 40, l: 50, r: 20 },
-        xaxis: {
-            title: 'Hour',
-            tickfont: { color: '#94a3b8' },
-            gridcolor: '#334155'
+        canvas.style.display = 'none';
+        if (!emptyMsg) {
+            emptyMsg = document.createElement('div');
+            emptyMsg.className = 'empty-state';
+            emptyMsg.style.cssText =
+                'display:flex;align-items:center;justify-content:center;height:100%;color:#64748b;font-size:14px;';
+            wrap.appendChild(emptyMsg);
+        }
+        emptyMsg.textContent = 'No hunt results in this period';
+        return;
+    }
+    canvas.style.display = 'block';
+    if (emptyMsg) emptyMsg.remove();
+
+    const ctx = canvas.getContext('2d');
+    if (weekdayChart) weekdayChart.destroy();
+
+    weekdayChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: data.days,
+            datasets: [{
+                label: 'Hunt results',
+                data: data.hunt_results,
+                backgroundColor: '#6366f1',
+                borderRadius: 4
+            }]
         },
-        yaxis: {
-            tickfont: { color: '#94a3b8' },
-            gridcolor: '#334155'
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    backgroundColor: '#1e293b',
+                    titleColor: '#f8fafc',
+                    bodyColor: '#cbd5e1',
+                    borderColor: '#334155',
+                    borderWidth: 1
+                }
+            },
+            scales: {
+                x: {
+                    ticks: { color: '#94a3b8' },
+                    grid: { display: false }
+                },
+                y: {
+                    beginAtZero: true,
+                    ticks: { color: '#94a3b8', precision: 0 },
+                    grid: { color: '#334155' },
+                    title: {
+                        display: true,
+                        text: 'Count',
+                        color: '#64748b',
+                        font: { size: 11 }
+                    }
+                }
+            }
         }
-    };
-    
-    Plotly.newPlot('heatmapChart', heatmapData, layout, {responsive: true});
+    });
 }
 
 async function loadEvents() {
@@ -322,7 +364,7 @@ async function loadEvents() {
     }
     
     container.innerHTML = data.events.map(event => {
-        const icon = getEventIcon(event.type);
+        const marker = getEventTypeMarker(event.type);
         const time = new Date(event.ts).toLocaleTimeString();
         const details = formatEventDetails(event);
         const d = event.data || {};
@@ -333,7 +375,7 @@ async function loadEvents() {
         
         return `
             <div class="event-item">
-                <span class="event-icon">${icon}</span>
+                <span class="event-type-marker" title="${escapeHtml(event.type)}">${marker}</span>
                 <div class="event-content">
                     <div class="event-type">${event.type.replace(/_/g, ' ')}</div>
                     <div class="event-details">${details}</div>
@@ -345,17 +387,17 @@ async function loadEvents() {
     }).join('');
 }
 
-function getEventIcon(type) {
-    const icons = {
-        'session_created': '📁',
-        'hunt_start': '🎯',
-        'hunt_complete': '✅',
-        'hunt_result': '📊',
-        'api_call_start': '📡',
-        'api_call_end': '📥',
-        'judge_call': '⚖️'
+function getEventTypeMarker(type) {
+    const abbrev = {
+        session_created: 'SC',
+        hunt_start: 'HS',
+        hunt_complete: 'HC',
+        hunt_result: 'HR',
+        api_call_start: 'A+',
+        api_call_end: 'A−',
+        judge_call: 'JG'
     };
-    return icons[type] || '📌';
+    return abbrev[type] || type.slice(0, 2).toUpperCase();
 }
 
 function formatEventDetails(event) {
@@ -364,9 +406,9 @@ function formatEventDetails(event) {
         case 'session_created':
             return `Session: ${data.session_id || 'N/A'}`;
         case 'hunt_result':
-            return `Score: ${data.score ?? 'N/A'} | ${data.is_breaking ? '💔 BREAK' : '✓ Pass'} | ${data.model?.split('/').pop() || ''}`;
+            return `Score: ${data.score ?? 'N/A'} | ${data.is_breaking ? 'BREAK' : 'Pass'} | ${data.model?.split('/').pop() || ''}`;
         case 'api_call_end':
-            return `${data.provider} | ${data.latency_ms}ms | ${data.success ? '✓' : '✗'}`;
+            return `${data.provider} | ${data.latency_ms}ms | ${data.success ? 'OK' : 'Failed'}`;
         default:
             return JSON.stringify(data);
     }
@@ -566,7 +608,7 @@ async function loadCosts() {
     
     for (const [provider, stats] of Object.entries(data.by_provider || {})) {
         rows.push({
-            name: `📦 ${provider}`,
+            name: provider,
             ...stats,
             isProvider: true
         });
@@ -665,17 +707,17 @@ function formatDetailItem(item, type) {
                     <div class="detail-header">
                         <span>${item.model?.split('/').pop() || 'Unknown'}</span>
                         <span class="detail-badge ${item.is_breaking ? 'fail' : 'success'}">
-                            Score: ${item.score ?? 'N/A'} ${item.is_breaking ? '💔' : '✓'}
+                            Score: ${item.score ?? 'N/A'} ${item.is_breaking ? 'BREAK' : 'Pass'}
                         </span>
                     </div>
-                    ${collapsibleBlock('📝 Model Response', item.response_preview, true)}
+                    ${collapsibleBlock('Model response', item.response_preview, true)}
                     <div class="judge-section">
-                        <div class="judge-header">⚖️ Judge Verdict</div>
+                        <div class="judge-header">Judge verdict</div>
                         <div class="criteria-list">${formatCriteriaBadges(item.criteria)}</div>
-                        ${item.judge_explanation ? collapsibleBlock('💬 Judge Reasoning', item.judge_explanation, true) : ''}
+                        ${item.judge_explanation ? collapsibleBlock('Judge reasoning', item.judge_explanation, true) : ''}
                     </div>
                     <div class="detail-meta">
-                        <span>🏷️ ${item.trainer_id || item.session_id}</span>
+                        <span>${item.trainer_id || item.session_id}</span>
                         ${item.trainer_email ? `<span class="trainer-email">${escapeHtml(item.trainer_email)}</span>` : ''}
                         ${item.colab_url ? `<a class="detail-colab-link" href="${escapeHtml(item.colab_url)}" target="_blank" rel="noopener noreferrer">View task</a>` : ''}
                         <span class="detail-time">${time}</span>
@@ -687,17 +729,17 @@ function formatDetailItem(item, type) {
             return `
                 <div class="detail-item breaking">
                     <div class="detail-header">
-                        <span>💔 ${item.model?.split('/').pop()}</span>
+                        <span>${item.model?.split('/').pop()}</span>
                         <span class="detail-badge fail">BREAK</span>
                     </div>
-                    ${collapsibleBlock('📝 Model Response', item.response_preview, true)}
+                    ${collapsibleBlock('Model response', item.response_preview, true)}
                     <div class="judge-section">
-                        <div class="judge-header">⚖️ Judge Verdict</div>
+                        <div class="judge-header">Judge verdict</div>
                         <div class="criteria-list">${formatCriteriaBadges(item.criteria)}</div>
-                        ${item.judge_explanation ? collapsibleBlock('💬 Judge Reasoning', item.judge_explanation, true) : ''}
+                        ${item.judge_explanation ? collapsibleBlock('Judge reasoning', item.judge_explanation, true) : ''}
                     </div>
                     <div class="detail-meta">
-                        <span>🏷️ ${item.trainer_id || item.session_id}</span>
+                        <span>${item.trainer_id || item.session_id}</span>
                         ${item.trainer_email ? `<span class="trainer-email">${escapeHtml(item.trainer_email)}</span>` : ''}
                         ${item.colab_url ? `<a class="detail-colab-link" href="${escapeHtml(item.colab_url)}" target="_blank" rel="noopener noreferrer">View task</a>` : ''}
                         <span class="detail-time">${time}</span>
@@ -710,13 +752,13 @@ function formatDetailItem(item, type) {
                 <div class="detail-item ${item.success ? '' : 'error'}">
                     <div class="detail-header">
                         <span>${item.provider} / ${item.model?.split('/').pop()}</span>
-                        <span class="detail-badge ${item.success ? 'success' : 'fail'}">${item.success ? '✓' : '✗'}</span>
+                        <span class="detail-badge ${item.success ? 'success' : 'fail'}">${item.success ? 'OK' : 'Failed'}</span>
                     </div>
                     <div class="detail-meta">
-                        <span>⏱️ ${item.latency_ms}ms</span>
-                        <span>📥 ${item.tokens_in || 0} in</span>
-                        <span>📤 ${item.tokens_out || 0} out</span>
-                        <span>💰 $${item.cost?.toFixed(6) || '0'}</span>
+                        <span>${item.latency_ms}ms</span>
+                        <span>${item.tokens_in || 0} in</span>
+                        <span>${item.tokens_out || 0} out</span>
+                        <span>$${item.cost?.toFixed(6) || '0'}</span>
                         ${item.trainer_email ? `<span class="trainer-email">${escapeHtml(item.trainer_email)}</span>` : ''}
                         ${item.colab_url ? `<a class="detail-colab-link" href="${escapeHtml(item.colab_url)}" target="_blank" rel="noopener noreferrer">View task</a>` : ''}
                         <span class="detail-time">${time}</span>
@@ -728,12 +770,12 @@ function formatDetailItem(item, type) {
             return `
                 <div class="detail-item error">
                     <div class="detail-header">
-                        <span>⚠️ ${item.type} error</span>
+                        <span>${item.type} error</span>
                         <span>${item.model?.split('/').pop() || ''}</span>
                     </div>
                     <div class="detail-content">${escapeHtml(item.error) || 'Unknown error'}</div>
                     <div class="detail-meta">
-                        <span>🏷️ ${item.session_id || 'N/A'}</span>
+                        <span>${item.session_id || 'N/A'}</span>
                         ${item.trainer_email ? `<span class="trainer-email">${escapeHtml(item.trainer_email)}</span>` : ''}
                         ${item.colab_url ? `<a class="detail-colab-link" href="${escapeHtml(item.colab_url)}" target="_blank" rel="noopener noreferrer">View task</a>` : ''}
                         <span class="detail-time">${time}</span>
@@ -745,11 +787,15 @@ function formatDetailItem(item, type) {
 
 // ============== Search ==============
 
+function overviewTabButton() {
+    return document.querySelector('.tab-nav .tab-btn[data-section="overview"]');
+}
+
 async function performSearch() {
     const query = document.getElementById('searchInput').value.trim();
     if (!query) return;
     
-    showSection('search');
+    showSection('search', null);
     document.getElementById('searchResults').innerHTML = '<div class="loading">Searching...</div>';
     
     const data = await fetchAPI(`search?q=${encodeURIComponent(query)}&limit=100`);
@@ -778,7 +824,7 @@ async function performSearch() {
 
 function clearSearch() {
     document.getElementById('searchInput').value = '';
-    showSection('overview');
+    showSection('overview', overviewTabButton());
 }
 
 // ============== Refresh ==============
@@ -800,6 +846,22 @@ document.addEventListener('DOMContentLoaded', () => {
     if (te) {
         const saved = localStorage.getItem(TRAINER_EMAILS_STORAGE_KEY);
         if (saved) te.value = saved;
+        te.addEventListener('change', onTrainerEmailsChange);
+        te.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                onTrainerEmailsChange();
+            }
+        });
+    }
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput) {
+        searchInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                performSearch();
+            }
+        });
     }
     // Initial load
     loadSectionData('overview');

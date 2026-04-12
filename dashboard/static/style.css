@@ -21,7 +21,7 @@
 }
 
 body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     background: var(--bg-dark);
     color: var(--text-primary);
     line-height: 1.6;
@@ -303,7 +303,33 @@ main {
 }
 
 .card-icon {
-    font-size: 2rem;
+    flex-shrink: 0;
+    width: 2.5rem;
+    height: 2.5rem;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: var(--text-secondary);
+    background: var(--bg-hover);
+}
+
+.card-icon-muted {
+    color: #a5b4fc;
+    background: rgba(99, 102, 241, 0.12);
+}
+
+.card-icon-accent {
+    color: #6ee7b7;
+    background: rgba(16, 185, 129, 0.12);
+}
+
+.card-icon-warn {
+    color: #fca5a5;
+    background: rgba(239, 68, 68, 0.12);
 }
 
 .card-value {
@@ -403,8 +429,12 @@ main {
 }
 
 .podium-rank {
-    font-size: 2rem;
-    margin-bottom: 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    margin-bottom: 0.35rem;
 }
 
 .podium-name {
@@ -707,8 +737,17 @@ main {
     border-bottom: 1px solid var(--border);
 }
 
-.event-icon {
-    font-size: 1.25rem;
+.event-type-marker {
+    flex-shrink: 0;
+    min-width: 2rem;
+    padding: 0.2rem 0.35rem;
+    border-radius: 4px;
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: var(--text-secondary);
+    background: var(--bg-hover);
+    text-align: center;
 }
 
 .event-content {
