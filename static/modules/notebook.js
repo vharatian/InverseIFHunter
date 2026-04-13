@@ -505,7 +505,7 @@ export async function fetchFromUrl(forceNew = false) {
     
     if (!elements.fetchUrlBtn) {
         console.error('fetchUrlBtn element not found');
-        showToast('Fetch button not found', 'error');
+        showToast('Load button not found', 'error');
         return;
     }
     
@@ -516,9 +516,9 @@ export async function fetchFromUrl(forceNew = false) {
     }
     
     try {
-        showToast('Fetching notebook from URL...', 'info');
+        showToast('Loading notebook from URL...', 'info');
         elements.fetchUrlBtn.disabled = true;
-        elements.fetchUrlBtn.textContent = 'Fetching...';
+        elements.fetchUrlBtn.textContent = 'Loading...';
         
         const trainerInfo = getTrainerInfo();
         const response = await fetch('api/fetch-notebook', {
@@ -529,10 +529,10 @@ export async function fetchFromUrl(forceNew = false) {
         
         
         if (!response.ok) {
-            let errorMessage = 'Fetch failed';
+            let errorMessage = 'Load failed';
             try {
             const error = await response.json();
-                errorMessage = error.detail || error.message || 'Fetch failed';
+                errorMessage = error.detail || error.message || 'Load failed';
             } catch (e) {
                 errorMessage = `HTTP ${response.status}: ${response.statusText}`;
             }
@@ -559,11 +559,11 @@ export async function fetchFromUrl(forceNew = false) {
     } catch (error) {
         console.error('Error fetching notebook:', error);
         playFetchError();
-        showError(error, { operation: 'Fetch notebook', retry: fetchFromUrl });
+        showError(error, { operation: 'Load notebook', retry: fetchFromUrl });
     } finally {
         if (elements.fetchUrlBtn) {
             elements.fetchUrlBtn.disabled = false;
-            elements.fetchUrlBtn.textContent = 'Fetch';
+            elements.fetchUrlBtn.textContent = 'Load';
         }
     }
 }

@@ -1,5 +1,7 @@
 # Deployment Guide
 
+**Operations runbook** (four apps, smoke checks, known issues, incident templates): [operations/README.md](operations/README.md).
+
 ## Architecture
 
 Both stacks use **`docker-compose.prod.yml`** as the base, different **`.env`** files and **Compose project names** (`mh-staging` vs `mh-production`). **Production** also merges **`docker-compose.edge-public.yml`** (nginx on host `:80`). **Staging** merges **`docker-compose.staging-overrides.yml`** (adds **`modelhunter_edge`** aliases only — no public edge container on staging). `deploy.sh` passes the correct `-f` list.

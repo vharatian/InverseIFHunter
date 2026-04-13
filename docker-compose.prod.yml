@@ -41,6 +41,7 @@ services:
       TELEMETRY_LOG_PATH: /app/.telemetry/events.jsonl
     volumes:
       - ./config:/app/config
+      - ./service_account.json:/app/service_account.json:ro
       - telemetry-data:/app/.telemetry
       - storage-data:/app/.storage
     healthcheck:

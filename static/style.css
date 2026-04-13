@@ -6313,7 +6313,9 @@ body.sidebar-visible .container.multi-turn-layout {
     padding-top: 0.25rem;
 }
 .tb-generate-btn {
-    width: 100%;
+    width: fit-content;
+    max-width: 100%;
+    align-self: flex-start;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -6503,11 +6505,13 @@ body.sidebar-visible .container.multi-turn-layout {
 .tb-response-actions {
     display: flex;
     gap: 0.75rem;
-    align-items: stretch;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
 }
-.tb-judge-btn   { flex: 1; padding: 0.38rem 0.65rem; font-size: 0.76rem; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 0.35rem; }
-.tb-regen-btn   { flex: 1; padding: 0.38rem 0.65rem; font-size: 0.76rem; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 0.35rem; }
-.tb-promote-btn { flex: 2; padding: 0.38rem 0.65rem; font-size: 0.76rem; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 0.35rem; }
+.tb-judge-btn   { flex: 0 0 auto; padding: 0.38rem 0.65rem; font-size: 0.76rem; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 0.35rem; }
+.tb-regen-btn   { flex: 0 0 auto; padding: 0.38rem 0.65rem; font-size: 0.76rem; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 0.35rem; }
+.tb-promote-btn { flex: 0 0 auto; padding: 0.38rem 0.65rem; font-size: 0.76rem; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 0.35rem; }
 
 /* ── Judge Result ── */
 .tb-judge-result {
@@ -7771,11 +7775,6 @@ body.sidebar-visible .container.multi-turn-layout {
     flex-shrink: 0;
     flex-wrap: wrap;
 }
-.tb-save-footer-label {
-    font-size: 0.85rem;
-    color: var(--text-secondary);
-    min-width: 120px;
-}
 .tb-save-footer-center {
     display: flex;
     align-items: center;
@@ -7791,6 +7790,11 @@ body.sidebar-visible .container.multi-turn-layout {
     display: flex;
     align-items: center;
     gap: 0.5rem;
+    flex: 0 0 auto;
+}
+.tb-save-footer-actions > .btn {
+    width: fit-content;
+    max-width: 100%;
 }
 .tb-save-dropdown-wrap {
     position: relative;
