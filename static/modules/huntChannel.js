@@ -88,6 +88,8 @@ export function connectHuntChannel(sessionId, userEmail, callbacks) {
       .join()
       .receive('ok', () => {
         console.log(`[HuntChannel] Joined hunt:${sessionId}`);
+        fetch(`api/start-hunt/${sessionId}`, { method: 'POST' })
+          .catch(err => console.warn('[HuntChannel] Failed to submit hunt job:', err));
       })
       .receive('error', (resp) => {
         console.warn('[HuntChannel] Join failed:', resp);

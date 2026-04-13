@@ -1,6 +1,7 @@
 """
 Hunt Routes
 
+POST /api/start-hunt/{session_id}      — submit hunt job (idempotent)
 GET  /api/hunt-stream/{session_id}     — SSE hunt progress stream
 GET  /api/results/{session_id}         — get all accumulated results
 GET  /api/review-results/{session_id}  — get 4 results for human review
@@ -14,12 +15,31 @@ from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
 from services.hunt_engine import hunt_engine
+from services.hunt_worker import submit_hunt_job
+from models.schemas import HuntStatus
 from helpers.shared import _get_validated_session, _log_telemetry_safe, _telemetry_enabled
 import services.redis_session as redis_store
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["hunt"])
+
+
+async def _submit_if_pending(session_id: str) -> bool:
+    """Submit a hunt job only if session is still pending. Returns True if submitted."""
+    status = await redis_store.get_status(session_id)
+    if status and status != HuntStatus.PENDING:
+        return False
+    await submit_hunt_job(session_id)
+    return True
+
+
+@router.post("/start-hunt/{session_id}")
+async def start_hunt(session_id: str):
+    """Idempotent kick — submits hunt job only when status is pending."""
+    await _get_validated_session(session_id)
+    submitted = await _submit_if_pending(session_id)
+    return {"submitted": submitted}
 
 
 @router.get("/hunt-stream/{session_id}")
@@ -33,7 +53,6 @@ async def hunt_stream(session_id: str, request: Request):
     Hunt execution is fully decoupled — survives container restarts.
     """
     import services.event_stream as event_stream
-    from services.hunt_worker import submit_hunt_job
 
     session = await _get_validated_session(session_id)
 
@@ -57,7 +76,7 @@ async def hunt_stream(session_id: str, request: Request):
                     if event.event_type in ("complete", "error"):
                         return
             else:
-                await submit_hunt_job(session_id)
+                await _submit_if_pending(session_id)
 
             async for eid, event in event_stream.subscribe(session_id, last_event_id):
                 if await request.is_disconnected():

@@ -6315,7 +6315,7 @@ body.sidebar-visible .container.multi-turn-layout {
 .tb-generate-btn {
     width: fit-content;
     max-width: 100%;
-    align-self: flex-start;
+    align-self: flex-end;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -6506,7 +6506,7 @@ body.sidebar-visible .container.multi-turn-layout {
     display: flex;
     gap: 0.75rem;
     align-items: center;
-    justify-content: flex-end;
+    justify-content: center;
     flex-wrap: wrap;
 }
 .tb-judge-btn   { flex: 0 0 auto; padding: 0.38rem 0.65rem; font-size: 0.76rem; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 0.35rem; }
