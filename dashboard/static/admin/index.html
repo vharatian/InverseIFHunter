@@ -389,6 +389,33 @@
         .modal-sub { font-size: 0.75rem; color: var(--text-muted); font-family: var(--font-mono); margin-bottom: 1rem; }
         .modal-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1.25rem; }
 
+        /* ── DB browser (Data tab) ───────────────────────────── */
+        .db-sub-tabs { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.75rem; }
+        .db-sub-tab {
+            padding: 0.35rem 0.75rem; font-size: 0.75rem; font-weight: 600;
+            border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-secondary);
+            color: var(--text-secondary); cursor: pointer;
+        }
+        .db-sub-tab:hover { border-color: var(--accent-primary); color: var(--accent-primary); }
+        .db-sub-tab.active { border-color: var(--accent-primary); background: var(--accent-glow); color: var(--accent-primary); }
+        .db-toolbar { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: flex-end; margin-bottom: 0.75rem; }
+        .db-toolbar .form-group { margin-bottom: 0; min-width: 140px; }
+        .db-table-wrap {
+            overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-md);
+            max-height: 520px;
+        }
+        .db-table { width: 100%; border-collapse: collapse; font-size: 0.72rem; }
+        .db-table th, .db-table td { padding: 0.35rem 0.45rem; border-bottom: 1px solid var(--border-subtle); text-align: left; vertical-align: top; }
+        .db-table th { position: sticky; top: 0; background: var(--bg-tertiary); z-index: 1; white-space: nowrap; }
+        .db-table tbody tr:hover { background: var(--bg-hover); }
+        .db-table tbody tr.db-row { cursor: pointer; }
+        .db-cell-json { font-family: var(--font-mono); color: var(--text-secondary); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .db-cell-actions { white-space: nowrap; }
+        .db-row-del { cursor: pointer; padding: 0.15rem 0.4rem; font-size: 0.68rem; }
+        .db-pager { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.75rem; flex-wrap: wrap; font-size: 0.78rem; color: var(--text-secondary); }
+        .db-modal-panel { max-width: min(720px, 96vw); max-height: 90vh; overflow-y: auto; }
+        #db-row-modal-fields .form-group textarea { min-height: 72px; font-family: var(--font-mono); font-size: 0.78rem; }
+
         /* ── Config shell & toolbar ───────────────────────────── */
         .config-shell { display: flex; flex-direction: column; gap: 0.85rem; }
         .config-toolbar {
@@ -729,6 +756,19 @@
         </div>
     </div>
 
+    <div id="db-row-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="db-row-modal-title">
+        <div class="modal-panel db-modal-panel">
+            <h2 id="db-row-modal-title" class="modal-title">Row</h2>
+            <p class="modal-sub" id="db-row-modal-sub"></p>
+            <div id="db-row-modal-fields"></div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-ghost" id="db-row-modal-cancel">Cancel</button>
+                <button type="button" class="btn btn-danger btn-sm" id="db-row-modal-delete" style="display:none">Delete</button>
+                <button type="button" class="btn" id="db-row-modal-save">Save</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Login Gate -->
     <div id="login-gate">
         <div class="login-backdrop">
@@ -823,6 +863,6 @@
         </div>
     </div>
 
-    <script type="module" src="static/admin.js?v=6"></script>
+    <script type="module" src="static/admin.js?v=7"></script>
 </body>
 </html>

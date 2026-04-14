@@ -18,7 +18,7 @@ import asyncio
 import json
 import logging
 import re
-from typing import Optional, List
+from typing import Any, Dict, List, Optional
 
 
 from fastapi import APIRouter, File, UploadFile, HTTPException, Request, BackgroundTasks
@@ -34,7 +34,7 @@ from services.pg_session import (
     save_session_pg, merge_session_metadata_pg, get_session_metadata_pg,
     find_sessions_by_task_id_pg, find_sessions_by_file_id_pg,
 )
-from helpers.notebook_helpers import HEADING_MAP, _update_session_notebook_field
+from helpers.notebook_helpers import HEADING_MAP, PROMPT_PREVIEW_MAX_LEN, _update_session_notebook_field
 import services.redis_session as redis_store
 from helpers.shared import (
     _get_validated_session,
@@ -72,6 +72,34 @@ def _extract_task_id_from_parsed(parsed: ParsedNotebook) -> str:
         if val is not None and str(val).strip():
             return str(val).strip()
     return ""
+
+
+def _merge_prompt_preview_for_duplicate(
+    existing: List[Dict[str, Any]], parsed: Optional[ParsedNotebook] = None
+) -> None:
+    """If duplicate lookup returned no prompt text, use the notebook the user is opening."""
+    if not existing or not parsed:
+        return
+    raw = (getattr(parsed, "prompt", None) or "").strip()
+    if len(raw) > PROMPT_PREVIEW_MAX_LEN:
+        raw = raw[: PROMPT_PREVIEW_MAX_LEN - 1] + "…"
+    if not raw:
+        return
+    for row in existing:
+        if not (str(row.get("prompt_preview") or "").strip()):
+            row["prompt_preview"] = raw
+
+
+async def _enrich_duplicate_sessions_from_redis(existing: List[Dict[str, Any]]) -> None:
+    """Prefer Redis review_status when the session is still live there (PG rows may lack metadata)."""
+    for row in existing:
+        sid = row.get("session_id")
+        if not sid:
+            continue
+        try:
+            row["review_status"] = await redis_store.get_review_status(sid)
+        except Exception:
+            pass
 
 
 # ============== Request/Response Models ==============
@@ -122,6 +150,8 @@ async def upload_notebook(request: Request, file: UploadFile = File(...), force_
                 if not existing:
                     existing = await find_sessions_by_task_id_pg(task_id)
                 if existing:
+                    await _enrich_duplicate_sessions_from_redis(existing)
+                    _merge_prompt_preview_for_duplicate(existing, parsed)
                     return {
                         "success": True,
                         "duplicate_found": True,
@@ -216,6 +246,8 @@ async def fetch_notebook(http_request: Request, request: NotebookURLRequest):
                 if not existing:
                     existing = await find_sessions_by_task_id_pg(task_id)
                 if existing:
+                    await _enrich_duplicate_sessions_from_redis(existing)
+                    _merge_prompt_preview_for_duplicate(existing, parsed)
                     return {
                         "success": True,
                         "duplicate_found": True,
@@ -228,6 +260,8 @@ async def fetch_notebook(http_request: Request, request: NotebookURLRequest):
                 te = (request.trainer_email or "").strip().lower()
                 existing = await find_sessions_by_file_id_pg(file_id, te)
                 if existing:
+                    await _enrich_duplicate_sessions_from_redis(existing)
+                    _merge_prompt_preview_for_duplicate(existing, parsed)
                     return {
                         "success": True,
                         "duplicate_found": True,

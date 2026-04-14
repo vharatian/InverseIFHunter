@@ -473,12 +473,29 @@ export async function uploadFile(file, forceNew = false) {
     }
 }
 
+function _truncateModalLine(s, maxLen) {
+    const t = (s || '').replace(/\s+/g, ' ').trim();
+    if (t.length <= maxLen) return t;
+    return `${t.slice(0, maxLen - 1)}…`;
+}
+
+function _duplicateStatusLine(sess) {
+    const rs = (sess.review_status || '').trim().toLowerCase();
+    const hs = (sess.hunt_status || 'pending').trim().toLowerCase();
+    const reviewLabel = !rs || rs === 'unknown' ? 'draft' : rs;
+    return `Review: ${reviewLabel} · Hunt: ${hs || 'pending'}`;
+}
+
 async function _showDuplicateModal(taskId, existingSessions) {
     const sess = existingSessions[0];
-    const statusLabel = sess.review_status || sess.hunt_status || 'in-progress';
+    const statusLine = _duplicateStatusLine(sess);
+    const preview = _truncateModalLine(sess.prompt_preview, 280);
+    const message = preview
+        ? `A session already exists for this notebook.\n\nPrompt: "${preview}"\n${statusLine}\n\nWould you like to resume the existing session or start a new one?`
+        : `A session already exists for task "${taskId}".\n${statusLine}\n\nWould you like to resume the existing session or start a new one?`;
     return showAppModal({
         title: 'Task already exists',
-        message: `A session for task "${taskId}" already exists (status: ${statusLabel}, session: ${sess.session_id}).\n\nWould you like to resume the existing session or start a new one?`,
+        message,
         buttons: [
             { label: 'Resume existing', primary: true, value: 'resume' },
             { label: 'Start fresh', value: 'new' },

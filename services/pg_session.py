@@ -12,10 +12,56 @@ from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from database import get_db
+from helpers.notebook_helpers import PROMPT_PREVIEW_MAX_LEN
 from models.db_models import SessionRow, HuntResultRow, TrainerRow, QCRunRow
 from models.schemas import HuntSession, HuntConfig, HuntStatus, ParsedNotebook, HuntResult, TurnData
 
 logger = logging.getLogger(__name__)
+
+_REVIEW_STATUS_PG = frozenset(
+    {"draft", "submitted", "returned", "approved", "rejected", "escalated"}
+)
+
+
+def _normalize_pg_review_status(raw: Optional[str]) -> str:
+    t = (raw or "").strip().lower()
+    if t in _REVIEW_STATUS_PG:
+        return t
+    return "draft"
+
+
+def _duplicate_session_rows_to_dicts(rows: List[Any]) -> List[Dict[str, Any]]:
+    """Map PG duplicate-query rows to the shape expected by /api/*-notebook duplicate responses."""
+    return [
+        {
+            "session_id": row[0],
+            "review_status": _normalize_pg_review_status(row[2]),
+            "hunt_status": row[1] or "pending",
+            "prompt_preview": (row[3] or "").strip(),
+        }
+        for row in rows
+    ]
+
+
+async def _query_duplicate_sessions_pg(where_order_limit: str, params: dict) -> List[Dict[str, Any]]:
+    """Shared SELECT for task_id / file_id / colab_url duplicate lookups (prompt + review hint)."""
+    n = int(PROMPT_PREVIEW_MAX_LEN)
+    sql = f"""
+                SELECT id, status,
+                       NULLIF(TRIM(metadata->>'review_status'), '') AS review_meta,
+                       LEFT(
+                         COALESCE(
+                           NULLIF(TRIM(notebook_json->>'prompt'), ''),
+                           NULLIF(TRIM(notebook_json->'turns'->0->>'prompt'), '')
+                         ),
+                         {n}
+                       ) AS prompt_preview
+                FROM sessions
+                WHERE {where_order_limit}
+            """
+    async with get_db() as db:
+        result = await db.execute(text(sql), params)
+        return _duplicate_session_rows_to_dicts(result.fetchall())
 
 
 async def save_session_pg(session: HuntSession) -> None:
@@ -227,25 +273,17 @@ async def find_sessions_by_task_id_pg(task_id: str) -> List[Dict[str, Any]]:
     """Find sessions in PG whose notebook_json metadata contains the given task_id."""
     if not task_id or not task_id.strip():
         return []
-    async with get_db() as db:
-        result = await db.execute(
-            text("""
-                SELECT id, status FROM sessions
-                WHERE notebook_json->>'metadata' IS NOT NULL
+    return await _query_duplicate_sessions_pg(
+        """notebook_json->>'metadata' IS NOT NULL
                   AND EXISTS (
                       SELECT 1 FROM jsonb_each_text(notebook_json->'metadata') kv
                       WHERE kv.key IN ('Task ID', 'TaskID', 'task_id')
                         AND kv.value = :tid
                   )
                 ORDER BY updated_at DESC
-                LIMIT 10
-            """),
-            {"tid": task_id.strip()},
-        )
-        return [
-            {"session_id": row.id, "review_status": "unknown", "hunt_status": row.status or "pending"}
-            for row in result.fetchall()
-        ]
+                LIMIT 10""",
+        {"tid": task_id.strip()},
+    )
 
 
 async def find_sessions_by_file_id_pg(file_id: str, trainer_email: str = "") -> List[Dict[str, Any]]:
@@ -257,21 +295,11 @@ async def find_sessions_by_file_id_pg(file_id: str, trainer_email: str = "") -> 
     if trainer_email:
         email_clause = "AND metadata->>'trainer_email' = :email"
         params["email"] = trainer_email.strip().lower()
-    async with get_db() as db:
-        result = await db.execute(
-            text(f"""
-                SELECT id, status FROM sessions
-                WHERE metadata->>'file_id' = :fid
+    where_order = f"""metadata->>'file_id' = :fid
                   {email_clause}
                 ORDER BY updated_at DESC
-                LIMIT 10
-            """),
-            params,
-        )
-        return [
-            {"session_id": row.id, "review_status": "unknown", "hunt_status": row.status or "pending"}
-            for row in result.fetchall()
-        ]
+                LIMIT 10"""
+    return await _query_duplicate_sessions_pg(where_order, params)
 
 
 async def find_sessions_by_colab_url_pg(url: str) -> List[Dict[str, Any]]:
@@ -280,21 +308,13 @@ async def find_sessions_by_colab_url_pg(url: str) -> List[Dict[str, Any]]:
     if not u:
         return []
     u_strip = u.rstrip("/")
-    async with get_db() as db:
-        result = await db.execute(
-            text("""
-                SELECT id, status FROM sessions
-                WHERE TRIM(COALESCE(metadata->>'colab_url', '')) IN (:u, :u2)
+    return await _query_duplicate_sessions_pg(
+        """TRIM(COALESCE(metadata->>'colab_url', '')) IN (:u, :u2)
                    OR TRIM(COALESCE(metadata->>'url', '')) IN (:u, :u2)
                 ORDER BY updated_at DESC
-                LIMIT 10
-            """),
-            {"u": u, "u2": u_strip},
-        )
-        return [
-            {"session_id": row.id, "review_status": "unknown", "hunt_status": row.status or "pending"}
-            for row in result.fetchall()
-        ]
+                LIMIT 10""",
+        {"u": u, "u2": u_strip},
+    )
 
 
 async def insert_qc_run_pg(

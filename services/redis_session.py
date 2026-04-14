@@ -27,6 +27,7 @@ import os
 from typing import Any, Dict, Optional, List
 
 from redis_client import get_redis, get_redis_blocking, close_redis
+from helpers.notebook_helpers import prompt_preview_from_notebook_json
 from models.schemas import (
     HuntSession, HuntConfig, HuntResult, HuntStatus,
     ParsedNotebook, TurnData, HuntEvent
@@ -694,10 +695,12 @@ async def find_sessions_by_task_id(task_id: str) -> List[Dict[str, Any]]:
         nb_json = raw[i * 3]
         existing_tid = _extract_task_display_id(nb_json)
         if existing_tid == target:
+            nb_json = nb_json.decode("utf-8", errors="replace") if isinstance(nb_json, (bytes, bytearray)) else nb_json
             matches.append({
                 "session_id": sid,
                 "review_status": raw[i * 3 + 1] or "draft",
                 "hunt_status": raw[i * 3 + 2] or "pending",
+                "prompt_preview": prompt_preview_from_notebook_json(nb_json),
             })
     return matches
 

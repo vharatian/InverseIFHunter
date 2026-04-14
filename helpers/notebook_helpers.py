@@ -3,8 +3,9 @@ Notebook Cell Helpers
 
 Constants and utility functions for manipulating Jupyter notebook cell structures.
 """
+import json
 import re
-from typing import List
+from typing import Any, List, Optional, Union
 from models.schemas import HuntSession
 
 
@@ -21,6 +22,9 @@ HEADING_MAP = {
 
 # Cell order for notebook structure
 CELL_ORDER = ["prompt", "response", "model_reasoning", "response_reference", "judge_system_prompt"]
+
+# Single source for duplicate-modal / PG LEFT() prompt snippet length
+PROMPT_PREVIEW_MAX_LEN = 220
 
 # Progressive save heading map: cell_type -> human-readable label for **[Turn-N: Label]** format
 PROGRESSIVE_HEADING_MAP = {
@@ -352,3 +356,36 @@ def _reorder_notebook_cells(notebook_data: dict, heading_map: dict, cell_order: 
         new_cells.append(cell)
     
     notebook_data["cells"] = new_cells
+
+
+def prompt_preview_from_notebook_json(
+    notebook_json: Optional[Union[str, bytes]], max_len: int = PROMPT_PREVIEW_MAX_LEN
+) -> str:
+    """
+    Short single-line preview of the task prompt from stored session notebook JSON
+    (ParsedNotebook dump in Redis/PG). Handles multi-turn (first turn prompt).
+    """
+    if notebook_json is None:
+        return ""
+    if isinstance(notebook_json, (bytes, bytearray)):
+        try:
+            notebook_json = notebook_json.decode("utf-8", errors="replace")
+        except Exception:
+            return ""
+    if not str(notebook_json).strip():
+        return ""
+    try:
+        data: Any = json.loads(notebook_json)
+    except (json.JSONDecodeError, TypeError):
+        return ""
+    if not isinstance(data, dict):
+        return ""
+    p = (data.get("prompt") or "").strip()
+    if not p:
+        turns = data.get("turns") or []
+        if isinstance(turns, list) and turns and isinstance(turns[0], dict):
+            p = (turns[0].get("prompt") or "").strip()
+    p = re.sub(r"\s+", " ", p).strip()
+    if len(p) > max_len:
+        return p[: max_len - 1] + "…"
+    return p

@@ -1,10 +1,14 @@
 """Data management routes — session cleanup, wipe test data."""
-import os
+import json
 import logging
+import os
+import re
+import uuid
+from datetime import datetime, timezone
+from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel
-from typing import Optional
 
 from auth import verify_super_admin
 
@@ -13,6 +17,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin/data", tags=["admin-data"])
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
+
+# Admin DB browser — allowlisted table names only (see plan).
+ALLOWED_TABLES = frozenset({"sessions", "hunt_results", "trainers", "qc_runs"})
+_IDENT_RE = re.compile(r"^[a-z_][a-z0-9_]*$")
 
 
 def _get_sync_url():
@@ -144,5 +152,349 @@ async def data_stats(_=Depends(verify_super_admin)):
             "draft_sessions": draft,
             "total_hunt_results": results,
         }
+    finally:
+        await conn.close()
+
+
+# ─── DB browser (super-admin) ─────────────────────────────────────────────
+
+
+def _assert_allowed_table(table: str) -> str:
+    if table not in ALLOWED_TABLES:
+        raise HTTPException(404, "Unknown table")
+    return table
+
+
+def _quote_ident(name: str) -> str:
+    if not _IDENT_RE.match(name):
+        raise HTTPException(400, "Invalid column name")
+    return '"' + name.replace('"', '""') + '"'
+
+
+def _serialize_cell(val: Any) -> Any:
+    if val is None:
+        return None
+    if isinstance(val, uuid.UUID):
+        return str(val)
+    if isinstance(val, datetime):
+        return val.isoformat()
+    if isinstance(val, (dict, list)):
+        return val
+    if isinstance(val, memoryview):
+        return val.tobytes().decode("utf-8", errors="replace")
+    return val
+
+
+def _serialize_row(row: dict) -> dict:
+    return {k: _serialize_cell(v) for k, v in row.items()}
+
+
+async def _fetch_columns(conn, table: str) -> list[dict]:
+    rows = await conn.fetch(
+        """
+        SELECT c.column_name,
+               CASE WHEN c.data_type = 'USER-DEFINED' THEN c.udt_name::text ELSE c.data_type END AS data_type,
+               c.is_nullable,
+               COALESCE(pk.is_pk, false) AS is_pk
+        FROM information_schema.columns c
+        LEFT JOIN (
+            SELECT ku.table_name, ku.column_name, true AS is_pk
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage ku
+              ON tc.constraint_catalog = ku.constraint_catalog
+             AND tc.constraint_schema = ku.constraint_schema
+             AND tc.constraint_name = ku.constraint_name
+            WHERE tc.table_schema = 'public'
+              AND tc.constraint_type = 'PRIMARY KEY'
+        ) pk ON c.table_name = pk.table_name AND c.column_name = pk.column_name
+        WHERE c.table_schema = 'public' AND c.table_name = $1
+        ORDER BY c.ordinal_position
+        """,
+        table,
+    )
+    if not rows:
+        return []
+    out = []
+    for r in rows:
+        dt = r["data_type"]
+        is_jsonb = dt == "jsonb"
+        out.append({
+            "name": r["column_name"],
+            "data_type": "jsonb" if is_jsonb else dt,
+            "nullable": r["is_nullable"] == "YES",
+            "is_pk": bool(r["is_pk"]),
+        })
+    return out
+
+
+async def _get_pk_name(columns: list[dict]) -> str:
+    for c in columns:
+        if c["is_pk"]:
+            return c["name"]
+    raise HTTPException(500, "Table has no primary key in metadata")
+
+
+def _parse_value_for_column(col_meta: dict, raw: Any) -> Any:
+    if raw is None:
+        return None
+    dt = col_meta["data_type"]
+    if raw == "" and col_meta["nullable"] and (dt == "uuid" or "uuid" in str(dt)):
+        return None
+    if dt == "jsonb":
+        if isinstance(raw, (dict, list)):
+            return raw
+        if isinstance(raw, str):
+            return json.loads(raw)
+        raise HTTPException(400, f"Invalid JSONB for {col_meta['name']}")
+    if dt == "uuid" or "uuid" in str(dt):
+        return uuid.UUID(str(raw))
+    if dt in ("integer", "bigint", "smallint") or "integer" in str(dt):
+        return int(raw)
+    if dt in ("boolean",) or dt == "bool":
+        return bool(raw)
+    if dt in ("double precision", "real") or "numeric" in str(dt) or dt == "float":
+        return float(raw)
+    if "timestamp" in str(dt) or dt == "date":
+        if isinstance(raw, (int, float)):
+            return datetime.fromtimestamp(raw, tz=timezone.utc)
+        s = str(raw).strip()
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        d = datetime.fromisoformat(s)
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=timezone.utc)
+        return d
+    return raw
+
+
+async def _coerce_body_for_write(
+    conn, table: str, body: dict[str, Any], *, partial: bool
+) -> dict[str, Any]:
+    columns = await _fetch_columns(conn, table)
+    if not columns:
+        raise HTTPException(404, "Table not found or empty metadata")
+    col_by_name = {c["name"]: c for c in columns}
+    out: dict[str, Any] = {}
+    for key, val in body.items():
+        if key not in allowed:
+            continue
+        meta = col_by_name[key]
+        if meta["is_pk"] and partial:
+            continue
+        if val is None and not meta["nullable"] and not meta["is_pk"]:
+            raise HTTPException(400, f"{key} cannot be null")
+        if val == "" and meta["nullable"]:
+            out[key] = None
+            continue
+        if val is None:
+            out[key] = None
+            continue
+        out[key] = _parse_value_for_column(meta, val)
+    return out
+
+
+def _searchable_columns(columns: list[dict]) -> list[str]:
+    return [c["name"] for c in columns if c["data_type"] != "jsonb"]
+
+
+@router.get("/browse/{table}/schema")
+async def browse_schema(table: str, _=Depends(verify_super_admin)):
+    """Column metadata for building the admin grid and forms."""
+    table = _assert_allowed_table(table)
+    if not DATABASE_URL:
+        raise HTTPException(503, "DATABASE_URL not configured")
+    conn = await _get_conn()
+    try:
+        cols = await _fetch_columns(conn, table)
+        if not cols:
+            raise HTTPException(404, "Table not found")
+        pk = await _get_pk_name(cols)
+        sortable = [c["name"] for c in cols if c["data_type"] != "jsonb"]
+        return {"table": table, "columns": cols, "pk": pk, "sortable": sortable}
+    finally:
+        await conn.close()
+
+
+@router.get("/browse/{table}")
+async def browse_list(
+    table: str,
+    _=Depends(verify_super_admin),
+    page: int = Query(1, ge=1),
+    limit: int = Query(25, ge=1, le=100),
+    search: str = Query("", max_length=500),
+    sort: Optional[str] = None,
+    order: str = Query("desc"),
+):
+    table = _assert_allowed_table(table)
+    if not DATABASE_URL:
+        raise HTTPException(503, "DATABASE_URL not configured")
+    conn = await _get_conn()
+    try:
+        columns = await _fetch_columns(conn, table)
+        if not columns:
+            raise HTTPException(404, "Table not found")
+        col_names = [c["name"] for c in columns]
+        pk = await _get_pk_name(columns)
+        sort_col = sort if sort in col_names else None
+        if not sort_col:
+            if "updated_at" in col_names:
+                sort_col = "updated_at"
+            elif "created_at" in col_names:
+                sort_col = "created_at"
+            else:
+                sort_col = pk
+        ol = order.lower()
+        if ol not in ("asc", "desc"):
+            raise HTTPException(400, "order must be asc or desc")
+        order_sql = "ASC" if ol == "asc" else "DESC"
+        q_ident = _quote_ident
+        t_ref = q_ident(table)
+        order_expr = f"{q_ident(sort_col)} {order_sql} NULLS LAST"
+        offset = (page - 1) * limit
+        params: list[Any] = []
+        where_sql = ""
+        if search.strip():
+            s = f"%{search.strip()}%"
+            search_cols = _searchable_columns(columns)
+            if search_cols:
+                parts = [f"CAST({q_ident(c)} AS TEXT) ILIKE $1" for c in search_cols]
+                params.append(s)
+                where_sql = "WHERE (" + " OR ".join(parts) + ")"
+        count_sql = f"SELECT COUNT(*) FROM {t_ref} {where_sql}"
+        total = await conn.fetchval(count_sql, *params)
+        ni = len(params)
+        list_sql = (
+            f"SELECT * FROM {t_ref} {where_sql} ORDER BY {order_expr} "
+            f"LIMIT ${ni + 1} OFFSET ${ni + 2}"
+        )
+        params.extend([limit, offset])
+        recs = await conn.fetch(list_sql, *params)
+        rows = [_serialize_row(dict(r)) for r in recs]
+        return {
+            "rows": rows,
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "sort": sort_col,
+            "order": order.lower(),
+        }
+    finally:
+        await conn.close()
+
+
+@router.get("/browse/{table}/{row_id}")
+async def browse_get(table: str, row_id: str, _=Depends(verify_super_admin)):
+    table = _assert_allowed_table(table)
+    if not DATABASE_URL:
+        raise HTTPException(503, "DATABASE_URL not configured")
+    conn = await _get_conn()
+    try:
+        columns = await _fetch_columns(conn, table)
+        if not columns:
+            raise HTTPException(404, "Table not found")
+        pk = await _get_pk_name(columns)
+        pk_meta = next(c for c in columns if c["name"] == pk)
+        typed = _parse_value_for_column(pk_meta, row_id)
+        q = f"SELECT * FROM {_quote_ident(table)} WHERE {_quote_ident(pk)} = $1"
+        rec = await conn.fetchrow(q, typed)
+        if not rec:
+            raise HTTPException(404, "Row not found")
+        return _serialize_row(dict(rec))
+    finally:
+        await conn.close()
+
+
+@router.post("/browse/{table}")
+async def browse_create(
+    table: str,
+    body: dict = Body(default_factory=dict),
+    _=Depends(verify_super_admin),
+):
+    table = _assert_allowed_table(table)
+    if not DATABASE_URL:
+        raise HTTPException(503, "DATABASE_URL not configured")
+    conn = await _get_conn()
+    try:
+        columns = await _fetch_columns(conn, table)
+        if not columns:
+            raise HTTPException(404, "Table not found")
+        coerced = await _coerce_body_for_write(conn, table, body, partial=False)
+        pk = await _get_pk_name(columns)
+        pk_meta = next(c for c in columns if c["name"] == pk)
+        if pk not in coerced or coerced.get(pk) is None:
+            if pk_meta["data_type"] == "uuid":
+                coerced[pk] = uuid.uuid4()
+            elif table == "sessions" and pk == "id":
+                raise HTTPException(400, "sessions.id is required for insert")
+        cols = list(coerced.keys())
+        placeholders = [f"${i + 1}" for i in range(len(cols))]
+        sql = (
+            f"INSERT INTO {_quote_ident(table)} ({', '.join(_quote_ident(c) for c in cols)}) "
+            f"VALUES ({', '.join(placeholders)}) RETURNING *"
+        )
+        rec = await conn.fetchrow(sql, *[coerced[c] for c in cols])
+        return _serialize_row(dict(rec))
+    finally:
+        await conn.close()
+
+
+@router.put("/browse/{table}/{row_id}")
+async def browse_update(
+    table: str,
+    row_id: str,
+    body: dict = Body(default_factory=dict),
+    _=Depends(verify_super_admin),
+):
+    table = _assert_allowed_table(table)
+    if not DATABASE_URL:
+        raise HTTPException(503, "DATABASE_URL not configured")
+    conn = await _get_conn()
+    try:
+        columns = await _fetch_columns(conn, table)
+        if not columns:
+            raise HTTPException(404, "Table not found")
+        pk = await _get_pk_name(columns)
+        pk_meta = next(c for c in columns if c["name"] == pk)
+        pk_val = _parse_value_for_column(pk_meta, row_id)
+        coerced = await _coerce_body_for_write(conn, table, body, partial=True)
+        for k in list(coerced.keys()):
+            if k == pk:
+                coerced.pop(k, None)
+        if not coerced:
+            raise HTTPException(400, "No columns to update")
+        sets = [f"{_quote_ident(k)} = ${i + 1}" for i, k in enumerate(coerced.keys())]
+        vals = list(coerced.values())
+        sql = (
+            f"UPDATE {_quote_ident(table)} SET {', '.join(sets)} "
+            f"WHERE {_quote_ident(pk)} = ${len(vals) + 1} RETURNING *"
+        )
+        rec = await conn.fetchrow(sql, *vals, pk_val)
+        if not rec:
+            raise HTTPException(404, "Row not found")
+        return _serialize_row(dict(rec))
+    finally:
+        await conn.close()
+
+
+@router.delete("/browse/{table}/{row_id}")
+async def browse_delete(table: str, row_id: str, _=Depends(verify_super_admin)):
+    table = _assert_allowed_table(table)
+    if not DATABASE_URL:
+        raise HTTPException(503, "DATABASE_URL not configured")
+    conn = await _get_conn()
+    try:
+        columns = await _fetch_columns(conn, table)
+        if not columns:
+            raise HTTPException(404, "Table not found")
+        pk = await _get_pk_name(columns)
+        pk_meta = next(c for c in columns if c["name"] == pk)
+        pk_val = _parse_value_for_column(pk_meta, row_id)
+        res = await conn.execute(
+            f"DELETE FROM {_quote_ident(table)} WHERE {_quote_ident(pk)} = $1",
+            pk_val,
+        )
+        if res == "DELETE 0":
+            raise HTTPException(404, "Row not found")
+        return {"deleted": True, "table": table, "pk": pk, "row_id": row_id}
     finally:
         await conn.close()

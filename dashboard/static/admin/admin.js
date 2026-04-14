@@ -5,6 +5,12 @@
 
 let currentUser = null;
 
+let dbBrowseLastRows = [];
+let dbBrowseLastSchema = null;
+let dbModalCtx = { mode: 'edit', table: '', pk: '', row: null };
+let dbBrowseState = { table: 'sessions', page: 1, limit: 25, search: '', sort: '', order: 'desc', schemaCache: {} };
+let dbBrowseContainer = null;
+
 // Base path prefix — detects /staging or similar prefix from the current URL.
 // E.g. /staging/admin/ → _basePath = '/staging', /admin/ → _basePath = ''
 const _basePath = (() => {
@@ -53,6 +59,14 @@ function esc(str) {
     const d = document.createElement('div');
     d.textContent = String(str);
     return d.innerHTML;
+}
+
+function debounce(fn, ms) {
+    let t;
+    return (...args) => {
+        clearTimeout(t);
+        t = setTimeout(() => fn(...args), ms);
+    };
 }
 
 function _initials(email, name) {
@@ -745,7 +759,7 @@ function renderDataTab(stats, container) {
                 <button class="btn btn-danger btn-sm" id="delete-session-btn">Delete</button>
             </div>
         </div>
-        <div class="card">
+        <div class="card" style="margin-bottom:1rem;">
             <div class="card-header"><h3>Wipe Draft / Test Sessions</h3></div>
             <div style="padding:1rem;">
                 <p style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:0.75rem;">
@@ -760,13 +774,40 @@ function renderDataTab(stats, container) {
                 </div>
             </div>
         </div>
+        <div class="card db-browse-card">
+            <div class="card-header"><h3>Database browser</h3></div>
+            <div id="db-browse-root" style="padding:0 0 1rem;">
+                <div class="db-sub-tabs" id="db-sub-tabs"></div>
+                <div class="db-toolbar">
+                    <div class="form-group">
+                        <label for="db-browse-search">Search</label>
+                        <input type="text" id="db-browse-search" placeholder="Filter rows…" style="min-width:180px;" />
+                    </div>
+                    <div class="form-group">
+                        <label for="db-browse-sort">Sort</label>
+                        <select id="db-browse-sort"></select>
+                    </div>
+                    <div class="form-group">
+                        <label for="db-browse-order">Order</label>
+                        <select id="db-browse-order"><option value="desc">desc</option><option value="asc">asc</option></select>
+                    </div>
+                    <div class="form-group">
+                        <label for="db-browse-limit">Per page</label>
+                        <select id="db-browse-limit"><option value="25">25</option><option value="50">50</option><option value="100">100</option></select>
+                    </div>
+                    <button type="button" class="btn btn-sm" id="db-browse-add">Add row</button>
+                </div>
+                <div id="db-browse-table-wrap"><div class="loading">Loading…</div></div>
+                <div id="db-browse-pager"></div>
+            </div>
+        </div>
     `;
     document.getElementById('delete-session-btn').addEventListener('click', async () => {
         const sid = document.getElementById('delete-session-id').value.trim();
         if (!sid) { toast('Enter a session ID', 'error'); return; }
         if (!confirm(`Delete session ${sid}? This cannot be undone.`)) return;
         try {
-            await api(`data/session/${sid}`, { method: 'DELETE' });
+            await api(`data/session/${encodeURIComponent(sid)}`, { method: 'DELETE' });
             toast(`Session ${sid} deleted`);
             loadDataTab();
         } catch (e) { toast(e.message, 'error'); }
@@ -785,6 +826,310 @@ function renderDataTab(stats, container) {
             loadDataTab();
         } catch (e) { toast(e.message, 'error'); }
     });
+    initDbBrowse(container);
+}
+
+const DB_TABLES = ['sessions', 'hunt_results', 'trainers', 'qc_runs'];
+
+function _dbPath(p) {
+    return `data/browse/${p}`;
+}
+
+async function loadDbBrowseSchema(table) {
+    if (dbBrowseState.schemaCache[table]) return dbBrowseState.schemaCache[table];
+    const s = await api(_dbPath(`${table}/schema`));
+    dbBrowseState.schemaCache[table] = s;
+    return s;
+}
+
+function _dbIsNumericType(dt) {
+    if (!dt) return false;
+    return dt === 'integer' || dt === 'bigint' || dt === 'smallint' || dt === 'double precision' || dt === 'real'
+        || String(dt).includes('numeric');
+}
+
+function _dbFieldInputHtml(col, val, mode) {
+    const id = `dbf-${col.name}`;
+    const ro = col.is_pk && mode === 'edit';
+    const v = val !== undefined && val !== null ? val : '';
+    if (col.data_type === 'jsonb') {
+        const tv = (v === '' || v === null || v === undefined) ? '' : (typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v));
+        return `<div class="form-group"><label for="${id}">${esc(col.name)}</label><textarea id="${id}" data-dbf="${esc(col.name)}" data-jsonb="1" ${ro ? 'readonly' : ''}>${esc(tv)}</textarea></div>`;
+    }
+    if (col.data_type === 'boolean') {
+        const chk = v === true || v === 'true';
+        return `<div class="form-group"><label><input type="checkbox" id="${id}" data-dbf="${esc(col.name)}" ${chk ? 'checked' : ''} ${ro ? 'disabled' : ''} /> ${esc(col.name)}</label></div>`;
+    }
+    if (_dbIsNumericType(col.data_type)) {
+        return `<div class="form-group"><label for="${id}">${esc(col.name)}</label><input type="number" step="any" id="${id}" data-dbf="${esc(col.name)}" value="${esc(v)}" ${ro ? 'readonly' : ''} /></div>`;
+    }
+    if (String(col.data_type || '').includes('timestamp') || col.data_type === 'date') {
+        return `<div class="form-group"><label for="${id}">${esc(col.name)}</label><input type="text" id="${id}" data-dbf="${esc(col.name)}" value="${esc(v)}" placeholder="ISO-8601" ${ro ? 'readonly' : ''} /></div>`;
+    }
+    if (col.data_type === 'uuid' || String(col.data_type || '').includes('uuid')) {
+        const hideAddUuidPk = mode === 'add' && col.is_pk && (col.data_type === 'uuid' || String(col.data_type || '').includes('uuid'));
+        if (hideAddUuidPk) {
+            return `<div class="form-group"><label>${esc(col.name)}</label><p style="font-size:0.75rem;color:var(--text-secondary);">Auto-generated UUID on save</p><input type="hidden" id="${id}" data-dbf="${esc(col.name)}" value="" /></div>`;
+        }
+        return `<div class="form-group"><label for="${id}">${esc(col.name)}</label><input type="text" id="${id}" data-dbf="${esc(col.name)}" value="${esc(v)}" ${ro ? 'readonly' : ''} /></div>`;
+    }
+    const longText = /prompt|response|reasoning|explanation|judge_output|error|trace/i.test(col.name);
+    if (longText || String(v).length > 120) {
+        return `<div class="form-group"><label for="${id}">${esc(col.name)}</label><textarea id="${id}" data-dbf="${esc(col.name)}" ${ro ? 'readonly' : ''}>${esc(v)}</textarea></div>`;
+    }
+    return `<div class="form-group"><label for="${id}">${esc(col.name)}</label><input type="text" id="${id}" data-dbf="${esc(col.name)}" value="${esc(v)}" ${ro ? 'readonly' : ''} /></div>`;
+}
+
+function _dbCollectPayload(schema) {
+    const out = {};
+    for (const col of schema.columns) {
+        const el = document.getElementById(`dbf-${col.name}`);
+        if (!el) continue;
+        if (col.data_type === 'jsonb') {
+            const s = el.value.trim();
+            if (!s) out[col.name] = null;
+            else {
+                try { out[col.name] = JSON.parse(s); }
+                catch (e) { throw new Error(`Invalid JSON in ${col.name}: ${e.message}`); }
+            }
+            continue;
+        }
+        if (col.data_type === 'boolean') {
+            out[col.name] = el.checked;
+            continue;
+        }
+        if (_dbIsNumericType(col.data_type)) {
+            const raw = el.value.trim();
+            if (raw === '') out[col.name] = null;
+            else if (col.data_type === 'integer' || col.data_type === 'bigint' || col.data_type === 'smallint') out[col.name] = parseInt(raw, 10);
+            else out[col.name] = parseFloat(raw);
+            continue;
+        }
+        const raw = el.value;
+        if (raw === '' && col.nullable && !col.is_pk) out[col.name] = null;
+        else out[col.name] = raw;
+    }
+    return out;
+}
+
+function openDbModal(mode, table, schema, row) {
+    dbBrowseLastSchema = schema;
+    dbModalCtx = { mode, table, pk: schema.pk, row: row || null };
+    const title = document.getElementById('db-row-modal-title');
+    const sub = document.getElementById('db-row-modal-sub');
+    const fields = document.getElementById('db-row-modal-fields');
+    const delBtn = document.getElementById('db-row-modal-delete');
+    title.textContent = mode === 'add' ? `Add row — ${table}` : `Edit row — ${table}`;
+    sub.textContent = mode === 'edit' && row ? `${schema.pk}: ${row[schema.pk]}` : '';
+    let h = '';
+    for (const col of schema.columns) {
+        const val = mode === 'edit' && row ? row[col.name] : undefined;
+        h += _dbFieldInputHtml(col, val, mode);
+    }
+    fields.innerHTML = h;
+    delBtn.style.display = mode === 'edit' ? '' : 'none';
+    document.getElementById('db-row-modal').classList.remove('hidden');
+}
+
+function closeDbModal() {
+    document.getElementById('db-row-modal').classList.add('hidden');
+}
+
+async function saveDbModal() {
+    const { mode, table, pk, row } = dbModalCtx;
+    let s = dbBrowseLastSchema;
+    if (!s || s.table !== table) {
+        try { s = await loadDbBrowseSchema(table); dbBrowseLastSchema = s; }
+        catch (e) { toast(e.message, 'error'); return; }
+    }
+    try {
+        if (mode === 'add') {
+            const body = _dbCollectPayload(s);
+            const pkCol = s.columns.find(c => c.name === s.pk);
+            if (pkCol && (pkCol.data_type === 'uuid' || String(pkCol.data_type || '').includes('uuid'))) {
+                if (body[s.pk] === '' || body[s.pk] == null) delete body[s.pk];
+            }
+            await api(_dbPath(table), { method: 'POST', body: JSON.stringify(body) });
+            toast('Row created');
+        } else {
+            const rid = row[pk];
+            const body = _dbCollectPayload(s);
+            delete body[pk];
+            await api(_dbPath(`${table}/${encodeURIComponent(String(rid))}`), { method: 'PUT', body: JSON.stringify(body) });
+            toast('Row updated');
+        }
+        closeDbModal();
+        if (dbBrowseContainer) refreshDbBrowse(dbBrowseContainer);
+    } catch (e) { toast(e.message, 'error'); }
+}
+
+async function deleteDbModalRow() {
+    const { table, pk, row } = dbModalCtx;
+    if (!row || !confirm('Delete this row?')) return;
+    const rid = row[pk];
+    try {
+        await api(_dbPath(`${table}/${encodeURIComponent(String(rid))}`), { method: 'DELETE' });
+        toast('Row deleted');
+        closeDbModal();
+        if (dbBrowseContainer) refreshDbBrowse(dbBrowseContainer);
+    } catch (e) { toast(e.message, 'error'); }
+}
+
+function _dbCellPreview(val) {
+    if (val === null || val === undefined) return '—';
+    if (typeof val === 'object') {
+        const j = JSON.stringify(val);
+        return j.length > 90 ? j.slice(0, 87) + '…' : j;
+    }
+    const s = String(val);
+    return s.length > 80 ? s.slice(0, 77) + '…' : s;
+}
+
+function renderDbTableHtml(schema, listData) {
+    const cols = schema.columns.slice(0, 12);
+    const pk = schema.pk;
+    let th = cols.map(c => `<th>${esc(c.name)}</th>`).join('');
+    th += '<th class="db-cell-actions"> </th>';
+    const rows = listData.rows || [];
+    dbBrowseLastRows = rows;
+    dbBrowseLastSchema = schema;
+    let tr = '';
+    rows.forEach((row, i) => {
+        let tds = cols.map((c) => {
+            const v = row[c.name];
+            const cls = c.data_type === 'jsonb' ? 'db-cell-json' : '';
+            return `<td class="${cls}">${esc(_dbCellPreview(v))}</td>`;
+        }).join('');
+        tds += `<td class="db-cell-actions"><button type="button" class="btn btn-xs btn-danger db-row-del" data-row-index="${i}">Del</button></td>`;
+        tr += `<tr class="db-row" data-row-index="${i}">${tds}</tr>`;
+    });
+    const colSpan = cols.length + 1;
+    return `<table class="db-table"><thead><tr>${th}</tr></thead><tbody>${tr || `<tr><td colspan="${colSpan}" style="padding:1rem;color:var(--text-muted)">No rows</td></tr>`}</tbody></table>`;
+}
+
+function renderDbPagerHtml(listData) {
+    const total = listData.total || 0;
+    const page = listData.page || 1;
+    const limit = listData.limit || 25;
+    const pages = Math.max(1, Math.ceil(total / limit));
+    return `
+        <div class="db-pager">
+            <span>${total} rows</span>
+            <span>Page ${page} / ${pages}</span>
+            <button type="button" class="btn btn-xs" id="db-pager-prev" ${page <= 1 ? 'disabled' : ''}>Prev</button>
+            <button type="button" class="btn btn-xs" id="db-pager-next" ${page >= pages ? 'disabled' : ''}>Next</button>
+        </div>
+    `;
+}
+
+function syncDbToolbar(schema) {
+    const sortSel = document.getElementById('db-browse-sort');
+    const orderSel = document.getElementById('db-browse-order');
+    const limitSel = document.getElementById('db-browse-limit');
+    if (!sortSel) return;
+    const sortable = schema.sortable || [];
+    sortSel.innerHTML = sortable.map(s => `<option value="${esc(s)}" ${s === dbBrowseState.sort ? 'selected' : ''}>${esc(s)}</option>`).join('');
+    if (!dbBrowseState.sort && sortable.length) dbBrowseState.sort = sortable[0];
+    sortSel.value = dbBrowseState.sort || sortable[0] || '';
+    orderSel.value = dbBrowseState.order;
+    limitSel.value = String(dbBrowseState.limit);
+}
+
+async function refreshDbBrowse(container) {
+    const wrap = container.querySelector('#db-browse-table-wrap');
+    const pager = container.querySelector('#db-browse-pager');
+    if (!wrap) return;
+    wrap.innerHTML = '<div class="loading">Loading…</div>';
+    try {
+        const schema = await loadDbBrowseSchema(dbBrowseState.table);
+        syncDbToolbar(schema);
+        const params = new URLSearchParams();
+        params.set('page', String(dbBrowseState.page));
+        params.set('limit', String(dbBrowseState.limit));
+        params.set('order', dbBrowseState.order);
+        if (dbBrowseState.search) params.set('search', dbBrowseState.search);
+        if (dbBrowseState.sort) params.set('sort', dbBrowseState.sort);
+        const listData = await api(_dbPath(`${dbBrowseState.table}?${params}`));
+        wrap.innerHTML = renderDbTableHtml(schema, listData);
+        if (pager) pager.innerHTML = renderDbPagerHtml(listData);
+        wrap.querySelectorAll('.db-row').forEach((tr) => {
+            tr.addEventListener('click', (e) => {
+                if (e.target.closest('.db-row-del')) return;
+                const i = parseInt(tr.dataset.rowIndex, 10);
+                openDbModal('edit', dbBrowseState.table, schema, dbBrowseLastRows[i]);
+            });
+        });
+        wrap.querySelectorAll('.db-row-del').forEach((btn) => {
+            btn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                const i = parseInt(btn.dataset.rowIndex, 10);
+                const row = dbBrowseLastRows[i];
+                const pk = schema.pk;
+                if (!row || !confirm(`Delete row ${row[pk]}?`)) return;
+                try {
+                    await api(_dbPath(`${dbBrowseState.table}/${encodeURIComponent(String(row[pk]))}`), { method: 'DELETE' });
+                    toast('Row deleted');
+                    refreshDbBrowse(container);
+                } catch (err) { toast(err.message, 'error'); }
+            });
+        });
+        const prev = container.querySelector('#db-pager-prev');
+        const next = container.querySelector('#db-pager-next');
+        if (prev) prev.onclick = () => { dbBrowseState.page = Math.max(1, dbBrowseState.page - 1); refreshDbBrowse(container); };
+        if (next) next.onclick = () => { dbBrowseState.page += 1; refreshDbBrowse(container); };
+    } catch (e) {
+        wrap.innerHTML = `<div class="error-msg">${esc(e.message)}</div>`;
+        if (pager) pager.innerHTML = '';
+    }
+}
+
+function initDbBrowse(container) {
+    dbBrowseContainer = container;
+    dbBrowseState = { table: 'sessions', page: 1, limit: 25, search: '', sort: '', order: 'desc', schemaCache: {} };
+    const tabs = container.querySelector('#db-sub-tabs');
+    if (!tabs) return;
+    tabs.innerHTML = DB_TABLES.map(t => `<button type="button" class="db-sub-tab ${t === dbBrowseState.table ? 'active' : ''}" data-db-table="${t}">${t}</button>`).join('');
+    tabs.querySelectorAll('.db-sub-tab').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            dbBrowseState.table = btn.dataset.dbTable;
+            dbBrowseState.page = 1;
+            dbBrowseState.search = '';
+            dbBrowseState.sort = '';
+            tabs.querySelectorAll('.db-sub-tab').forEach(b => b.classList.toggle('active', b.dataset.dbTable === dbBrowseState.table));
+            const search = container.querySelector('#db-browse-search');
+            if (search) search.value = '';
+            refreshDbBrowse(container);
+        });
+    });
+    const searchIn = container.querySelector('#db-browse-search');
+    const debounced = debounce(() => {
+        dbBrowseState.search = searchIn.value.trim();
+        dbBrowseState.page = 1;
+        refreshDbBrowse(container);
+    }, 350);
+    searchIn.addEventListener('input', debounced);
+    container.querySelector('#db-browse-sort').addEventListener('change', (e) => {
+        dbBrowseState.sort = e.target.value;
+        dbBrowseState.page = 1;
+        refreshDbBrowse(container);
+    });
+    container.querySelector('#db-browse-order').addEventListener('change', (e) => {
+        dbBrowseState.order = e.target.value;
+        dbBrowseState.page = 1;
+        refreshDbBrowse(container);
+    });
+    container.querySelector('#db-browse-limit').addEventListener('change', (e) => {
+        dbBrowseState.limit = parseInt(e.target.value, 10);
+        dbBrowseState.page = 1;
+        refreshDbBrowse(container);
+    });
+    container.querySelector('#db-browse-add').addEventListener('click', async () => {
+        try {
+            const schema = await loadDbBrowseSchema(dbBrowseState.table);
+            openDbModal('add', dbBrowseState.table, schema, null);
+        } catch (e) { toast(e.message, 'error'); }
+    });
+    refreshDbBrowse(container);
 }
 
 // ═════════════════════════════════════════════════════════════════
@@ -821,6 +1166,10 @@ function init() {
     document.getElementById('login-email').addEventListener('keydown', e => { if (e.key === 'Enter') loginBtn.click(); });
     document.getElementById('login-password').addEventListener('keydown', e => { if (e.key === 'Enter') loginBtn.click(); });
     document.getElementById('logout-btn').addEventListener('click', logout);
+    document.getElementById('db-row-modal-cancel').addEventListener('click', closeDbModal);
+    document.getElementById('db-row-modal').addEventListener('click', (e) => { if (e.target.id === 'db-row-modal') closeDbModal(); });
+    document.getElementById('db-row-modal-save').addEventListener('click', () => saveDbModal());
+    document.getElementById('db-row-modal-delete').addEventListener('click', () => deleteDbModalRow());
     document.getElementById('tab-nav').addEventListener('click', e => { const b = e.target.closest('.tab-btn'); if (b?.dataset.tab) showTab(b.dataset.tab); });
 
     document.addEventListener('input', e => {
