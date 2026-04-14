@@ -386,7 +386,9 @@ async function saveGradingDraft(huntId) {
         submitted: false,
     };
 
-    const reviews = { ...existing, [huntId]: review };
+    // Only send the draft being edited — avoid overwriting unrelated row_N entries
+    // with stale copies from state (backend merges, so other keys are preserved).
+    const reviewPayload = { [huntId]: review };
     const fieldId = `grading-${huntId}`;
 
     try {
@@ -403,11 +405,11 @@ async function saveGradingDraft(huntId) {
             {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ reviews, auto_save: true }),
+                body: JSON.stringify({ reviews: reviewPayload, auto_save: true }),
             }
         );
         if (!res.ok) throw new Error('Save failed');
-        state.humanReviews = reviews;
+        state.humanReviews = { ...existing, [huntId]: review };
         _setGlobalStatus('saved');
         setStatus(fieldId, STATUS.SAVED);
     } catch (err) {
@@ -417,7 +419,7 @@ async function saveGradingDraft(huntId) {
             await enqueue({
                 type: 'save-reviews',
                 url: `api/save-reviews/${state.sessionId}`,
-                options: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reviews, auto_save: true }) },
+                options: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reviews: reviewPayload, auto_save: true }) },
                 sessionId: state.sessionId,
             });
         } else {

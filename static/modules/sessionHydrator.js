@@ -213,6 +213,13 @@ function _restoreSectionVisibility() {
 
     // Sync turn UI (journey bar, badges, tabs, thread) to match restored state
     syncTurnUI();
+
+    // Post-hunt decision fork only appears live after handleHuntComplete → showMultiTurnDecision.
+    // Hide on hydration so refresh + re-open does not show "Turn N Complete" with empty state.
+    const decisionCard = document.getElementById('multiTurnDecisionCard');
+    if (decisionCard) decisionCard.classList.add('hidden');
+    const decisionPanel = document.getElementById('multiTurnDecisionPanel');
+    if (decisionPanel) decisionPanel.classList.add('hidden');
 }
 
 
@@ -280,10 +287,13 @@ function _hydrateResultsSection(allResults) {
             }
             if (rowIdx !== undefined && rowIdx !== null) {
                 selectedRows.add(rowIdx);
-                // Normalize to row_N format so downstream functions work
                 const rowKey = `row_${rowIdx}`;
-                if (!normalizedReviews[rowKey]) {
-                    normalizedReviews[rowKey] = { ...val, hunt_id: val.hunt_id ?? parseInt(key, 10), row_number: rowIdx };
+                const mapped = { ...val, hunt_id: val.hunt_id ?? parseInt(key, 10), row_number: rowIdx };
+                const existing = normalizedReviews[rowKey];
+                if (!existing) {
+                    normalizedReviews[rowKey] = mapped;
+                } else if (val.timestamp && existing.timestamp && new Date(val.timestamp) > new Date(existing.timestamp)) {
+                    normalizedReviews[rowKey] = mapped;
                 }
             }
             normalizedReviews[key] = val;

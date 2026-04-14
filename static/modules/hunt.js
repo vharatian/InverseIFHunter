@@ -768,20 +768,18 @@ export function initProgressUI() {
         }
     }
     
-    // APPEND table rows — display turn-local numbers, but use global hunt_id for row ID (SSE matching)
+    // APPEND table rows — run-relative #1..N (this batch only); row id uses global hunt_id for SSE
     const models = state.config.models;
-    const turnLocalBase = state.huntsThisTurn - parallel_workers;
     
     for (let i = 1; i <= parallel_workers; i++) {
         const globalRowNum = offset + i;
-        const turnLocalNum = turnLocalBase + i;
         const model = models[i - 1] || models[0];
         const modelDisplay = getModelDisplayName(model);
         
         const row = document.createElement('tr');
         row.id = `hunt-row-${globalRowNum}`;
         row.innerHTML = `
-            <td>${turnLocalNum}</td>
+            <td>${i}</td>
             <td class="model-cell" title="${model}">${modelDisplay}</td>
             <td class="response-cell" style="min-width: 180px; max-width: 360px;">
                 <span class="response-placeholder" style="color: var(--text-muted);">-</span>

@@ -768,7 +768,7 @@ export function setupGradingSlideoutEvents(container, huntId, result, slotIndex,
     }
 }
 
-export function submitGradingReview(huntId, result, slotIndex, rowNumber) {
+export async function submitGradingReview(huntId, result, slotIndex, rowNumber) {
     const review = state.humanReviews[huntId] || {};
     const grades = review.grades || {};
     const notes = (review.notes || '').trim();
@@ -814,6 +814,20 @@ export function submitGradingReview(huntId, result, slotIndex, rowNumber) {
     };
     
     
+    // Persist final review to backend (row_N is authoritative key)
+    try {
+        await fetch(`api/save-reviews/${state.sessionId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                reviews: { [rowKey]: state.humanReviews[rowKey] },
+                auto_save: true,
+            }),
+        });
+    } catch (err) {
+        console.warn(`Failed to persist review for ${rowKey}:`, err);
+    }
+
     // Update status in slideout
     const statusEl = document.querySelector(`.grading-status[data-hunt-id="${huntId}"]`);
     if (statusEl) {

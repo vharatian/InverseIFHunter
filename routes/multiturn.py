@@ -190,6 +190,21 @@ async def mark_breaking(session_id: str):
     session = await _get_validated_session(session_id)
     
     current_turn = session.current_turn
+
+    # Idempotent: already marked this turn as breaking (e.g. duplicate click after refresh)
+    for t in session.turns or []:
+        if t.turn_number == current_turn and getattr(t, "status", None) == "breaking":
+            logger.info(
+                f"Session {session_id}: mark-breaking skipped — turn {current_turn} already breaking"
+            )
+            return {
+                "success": True,
+                "session_id": session_id,
+                "breaking_turn": current_turn,
+                "total_turns": len(session.turns),
+                "is_multi_turn": bool(session.notebook and session.notebook.is_multi_turn),
+                "idempotent": True,
+            }
     
     # Save current turn data with "breaking" status
     turn_data = TurnData(

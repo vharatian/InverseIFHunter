@@ -18,7 +18,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Header, HTTPException, Query, Request  # noqa: F401 - HTTPException used in handlers
 from typing import Annotated
 
-from models.schemas import HuntConfig
+from models.schemas import HuntConfig, HuntStatus
 from services.pg_session import save_session_pg, get_session_metadata_pg, delete_session_pg, merge_session_metadata_pg
 from helpers.shared import _get_validated_session
 import services.redis_session as redis_store
@@ -195,6 +195,29 @@ async def update_config(session_id: str, config: HuntConfig):
     # Persist config to Redis
     await redis_store.set_config(session_id, session.config)
     await redis_store.set_meta_field(session_id, "total_hunts", session.total_hunts)
+
+    # Allow a new hunt run after a finished run: job submit only runs when status is pending.
+    status = await redis_store.get_status(session_id)
+    if status in (
+        HuntStatus.COMPLETED,
+        HuntStatus.FAILED,
+        HuntStatus.STOPPED_BUDGET,
+        HuntStatus.NEEDS_ATTENTION,
+    ):
+        await redis_store.set_status(session_id, HuntStatus.PENDING)
+        await redis_store.clear_results(session_id)
+        await redis_store.set_hunt_counters(
+            session_id,
+            total_hunts=config.parallel_workers,
+            completed_hunts=0,
+            breaks_found=0,
+            passes_found=0,
+        )
+        session.status = HuntStatus.PENDING
+        session.results = []
+        session.completed_hunts = 0
+        session.breaks_found = 0
+        session.passes_found = 0
 
     try:
         await save_session_pg(session)
