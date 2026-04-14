@@ -74,13 +74,16 @@ async def publish(session_id: str, event: HuntEvent) -> str:
     await r.expire(key, STREAM_TTL)
 
     # Notify Elixir edge via Pub/Sub (Streams and Pub/Sub are separate subsystems)
+    # Merge hunt_id into data so WS clients get the same flat shape as the SSE path
     pubsub_channel = f"mh:events:hunt:{session_id}"
     pubsub_payload = {
         "session_id": session_id,
         "type": event.event_type,
         "event_type": event.event_type,
-        "hunt_id": event.hunt_id,
-        "data": event.data,
+        "data": {
+            "hunt_id": event.hunt_id,
+            **event.data,
+        },
     }
     try:
         await r.publish(pubsub_channel, json.dumps(pubsub_payload, default=str))
