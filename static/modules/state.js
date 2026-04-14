@@ -89,6 +89,13 @@ export const state = {
     huntsThisTurn: 0,         // Hunts in the CURRENT turn (resets on new turn)
     previousTurnHuntIds: new Set(),  // hunt_ids from completed turns (excluded from current turn fetch)
 
+    /** Hunt wall-clock timing: lap per Find Breaking Responses run ({@link hunt.js}) */
+    huntTiming: {
+        laps: [],       // { turn, lap, startedAt, durationMs }[]
+        turnTotals: {}, // { [turn: number]: ms }
+        grandTotalMs: 0,
+    },
+
     // Reviewer feedback (overall + section_feedback) — set by sessionHydrator and reviewSync
     reviewFeedback: null
 };

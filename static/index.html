@@ -255,9 +255,12 @@
                                 <div class="url-input-group">
                                     <input type="url" id="colabUrlInput"
                                         placeholder="https://colab.research.google.com/drive/..." class="url-input">
-                                    <button type="button" id="fetchUrlBtn" class="btn btn-secondary fetch-btn-cute">
-                                        Load
-                                    </button>
+                                    <div class="url-load-actions">
+                                        <button type="button" id="fetchUrlBtn" class="btn btn-secondary fetch-btn-cute">
+                                            Load
+                                        </button>
+                                        <span class="url-enter-hint">Press Enter to load</span>
+                                    </div>
                                 </div>
                                 <small style="color: var(--text-muted); margin-top: 0.5rem; display: block;">
                                     Supports: Colab share links, Google Drive links, raw .ipynb URLs
@@ -479,7 +482,10 @@
                         <div class="status" id="huntStatus">
                             <span class="status-dot running"></span>
                             <span id="statusText">Running...</span>
-                            <span id="huntElapsedTimer" class="hunt-elapsed-timer"></span>
+                            <span class="hunt-elapsed-wrap">
+                                <span id="huntElapsedTimer" class="hunt-elapsed-timer"></span>
+                                <span id="huntElapsedTotal" class="hunt-elapsed-total hidden" aria-hidden="true"></span>
+                            </span>
                         </div>
                     </div>
 

@@ -29,28 +29,156 @@ import { syncActiveRunToNotebook } from './testbed.js';
 import { playHuntStart } from './sounds.js?v=43';
 import { connectHuntChannel, disconnectHuntChannel } from './huntChannel.js';
 
-// ── Hunt timer & aurora — purely visual, no logic impact ──────────────────
+// ── Hunt timer (lap per run) + optional total badge — persisted on submit-for-review ──
 let _huntTimerInterval = null;
-let _huntTimerStart    = null;
+
+function _ensureHuntTimingShape() {
+    if (!state.huntTiming) {
+        state.huntTiming = { laps: [], turnTotals: {}, grandTotalMs: 0 };
+    }
+    if (!Array.isArray(state.huntTiming.laps)) state.huntTiming.laps = [];
+}
+
+/** Clear lap data (new notebook / session). */
+export function resetHuntTiming() {
+    state.huntTiming = { laps: [], turnTotals: {}, grandTotalMs: 0 };
+}
+
+function _fmtClock(ms) {
+    const s = Math.max(0, Math.floor(ms / 1000));
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    return `${m}:${String(r).padStart(2, '0')}`;
+}
+
+function _sumCompletedDurations() {
+    _ensureHuntTimingShape();
+    return state.huntTiming.laps.reduce((acc, l) => acc + (l.durationMs != null ? l.durationMs : 0), 0);
+}
+
+/** Last lap with no duration yet (current run). */
+function _getActiveLap() {
+    _ensureHuntTimingShape();
+    for (let i = state.huntTiming.laps.length - 1; i >= 0; i--) {
+        if (state.huntTiming.laps[i].durationMs == null) return state.huntTiming.laps[i];
+    }
+    return null;
+}
+
+function _nextLapIndexForTurn(turn) {
+    _ensureHuntTimingShape();
+    return state.huntTiming.laps.filter((l) => l.turn === turn && l.durationMs != null).length;
+}
+
+function _recomputeTotals() {
+    _ensureHuntTimingShape();
+    const turnTotals = {};
+    let grand = 0;
+    for (const l of state.huntTiming.laps) {
+        if (l.durationMs == null) continue;
+        grand += l.durationMs;
+        turnTotals[l.turn] = (turnTotals[l.turn] || 0) + l.durationMs;
+    }
+    state.huntTiming.turnTotals = turnTotals;
+    state.huntTiming.grandTotalMs = grand;
+}
+
+/** Called when hunts finish: close the open lap and freeze the main timer display. */
+export function finalizeHuntTimerLap() {
+    _ensureHuntTimingShape();
+    const cur = _getActiveLap();
+    if (!cur) return;
+    cur.durationMs = Math.max(0, Date.now() - cur.startedAt);
+    _recomputeTotals();
+    const el = document.getElementById('huntElapsedTimer');
+    const totalEl = document.getElementById('huntElapsedTotal');
+    if (el) {
+        el.textContent = _fmtClock(cur.durationMs);
+        el.classList.add('visible', 'frozen');
+    }
+    if (totalEl) {
+        const totalMs = state.huntTiming.grandTotalMs;
+        if (totalMs > cur.durationMs) {
+            totalEl.textContent = `(total ${_fmtClock(totalMs)})`;
+            totalEl.classList.remove('hidden');
+        } else {
+            totalEl.textContent = '';
+            totalEl.classList.add('hidden');
+        }
+    }
+}
+
+export function getHuntTimingForSubmit() {
+    _ensureHuntTimingShape();
+    if (!state.isHunting && _getActiveLap()) finalizeHuntTimerLap();
+    const laps = state.huntTiming.laps
+        .filter((l) => l.durationMs != null)
+        .map((l) => ({
+            turn: l.turn,
+            lap: l.lap,
+            startedAt: l.startedAt,
+            durationMs: l.durationMs,
+        }));
+    if (laps.length === 0) return null;
+    _recomputeTotals();
+    return {
+        laps,
+        turn_totals: { ...state.huntTiming.turnTotals },
+        grand_total_ms: state.huntTiming.grandTotalMs,
+        submitted_at_ms: Date.now(),
+    };
+}
 
 function _startHuntTimer() {
     const el = document.getElementById('huntElapsedTimer');
+    const totalEl = document.getElementById('huntElapsedTotal');
     if (!el) return;
-    _huntTimerStart = Date.now();
+
+    _ensureHuntTimingShape();
+    const turn = state.currentTurn || 1;
+    const lapIdx = _nextLapIndexForTurn(turn);
+    state.huntTiming.laps.push({
+        turn,
+        lap: lapIdx,
+        startedAt: Date.now(),
+        durationMs: null,
+    });
+
+    const completedBefore = _sumCompletedDurations();
+
     el.textContent = '0:00';
     el.classList.add('visible');
     el.classList.remove('frozen');
+    if (totalEl) {
+        if (completedBefore > 0) {
+            totalEl.textContent = `(total ${_fmtClock(completedBefore)})`;
+            totalEl.classList.remove('hidden');
+        } else {
+            totalEl.textContent = '';
+            totalEl.classList.add('hidden');
+        }
+    }
+
+    if (_huntTimerInterval) {
+        clearInterval(_huntTimerInterval);
+        _huntTimerInterval = null;
+    }
+
     _huntTimerInterval = setInterval(() => {
         if (!state.isHunting) {
             clearInterval(_huntTimerInterval);
             _huntTimerInterval = null;
-            el.classList.add('frozen');
+            finalizeHuntTimerLap();
             return;
         }
-        const secs = Math.floor((Date.now() - _huntTimerStart) / 1000);
-        const m = Math.floor(secs / 60);
-        const s = secs % 60;
-        el.textContent = `${m}:${String(s).padStart(2, '0')}`;
+        const active = _getActiveLap();
+        if (!active) return;
+        const lapMs = Date.now() - active.startedAt;
+        el.textContent = _fmtClock(lapMs);
+        if (totalEl && completedBefore > 0) {
+            totalEl.textContent = `(total ${_fmtClock(completedBefore + lapMs)})`;
+            totalEl.classList.remove('hidden');
+        }
     }, 500);
 }
 

@@ -1105,8 +1105,24 @@ label {
     width: 100%;
 }
 
-.url-input-group .fetch-btn-cute {
+.url-load-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem 0.65rem;
     align-self: center;
+}
+
+.url-enter-hint {
+    font-size: 0.68rem;
+    font-weight: 400;
+    color: var(--text-muted);
+    opacity: 0.72;
+    line-height: 1.25;
+    letter-spacing: 0.01em;
+    user-select: none;
+    white-space: nowrap;
 }
 
 .url-input {
@@ -8117,6 +8133,24 @@ body.sidebar-visible .container.multi-turn-layout {
    HUNT ELAPSED TIMER
 ───────────────────────────────────────────────────────────────────────────── */
 
+.hunt-elapsed-wrap {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.35rem;
+    margin-left: 8px;
+    flex-wrap: wrap;
+    vertical-align: middle;
+}
+
+.hunt-elapsed-total {
+    font-size: 0.65rem;
+    font-weight: 400;
+    color: var(--text-muted);
+    opacity: 0.8;
+    white-space: nowrap;
+    max-width: 9rem;
+}
+
 .hunt-elapsed-timer {
     display: none;
     font-size: 0.75rem;
@@ -8127,7 +8161,7 @@ body.sidebar-visible .container.multi-turn-layout {
     border: 1px solid var(--border);
     border-radius: 5px;
     padding: 1px 7px;
-    margin-left: 8px;
+    margin-left: 0;
     letter-spacing: 0.02em;
     vertical-align: middle;
     transition: color 0.3s ease;

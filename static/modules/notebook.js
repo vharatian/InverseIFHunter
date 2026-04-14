@@ -35,6 +35,7 @@ import {
 } from './editors.js';
 import { showAppModal, showPasswordPrompt } from './api.js';
 import { playFetchSuccess, playFetchError, playFinalSubmission, playFinalSubmissionError } from './sounds.js?v=43';
+import { resetHuntTiming } from './hunt.js';
 import { activateAdminMode } from './adminMode.js';
 import { runQualityCheckOverlay } from './qualityCheckOverlay.js';
 import { renderQCPersistentSection } from './qcPersistentSection.js';
@@ -654,6 +655,7 @@ export async function handleNotebookLoaded(data, isUrl = false, overrideUrl = nu
     
     state.sessionId = data.session_id;
     state.notebook = data.notebook;
+    resetHuntTiming();
     
     // Start heartbeat now that we have a session
     startHeartbeat();
@@ -714,6 +716,12 @@ export async function handleNotebookLoaded(data, isUrl = false, overrideUrl = nu
     // Preselect model based on notebook metadata or model_slots
     let modelPrefix = null;
     let modelSource = null; // Track where we got the model from
+
+    const isPlaceholderMetadataModel = (s) => {
+        if (!s || typeof s !== 'string') return true;
+        const v = s.trim().toLowerCase();
+        return /^(model|none|n\/a|n_a|tbd|\?|—|--|-|)$/i.test(v);
+    };
     
     // First, try to get model from metadata (most explicit) - PRIORITY 1
     if (data.notebook.metadata) {
@@ -734,7 +742,9 @@ export async function handleNotebookLoaded(data, isUrl = false, overrideUrl = nu
             // Clean the value: remove leading dashes, spaces, colons, trim
             // Handles cases like "Model: - qwen" -> "qwen", " - qwen" -> "qwen"
             modelPrefix = rawModel.toString().trim().replace(/^[-:\s]+/, '').trim();
-            if (modelPrefix) {
+            if (modelPrefix && isPlaceholderMetadataModel(modelPrefix)) {
+                modelPrefix = null;
+            } else if (modelPrefix) {
                 modelSource = 'metadata';
             } else {
                 console.warn(`Model value in metadata was empty after cleaning: "${rawModel}"`);
@@ -768,32 +778,42 @@ export async function handleNotebookLoaded(data, isUrl = false, overrideUrl = nu
         const modelPrefixLower = modelPrefix.toLowerCase().trim();
         let modelId = null;
         let provider = 'openrouter'; // Default provider
+        let matchedNotebookFamily = false; // true only for known metadata/slots hints (not unknown→Qwen fallback)
         
         
         if (modelPrefixLower === 'nemotron' || modelPrefixLower.includes('nemotron')) {
             modelId = 'nvidia/nemotron-3-nano-30b-a3b';
             provider = 'openrouter';
+            matchedNotebookFamily = true;
         } else if (modelPrefixLower === 'qwen' || modelPrefixLower.includes('qwen')) {
             // Prefer openrouter if available, fallback to fireworks
             if (getProviderModels()['openrouter']?.some(m => m.id.includes('qwen'))) {
                 modelId = 'qwen/qwen3-235b-a22b-thinking-2507';
                 provider = 'openrouter';
+                matchedNotebookFamily = true;
             } else if (getProviderModels()['fireworks']?.some(m => m.id.includes('qwen'))) {
                 modelId = 'accounts/fireworks/models/qwen3-235b-a22b-thinking-2507';
                 provider = 'fireworks';
+                matchedNotebookFamily = true;
             }
         } else if (modelPrefixLower === 'sonnet' || modelPrefixLower.includes('sonnet')) {
             modelId = 'anthropic/claude-sonnet-4.5';
             provider = 'openrouter';
+            matchedNotebookFamily = true;
         } else if (modelPrefixLower === 'opus' || modelPrefixLower.includes('opus')) {
             modelId = 'anthropic/claude-opus-4.5';
             provider = 'openrouter';
+            matchedNotebookFamily = true;
         } else {
             console.warn(`Unknown model prefix: "${modelPrefix}". Will use default (Qwen).`);
             // Default to Qwen if unknown
             modelId = 'qwen/qwen3-235b-a22b-thinking-2507';
             provider = 'openrouter';
+            matchedNotebookFamily = false;
         }
+        
+        const fromNotebook =
+            matchedNotebookFamily && (modelSource === 'metadata' || modelSource === 'model_slots');
         
         // Set the provider and model if found
         if (modelId && elements.providerSelect && elements.modelSelect) {
@@ -806,7 +826,11 @@ export async function handleNotebookLoaded(data, isUrl = false, overrideUrl = nu
             updateModelOptions(false);
             // Force-set again after dropdown is built (belt and suspenders)
             elements.modelSelect.value = modelId;
-            showToast(`Model preselected: ${modelPrefix}`, 'info');
+            const displayName = getModelDisplayName(modelId);
+            const toastMsg = fromNotebook
+                ? `Model from notebook: ${displayName}`
+                : `Using default model: ${displayName}`;
+            showToast(toastMsg, 'info');
         } else {
             console.warn('Provider or model select elements not found');
         }

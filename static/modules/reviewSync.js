@@ -3,6 +3,7 @@
  * Uses GET /api/session/{id} and POST submit-for-review / resubmit.
  */
 import { state } from './state.js';
+import { getHuntTimingForSubmit } from './hunt.js';
 import { createPoller } from './poll.js';
 import { setReviewStatus } from './autosave.js';
 import { applySectionLocksFromFeedback } from './sessionHydrator.js';
@@ -151,7 +152,12 @@ async function submitForReview(sessionId) {
     const btn = document.getElementById('submitForReviewBtn');
     if (btn) btn.disabled = true;
     try {
-        const res = await fetch(`api/session/${sessionId}/submit-for-review`, { method: 'POST' });
+        const huntTiming = getHuntTimingForSubmit();
+        const res = await fetch(`api/session/${sessionId}/submit-for-review`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ hunt_timing: huntTiming }),
+        });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.detail || res.statusText);
         await refreshReviewSync(sessionId);
@@ -179,7 +185,12 @@ async function resubmitForReview(sessionId) {
     const btn = document.getElementById('resubmitForReviewBtn');
     if (btn) btn.disabled = true;
     try {
-        const res = await fetch(`api/session/${sessionId}/resubmit`, { method: 'POST' });
+        const huntTiming = getHuntTimingForSubmit();
+        const res = await fetch(`api/session/${sessionId}/resubmit`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ hunt_timing: huntTiming }),
+        });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.detail || res.statusText);
         if (data.escalated) {

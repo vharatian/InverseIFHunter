@@ -13,13 +13,13 @@ POST /api/session/{session_id}/acknowledge
 """
 import logging
 import os
-from typing import Optional
+from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Header, HTTPException, Query  # noqa: F401 - HTTPException used in handlers
+from fastapi import APIRouter, Header, HTTPException, Query, Request  # noqa: F401 - HTTPException used in handlers
 from typing import Annotated
 
 from models.schemas import HuntConfig
-from services.pg_session import save_session_pg, get_session_metadata_pg, delete_session_pg
+from services.pg_session import save_session_pg, get_session_metadata_pg, delete_session_pg, merge_session_metadata_pg
 from helpers.shared import _get_validated_session
 import services.redis_session as redis_store
 from agentic_reviewer.team_config import get_role, get_allowed_trainer_emails_for_role
@@ -244,9 +244,31 @@ async def _notify_escalation(session_id: str, round_num: int, max_rounds: int) -
         logger.exception("Failed to send escalation notifications for session %s", session_id)
 
 
+async def _parse_hunt_timing_from_request(request: Request) -> Optional[Dict[str, Any]]:
+    """Optional JSON body with key hunt_timing (dict)."""
+    try:
+        data = await request.json()
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    ht = data.get("hunt_timing")
+    return ht if isinstance(ht, dict) else None
+
+
+async def _maybe_persist_hunt_timing(session_id: str, hunt_timing: Optional[Dict[str, Any]]) -> None:
+    if not hunt_timing:
+        return
+    try:
+        await merge_session_metadata_pg(session_id, {"hunt_timing": hunt_timing})
+    except Exception:
+        logger.exception("Failed to persist hunt_timing for session %s", session_id)
+
+
 @router.post("/session/{session_id}/submit-for-review")
-async def submit_for_review(session_id: str):
+async def submit_for_review(session_id: str, request: Request):
     """Set review_status to submitted so the task appears in the reviewer queue."""
+    hunt_timing = await _parse_hunt_timing_from_request(request)
     session = await _get_validated_session(session_id)
     # QC gate temporarily bypassed — reviewer-side council handles quality checks now
     # if not await redis_store.get_qc_done(session_id):
@@ -275,6 +297,7 @@ async def submit_for_review(session_id: str):
         _notify_reviewer_for_session(session_id, "task_submitted", "A new task has been submitted for your review."),
         context=f"submit notification for {session_id}",
     )
+    await _maybe_persist_hunt_timing(session_id, hunt_timing)
     version = await get_version(r, session_id)
     logger.info(f"Session {session_id} submitted for review (round {round_num})")
     return {"ok": True, "review_status": "submitted", "review_round": round_num, "version": version}
@@ -290,9 +313,10 @@ async def mark_qc_done(session_id: str):
 
 
 @router.post("/session/{session_id}/resubmit")
-async def resubmit_for_review(session_id: str):
+async def resubmit_for_review(session_id: str, request: Request):
     """Set review_status back to submitted after trainer revised (from returned).
     If max rounds exceeded, escalates to admin instead."""
+    hunt_timing = await _parse_hunt_timing_from_request(request)
     await _get_validated_session(session_id)
     # QC gate temporarily bypassed — reviewer-side council handles quality checks now
     # if not await redis_store.get_qc_done(session_id):
@@ -325,6 +349,7 @@ async def resubmit_for_review(session_id: str):
         await redis_store.incr_review_round(session_id)
         await redis_store.append_audit(session_id, "escalated", "trainer", {"reason": f"Max rounds ({max_rounds}) exceeded"})
         await _notify_escalation(session_id, next_round, max_rounds)
+        await _maybe_persist_hunt_timing(session_id, hunt_timing)
         logger.info(f"Session {session_id} escalated to admin (round {next_round} > max {max_rounds})")
         return {"ok": True, "review_status": "escalated", "review_round": next_round, "escalated": True}
 
@@ -341,6 +366,7 @@ async def resubmit_for_review(session_id: str):
         _notify_reviewer_for_session(session_id, "task_resubmitted", "A task has been fixed and resubmitted for your review."),
         context=f"resubmit notification for {session_id}",
     )
+    await _maybe_persist_hunt_timing(session_id, hunt_timing)
     version = await get_version(r, session_id)
     logger.info(f"Session {session_id} resubmitted for review round {next_round} (feedback archived)")
     return {"ok": True, "review_status": "submitted", "review_round": next_round, "version": version}
