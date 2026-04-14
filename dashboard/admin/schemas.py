@@ -36,6 +36,7 @@ class MeResponse(BaseModel):
 class PodSummary(BaseModel):
     pod_id: str
     name: str
+    pod_lead: Optional[Dict[str, str]] = None
     reviewer: Optional[Dict[str, str]] = None
     trainers: List[str] = []
 
@@ -60,6 +61,17 @@ class SetReviewerRequest(BaseModel):
     @classmethod
     def validate_email(cls, v: str) -> str:
         return _check_email(v)
+
+
+class SetPodLeadRequest(BaseModel):
+    email: str
+    name: str = ""
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        return _check_email(v)
+
 
 class AddAdminRequest(BaseModel):
     email: str

@@ -6,6 +6,7 @@ from admin.schemas import (
     TeamResponse,
     AddTrainerRequest,
     SetReviewerRequest,
+    SetPodLeadRequest,
     AddAdminRequest,
     AddSuperAdminRequest,
     CreatePodRequest,
@@ -46,6 +47,26 @@ async def set_reviewer(pod_id: str, body: SetReviewerRequest, _=Depends(verify_s
     """Set the reviewer for a pod."""
     try:
         team_service.set_reviewer(pod_id, body.email, body.name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
+
+
+@router.put("/pods/{pod_id}/pod-lead")
+async def set_pod_lead(pod_id: str, body: SetPodLeadRequest, _=Depends(verify_super_admin)):
+    """Set the pod lead for a pod."""
+    try:
+        team_service.set_pod_lead(pod_id, body.email, body.name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
+
+
+@router.delete("/pods/{pod_id}/pod-lead")
+async def remove_pod_lead(pod_id: str, _=Depends(verify_super_admin)):
+    """Remove the pod lead from a pod."""
+    try:
+        team_service.remove_pod_lead(pod_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"ok": True}

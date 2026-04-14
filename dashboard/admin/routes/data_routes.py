@@ -87,48 +87,71 @@ async def _get_conn():
 
 
 async def _ensure_tables(conn):
-    """Create sessions and hunt_results tables if they don't exist."""
+    """Create all browseable tables if they don't exist."""
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS trainers (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            email TEXT UNIQUE NOT NULL,
+            display_name TEXT,
+            team TEXT,
+            role TEXT NOT NULL DEFAULT 'trainer',
+            config JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    """)
     await conn.execute("""
         CREATE TABLE IF NOT EXISTS sessions (
             id TEXT PRIMARY KEY,
+            trainer_id UUID REFERENCES trainers(id),
             notebook_json JSONB,
             config JSONB,
-            status TEXT DEFAULT 'pending',
-            human_reviews JSONB DEFAULT '{}'::jsonb,
-            conversation_history JSONB DEFAULT '[]'::jsonb,
-            turns JSONB DEFAULT '[]'::jsonb,
-            total_hunts INTEGER DEFAULT 0,
-            completed_hunts INTEGER DEFAULT 0,
-            breaks_found INTEGER DEFAULT 0,
-            passes_found INTEGER DEFAULT 0,
-            accumulated_hunt_count INTEGER DEFAULT 0,
-            current_turn INTEGER DEFAULT 1,
-            metadata JSONB DEFAULT '{}'::jsonb,
-            created_at TIMESTAMPTZ DEFAULT NOW(),
-            updated_at TIMESTAMPTZ DEFAULT NOW()
+            status TEXT NOT NULL DEFAULT 'pending',
+            metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+            human_reviews JSONB NOT NULL DEFAULT '{}'::jsonb,
+            conversation_history JSONB NOT NULL DEFAULT '[]'::jsonb,
+            turns JSONB NOT NULL DEFAULT '[]'::jsonb,
+            total_hunts INTEGER NOT NULL DEFAULT 0,
+            completed_hunts INTEGER NOT NULL DEFAULT 0,
+            breaks_found INTEGER NOT NULL DEFAULT 0,
+            passes_found INTEGER NOT NULL DEFAULT 0,
+            accumulated_hunt_count INTEGER NOT NULL DEFAULT 0,
+            current_turn INTEGER NOT NULL DEFAULT 1,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
     """)
     await conn.execute("""
         CREATE TABLE IF NOT EXISTS hunt_results (
-            id SERIAL PRIMARY KEY,
-            session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
-            hunt_id INTEGER,
-            model TEXT,
-            provider TEXT,
-            status TEXT,
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+            hunt_id INTEGER NOT NULL,
+            model TEXT NOT NULL,
+            provider TEXT NOT NULL DEFAULT 'openrouter',
+            status TEXT NOT NULL DEFAULT 'pending',
             prompt TEXT,
             response TEXT,
             reasoning_trace TEXT,
-            judge_score FLOAT,
+            judge_score INTEGER,
             judge_output TEXT,
             judge_explanation TEXT,
-            judge_criteria JSONB DEFAULT '{}'::jsonb,
-            scores JSONB DEFAULT '{}'::jsonb,
+            judge_criteria JSONB NOT NULL DEFAULT '{}'::jsonb,
+            scores JSONB NOT NULL DEFAULT '{}'::jsonb,
             error TEXT,
-            is_breaking BOOLEAN DEFAULT FALSE,
+            is_breaking BOOLEAN NOT NULL DEFAULT FALSE,
             sample_label TEXT,
             duration_ms INTEGER,
-            created_at TIMESTAMPTZ DEFAULT NOW()
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    """)
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS qc_runs (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+            run_type TEXT NOT NULL,
+            result JSONB NOT NULL,
+            rules_applied JSONB NOT NULL DEFAULT '[]'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
     """)
 
@@ -190,6 +213,7 @@ def _serialize_row(row: dict) -> dict:
 
 
 async def _fetch_columns(conn, table: str) -> list[dict]:
+    await _ensure_tables(conn)
     rows = await conn.fetch(
         """
         SELECT c.column_name,

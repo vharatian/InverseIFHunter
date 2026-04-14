@@ -557,6 +557,7 @@ class EnhancedLogReader:
             "total_cost": 0.0,
             "total_tokens_in": 0,
             "total_tokens_out": 0,
+            "total_calls": 0,
             "by_model": defaultdict(lambda: {"cost": 0.0, "tokens_in": 0, "tokens_out": 0, "calls": 0}),
             "by_provider": defaultdict(lambda: {"cost": 0.0, "tokens_in": 0, "tokens_out": 0, "calls": 0}),
             "time_window_hours": hours
@@ -578,7 +579,8 @@ class EnhancedLogReader:
                 summary["total_cost"] += cost
                 summary["total_tokens_in"] += tokens_in
                 summary["total_tokens_out"] += tokens_out
-                
+                summary["total_calls"] += 1
+
                 summary["by_model"][model]["cost"] += cost
                 summary["by_model"][model]["tokens_in"] += tokens_in
                 summary["by_model"][model]["tokens_out"] += tokens_out

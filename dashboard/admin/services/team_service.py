@@ -78,6 +78,9 @@ def _all_emails(data: Dict[str, Any]) -> set:
         reviewer = pod.get("reviewer") or {}
         if reviewer.get("email"):
             emails.add(_norm(reviewer["email"]))
+        pod_lead = pod.get("pod_lead") or {}
+        if pod_lead.get("email"):
+            emails.add(_norm(pod_lead["email"]))
         for t in pod.get("trainers") or []:
             emails.add(_norm(t))
     emails.discard("")
@@ -92,6 +95,7 @@ def get_team() -> Dict[str, Any]:
         pods.append({
             "pod_id": pod_id,
             "name": pod.get("name", pod_id),
+            "pod_lead": pod.get("pod_lead"),
             "reviewer": pod.get("reviewer"),
             "trainers": [_norm(t) for t in (pod.get("trainers") or [])],
         })
@@ -145,6 +149,27 @@ def set_reviewer(pod_id: str, email: str, name: str = "") -> None:
     if em in existing:
         raise ValueError(f"Email '{em}' already exists in team config")
     pods[pod_id]["reviewer"] = {"email": em, "name": name or em.split("@")[0]}
+    _save(data)
+
+
+def set_pod_lead(pod_id: str, email: str, name: str = "") -> None:
+    """Set pod lead. Same person may lead multiple pods — no global uniqueness check."""
+    em = _validate_email(email)
+    data = _load_raw()
+    pods = data.get("pods") or {}
+    if pod_id not in pods:
+        raise ValueError(f"Pod '{pod_id}' not found")
+    pods[pod_id]["pod_lead"] = {"email": em, "name": name or em.split("@")[0]}
+    _save(data)
+
+
+def remove_pod_lead(pod_id: str) -> None:
+    """Clear pod lead for a pod."""
+    data = _load_raw()
+    pods = data.get("pods") or {}
+    if pod_id not in pods:
+        raise ValueError(f"Pod '{pod_id}' not found")
+    pods[pod_id]["pod_lead"] = None
     _save(data)
 
 
@@ -207,12 +232,12 @@ def create_pod(pod_id: str, name: str) -> None:
     pods = data.setdefault("pods", {})
     if pod_id in pods:
         raise ValueError(f"Pod '{pod_id}' already exists")
-    pods[pod_id] = {"name": name, "reviewer": None, "trainers": []}
+    pods[pod_id] = {"name": name, "pod_lead": None, "reviewer": None, "trainers": []}
     _save(data)
 
 
 def remove_pod(pod_id: str) -> None:
-    """Remove a pod. Must be empty (no trainers, no reviewer). Raises ValueError otherwise."""
+    """Remove a pod. Must be empty (no trainers, no reviewer, no pod lead). Raises ValueError otherwise."""
     data = _load_raw()
     pods = data.get("pods") or {}
     if pod_id not in pods:
@@ -222,5 +247,7 @@ def remove_pod(pod_id: str) -> None:
         raise ValueError(f"Pod '{pod_id}' still has trainers — remove them first")
     if pod.get("reviewer") and pod["reviewer"].get("email"):
         raise ValueError(f"Pod '{pod_id}' still has a reviewer — remove them first")
+    if pod.get("pod_lead") and (pod.get("pod_lead") or {}).get("email"):
+        raise ValueError(f"Pod '{pod_id}' still has a pod lead — remove them first")
     del pods[pod_id]
     _save(data)
