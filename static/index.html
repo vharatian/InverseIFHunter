@@ -11,7 +11,7 @@
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
         rel="stylesheet">
-    <link rel="stylesheet" href="static/style.css?v=43">
+    <link rel="stylesheet" href="static/style.css?v=44">
     <!-- Marked.js for Markdown parsing -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
@@ -144,21 +144,13 @@
                 </button>
             </div>
         </div>
+        <nav class="turn-journey-bar" id="turnJourneyBar" aria-label="Turn progress">
+            <!-- Journey steps rendered dynamically by JS -->
+        </nav>
     </header>
-
-    <!-- Turn Journey Bar (sticky, hidden until multi-turn) -->
-    <nav class="turn-journey-bar" id="turnJourneyBar">
-        <!-- Journey steps rendered dynamically by JS -->
-    </nav>
 
     <!-- Main Content -->
     <main class="container" id="mainContainer">
-        <!-- Conversation Thread (left rail, hidden until multi-turn) -->
-        <aside class="conversation-thread" id="conversationThread">
-            <div class="thread-title">Conversation</div>
-            <!-- Thread nodes rendered dynamically by JS -->
-        </aside>
-        <!-- Main content area wrapper (shifts right when thread is visible) -->
         <div class="main-content-area" id="mainContentArea">
 
             <!-- ═══ TRAINER QUEUE (Phase 4 homepage) ═══ -->

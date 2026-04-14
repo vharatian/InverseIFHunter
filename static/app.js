@@ -166,8 +166,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 resetTurnState();
 
                 // ── Hide multi-turn UI ──
-                const thread = document.getElementById('conversationThread');
-                if (thread) thread.classList.remove('visible');
                 const journeyBar = document.getElementById('turnJourneyBar');
                 if (journeyBar) journeyBar.classList.remove('visible');
                 const container = document.getElementById('mainContainer');
@@ -426,8 +424,6 @@ async function restoreSession() {
 
             // Don't render multi-turn UI on initial load — user lands on queue/home view.
             // UI will be rendered when they open a task via showTaskView().
-            const thread = document.getElementById('conversationThread');
-            if (thread) thread.classList.remove('visible');
             const journeyBar = document.getElementById('turnJourneyBar');
             if (journeyBar) journeyBar.classList.remove('visible');
             const container = document.getElementById('mainContainer');

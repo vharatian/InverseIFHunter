@@ -1,7 +1,7 @@
 /**
  * multiturn.js — Turn-Aware UI, Multi-Turn Flow, Calibration
  * 
- * Handles turn journey bar, conversation thread, multi-turn decisions,
+ * Handles turn journey bar, multi-turn decisions,
  * calibration mode, turn history, and turn advancement.
  * 
  * Dependencies: config.js, utils.js, state.js, dom.js (+ celebrations, results, notebook, editors, hunt)
@@ -30,7 +30,7 @@ import { getConfigValue, adminBypass, getHuntModeById } from './config.js';
 // startHunt is called inside handleCalibrationGenerate -> fine.
 // showMultiTurnDecision is called inside handleHuntComplete -> fine.
 
-// ============== Turn-Aware UI Functions (Journey Bar, Thread, Badges) ==============
+// ============== Turn-Aware UI Functions (Journey Bar, Badges) ==============
 
 /**
  * Single entry point to sync all turn-related DOM after state.currentTurn changes.
@@ -151,83 +151,6 @@ export function renderJourneyBar() {
 }
 
 /**
- * Render the Conversation Thread — left-rail timeline.
- */
-export function renderConversationThread() {
-    const thread = document.getElementById('conversationThread');
-    if (!thread) return;
-    
-    // Keep the title, clear the rest
-    const title = thread.querySelector('.thread-title');
-    thread.innerHTML = '';
-    if (title) thread.appendChild(title);
-    else {
-        const t = document.createElement('div');
-        t.className = 'thread-title';
-        t.textContent = 'Conversation';
-        thread.appendChild(t);
-    }
-    
-    // Completed turns
-    state.turns.forEach(t => {
-        const turnNum = t.turnNumber || t.turn_number;
-        const node = document.createElement('div');
-        node.className = 'thread-node completed thread-node-enter';
-        node.dataset.turn = turnNum;
-        
-        const color = getTurnColor(turnNum);
-        node.style.setProperty('--node-color', color);
-        
-        const turnHuntCount = t.huntCount || (t.results || []).length;
-        node.innerHTML = `
-            <div class="thread-turn-label">
-                <span class="turn-badge ${getTurnColorClass(turnNum)}" style="font-size:0.6rem; padding:0.1rem 0.4rem;">T${turnNum}</span>
-            </div>
-            <div class="thread-prompt-preview">${escapeHtml((t.prompt || '').substring(0, 80))}</div>
-            ${t.selectedResponse ? `<div class="thread-response-preview" style="border-left-color:${color};">${escapeHtml(t.selectedResponse.substring(0, 80))}</div>` : ''}
-            <div class="thread-status done">${turnHuntCount} hunts</div>
-        `;
-        
-        node.addEventListener('click', () => {
-            activateTurnTab(turnNum);
-        });
-        
-        thread.appendChild(node);
-    });
-    
-    // Current turn
-    const currentNode = document.createElement('div');
-    currentNode.className = 'thread-node active thread-node-enter';
-    currentNode.dataset.turn = state.currentTurn;
-    const currentColor = getTurnColor(state.currentTurn);
-    currentNode.style.setProperty('--node-color', currentColor);
-    
-    const currentPrompt = state.notebook?.prompt || '';
-    const huntCount = state.huntsThisTurn || 0;
-    
-    currentNode.innerHTML = `
-        <div class="thread-turn-label">
-            <span class="turn-badge ${getTurnColorClass(state.currentTurn)}" style="font-size:0.6rem; padding:0.1rem 0.4rem;">T${state.currentTurn}</span>
-        </div>
-        <div class="thread-prompt-preview">${escapeHtml(currentPrompt.substring(0, 80))}</div>
-        <div class="thread-status hunting">${state.isHunting ? '● Hunting...' : (huntCount > 0 ? `${huntCount} hunts` : 'Ready')}</div>
-    `;
-    
-    thread.appendChild(currentNode);
-    
-    // Activate the two-column layout and show thread
-    const container = document.getElementById('mainContainer');
-    if (container) container.classList.add('multi-turn-layout');
-    thread.classList.add('visible');
-    
-    // Hide metadata sidebar to avoid overlap with conversation thread
-    if (elements.metadataSidebar) {
-        elements.metadataSidebar.style.display = 'none';
-        document.body.classList.remove('sidebar-visible');
-    }
-}
-
-/**
  * Update all turn-aware section headers, progress info, and badges.
  */
 export function updateTurnAwareUI() {
@@ -281,10 +204,9 @@ export function updateTurnAwareUI() {
     const decisionNextTurn = document.getElementById('decisionNextTurn');
     if (decisionNextTurn) decisionNextTurn.textContent = turn + 1;
     
-    // Render journey bar and thread if multi-turn
+    // Render journey bar if multi-turn
     if (state.isMultiTurn || turn > 1) {
         renderJourneyBar();
-        renderConversationThread();
     }
 }
 
