@@ -4,10 +4,9 @@
  * Fetches GET /api/trainer-queue and renders:
  *   - Time-aware greeting
  *   - Smart focus card (most relevant next action)
- *   - Momentum strip (approved / submitted / drafts counts)
- *   - "Needs attention" (returned + active drafts)
- *   - "With reviewer" (submitted)
- *   - "Completed" (approved + rejected)
+ *   - Momentum strip (in progress / completed submitted counts)
+ *   - "In progress" (drafts + returned)
+ *   - "Completed" (submitted to reviewer)
  *   - Empty state when no tasks
  *
  * Exports: initTrainerQueue, refreshQueue, showQueueView, showTaskView
@@ -31,9 +30,8 @@ function cacheDom() {
         focusTitle:       id('tqFocusTitle'),
         focusDetail:      id('tqFocusDetail'),
         focusBtn:         id('tqFocusBtn'),
-        momentumApproved: id('tqMomentumApproved'),
-        momentumSubmitted:id('tqMomentumSubmitted'),
-        momentumDrafts:   id('tqMomentumDrafts'),
+        momentumInProgress: id('tqMomentumInProgress'),
+        momentumCompleted:  id('tqMomentumCompleted'),
         momentum:         id('tqMomentum'),
         tabs:             id('tqTabs'),
         empty:            id('tqEmpty'),
@@ -43,8 +41,6 @@ function cacheDom() {
 
     // Tab panels and lists keyed by tab name
     _panels = {
-        returned:  { panel: id('tqPanelReturned'),  list: id('tqReturnedList'),  empty: id('tqPanelReturnedEmpty'),  count: id('tqTabCountReturned') },
-        waiting:   { panel: id('tqPanelWaiting'),   list: id('tqWaitingList'),   empty: id('tqPanelWaitingEmpty'),   count: id('tqTabCountWaiting') },
         drafts:    { panel: id('tqPanelDrafts'),    list: id('tqDraftsList'),    empty: id('tqPanelDraftsEmpty'),    count: id('tqTabCountDrafts') },
         completed: { panel: id('tqPanelCompleted'),  list: id('tqCompletedList'), empty: id('tqPanelCompletedEmpty'), count: id('tqTabCountCompleted') },
     };
@@ -55,7 +51,7 @@ let _onOpenTask = null;   // callback(sessionId) — set from app.js
 let _onNewTask = null;    // callback() — set from app.js
 let _stopPoller = null;
 let _panels = {};         // populated by cacheDom
-let _activeTab = 'returned';
+let _activeTab = 'drafts';
 
 // ── Public API ──────────────────────────────────────────────────
 
@@ -139,13 +135,12 @@ function render(data) {
 
     renderFocusCard(returned, drafts, submitted, approved);
 
-    renderPanel('returned',  returned, false);
-    renderPanel('waiting',   submitted, false);
-    renderPanel('drafts',    drafts, true);
-    renderPanel('completed', [...approved, ...rejected], false);
+    const inProgress = [...returned, ...drafts].sort((a, b) => _sessionSortKey(b) - _sessionSortKey(a));
+    renderPanel('drafts',    inProgress, true);
+    renderPanel('completed', submitted, false);
 
     // Auto-select first non-empty tab if current tab is empty
-    const counts = { returned: returned.length, waiting: submitted.length, drafts: drafts.length, completed: approved.length + rejected.length };
+    const counts = { drafts: inProgress.length, completed: submitted.length };
     if (counts[_activeTab] === 0) {
         const first = Object.keys(counts).find(k => counts[k] > 0);
         if (first) switchTab(first);
@@ -200,7 +195,7 @@ function renderFocusCard(returned, drafts, submitted, approved) {
         const t = drafts[0];
         setFocusCard(
             'draft',
-            `Continue ${taskLabel(t)}`,
+            draftFocusTitle(t),
             stageLabel(t),
             t.session_id,
             'Continue',
@@ -238,17 +233,14 @@ function setFocusCard(iconType, title, detail, sessionId, btnLabel) {
 // ── Momentum strip ──────────────────────────────────────────────
 
 function renderMomentum(sessions) {
-    const approved  = sessions.filter(s => s.review_status === 'approved').length;
     const submitted = sessions.filter(s => s.review_status === 'submitted').length;
-    const drafts    = sessions.filter(s => s.review_status === 'draft').length;
+    const inProgress = sessions.filter(s => s.review_status === 'draft' || s.review_status === 'returned').length;
 
-    const svgCheck = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
-    const svgClock = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`;
-    const svgEdit  = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`;
+    const svgEdit = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`;
+    const svgDone = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>`;
 
-    if (els.momentumApproved)  els.momentumApproved.innerHTML  = `${svgCheck}<span>${approved}</span><span class="tq-momentum-label">approved</span>`;
-    if (els.momentumSubmitted) els.momentumSubmitted.innerHTML = `${svgClock}<span>${submitted}</span><span class="tq-momentum-label">with reviewer</span>`;
-    if (els.momentumDrafts)    els.momentumDrafts.innerHTML    = `${svgEdit}<span>${drafts}</span><span class="tq-momentum-label">in progress</span>`;
+    if (els.momentumInProgress) els.momentumInProgress.innerHTML = `${svgEdit}<span>${inProgress}</span><span class="tq-momentum-label">in progress</span>`;
+    if (els.momentumCompleted)  els.momentumCompleted.innerHTML  = `${svgDone}<span>${submitted}</span><span class="tq-momentum-label">completed</span>`;
 }
 
 // ── Tab switching ───────────────────────────────────────────────
@@ -294,25 +286,15 @@ function renderPanel(name, tasks, showJourney) {
 }
 
 const EMPTY_STATE_CONFIG = {
-    returned: {
-        svg: `<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.35"><polyline points="20 6 9 17 4 12"/></svg>`,
-        title: 'All clear',
-        sub: 'No returned tasks. Keep it up.',
-    },
-    waiting: {
-        svg: `<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.35"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`,
-        title: 'Nothing pending review',
-        sub: 'Submit a task to send it to a reviewer.',
-    },
     drafts: {
         svg: `<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.35"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>`,
-        title: 'No drafts in progress',
-        sub: 'Start a new task to begin.',
+        title: 'Nothing in progress',
+        sub: 'No drafts or returned tasks. Start a new task to begin.',
     },
     completed: {
-        svg: `<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.35"><circle cx="12" cy="8" r="6"/><path d="M15.477 12.89L17 22l-5-3-5 3 1.523-9.11"/></svg>`,
-        title: 'No completed tasks yet',
-        sub: 'Approved tasks will appear here.',
+        svg: `<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.35"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`,
+        title: 'Nothing submitted yet',
+        sub: 'Submit a task from the workflow to send it for review.',
     },
 };
 
@@ -475,6 +457,14 @@ function taskLabel(t) {
     return t.session_id.slice(0, 10);
 }
 
+/** Focus card title: "Continue '…prompt…'" with single-quoted prompt body. */
+function draftFocusTitle(t) {
+    const raw = (t.prompt_preview && t.prompt_preview.trim()) || t.task_display_id || taskLabel(t);
+    const max = 120;
+    const body = raw.length > max ? raw.slice(0, max) + '…' : raw;
+    return `Continue '${body}'`;
+}
+
 function stageLabel(t) {
     const step = computeStep(t);
     const labels = [
@@ -501,6 +491,14 @@ function esc(s) {
     const d = document.createElement('div');
     d.textContent = s;
     return d.innerHTML;
+}
+
+function _sessionSortKey(s) {
+    const u = s?.updated_at;
+    if (u == null) return 0;
+    if (typeof u === 'number') return u < 1e12 ? u * 1000 : u;
+    const ms = Date.parse(u);
+    return Number.isFinite(ms) ? ms : 0;
 }
 
 function _relativeTime(ts) {

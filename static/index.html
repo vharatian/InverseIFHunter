@@ -176,29 +176,18 @@
 
                 <!-- Momentum strip -->
                 <div class="tq-momentum" id="tqMomentum">
-                    <span class="tq-momentum-item" id="tqMomentumApproved" title="Approved tasks"></span>
-                    <span class="tq-momentum-item" id="tqMomentumSubmitted" title="Under review"></span>
-                    <span class="tq-momentum-item" id="tqMomentumDrafts" title="Drafts in progress"></span>
+                    <span class="tq-momentum-item" id="tqMomentumInProgress" title="Drafts and tasks needing your attention"></span>
+                    <span class="tq-momentum-item" id="tqMomentumCompleted" title="Submitted to reviewer"></span>
                 </div>
 
                 <!-- Tab bar -->
                 <div class="tq-tabs" id="tqTabs">
-                    <button class="tq-tab tq-tab-active" data-tab="returned">Needs attention <span class="tq-tab-count" id="tqTabCountReturned"></span></button>
-                    <button class="tq-tab" data-tab="waiting">With reviewer <span class="tq-tab-count" id="tqTabCountWaiting"></span></button>
-                    <button class="tq-tab" data-tab="drafts">In progress <span class="tq-tab-count" id="tqTabCountDrafts"></span></button>
+                    <button class="tq-tab tq-tab-active" data-tab="drafts">In progress <span class="tq-tab-count" id="tqTabCountDrafts"></span></button>
                     <button class="tq-tab" data-tab="completed">Completed <span class="tq-tab-count" id="tqTabCountCompleted"></span></button>
                 </div>
 
                 <!-- Tab panels -->
-                <div class="tq-panel" id="tqPanelReturned">
-                    <div class="tq-task-list" id="tqReturnedList"></div>
-                    <div class="tq-panel-empty hidden" id="tqPanelReturnedEmpty">No returned tasks. You're all good.</div>
-                </div>
-                <div class="tq-panel hidden" id="tqPanelWaiting">
-                    <div class="tq-task-list" id="tqWaitingList"></div>
-                    <div class="tq-panel-empty hidden" id="tqPanelWaitingEmpty">Nothing under review right now.</div>
-                </div>
-                <div class="tq-panel hidden" id="tqPanelDrafts">
+                <div class="tq-panel" id="tqPanelDrafts">
                     <div class="tq-task-list" id="tqDraftsList"></div>
                     <div class="tq-panel-empty hidden" id="tqPanelDraftsEmpty">No drafts in progress.</div>
                 </div>
