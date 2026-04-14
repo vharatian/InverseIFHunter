@@ -73,6 +73,20 @@ async def publish(session_id: str, event: HuntEvent) -> str:
     # Set TTL on first event (refresh on subsequent)
     await r.expire(key, STREAM_TTL)
 
+    # Notify Elixir edge via Pub/Sub (Streams and Pub/Sub are separate subsystems)
+    pubsub_channel = f"mh:events:hunt:{session_id}"
+    pubsub_payload = {
+        "session_id": session_id,
+        "type": event.event_type,
+        "event_type": event.event_type,
+        "hunt_id": event.hunt_id,
+        "data": event.data,
+    }
+    try:
+        await r.publish(pubsub_channel, json.dumps(pubsub_payload, default=str))
+    except Exception as e:
+        logger.debug("pubsub publish failed (non-fatal): %s", e)
+
     # Persist to PostgreSQL telemetry (non-blocking, best-effort)
     try:
         from services.telemetry_pg import append_telemetry_event
