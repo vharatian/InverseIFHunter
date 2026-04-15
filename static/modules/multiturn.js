@@ -253,8 +253,10 @@ export function showMultiTurnDecision() {
     if (turnStat) turnStat.innerHTML = `<span class="turn-badge ${getTurnColorClass(state.currentTurn)}">Turn ${state.currentTurn}</span> Complete`;
     if (huntStat) huntStat.textContent = `${hunts} hunts`;
     if (breakStat) {
-        if (passingMode || minBrk === 0) {
+        if (passingMode) {
             breakStat.innerHTML = `${passes} pass${passes !== 1 ? 'es' : ''} found`;
+        } else if (minBrk === 0) {
+            breakStat.innerHTML = `${breaks} break${breaks !== 1 ? 's' : ''}, ${passes} pass${passes !== 1 ? 'es' : ''}`;
         } else {
             breakStat.innerHTML = `${breaks} break${breaks !== 1 ? 's' : ''} found`;
         }
@@ -272,10 +274,15 @@ export function showMultiTurnDecision() {
     const contHeading = document.getElementById('decisionContinueHeading');
     const contDesc = document.getElementById('decisionContinueDesc');
 
-    if (decMode.type === 'passing' || decMinBreaking === 0) {
+    if (decMode.type === 'passing') {
         if (endHeading) endHeading.textContent = 'Found Passing Responses?';
         if (endDesc) endDesc.textContent = 'End the session. Select passing responses for human review and save to notebook.';
         if (contHeading) contHeading.textContent = 'No Passing Yet?';
+        if (contDesc) contDesc.textContent = "Pick a response and write the next turn's prompt and criteria.";
+    } else if (decMinBreaking === 0 && !decMode.count_based) {
+        if (endHeading) endHeading.textContent = 'Found Breaking Responses?';
+        if (endDesc) endDesc.textContent = `End the session. Select ${decSlots} responses for human review (any mix of breaking and passing).`;
+        if (contHeading) contHeading.textContent = 'No Breaking Yet?';
         if (contDesc) contDesc.textContent = "Pick a response and write the next turn's prompt and criteria.";
     } else if (decMode.count_based) {
         const req = decMode.required_breaking ?? 1;
@@ -307,8 +314,8 @@ export function showMultiTurnDecision() {
             canReview = breaks >= req;
             if (!canReview) readinessMsg = `Need at least ${req} breaking response(s) in ${reviewMode.name} mode (currently ${breaks}). Run more hunts!`;
         } else if (minBreaking === 0) {
-            canReview = passes >= 1;
-            if (!canReview) readinessMsg = `Min Breaking is 0 — need at least 1 passing response (currently ${passes}). Run more hunts!`;
+            canReview = passes + breaks >= 1;
+            if (!canReview) readinessMsg = `Need at least 1 hunt result to end the session (currently ${passes} passing, ${breaks} breaking). Run more hunts!`;
         } else {
             canReview = breaks >= minBreaking;
             if (!canReview) readinessMsg = `Need at least ${minBreaking} breaking in ${reviewMode.name} mode (currently ${breaks}). Run more hunts!`;
@@ -597,17 +604,30 @@ export async function handleContinueToNextTurn() {
         contextDiv.innerHTML = contextHtml;
         list.appendChild(contextDiv);
     }
+
+    function _appendUseIdealResponseButton() {
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'display: flex; justify-content: flex-end; margin-top: 0.75rem;';
+        const btn = document.createElement('button');
+        btn.className = 'btn btn-secondary';
+        btn.style.cssText = 'padding: 0.45rem 1rem; font-size: 0.85rem; border: 1px solid var(--border); background: transparent; color: var(--text-muted); border-radius: 6px; cursor: pointer;';
+        btn.textContent = 'Use Ideal Response';
+        btn.title = 'Use your ideal response from the testbed as the conversation response for this turn';
+        btn.addEventListener('click', () => useIdealResponseAndAdvance());
+        wrap.appendChild(btn);
+        list.appendChild(wrap);
+    }
     
     if (state.allResponses.length === 0) {
         console.warn('[handleContinueToNextTurn] allResponses is empty after fetch');
         const emptyMsg = document.createElement('p');
         emptyMsg.style.color = 'var(--text-muted)';
-        emptyMsg.textContent = 'No responses available. Run a hunt first, or refresh the page. Check browser console (F12) for details.';
+        emptyMsg.textContent = 'No hunt responses listed for this turn (e.g. after advancing). You can still use your ideal response from the testbed below.';
         list.appendChild(emptyMsg);
+        _appendUseIdealResponseButton();
         picker.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         return;
     }
-    
     
     state.allResponses.forEach((r, idx) => {
         const score = r.judge_score ?? r.score ?? '?';
@@ -660,17 +680,7 @@ export async function handleContinueToNextTurn() {
         list.appendChild(card);
     });
 
-    // Add "Use Ideal Response" button at the bottom
-    const idealWrap = document.createElement('div');
-    idealWrap.style.cssText = 'display: flex; justify-content: flex-end; margin-top: 0.75rem;';
-    const idealBtn = document.createElement('button');
-    idealBtn.className = 'btn btn-secondary';
-    idealBtn.style.cssText = 'padding: 0.45rem 1rem; font-size: 0.85rem; border: 1px solid var(--border); background: transparent; color: var(--text-muted); border-radius: 6px; cursor: pointer;';
-    idealBtn.textContent = 'Use Ideal Response';
-    idealBtn.title = 'Use your ideal response from the testbed as the conversation response for this turn';
-    idealBtn.addEventListener('click', () => useIdealResponseAndAdvance());
-    idealWrap.appendChild(idealBtn);
-    list.appendChild(idealWrap);
+    _appendUseIdealResponseButton();
 
     // Scroll picker into view so options are visible
     picker.scrollIntoView({ behavior: 'smooth', block: 'nearest' });

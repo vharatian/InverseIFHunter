@@ -174,14 +174,20 @@ h3 { font-size: 1.05rem; }
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    padding: 0.2rem 1rem;
+    flex-wrap: wrap;
+    row-gap: 0.65rem;
+    column-gap: 1.25rem;
+    padding: 0.65rem 1.5rem;
+    box-sizing: border-box;
     border-bottom: 1px solid var(--border);
 }
 
 .header-actions {
     display: flex;
     align-items: center;
-    gap: 1rem;
+    flex-wrap: wrap;
+    gap: 0.85rem;
+    margin-left: auto;
 }
 
 /* ── Task Info Navbar Chip ─────────────────────────────────── */
@@ -192,8 +198,8 @@ h3 { font-size: 1.05rem; }
 .task-info-chip-btn {
     display: flex;
     align-items: center;
-    gap: 0.35rem;
-    padding: 0.28rem 0.65rem;
+    gap: 0.4rem;
+    padding: 0.35rem 0.85rem;
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
@@ -305,7 +311,7 @@ h3 { font-size: 1.05rem; }
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    padding: 0.25rem 0.5rem;
+    padding: 0.35rem 0.65rem;
     cursor: pointer;
     font-size: 1rem;
     line-height: 1;
@@ -321,7 +327,7 @@ h3 { font-size: 1.05rem; }
     font-size: 0.9rem;
     color: var(--text-muted);
     text-decoration: none;
-    padding: 0.35rem 0.6rem;
+    padding: 0.4rem 0.75rem;
     border-radius: 6px;
     transition: color 0.2s, background 0.2s;
 }
@@ -557,7 +563,7 @@ body.sidebar-visible .container {
 
 /* Top padding matches fixed header (+ journey row when visible) */
 body {
-    --app-top-strip-height: 52px;
+    --app-top-strip-height: 56px;
     padding-top: var(--app-top-strip-height);
 }
 body:has(#turnJourneyBar.visible) {
@@ -4176,7 +4182,8 @@ body.sidebar-visible .container.multi-turn-layout {
 .trainer-identity {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.55rem;
+    padding: 0.2rem 0.65rem 0.2rem 0;
     font-size: 0.82rem;
     color: var(--text-secondary);
 }
@@ -4191,7 +4198,8 @@ body.sidebar-visible .container.multi-turn-layout {
     color: var(--accent);
     cursor: pointer;
     font-size: 0.78rem;
-    padding: 0.15rem 0.4rem;
+    margin-left: 0.15rem;
+    padding: 0.2rem 0.5rem;
     border-radius: 4px;
     transition: background 0.15s ease;
     font-family: inherit;
@@ -5268,7 +5276,7 @@ body.sidebar-visible .container.multi-turn-layout {
 .notif-bell-wrapper { position: relative; display: inline-flex; }
 .notif-bell {
     background: none; border: none; cursor: pointer; color: var(--text-secondary);
-    padding: 6px; border-radius: var(--radius-sm, 6px); transition: all 0.15s ease;
+    padding: 8px; border-radius: var(--radius-sm, 6px); transition: all 0.15s ease;
     display: flex; align-items: center; justify-content: center; position: relative;
 }
 .notif-bell:hover { background: var(--bg-hover, rgba(255,255,255,0.06)); color: var(--text-primary); }
@@ -5370,7 +5378,7 @@ body.sidebar-visible .container.multi-turn-layout {
 .header-brand {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.65rem;
     margin-right: auto;
     text-decoration: none;
     user-select: none;
@@ -5399,14 +5407,7 @@ body.sidebar-visible .container.multi-turn-layout {
 .theme-icon-sun  { display: none; }
 .theme-icon-moon { display: block; }
 
-/* Trainer identity — add SVG user icon styling */
-.trainer-identity {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    font-size: 0.82rem;
-    color: var(--text-secondary);
-}
+/* Trainer identity — SVG user icon */
 .trainer-identity svg {
     color: var(--text-muted);
     flex-shrink: 0;
@@ -7540,8 +7541,8 @@ body.sidebar-visible .container.multi-turn-layout {
 .nav-testbed-btn {
     display: inline-flex;
     align-items: center;
-    gap: 0.35rem;
-    padding: 0.35rem 0.75rem;
+    gap: 0.45rem;
+    padding: 0.4rem 0.9rem;
     font-size: 0.82rem;
     font-weight: 500;
     color: var(--text-secondary);
