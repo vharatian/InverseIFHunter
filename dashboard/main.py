@@ -91,8 +91,14 @@ def _compute_dashboard_version() -> str:
     return f"dash.{content_hash.hexdigest()[:10]}"
 
 
-_updates_js = Path(__file__).resolve().parent.parent / "static" / "js" / "updates"
-if _updates_js.is_dir():
+# Monorepo: InverseIFHunter/static/js/updates | Docker (context ./dashboard): dashboard/static/js/updates
+_dash_root = Path(__file__).resolve().parent
+_updates_candidates = [
+    _dash_root.parent / "static" / "js" / "updates",
+    _dash_root / "static" / "js" / "updates",
+]
+_updates_js = next((p for p in _updates_candidates if p.is_dir()), None)
+if _updates_js:
     app.mount(
         "/updates-assets",
         StaticFiles(directory=str(_updates_js)),
