@@ -73,6 +73,10 @@ function esc(str) {
     return d.innerHTML;
 }
 
+function attrEsc(str) {
+    return esc(str).replace(/"/g, '&quot;');
+}
+
 function debounce(fn, ms) {
     let t;
     return (...args) => {
@@ -834,7 +838,7 @@ function renderDataTab(stats, container) {
                     </div>
                     <button type="button" class="btn btn-sm" id="db-browse-add">Add row</button>
                 </div>
-                <div id="db-browse-table-wrap"><div class="loading">Loading…</div></div>
+                <div id="db-browse-table-wrap" class="db-table-wrap"><div class="loading">Loading…</div></div>
                 <div id="db-browse-pager"></div>
             </div>
         </div>
@@ -1022,10 +1026,17 @@ function _dbCellPreview(val) {
     return s.length > 80 ? s.slice(0, 77) + '…' : s;
 }
 
+function _dbCellTitle(val) {
+    if (val === null || val === undefined) return '';
+    const s = typeof val === 'object' ? JSON.stringify(val) : String(val);
+    const flat = s.replace(/\s+/g, ' ').trim();
+    return flat.length > 1600 ? `${flat.slice(0, 1597)}…` : flat;
+}
+
 function renderDbTableHtml(schema, listData) {
     const cols = schema.columns.slice(0, 12);
     const pk = schema.pk;
-    let th = cols.map(c => `<th>${esc(c.name)}</th>`).join('');
+    let th = cols.map(c => `<th title="${attrEsc(c.name)}"><span class="db-th-inner">${esc(c.name)}</span></th>`).join('');
     th += '<th class="db-cell-actions"> </th>';
     const rows = listData.rows || [];
     dbBrowseLastRows = rows;
@@ -1034,8 +1045,11 @@ function renderDbTableHtml(schema, listData) {
     rows.forEach((row, i) => {
         let tds = cols.map((c) => {
             const v = row[c.name];
-            const cls = c.data_type === 'jsonb' ? 'db-cell-json' : '';
-            return `<td class="${cls}">${esc(_dbCellPreview(v))}</td>`;
+            const jsonish = c.data_type === 'jsonb' || /json|history|notebook|config|reviews|turns|payload|metadata|blob/i.test(c.name);
+            const cls = jsonish ? 'db-cell-json' : '';
+            const tip = _dbCellTitle(v);
+            const tit = tip ? ` title="${attrEsc(tip)}"` : '';
+            return `<td class="db-cell-data ${cls}"${tit}>${esc(_dbCellPreview(v))}</td>`;
         }).join('');
         tds += `<td class="db-cell-actions"><button type="button" class="btn btn-xs btn-danger db-row-del" data-row-index="${i}">Del</button></td>`;
         tr += `<tr class="db-row" data-row-index="${i}">${tds}</tr>`;

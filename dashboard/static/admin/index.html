@@ -400,17 +400,32 @@
         .db-sub-tab.active { border-color: var(--accent-primary); background: var(--accent-glow); color: var(--accent-primary); }
         .db-toolbar { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: flex-end; margin-bottom: 0.75rem; }
         .db-toolbar .form-group { margin-bottom: 0; min-width: 140px; }
+        .db-browse-card { min-width: 0; }
+        #db-browse-root { min-width: 0; }
         .db-table-wrap {
-            overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-md);
-            max-height: 520px;
+            width: 100%; max-width: 100%;
+            overflow-x: auto; overflow-y: auto;
+            overscroll-behavior: contain;
+            border: 1px solid var(--border); border-radius: var(--radius-md);
+            background: var(--bg-secondary);
+            max-height: min(52vh, 520px);
         }
-        .db-table { width: 100%; border-collapse: collapse; font-size: 0.72rem; }
+        .db-table { width: max(100%, max-content); border-collapse: collapse; font-size: 0.72rem; table-layout: auto; }
         .db-table th, .db-table td { padding: 0.35rem 0.45rem; border-bottom: 1px solid var(--border-subtle); text-align: left; vertical-align: top; }
-        .db-table th { position: sticky; top: 0; background: var(--bg-tertiary); z-index: 1; white-space: nowrap; }
+        .db-table th {
+            position: sticky; top: 0; background: var(--bg-tertiary); z-index: 1;
+            max-width: 14rem; overflow: hidden;
+        }
+        .db-th-inner { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .db-table tbody tr:hover { background: var(--bg-hover); }
         .db-table tbody tr.db-row { cursor: pointer; }
-        .db-cell-json { font-family: var(--font-mono); color: var(--text-secondary); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .db-cell-actions { white-space: nowrap; }
+        .db-table td.db-cell-data {
+            max-width: 14rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+            font-size: 0.7rem; line-height: 1.35;
+        }
+        .db-table td.db-cell-data.db-cell-json { max-width: 18rem; }
+        .db-cell-json { font-family: var(--font-mono); color: var(--text-secondary); }
+        .db-cell-actions { white-space: nowrap; width: 1%; max-width: none; }
         .db-row-del { cursor: pointer; padding: 0.15rem 0.4rem; font-size: 0.68rem; }
         .db-pager { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.75rem; flex-wrap: wrap; font-size: 0.78rem; color: var(--text-secondary); }
         .db-modal-panel { max-width: min(720px, 96vw); max-height: 90vh; overflow-y: auto; }
@@ -864,6 +879,6 @@
         </div>
     </div>
 
-    <script type="module" src="static/admin.js?v=8"></script>
+    <script type="module" src="static/admin.js?v=9"></script>
 </body>
 </html>

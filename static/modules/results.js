@@ -1417,6 +1417,15 @@ export function formatLLMCriteria(criteria, fullExplanation) {
 }
 
 
+/** Collapse "[FAIL] C4 (FAIL)" → "[FAIL] C4" (LLM output repeats status after the id). */
+function compactJudgeCriterionBadge(badge) {
+    if (typeof badge !== 'string') return badge;
+    return badge.replace(
+        /^(\[(?:PASS|FAIL|MISSING)\]\s*C\d+)\s*\((?:PASS|FAIL|MISSING)\)/i,
+        '$1'
+    );
+}
+
 /**
  * Render an "Independent Judging Results" explanation string as structured HTML.
  * Parses the header line, passing-criteria summary, and per-criterion lines.
@@ -1459,6 +1468,7 @@ function renderJudgeExplanation(explanationText) {
                 badge = line;
                 reason = '';
             }
+            badge = compactJudgeCriterionBadge(badge);
             criteriaHtml += `
                 <div style="display: flex; align-items: baseline; gap: 0.5rem; padding: 0.45rem 0.6rem; margin-bottom: 0.3rem; background: var(--bg-primary); border-left: 3px solid ${statusColor}; border-radius: 4px; font-size: 0.875rem; line-height: 1.5;">
                     <span style="font-weight: 700; color: ${statusColor}; white-space: nowrap; flex-shrink: 0;">${escapeHtml(badge)}</span>
@@ -1509,21 +1519,18 @@ export function formatJudgeCriteriaDisplay(criteria) {
         const isPassing = statusUpper === 'PASS';
         const isMissing = statusUpper === 'MISSING';
         
-        let statusMarker, statusText, statusColor, bgColor;
+        let statusMarker, statusColor, bgColor;
         
         if (isMissing) {
             statusMarker = '[MISSING]';
-            statusText = 'MISSING';
             statusColor = 'var(--warning)';
             bgColor = 'var(--warning-bg)';
         } else if (isPassing) {
             statusMarker = '[PASS]';
-            statusText = 'PASS';
             statusColor = 'var(--success)';
             bgColor = 'var(--bg-tertiary)';
         } else {
             statusMarker = '[FAIL]';
-            statusText = 'FAIL';
             statusColor = 'var(--danger)';
             bgColor = 'var(--bg-tertiary)';
         }
@@ -1542,7 +1549,7 @@ export function formatJudgeCriteriaDisplay(criteria) {
         return `
             <div style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem; margin: 0.25rem 0; background: ${bgColor}; border-radius: 6px; border-left: 3px solid ${statusColor};">
                 <span style="font-weight: 600; min-width: 35px;">${key}:</span>
-                <span style="color: ${statusColor}; font-weight: 600;">${statusMarker} ${statusText}</span>
+                <span style="color: ${statusColor}; font-weight: 600;">${statusMarker}</span>
                 ${criteriaText ? `<span style="flex: 1; font-size: 0.85rem; color: var(--text-secondary);">${escapeHtml(criteriaText)}</span>` : ''}
                 ${warningMsg}
             </div>
