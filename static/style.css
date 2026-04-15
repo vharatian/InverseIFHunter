@@ -1354,10 +1354,8 @@ label {
     overflow: hidden;
     max-height: 40px;
 }
-.offline-banner--hidden {
-    max-height: 0;
-    opacity: 0;
-    padding: 0 16px;
+.offline-banner.offline-banner--hidden {
+    display: none;
 }
 .offline-banner__icon { font-size: 1rem; }
 .offline-banner__badge {

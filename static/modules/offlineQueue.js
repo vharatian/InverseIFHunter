@@ -22,6 +22,7 @@ let _db = null;
 let _online = navigator.onLine;
 let _flushing = false;
 const _listeners = [];
+let _queueInited = false;
 
 /* ---- Public API ---- */
 
@@ -72,8 +73,21 @@ export async function pendingCount() {
  * Initialize offline detection + auto-flush on reconnect.
  */
 export function initOfflineQueue() {
+    if (_queueInited) return;
+    _queueInited = true;
+
+    const syncFromNavigator = () => {
+        _setOnline(navigator.onLine);
+    };
+
     window.addEventListener('online', () => _setOnline(true));
     window.addEventListener('offline', () => _setOnline(false));
+    window.addEventListener('pageshow', syncFromNavigator);
+    window.addEventListener('focus', syncFromNavigator);
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') syncFromNavigator();
+    });
+
     _online = navigator.onLine;
     _ensureBanner();
     if (_online) _flush();

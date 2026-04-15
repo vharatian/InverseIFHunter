@@ -48,7 +48,7 @@ import { initReviewSync, refreshReviewSync } from './modules/reviewSync.js?v=43'
 import { initTrainerQueue, showQueueView, showTaskView } from './modules/trainerQueue.js?v=43';
 import { initNotifications } from './modules/notifications.js?v=43';
 import { hydrateSession, clearSectionLocks } from './modules/sessionHydrator.js?v=43';
-import { initOfflineQueue } from './modules/offlineQueue.js?v=43';
+import { initOfflineQueue } from './modules/offlineQueue.js?v=44';
 import { initAdminMode, deactivateAdminMode } from './modules/adminMode.js?v=43';
 
 // Clean cache-busting query param from URL (left over by version-update hard refresh)
