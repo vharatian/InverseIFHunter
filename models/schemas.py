@@ -109,6 +109,8 @@ class HuntResult(BaseModel):
     """Result of a single hunt attempt."""
     hunt_id: int
     model: str
+    provider: str = "openrouter"
+    prompt: Optional[str] = None
     status: HuntStatus = HuntStatus.PENDING
     response: str = ""
     reasoning_trace: str = ""
@@ -116,8 +118,10 @@ class HuntResult(BaseModel):
     judge_output: str = ""
     judge_criteria: Dict[str, str] = {}
     judge_explanation: str = ""
+    scores: Dict[str, Any] = {}
     error: Optional[str] = None
     is_breaking: bool = False
+    duration_ms: Optional[int] = None
     # InverseIF aggregation
     sample_label: Optional[SampleLabel] = None  # PASS | BREAK | ERROR
     pass_rate: Optional[float] = None

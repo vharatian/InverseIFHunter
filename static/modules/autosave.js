@@ -12,7 +12,7 @@ import { showToast, showError } from './celebrations.js?v=43';
 import { validatePromptLength } from './editors.js';
 import { updateOriginalNotebookWithCell } from './notebook.js';
 import { fetchConfigFromAPI, adminBypass } from './config.js';
-import { isOnline, enqueue, onStatusChange } from './offlineQueue.js?v=44';
+import { isOnline, enqueue, onStatusChange } from './offlineQueue.js?v=46';
 
 let DEBOUNCE_MS = 800;
 let MIN_SAVE_INTERVAL_MS = 2000;

@@ -23,6 +23,63 @@ let _online = navigator.onLine;
 let _flushing = false;
 const _listeners = [];
 let _queueInited = false;
+let _offlinePoll = null;
+let _reachDebounce = null;
+
+/**
+ * True reachability: Chrome profiles sometimes leave navigator.onLine stuck false
+ * (VPN, extensions, flaky Wi‑Fi) while the app can still reach the server.
+ */
+async function _probeReachability() {
+    try {
+        const ac = new AbortController();
+        const tid = setTimeout(() => ac.abort(), 5000);
+        const res = await fetch('api/health', { method: 'GET', cache: 'no-store', signal: ac.signal });
+        clearTimeout(tid);
+        return res.ok;
+    } catch {
+        return false;
+    }
+}
+
+function _clearOfflinePoll() {
+    if (_offlinePoll) {
+        clearInterval(_offlinePoll);
+        _offlinePoll = null;
+    }
+}
+
+function _ensureOfflinePoll() {
+    if (_offlinePoll) return;
+    _offlinePoll = setInterval(() => void _recoverIfReachable(), 12000);
+}
+
+async function _recoverIfReachable() {
+    if (_online) return;
+    const ok = await _probeReachability();
+    if (ok) _setOnline(true);
+}
+
+async function _syncReachability() {
+    if (navigator.onLine) {
+        _setOnline(true);
+        return;
+    }
+    const ok = await _probeReachability();
+    if (ok) _setOnline(true);
+    else {
+        if (!_online) _ensureOfflinePoll();
+        else _setOnline(false);
+    }
+}
+
+function _scheduleReachabilitySync() {
+    clearTimeout(_reachDebounce);
+    _reachDebounce = setTimeout(() => {
+        _reachDebounce = null;
+        void _syncReachability();
+    }, 300);
+}
 
 /* ---- Public API ---- */
 
@@ -76,31 +133,41 @@ export function initOfflineQueue() {
     if (_queueInited) return;
     _queueInited = true;
 
-    const syncFromNavigator = () => {
-        _setOnline(navigator.onLine);
-    };
-
     window.addEventListener('online', () => _setOnline(true));
-    window.addEventListener('offline', () => _setOnline(false));
-    window.addEventListener('pageshow', syncFromNavigator);
-    window.addEventListener('focus', syncFromNavigator);
+    window.addEventListener('offline', () => {
+        _setOnline(false);
+        setTimeout(() => void _recoverIfReachable(), 500);
+    });
+    window.addEventListener('pageshow', () => _scheduleReachabilitySync());
+    window.addEventListener('focus', () => _scheduleReachabilitySync());
     document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') syncFromNavigator();
+        if (document.visibilityState === 'visible') _scheduleReachabilitySync();
     });
 
     _online = navigator.onLine;
     _ensureBanner();
-    if (_online) _flush();
+    void (async () => {
+        await _syncReachability();
+        if (_online) _flush();
+    })();
 }
 
 /* ---- Internals ---- */
 
 function _setOnline(val) {
-    if (_online === val) return;
+    if (_online === val) {
+        if (!val) _ensureOfflinePoll();
+        return;
+    }
     _online = val;
     _listeners.forEach(fn => { try { fn(val); } catch (_) {} });
     _updateBanner();
-    if (val) _flush();
+    if (val) {
+        _clearOfflinePoll();
+        _flush();
+    } else {
+        _ensureOfflinePoll();
+    }
 }
 
 async function _flush() {

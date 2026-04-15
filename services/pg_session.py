@@ -160,6 +160,8 @@ async def load_session_pg(session_id: str) -> Optional[HuntSession]:
                 hr = HuntResult(
                     hunt_id=r.hunt_id,
                     model=r.model,
+                    provider=r.provider or "openrouter",
+                    prompt=r.prompt,
                     status=HuntStatus(r.status) if r.status else HuntStatus.PENDING,
                     response=r.response or "",
                     reasoning_trace=r.reasoning_trace or "",
@@ -167,9 +169,11 @@ async def load_session_pg(session_id: str) -> Optional[HuntSession]:
                     judge_output=r.judge_output or "",
                     judge_criteria=r.judge_criteria or {},
                     judge_explanation=r.judge_explanation or "",
+                    scores=r.scores or {},
                     error=r.error,
                     is_breaking=r.is_breaking or False,
                     sample_label=r.sample_label,
+                    duration_ms=r.duration_ms,
                 )
                 hunt_results.append(hr)
             except Exception:

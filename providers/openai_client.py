@@ -214,9 +214,13 @@ def _compute_judge_score(results: List[Dict], total: int, pass_threshold: float)
         + "\n".join(criteria_lines)
     )
     final_criteria = {r["id"]: r["status"] for r in results}
+    detailed_scores = {
+        str(r["id"]): {"status": r["status"], "reason": r["reason"]}
+        for r in results
+    }
     return {"score": score, "pass_count": pass_count, "fail_count": fail_count,
             "missing_count": missing_count, "criteria": final_criteria,
-            "explanation": explanation}
+            "explanation": explanation, "scores": detailed_scores}
 
 
 async def _eval_criterion_via_openrouter(client, prompt, student_response, standard_response,
@@ -280,8 +284,13 @@ async def _judge_via_openrouter(
     ]
     results = await asyncio.gather(*tasks)
     agg = _compute_judge_score(list(results), len(criteria_list), pass_threshold)
-    return {"score": agg["score"], "criteria": agg["criteria"], "explanation": agg["explanation"],
-            "raw_output": "Generated via OpenRouter (independent criteria judging)"}
+    return {
+        "score": agg["score"],
+        "criteria": agg["criteria"],
+        "explanation": agg["explanation"],
+        "scores": agg["scores"],
+        "raw_output": agg["explanation"],
+    }
 
 
 async def _judge_via_openrouter_streaming(
@@ -320,7 +329,7 @@ async def _judge_via_openrouter_streaming(
 
     agg = _compute_judge_score(results, total, pass_threshold)
     yield {"type": "done", "score": agg["score"], "passing": agg["pass_count"], "total": total,
-           "criteria": agg["criteria"], "explanation": agg["explanation"]}
+           "criteria": agg["criteria"], "explanation": agg["explanation"], "scores": agg["scores"]}
 
 
 class OpenAIJudgeClient:
@@ -560,7 +569,8 @@ class OpenAIJudgeClient:
             "score": agg["score"],
             "criteria": agg["criteria"],
             "explanation": agg["explanation"],
-            "raw_output": "Generated via Independent Criteria Judging"
+            "scores": agg["scores"],
+            "raw_output": agg["explanation"],
         }
 
     async def judge_response_streaming(
@@ -646,7 +656,7 @@ class OpenAIJudgeClient:
 
         agg = _compute_judge_score(results, total, pass_threshold)
         yield {"type": "done", "score": agg["score"], "passing": agg["pass_count"], "total": total,
-               "criteria": agg["criteria"], "explanation": agg["explanation"]}
+               "criteria": agg["criteria"], "explanation": agg["explanation"], "scores": agg["scores"]}
 
     async def _extract_criteria(self, reference: str, model: str) -> List[Dict[str, str]]:
         """

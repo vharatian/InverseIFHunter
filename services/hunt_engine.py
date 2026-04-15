@@ -10,6 +10,7 @@ Orchestrates parallel hunts with:
 - Rate-limited API calls (prevents overload)
 """
 import asyncio
+import time
 import uuid
 import logging
 from typing import List, Dict, Any, Optional, Callable
@@ -282,9 +283,12 @@ class HuntEngine:
         notebook: ParsedNotebook,
     ) -> HuntResult:
         """Run one sample: model + judge + classify. No Redis append or counter update (caller does)."""
+        provider = getattr(config, 'provider', 'openrouter')
         result = HuntResult(
             hunt_id=hunt_id,
             model=model,
+            provider=provider,
+            prompt=notebook.prompt,
             status=HuntStatus.RUNNING
         )
         await events.publish(session_id, HuntEvent(
@@ -293,7 +297,6 @@ class HuntEngine:
             data={"model": model}
         ))
         rate_limiter = get_rate_limiter() if _rate_limiter_enabled else None
-        provider = getattr(config, 'provider', 'openrouter')
         conversation_history = config.conversation_history or []
         messages_kwarg = {"messages": conversation_history} if conversation_history else {}
         pass_threshold = 1.0 if getattr(config, "passing_mode", False) else getattr(config, "pass_threshold", 0.5)
@@ -305,6 +308,7 @@ class HuntEngine:
                 hunt_id=hunt_id,
                 data={"step": "model_thinking", "message": "Model thinking"}
             ))
+            _t0 = time.perf_counter()
             if provider == 'fireworks':
                 from providers.fireworks import get_fireworks_client
                 client = get_fireworks_client()
@@ -336,6 +340,7 @@ class HuntEngine:
                         reasoning_budget_percent=config.reasoning_budget_percent,
                         **messages_kwarg
                     )
+            result.duration_ms = int((time.perf_counter() - _t0) * 1000)
 
             if error:
                 result.status = HuntStatus.FAILED
@@ -574,9 +579,12 @@ class HuntEngine:
         notebook: ParsedNotebook,
     ):
         """Run a single hunt: call model, then judge. Write result to Redis."""
+        provider = getattr(config, 'provider', 'openrouter')
         result = HuntResult(
             hunt_id=hunt_id,
             model=model,
+            provider=provider,
+            prompt=notebook.prompt,
             status=HuntStatus.RUNNING
         )
 
@@ -589,7 +597,6 @@ class HuntEngine:
 
         try:
             # Step 1: Call the model
-            provider = getattr(config, 'provider', 'openrouter')
             enhanced_prompt = notebook.prompt
 
             conversation_history = config.conversation_history or []
@@ -604,6 +611,7 @@ class HuntEngine:
                 data={"step": "model_thinking", "message": "Model thinking"}
             ))
 
+            _t0 = time.perf_counter()
             if provider == 'fireworks':
                 from providers.fireworks import get_fireworks_client
                 client = get_fireworks_client()
@@ -635,6 +643,7 @@ class HuntEngine:
                         reasoning_budget_percent=config.reasoning_budget_percent,
                         **messages_kwarg
                     )
+            result.duration_ms = int((time.perf_counter() - _t0) * 1000)
 
             if not error:
                 await events.publish(session_id, HuntEvent(
@@ -802,6 +811,7 @@ class HuntEngine:
             result.judge_output = judge_result.get("raw_output", "")
             result.judge_criteria = judge_result.get("criteria", {})
             result.judge_explanation = judge_result.get("explanation", "")
+            result.scores = judge_result.get("scores") or {}
 
             if judge_result.get("error"):
                 result.error = judge_result["error"]
