@@ -184,31 +184,63 @@ export function triggerColabConfetti() {
 
 const _TOAST_KIND = new Set(['success', 'error', 'warning', 'info']);
 
+let _simpleToastTimer = null;
+let _retryToastTimer = null;
+
+function _hideRetryToastImmediate() {
+    clearTimeout(_retryToastTimer);
+    _retryToastTimer = null;
+    const toast = document.getElementById('mh-toast-retry-singleton');
+    if (!toast) return;
+    toast.hidden = true;
+    toast.style.opacity = '';
+    toast.style.transform = '';
+}
+
+function _hideSimpleToastImmediate() {
+    clearTimeout(_simpleToastTimer);
+    _simpleToastTimer = null;
+    const toast = document.getElementById('mh-toast-singleton');
+    if (!toast) return;
+    toast.hidden = true;
+    toast.style.opacity = '';
+    toast.style.transform = '';
+}
+
+function _ensureSimpleToast(dock) {
+    let toast = document.getElementById('mh-toast-singleton');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'mh-toast-singleton';
+        toast.setAttribute('role', 'status');
+        toast.innerHTML = '<span class="mh-toast__bar" aria-hidden="true"></span><span class="mh-toast__msg"></span>';
+        dock.appendChild(toast);
+    }
+    return toast;
+}
+
 export function showToast(message, type = 'info') {
     const dock = elements.toastContainer;
     if (!dock) return;
 
+    _hideRetryToastImmediate();
+
     const kind = _TOAST_KIND.has(type) ? type : 'info';
-    const toast = document.createElement('div');
+    const toast = _ensureSimpleToast(dock);
     toast.className = `mh-toast mh-toast--${kind} fade-in`;
-    toast.setAttribute('role', 'status');
+    toast.hidden = false;
+    toast.style.opacity = '';
+    toast.style.transform = '';
+    const msg = toast.querySelector('.mh-toast__msg');
+    if (msg) msg.textContent = message;
 
-    const bar = document.createElement('span');
-    bar.className = 'mh-toast__bar';
-    bar.setAttribute('aria-hidden', 'true');
-
-    const msg = document.createElement('span');
-    msg.className = 'mh-toast__msg';
-    msg.textContent = message;
-
-    toast.appendChild(bar);
-    toast.appendChild(msg);
-    dock.appendChild(toast);
-
-    setTimeout(() => {
+    clearTimeout(_simpleToastTimer);
+    _simpleToastTimer = setTimeout(() => {
         toast.style.opacity = '0';
         toast.style.transform = 'translateY(-6px)';
-        setTimeout(() => toast.remove(), 300);
+        setTimeout(() => {
+            _hideSimpleToastImmediate();
+        }, 300);
     }, 4000);
 }
 
@@ -222,51 +254,55 @@ export function showToastWithRetry(message, hint, onRetry) {
     const dock = elements.toastContainer;
     if (!dock) return;
 
-    const toast = document.createElement('div');
-    toast.className = 'mh-toast mh-toast--error toast-with-retry fade-in';
+    _hideSimpleToastImmediate();
 
-    const bar = document.createElement('span');
-    bar.className = 'mh-toast__bar';
-    bar.setAttribute('aria-hidden', 'true');
-
-    const body = document.createElement('div');
-    body.className = 'mh-toast__body';
-
-    const content = document.createElement('div');
-    content.className = 'toast-retry-content';
-
-    const msgSpan = document.createElement('span');
-    msgSpan.textContent = message;
-    content.appendChild(msgSpan);
-
-    if (hint) {
-        const hintSpan = document.createElement('span');
-        hintSpan.className = 'toast-hint';
-        hintSpan.textContent = hint;
-        content.appendChild(hintSpan);
+    let toast = document.getElementById('mh-toast-retry-singleton');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'mh-toast-retry-singleton';
+        toast.className = 'mh-toast mh-toast--error toast-with-retry fade-in';
+        toast.innerHTML = `
+            <span class="mh-toast__bar" aria-hidden="true"></span>
+            <div class="mh-toast__body">
+                <div class="toast-retry-content">
+                    <span class="toast-retry-msg"></span>
+                    <span class="toast-hint"></span>
+                    <button type="button" class="btn btn-sm btn-outline toast-retry-btn">Retry</button>
+                </div>
+            </div>`;
+        dock.appendChild(toast);
     }
 
-    const retryBtn = document.createElement('button');
-    retryBtn.type = 'button';
-    retryBtn.className = 'btn btn-sm btn-outline toast-retry-btn';
-    retryBtn.textContent = 'Retry';
-    content.appendChild(retryBtn);
+    toast.hidden = false;
+    toast.style.opacity = '';
+    toast.style.transform = '';
 
-    body.appendChild(content);
-    toast.appendChild(bar);
-    toast.appendChild(body);
-    dock.appendChild(toast);
+    const msgSpan = toast.querySelector('.toast-retry-msg');
+    const hintSpan = toast.querySelector('.toast-hint');
+    const retryBtn = toast.querySelector('.toast-retry-btn');
+    if (msgSpan) msgSpan.textContent = message;
+    if (hintSpan) {
+        if (hint) {
+            hintSpan.textContent = hint;
+            hintSpan.style.display = '';
+        } else {
+            hintSpan.textContent = '';
+            hintSpan.style.display = 'none';
+        }
+    }
+    if (retryBtn) {
+        retryBtn.onclick = () => {
+            _hideRetryToastImmediate();
+            if (typeof onRetry === 'function') onRetry();
+        };
+    }
 
-    retryBtn.addEventListener('click', () => {
-        toast.remove();
-        if (typeof onRetry === 'function') onRetry();
-    });
-
-    setTimeout(() => {
-        if (toast.parentNode) {
+    clearTimeout(_retryToastTimer);
+    _retryToastTimer = setTimeout(() => {
+        if (!toast.hidden) {
             toast.style.opacity = '0';
             toast.style.transform = 'translateY(-6px)';
-            setTimeout(() => toast.remove(), 300);
+            setTimeout(() => _hideRetryToastImmediate(), 300);
         }
     }, 8000);
 }

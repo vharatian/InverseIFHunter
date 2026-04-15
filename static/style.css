@@ -1572,6 +1572,12 @@ label {
     color: var(--warning);
 }
 
+/* Singleton toasts: [hidden] must win over .mh-toast display */
+#mh-toast-singleton[hidden],
+#mh-toast-retry-singleton[hidden] {
+    display: none !important;
+}
+
 /* Compact glass toasts (celebrations.js) — width hugs message */
 .mh-toast {
     pointer-events: auto;

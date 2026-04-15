@@ -46,12 +46,24 @@ async function api(path, options = {}) {
     return res.json();
 }
 
+let _adminToastTimer = null;
+
 function toast(msg, type = 'success') {
-    const el = document.createElement('div');
+    const c = document.getElementById('toast-container');
+    if (!c) return;
+    clearTimeout(_adminToastTimer);
+    let el = document.getElementById('admin-toast-singleton');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'admin-toast-singleton';
+        c.appendChild(el);
+    }
     el.className = `toast ${type}`;
     el.textContent = msg;
-    document.getElementById('toast-container').appendChild(el);
-    setTimeout(() => el.remove(), 3500);
+    el.hidden = false;
+    _adminToastTimer = setTimeout(() => {
+        el.hidden = true;
+    }, 3500);
 }
 
 function esc(str) {

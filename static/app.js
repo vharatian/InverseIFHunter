@@ -40,7 +40,7 @@ import {
     initSelectionSectionCollapse
 } from './modules/results.js?v=43';
 import { initMultiTurnListeners, initCalibrationListeners, syncTurnUI } from './modules/multiturn.js?v=43';
-import { updateModelOptions } from './modules/editors.js?v=43';
+import { updateModelOptions, clearModelMismatchWarning } from './modules/editors.js?v=43';
 import { initAutosave, initNextTurnAutosave, initGradingAutosave, resetAllStatuses } from './modules/autosave.js?v=43';
 import { handleHumanJudgment, showNextBlindJudge, showToast, showError } from './modules/celebrations.js?v=43';
 import { updateCriteriaButtonsState } from './modules/utils.js?v=43';
@@ -325,8 +325,7 @@ function initEventListeners() {
                 // Assuming editors.js handles lock logic or we can add it here if needed.
                 return;
             }
-            // Clear previous results/warnings
-            state.modelMismatchWarning = false;
+            clearModelMismatchWarning();
             // We could call clearPreviousResults() from results.js if exported
             // But results.js exports clearPreviousResults? Yes.
             // Let's import it dynamically or add to imports

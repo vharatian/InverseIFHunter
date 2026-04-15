@@ -49,8 +49,10 @@ export function showTask(visible) {
   if (hint) hint.hidden = !visible;
 }
 
+let _reviewerToastTimer = null;
+
 /**
- * Show a toast notification.
+ * Show a toast notification (single reused element).
  * @param {string} message
  * @param {"success"|"error"|"info"} [type="info"]
  * @param {number} [durationMs=3000]
@@ -59,20 +61,35 @@ export function showToast(message, type = "info", durationMs = 3000) {
   const container = document.getElementById("toast-container");
   if (!container) return;
 
-  const toast = document.createElement("div");
-  toast.className = `toast toast-${type}`;
+  clearTimeout(_reviewerToastTimer);
+
+  let toast = document.getElementById("reviewer-toast-singleton");
+  if (!toast) {
+    toast = document.createElement("div");
+    toast.id = "reviewer-toast-singleton";
+    container.appendChild(toast);
+  }
 
   const icons = { success: "\u2713", error: "\u2717", info: "\u2139" };
+  toast.className = `toast toast-${type}`;
   toast.innerHTML = `<span class="toast-icon">${icons[type] || icons.info}</span><span class="toast-msg">${_escapeHtml(message)}</span>`;
+  toast.hidden = false;
+  toast.classList.remove("toast-exit");
 
-  container.appendChild(toast);
-  requestAnimationFrame(() => toast.classList.add("toast-visible"));
+  requestAnimationFrame(() => {
+    toast.classList.add("toast-visible");
+  });
 
-  setTimeout(() => {
+  _reviewerToastTimer = setTimeout(() => {
     toast.classList.remove("toast-visible");
     toast.classList.add("toast-exit");
-    toast.addEventListener("transitionend", () => toast.remove(), { once: true });
-    setTimeout(() => toast.remove(), 400);
+    const finish = () => {
+      toast.removeEventListener("transitionend", finish);
+      toast.hidden = true;
+      toast.classList.remove("toast-exit");
+    };
+    toast.addEventListener("transitionend", finish, { once: true });
+    setTimeout(finish, 400);
   }, durationMs);
 }
 

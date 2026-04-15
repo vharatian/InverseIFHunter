@@ -20,7 +20,7 @@ import {
     getIncompleteReviewsModalMessage 
 } from './utils.js';
 import { showToast, showError, showNextBlindJudge } from './celebrations.js?v=43';
-import { hideModelLockedIndicator } from './editors.js';
+import { hideModelLockedIndicator, clearModelMismatchWarning } from './editors.js';
 import { showMultiTurnDecision, updateTurnAwareUI } from './multiturn.js';
 import { showAppModal } from './api.js';
 import { MIN_EXPLANATION_WORDS, getConfigValue, adminBypass, getHuntModeById, getSelectionSlots } from './config.js';
@@ -1277,8 +1277,8 @@ export function clearPreviousResults() {
         modelRef: false,
         judge: false
     };
-    state.modelMismatchWarning = false;  // Reset warning flag
-    
+    clearModelMismatchWarning();
+
     // Hide model locked indicator (will be shown again if new notebook has model in metadata)
     hideModelLockedIndicator();
     
@@ -1824,11 +1824,6 @@ export function toggleHuntSelection(rowNumber, row) {
         if (selMode.type === 'passing' && isBreaking) {
             checkbox.checked = false;
             showToast(`Only passing hunts can be selected in ${selMode.name} mode.`, 'warning');
-            return;
-        }
-        if (selMode.type === 'breaking' && !selMode.count_based && selMinBreaking === 0 && isBreaking) {
-            checkbox.checked = false;
-            showToast(`Min Breaking is 0 — only passing hunts can be selected.`, 'warning');
             return;
         }
         if (selMode.count_based) {

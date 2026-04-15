@@ -46,19 +46,22 @@ export function hideModelLockedIndicator() {
 
 // ============== Model Matching Validation ==============
 
+function _setModelMismatchVisible(visible) {
+    state.modelMismatchWarning = visible;
+    const el = document.getElementById('modelMismatchWarning');
+    if (!el) return;
+    el.hidden = !visible;
+    el.classList.toggle('hidden', !visible);
+}
+
 export function validateModelMatch() {
-    state.modelMismatchWarning = false;
-    const existingWarning = document.getElementById('modelMismatchWarning');
-    if (existingWarning) existingWarning.remove();
+    _setModelMismatchVisible(false);
     return true;
 }
 
 export function clearModelMismatchWarning() {
-    state.modelMismatchWarning = false;
-    
-    const existingWarning = document.getElementById('modelMismatchWarning');
-    if (existingWarning) existingWarning.remove();
-    
+    _setModelMismatchVisible(false);
+
     if (elements.startHuntBtn) {
         elements.startHuntBtn.style.opacity = '';
         elements.startHuntBtn.style.cursor = '';
@@ -67,16 +70,20 @@ export function clearModelMismatchWarning() {
 
 export function showModelMismatchWarning(selectedModel, metadataModel) {
     if (state.adminMode && adminBypass('model_mismatch_warning')) return;
-    
-    state.modelMismatchWarning = true;
-    
-    const existingWarning = document.getElementById('modelMismatchWarning');
-    if (existingWarning) existingWarning.remove();
-    
-    const warning = document.createElement('div');
-    warning.id = 'modelMismatchWarning';
-    warning.className = 'model-mismatch-warning';
-    warning.innerHTML = `
+
+    let el = document.getElementById('modelMismatchWarning');
+    if (!el) {
+        const anchor = elements.modelSelect?.closest('.hunt-config-field') || elements.modelSelect?.parentElement;
+        if (anchor) {
+            el = document.createElement('div');
+            el.id = 'modelMismatchWarning';
+            el.className = 'model-mismatch-warning hidden';
+            el.hidden = true;
+            anchor.appendChild(el);
+        } else return;
+    }
+
+    el.innerHTML = `
         <div style="background: var(--danger-bg, #fee2e2); border: 2px solid var(--danger, #ef4444); border-radius: 8px; padding: 12px; margin-top: 8px;">
             <strong style="color: var(--danger, #ef4444);">MODEL MISMATCH - HUNT BLOCKED</strong><br><br>
             <strong>Required (from metadata):</strong> ${metadataModel}<br>
@@ -84,9 +91,7 @@ export function showModelMismatchWarning(selectedModel, metadataModel) {
             <em>Select the correct model to enable hunting.</em>
         </div>
     `;
-    
-    const modelGroup = elements.modelSelect?.closest('.form-group');
-    if (modelGroup) modelGroup.appendChild(warning);
+    _setModelMismatchVisible(true);
     
     if (elements.startHuntBtn) {
         elements.startHuntBtn.disabled = false;
