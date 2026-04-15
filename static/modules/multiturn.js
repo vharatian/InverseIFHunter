@@ -32,6 +32,19 @@ import { getConfigValue, adminBypass, getHuntModeById } from './config.js';
 
 // ============== Turn-Aware UI Functions (Journey Bar, Badges) ==============
 
+/** One row per turn number; last entry wins (hydration/merges can duplicate). */
+function dedupeCompletedTurns(turns) {
+    const byNum = new Map();
+    for (const t of turns || []) {
+        const n = Number(t.turnNumber ?? t.turn_number);
+        if (!Number.isFinite(n) || n < 1) continue;
+        byNum.set(n, t);
+    }
+    return Array.from(byNum.entries())
+        .sort((a, b) => a[0] - b[0])
+        .map(([, t]) => t);
+}
+
 /**
  * Single entry point to sync all turn-related DOM after state.currentTurn changes.
  * Call this after any path that sets state.currentTurn (hydration, resume, advance, etc.).
@@ -87,7 +100,7 @@ export function renderJourneyBar() {
     
     // Build list: completed turns + current turn + one future placeholder
     const steps = [];
-    state.turns.forEach(t => {
+    dedupeCompletedTurns(state.turns).forEach(t => {
         steps.push({ turnNumber: t.turnNumber || t.turn_number, status: 'completed' });
     });
     steps.push({ turnNumber: state.currentTurn, status: 'active' });
@@ -354,18 +367,15 @@ export function renderTurnHistoryTabs() {
     tabBar.innerHTML = '';
     
     // Build list of completed turns only (no current turn)
-    const allTurns = [];
-    state.turns.forEach(t => {
-        allTurns.push({
-            turnNumber: t.turnNumber || t.turn_number,
-            prompt: t.prompt,
-            criteria: t.response_reference || t.criteria,
-            selectedResponse: t.selectedResponse || t.selected_response || null,
-            judgeResult: t.judgeResult || t.judge_result || null,
-            status: 'completed',
-            results: t.results || []
-        });
-    });
+    const allTurns = dedupeCompletedTurns(state.turns).map(t => ({
+        turnNumber: t.turnNumber || t.turn_number,
+        prompt: t.prompt,
+        criteria: t.response_reference || t.criteria,
+        selectedResponse: t.selectedResponse || t.selected_response || null,
+        judgeResult: t.judgeResult || t.judge_result || null,
+        status: 'completed',
+        results: t.results || []
+    }));
     
     // No completed turns? Hide the history card
     if (allTurns.length === 0) {
@@ -755,8 +765,9 @@ async function _applyTurnAdvance(apiData, selectedResp, completedPrompt, complet
     const _huntModelId  = state.config.models?.[0] || '';
     const _huntModeId   = state.config.hunt_mode   || '';
 
-    state.turns.push({
+    const newTurn = {
         turnNumber: state.currentTurn - 1,
+        turn_number: state.currentTurn - 1,
         prompt: completedPrompt,
         response_reference: completedCriteria,
         response: selectedResp.response,
@@ -781,7 +792,9 @@ async function _applyTurnAdvance(apiData, selectedResp, completedPrompt, complet
             judge_score: r.judge_score,
             is_breaking: r.is_breaking
         }))
-    });
+    };
+    state.turns.push(newTurn);
+    state.turns = dedupeCompletedTurns(state.turns);
 
     state.multiTurnTotalHunts += state.huntsThisTurn || state.allResponses.length;
 

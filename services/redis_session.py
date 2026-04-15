@@ -28,6 +28,7 @@ from typing import Any, Dict, Optional, List
 
 from redis_client import get_redis, get_redis_blocking, close_redis
 from helpers.notebook_helpers import prompt_preview_from_notebook_json
+from services.turn_dedupe import dedupe_turns_to_models
 from models.schemas import (
     HuntSession, HuntConfig, HuntResult, HuntStatus,
     ParsedNotebook, TurnData, HuntEvent
@@ -164,7 +165,7 @@ async def save_full_session(
     # Bulk set lists
     await set_results(session.session_id, session.results or [])
     await set_all_results(session.session_id, session.all_results or [])
-    await set_turns(session.session_id, session.turns or [])
+    await set_turns(session.session_id, dedupe_turns_to_models(session.turns or []))
 
     if sqlite_workflow:
         await apply_sqlite_workflow_snapshot(session.session_id, sqlite_workflow)
@@ -208,7 +209,9 @@ async def get_full_session(session_id: str) -> Optional[HuntSession]:
     notebook = ParsedNotebook.model_validate_json(notebook_json) if notebook_json else None
     results = [HuntResult.model_validate_json(rj) for rj in (results_jsons or [])]
     all_results = [HuntResult.model_validate_json(rj) for rj in (all_results_jsons or [])]
-    turns = [TurnData.model_validate_json(tj) for tj in (turns_jsons or [])]
+    turns = dedupe_turns_to_models(
+        [TurnData.model_validate_json(tj) for tj in (turns_jsons or [])]
+    )
     history = json.loads(history_json) if history_json else []
     reviews = json.loads(reviews_json) if reviews_json else {}
 
@@ -289,7 +292,9 @@ async def get_all_results(session_id: str) -> List[HuntResult]:
 async def get_turns(session_id: str) -> List[TurnData]:
     r = await get_redis()
     items = await r.lrange(_key(session_id, "turns"), 0, -1)
-    return [TurnData.model_validate_json(item) for item in items]
+    return dedupe_turns_to_models(
+        [TurnData.model_validate_json(item) for item in items]
+    )
 
 
 async def get_conversation_history(session_id: str) -> List[Dict[str, str]]:
@@ -999,12 +1004,13 @@ async def get_full_session_state(session_id: str) -> Optional[Dict[str, Any]]:
         except (json.JSONDecodeError, TypeError):
             pass
 
-    turns = []
+    turns_raw: list[dict] = []
     for item in (turns_jsons or []):
         try:
-            turns.append(json.loads(item))
+            turns_raw.append(json.loads(item))
         except (json.JSONDecodeError, TypeError):
             pass
+    turns = [t.model_dump() for t in dedupe_turns_to_models(turns_raw)]
 
     conversation_history = []
     if history_json:

@@ -15,6 +15,7 @@ from database import get_db
 from helpers.notebook_helpers import PROMPT_PREVIEW_MAX_LEN
 from models.db_models import SessionRow, HuntResultRow, TrainerRow, QCRunRow
 from models.schemas import HuntSession, HuntConfig, HuntStatus, ParsedNotebook, HuntResult, TurnData
+from services.turn_dedupe import dedupe_turns_to_models
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +74,10 @@ async def save_session_pg(session: HuntSession) -> None:
             status=session.status.value if hasattr(session.status, "value") else str(session.status),
             human_reviews=session.human_reviews or {},
             conversation_history=[m for m in (session.conversation_history or [])],
-            turns=[t.model_dump() if hasattr(t, "model_dump") else t for t in (session.turns or [])],
+            turns=[
+                t.model_dump() if hasattr(t, "model_dump") else t
+                for t in dedupe_turns_to_models(session.turns or [])
+            ],
             total_hunts=session.total_hunts,
             completed_hunts=session.completed_hunts,
             breaks_found=session.breaks_found,
@@ -143,7 +147,7 @@ async def load_session_pg(session_id: str) -> Optional[HuntSession]:
                     restored_turns.append(TurnData(**t) if isinstance(t, dict) else t)
                 except Exception:
                     restored_turns.append(t)
-            fields["turns"] = restored_turns
+            fields["turns"] = dedupe_turns_to_models(restored_turns)
 
         result_rows = await db.execute(
             select(HuntResultRow)

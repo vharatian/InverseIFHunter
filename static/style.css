@@ -3575,6 +3575,7 @@ input[type="range"]::-moz-range-thumb:hover {
 }
 .turn-journey-bar.visible {
     display: flex;
+    justify-content: center;
 }
 
 .journey-step {
@@ -3668,15 +3669,19 @@ input[type="range"]::-moz-range-thumb:hover {
    ================================================================ */
 .container.multi-turn-layout {
     display: flex;
+    justify-content: center;
     gap: 0;
     max-width: 100%;
+    width: 100%;
     padding: 0;
+    box-sizing: border-box;
 }
 .container.multi-turn-layout .main-content-area {
-    flex: 1;
+    flex: 0 1 auto;
     min-width: 0;
     padding: 0 2rem 2rem 2rem;
     max-width: 1200px;
+    width: 100%;
 }
 
 /* When multi-turn layout is active, hide sidebar to avoid overlap */

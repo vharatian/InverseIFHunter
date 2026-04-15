@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from models.schemas import TurnData, HuntStatus
+from services.turn_dedupe import dedupe_turns_to_models
 from services.pg_session import save_session_pg
 from helpers.shared import _get_validated_session
 import services.redis_session as redis_store
@@ -103,7 +104,8 @@ async def _do_advance_turn(session_id: str, request: AdvanceTurnRequest):
         results=[r.model_dump() for r in session.results if r.status == HuntStatus.COMPLETED]
     )
     session.turns.append(turn_data)
-    
+    session.turns = dedupe_turns_to_models(session.turns)
+
     # Build conversation history: add current turn's user prompt + selected response
     session.conversation_history.append({
         "role": "user",
@@ -154,8 +156,7 @@ async def _do_advance_turn(session_id: str, request: AdvanceTurnRequest):
         await redis_store.set_hunt_counters(session_id, total_hunts=0, completed_hunts=0, breaks_found=0, passes_found=0)
         await redis_store.clear_results(session_id)
         await redis_store.clear_all_results(session_id)
-        if turn_data:
-            await redis_store.append_turn(session_id, turn_data)
+        await redis_store.set_turns(session_id, session.turns)
     except Exception as e:
         logger.error(f"Failed to persist session after turn advance: {e}")
 
@@ -216,12 +217,13 @@ async def mark_breaking(session_id: str):
         results=[r.model_dump() for r in session.results if r.status == HuntStatus.COMPLETED]
     )
     session.turns.append(turn_data)
+    session.turns = dedupe_turns_to_models(session.turns)
     session.notebook.is_multi_turn = len(session.turns) > 1
-    
+
     # Persist to Redis
     try:
         await redis_store.set_notebook(session_id, session.notebook)
-        await redis_store.append_turn(session_id, turn_data)
+        await redis_store.set_turns(session_id, session.turns)
     except Exception as e:
         logger.error(f"Failed to persist session after mark-breaking: {e}")
 

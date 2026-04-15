@@ -30,6 +30,7 @@ from services.notebook_parser import notebook_parser
 from services.alignment import build_alignment_export_payload
 from services.hunt_engine import hunt_engine
 from services.snapshot_service import snapshot_service, NotebookSnapshot
+from services.turn_dedupe import dedupe_turns_to_models
 from services.pg_session import (
     save_session_pg, merge_session_metadata_pg, get_session_metadata_pg,
     find_sessions_by_task_id_pg, find_sessions_by_file_id_pg,
@@ -875,7 +876,9 @@ async def save_snapshot(request: Request):
             )
             
             if is_multi_turn:
-                turns_data = snapshot.metadata.get('turns', [])
+                turns_data = [
+                    t.model_dump() for t in dedupe_turns_to_models(snapshot.metadata.get('turns', []))
+                ]
                 conversation_history = snapshot.metadata.get('conversation_history', [])
                 logger.info(f"Multi-turn export: {len(turns_data)} turns")
 
