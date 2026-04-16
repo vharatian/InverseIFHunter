@@ -417,12 +417,10 @@ async function restoreSession() {
         const response = await fetch(`api/session/${savedSessionId}`, { cache: 'no-store' });
         if (response.ok) {
             await response.json();
-            showTaskView();
             clearSectionLocks();
-            if (elements.uploadSection) elements.uploadSection.classList.add('hidden');
             try {
                 await hydrateSession(savedSessionId);
-                showToast('Session restored.', 'info');
+                showToast('Session restored. Open a task below to continue.', 'info');
             } catch (e) {
                 state.sessionId = savedSessionId;
                 await syncTurnStatusFromBackend(savedSessionId);
@@ -430,6 +428,7 @@ async function restoreSession() {
                 refreshReviewSync(savedSessionId);
                 showToast('Session loaded — some data may not be available. ' + (e.message || ''), 'info');
             }
+            showQueueView();
         } else if (response.status === 404) {
             localStorage.removeItem('modelHunter_sessionId');
             showToast('Previous session expired. Please load a new notebook.', 'warning');

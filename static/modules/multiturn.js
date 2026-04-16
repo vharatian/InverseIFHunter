@@ -95,7 +95,14 @@ export function activateTurnTab(turnNumber) {
 export function renderJourneyBar() {
     const bar = document.getElementById('turnJourneyBar');
     if (!bar) return;
-    
+
+    const taskView = document.getElementById('trainerTaskView');
+    if (!taskView || taskView.classList.contains('hidden')) {
+        bar.innerHTML = '';
+        bar.classList.remove('visible');
+        return;
+    }
+
     bar.innerHTML = '';
     
     // Build list: completed turns + current turn + one future placeholder
@@ -219,9 +226,15 @@ export function updateTurnAwareUI() {
     const decisionNextTurn = document.getElementById('decisionNextTurn');
     if (decisionNextTurn) decisionNextTurn.textContent = turn + 1;
     
-    // Render journey bar if multi-turn
+    // Render journey bar if multi-turn (only while task view is visible — see renderJourneyBar guard)
     if (state.isMultiTurn || turn > 1) {
         renderJourneyBar();
+    } else {
+        const bar = document.getElementById('turnJourneyBar');
+        if (bar) {
+            bar.innerHTML = '';
+            bar.classList.remove('visible');
+        }
     }
 }
 
