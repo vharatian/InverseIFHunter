@@ -142,6 +142,30 @@ class EnhancedLogReader:
                 cur["colab_url"] = cu
         return out
 
+    def _resolve_trainer_key(
+        self,
+        session_id: str,
+        disk_mapping: Dict[str, str],
+        ctx: Dict[str, Dict[str, str]],
+        event_data: Optional[Dict[str, Any]] = None,
+    ) -> Optional[str]:
+        """Stable trainer key: disk trainer_id, else telemetry email, else URL/file legacy, else session-scoped id."""
+        disk_val = disk_mapping.get(session_id)
+        if disk_val and str(disk_val).strip() and str(disk_val).lower() != "unknown":
+            return str(disk_val).strip()
+        row = ctx.get(session_id) or {}
+        d = event_data or {}
+        email = (row.get("trainer_email") or d.get("trainer_email") or "").strip().lower()
+        if email:
+            return email
+        url = (row.get("colab_url") or self._pick_colab_url(d) or "").strip()
+        fn = d.get("notebook") or d.get("filename") or "notebook.ipynb"
+        if url:
+            return self._extract_trainer_id_legacy(url, str(fn))
+        if session_id:
+            return f"session_{session_id[:12]}"
+        return None
+
     def _load_session_context(self) -> Dict[str, Dict[str, str]]:
         """session_id -> {trainer_email, colab_url}. Disk wins for conflicts; telemetry fills missing."""
         now = datetime.utcnow()
@@ -339,11 +363,18 @@ class EnhancedLogReader:
                 stats["total_sessions"] += 1
                 if session_id:
                     if allowed is not None:
-                        te = (ctx.get(session_id) or {}).get("trainer_email") or ""
-                        if te:
+                        te = (
+                            (ctx.get(session_id) or {}).get("trainer_email")
+                            or (data.get("trainer_email") or "")
+                        ).strip().lower()
+                        if te and te in allowed:
                             active_trainers.add(te)
-                    elif session_id in trainer_mapping:
-                        active_trainers.add(trainer_mapping[session_id])
+                    else:
+                        tid = self._resolve_trainer_key(
+                            session_id, trainer_mapping, ctx, data
+                        )
+                        if tid:
+                            active_trainers.add(tid)
             
             elif event_type == "hunt_start":
                 stats["total_hunts"] += 1
@@ -882,6 +913,8 @@ class EnhancedLogReader:
         since = datetime.utcnow() - timedelta(hours=hours)
         events = self._read_events(since=since)
         trainer_mapping = self._load_trainer_mapping()
+        ctx = self._load_session_context()
+        ctx = self._merge_session_created_from_events(events, ctx)
         
         trainer_stats = defaultdict(lambda: {
             "sessions": 0,
@@ -899,10 +932,13 @@ class EnhancedLogReader:
             session_id = data.get("session_id")
             ts = event.get("ts")
             
-            if not session_id or session_id not in trainer_mapping:
+            if not session_id:
                 continue
-            
-            trainer_id = trainer_mapping[session_id]
+            trainer_id = self._resolve_trainer_key(
+                session_id, trainer_mapping, ctx, data
+            )
+            if not trainer_id:
+                continue
             stats = trainer_stats[trainer_id]
             
             # Update timestamps
@@ -1033,6 +1069,8 @@ class EnhancedLogReader:
         since = datetime.utcnow() - timedelta(minutes=5)
         events = self._read_events(since=since)
         trainer_mapping = self._load_trainer_mapping()
+        ctx = self._load_session_context()
+        ctx = self._merge_session_created_from_events(events, ctx)
         
         active_sessions = set()
         active_trainers = set()
@@ -1046,8 +1084,11 @@ class EnhancedLogReader:
             
             if session_id:
                 active_sessions.add(session_id)
-                if session_id in trainer_mapping:
-                    active_trainers.add(trainer_mapping[session_id])
+                tid = self._resolve_trainer_key(
+                    session_id, trainer_mapping, ctx, data
+                )
+                if tid:
+                    active_trainers.add(tid)
             
             if event_type == "hunt_start":
                 hunts_in_progress += 1
