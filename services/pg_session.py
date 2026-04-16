@@ -31,6 +31,30 @@ def _normalize_pg_review_status(raw: Optional[str]) -> str:
     return "draft"
 
 
+def _row_to_hunt_result(r: HuntResultRow) -> Optional[HuntResult]:
+    try:
+        return HuntResult(
+            hunt_id=r.hunt_id,
+            model=r.model,
+            provider=r.provider or "openrouter",
+            prompt=r.prompt,
+            status=HuntStatus(r.status) if r.status else HuntStatus.PENDING,
+            response=r.response or "",
+            reasoning_trace=r.reasoning_trace or "",
+            judge_score=r.judge_score,
+            judge_output=r.judge_output or "",
+            judge_criteria=r.judge_criteria or {},
+            judge_explanation=r.judge_explanation or "",
+            scores=r.scores or {},
+            error=r.error,
+            is_breaking=r.is_breaking or False,
+            sample_label=r.sample_label,
+            duration_ms=r.duration_ms,
+        )
+    except Exception:
+        return None
+
+
 def _duplicate_session_rows_to_dicts(rows: List[Any]) -> List[Dict[str, Any]]:
     """Map PG duplicate-query rows to the shape expected by /api/*-notebook duplicate responses."""
     return [
@@ -175,33 +199,26 @@ async def load_session_pg(session_id: str) -> Optional[HuntSession]:
             .where(turn_filter)
             .order_by(HuntResultRow.created_at)
         )
-        hunt_results = []
+        hunt_results: List[HuntResult] = []
         for r in result_rows.scalars():
-            try:
-                hr = HuntResult(
-                    hunt_id=r.hunt_id,
-                    model=r.model,
-                    provider=r.provider or "openrouter",
-                    prompt=r.prompt,
-                    status=HuntStatus(r.status) if r.status else HuntStatus.PENDING,
-                    response=r.response or "",
-                    reasoning_trace=r.reasoning_trace or "",
-                    judge_score=r.judge_score,
-                    judge_output=r.judge_output or "",
-                    judge_criteria=r.judge_criteria or {},
-                    judge_explanation=r.judge_explanation or "",
-                    scores=r.scores or {},
-                    error=r.error,
-                    is_breaking=r.is_breaking or False,
-                    sample_label=r.sample_label,
-                    duration_ms=r.duration_ms,
-                )
+            hr = _row_to_hunt_result(r)
+            if hr:
                 hunt_results.append(hr)
-            except Exception:
-                pass
+
+        # Accumulated across all turns (current-turn only for `results` above)
+        all_rows = await db.execute(
+            select(HuntResultRow)
+            .where(HuntResultRow.session_id == session_id)
+            .order_by(HuntResultRow.created_at)
+        )
+        all_hunt_results: List[HuntResult] = []
+        for r in all_rows.scalars():
+            hr = _row_to_hunt_result(r)
+            if hr:
+                all_hunt_results.append(hr)
 
         fields["results"] = hunt_results
-        fields["all_results"] = hunt_results
+        fields["all_results"] = all_hunt_results
 
         return HuntSession(**fields)
 

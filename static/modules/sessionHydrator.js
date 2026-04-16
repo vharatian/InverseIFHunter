@@ -84,7 +84,8 @@ export async function hydrateSession(sessionId) {
     // Hydrate DOM sections — each guard against missing data internally
     _hydrateNotebookSection(data.notebook);
     // human_reviews already on state; _hydrateResultsSection normalizes keys — do not overwrite after.
-    _hydrateResultsSection(data.all_results || []);
+    state.selectionConfirmed = false;
+    _hydrateResultsSection(data.all_results || [], data.trainer_ui);
     if (data.trainer_ui) {
         applyTrainerUiAfterHydrate(data.trainer_ui);
     }
@@ -183,6 +184,8 @@ function _inferPhase(data) {
     const hasReviews = Object.keys(reviews).length > 0 && Object.values(reviews).some(v => v?.judgment != null);
     if (hasReviews) return 'grading';
     const allResults = data.all_results || [];
+    const tu = data.trainer_ui;
+    if (tu?.selection_confirmed && allResults.length > 0) return 'grading';
     if (allResults.length > 0) return 'reviewing';
     const status = data.hunt_status;
     if (status === 'running') return 'hunting';
@@ -256,8 +259,11 @@ function _populateMetadataSidebar(metadata) {
 }
 
 
-function _hydrateResultsSection(allResults) {
+function _hydrateResultsSection(allResults, trainerUi) {
     if (!allResults || allResults.length === 0) return;
+
+    const explicitSelectionConfirmed =
+        trainerUi && typeof trainerUi.selection_confirmed === 'boolean';
 
     state.allResponses = allResults;
     state.totalHuntsCount = allResults.length;
@@ -323,7 +329,7 @@ function _hydrateResultsSection(allResults) {
     const hydrateMinBreaking = state.config?.min_breaking_required ?? 0;
     const hydrateRequired = (hydrateMode.type === 'passing' || hydrateMode.count_based || hydrateMinBreaking === 0)
         ? 1 : hydrateSlots;
-    if (state.selectedRowNumbers.length >= hydrateRequired) {
+    if (!explicitSelectionConfirmed && state.selectedRowNumbers.length >= hydrateRequired) {
         state.selectionConfirmed = true;
     }
 

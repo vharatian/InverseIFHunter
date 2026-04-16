@@ -100,11 +100,17 @@ async def create_session(
     config: HuntConfig,
     *,
     review_status: str = "draft",
+    current_turn: int = 1,
 ) -> None:
     """Create a new session with all initial keys."""
     from datetime import datetime, timezone
     r = await get_redis()
     pipe = r.pipeline()
+
+    try:
+        ct0 = max(1, int(current_turn or 1))
+    except (TypeError, ValueError):
+        ct0 = 1
 
     rs = review_status if review_status in REVIEW_STATUS_VALUES else "draft"
     pipe.set(_key(session_id, "config"), config.model_dump_json())
@@ -116,7 +122,7 @@ async def create_session(
         "breaks_found": 0,
         "passes_found": 0,
         "accumulated_hunt_count": 0,
-        "current_turn": 1,
+        "current_turn": ct0,
         "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     })
     pipe.set(_key(session_id, "history"), "[]")
@@ -155,7 +161,13 @@ async def save_full_session(
     if sqlite_workflow and isinstance(sqlite_workflow.get("review_status"), str):
         rs = str(sqlite_workflow["review_status"]).strip().lower() or rs
 
-    await create_session(session.session_id, notebook, session.config, review_status=rs)
+    await create_session(
+        session.session_id,
+        notebook,
+        session.config,
+        review_status=rs,
+        current_turn=session.current_turn or 1,
+    )
 
     # Update status
     await set_status(session.session_id, session.status)
@@ -169,7 +181,6 @@ async def save_full_session(
         passes_found=getattr(session, "passes_found", 0),
     )
     await set_accumulated_hunt_count(session.session_id, session.accumulated_hunt_count or 0)
-    await set_current_turn(session.session_id, session.current_turn or 1)
 
     # Update complex structures
     if session.conversation_history:
@@ -470,6 +481,7 @@ async def set_status(session_id: str, status: HuntStatus) -> None:
 async def set_meta_field(session_id: str, field: str, value: Any) -> None:
     r = await get_redis()
     await r.hset(_key(session_id, "meta"), field, value)
+    await _refresh_ttl(r, session_id)
 
 
 async def set_conversation_history(session_id: str, history: List[Dict[str, str]]) -> None:
