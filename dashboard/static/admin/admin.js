@@ -1463,6 +1463,10 @@ function wireTeamReviewerModal() {
     });
 }
 
+if (window.location.search.includes('_v=')) {
+    window.history.replaceState(null, '', window.location.pathname);
+}
+
 function initAdminVersionCheck() {
     const d = _dashboardServicePrefix();
     import(`${d}/updates-assets/version-check.mjs`)

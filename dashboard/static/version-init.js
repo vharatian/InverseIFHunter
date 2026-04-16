@@ -3,6 +3,9 @@
  * Loaded via import(`${BASE_PATH}/static/version-init.js`) from index.html so staging paths work.
  */
 (async () => {
+  if (window.location.search.includes("_v=")) {
+    window.history.replaceState(null, "", window.location.pathname);
+  }
   try {
     const base = window.BASE_PATH || "";
     const { createIndicatorClickVersionCheck, showSimpleUpdateModal } = await import(

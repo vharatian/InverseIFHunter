@@ -70,11 +70,7 @@ export function showSimpleUpdateModal(options) {
 }
 
 function hardRefresh() {
-  const url = new URL(window.location.href);
-  url.searchParams.delete("_v");
-  const path = url.pathname + (url.searchParams.toString() ? `?${url.searchParams.toString()}` : "");
-  window.history.replaceState(null, "", path);
-  window.location.reload();
+  window.location.replace(window.location.pathname);
 }
 
 /**
