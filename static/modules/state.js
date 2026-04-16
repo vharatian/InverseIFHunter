@@ -128,13 +128,13 @@ export function resetTurnState() {
  * Set and persist the active UI phase to the backend.
  * @param {'editing'|'hunting'|'reviewing'|'grading'} phase
  */
-export function setActivePhase(phase) {
+export function setActivePhase(phase, extra = {}) {
     state.activePhase = phase;
     if (!state.sessionId) return;
     fetch(`api/session/${state.sessionId}/phase`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phase }),
+        body: JSON.stringify({ phase, ...extra }),
     }).catch(() => {});
 }
 

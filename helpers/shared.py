@@ -56,7 +56,8 @@ async def _get_validated_session(session_id: str) -> HuntSession:
     try:
         session = await load_session_pg(session_id)
         if session:
-            await redis_store.save_full_session(session)
+            meta = await get_session_metadata_pg(session_id)
+            await redis_store.save_full_session(session, workflow_metadata=meta)
             logger.info(f"Session {session_id} restored from PostgreSQL → Redis")
             return session
     except Exception as e:

@@ -101,6 +101,8 @@ export function renderJourneyBar() {
     // Build list: completed turns + current turn + one future placeholder
     const steps = [];
     dedupeCompletedTurns(state.turns).forEach(t => {
+        const st = t.status;
+        if (st === 'breaking') return;
         steps.push({ turnNumber: t.turnNumber || t.turn_number, status: 'completed' });
     });
     steps.push({ turnNumber: state.currentTurn, status: 'active' });

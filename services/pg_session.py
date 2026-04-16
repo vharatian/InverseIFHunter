@@ -8,7 +8,7 @@ import json
 import logging
 from typing import Optional, Dict, Any, List
 
-from sqlalchemy import select, text
+from sqlalchemy import select, text, or_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from database import get_db
@@ -66,6 +66,16 @@ async def _query_duplicate_sessions_pg(where_order_limit: str, params: dict) -> 
 
 
 async def save_session_pg(session: HuntSession) -> None:
+    """Upsert session row; merges Redis workflow fields into `sessions.metadata` first."""
+    try:
+        from services.redis_session import snapshot_workflow_for_pg
+
+        patch = await snapshot_workflow_for_pg(session.session_id)
+        if patch:
+            await merge_session_metadata_pg(session.session_id, patch)
+    except Exception as e:
+        logger.debug("workflow snapshot for PG skipped: %s", e)
+
     async with get_db() as db:
         stmt = pg_insert(SessionRow).values(
             id=session.session_id,
@@ -149,9 +159,20 @@ async def load_session_pg(session_id: str) -> Optional[HuntSession]:
                     restored_turns.append(t)
             fields["turns"] = dedupe_turns_to_models(restored_turns)
 
+        ct = int(row.current_turn or 1)
+        # Legacy rows have turn_number NULL — treat as turn 1 only when session is still on turn 1
+        if ct <= 1:
+            turn_filter = or_(
+                HuntResultRow.turn_number.is_(None),
+                HuntResultRow.turn_number == 1,
+            )
+        else:
+            turn_filter = HuntResultRow.turn_number == ct
+
         result_rows = await db.execute(
             select(HuntResultRow)
             .where(HuntResultRow.session_id == session_id)
+            .where(turn_filter)
             .order_by(HuntResultRow.created_at)
         )
         hunt_results = []
@@ -185,20 +206,31 @@ async def load_session_pg(session_id: str) -> Optional[HuntSession]:
         return HuntSession(**fields)
 
 
+async def _current_turn_for_pg_append(session_id: str) -> int:
+    try:
+        from services.redis_session import get_meta
+
+        meta = await get_meta(session_id)
+        return int(meta.get("current_turn", 1) or 1)
+    except Exception:
+        return 1
+
+
 async def append_result_pg(session_id: str, result) -> None:
     """Write a single hunt result to PostgreSQL. Fire-and-forget — never raises."""
     try:
+        turn_number = await _current_turn_for_pg_append(session_id)
         async with get_db() as db:
             await db.execute(
                 text("""
                     INSERT INTO hunt_results (
-                        session_id, hunt_id, model, provider, status,
+                        session_id, turn_number, hunt_id, model, provider, status,
                         prompt, response, reasoning_trace,
                         judge_score, judge_output, judge_explanation,
                         judge_criteria, scores, error,
                         is_breaking, sample_label, duration_ms
                     ) VALUES (
-                        :session_id, :hunt_id, :model, :provider, :status,
+                        :session_id, :turn_number, :hunt_id, :model, :provider, :status,
                         :prompt, :response, :reasoning_trace,
                         :judge_score, :judge_output, :judge_explanation,
                         CAST(:judge_criteria AS jsonb), CAST(:scores AS jsonb), :error,
@@ -207,6 +239,7 @@ async def append_result_pg(session_id: str, result) -> None:
                 """),
                 {
                     "session_id": session_id,
+                    "turn_number": turn_number,
                     "hunt_id": getattr(result, "hunt_id", 0),
                     "model": getattr(result, "model", "unknown"),
                     "provider": getattr(result, "provider", "unknown"),

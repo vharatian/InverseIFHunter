@@ -327,6 +327,12 @@ export function applyTrainerUiAfterHydrate(trainerUi) {
     if (trainerUi.alignment_last_snapshot && typeof trainerUi.alignment_last_snapshot === 'object') {
         state.alignmentLastSnapshot = trainerUi.alignment_last_snapshot;
     }
+    if (Array.isArray(trainerUi.selected_row_numbers)) {
+        state.selectedRowNumbers = trainerUi.selected_row_numbers.map((n) => parseInt(n, 10)).filter((n) => !isNaN(n));
+    }
+    if (typeof trainerUi.selection_confirmed === 'boolean') {
+        state.selectionConfirmed = trainerUi.selection_confirmed;
+    }
 }
 
 /**

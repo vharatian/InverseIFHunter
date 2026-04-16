@@ -416,19 +416,20 @@ async function restoreSession() {
     try {
         const response = await fetch(`api/session/${savedSessionId}`, { cache: 'no-store' });
         if (response.ok) {
-            await response.json(); // validate body; UI uses turn-status + hydrate on open-task
-            state.sessionId = savedSessionId;
-            // Restore multi-turn state from Redis (turns, conversationHistory, currentTurn)
-            await syncTurnStatusFromBackend(savedSessionId);
-
-            // Don't render multi-turn UI on initial load — user lands on queue/home view.
-            // UI will be rendered when they open a task via showTaskView().
-            const journeyBar = document.getElementById('turnJourneyBar');
-            if (journeyBar) journeyBar.classList.remove('visible');
-            const container = document.getElementById('mainContainer');
-            if (container) container.classList.remove('multi-turn-layout');
-
-            showToast('Session found! Please reload the notebook to continue.', 'info');
+            await response.json();
+            showTaskView();
+            clearSectionLocks();
+            if (elements.uploadSection) elements.uploadSection.classList.add('hidden');
+            try {
+                await hydrateSession(savedSessionId);
+                showToast('Session restored.', 'info');
+            } catch (e) {
+                state.sessionId = savedSessionId;
+                await syncTurnStatusFromBackend(savedSessionId);
+                syncTurnUI();
+                refreshReviewSync(savedSessionId);
+                showToast('Session loaded — some data may not be available. ' + (e.message || ''), 'info');
+            }
         } else if (response.status === 404) {
             localStorage.removeItem('modelHunter_sessionId');
             showToast('Previous session expired. Please load a new notebook.', 'warning');

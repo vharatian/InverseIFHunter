@@ -106,7 +106,38 @@ async def set_session_phase(session_id: str, request: dict):
     phase = (request.get("phase") or "").strip()
     if phase not in VALID_PHASES:
         raise HTTPException(400, f"Invalid phase: {phase}")
+    await _get_validated_session(session_id)
     await redis_store.set_meta_field(session_id, "active_phase", phase)
+
+    sel = request.get("selected_row_numbers")
+    scf = request.get("selection_confirmed")
+    if sel is not None or scf is not None:
+        tu = await redis_store.get_trainer_ui(session_id)
+        if not isinstance(tu, dict):
+            tu = {}
+        if sel is not None and isinstance(sel, list):
+            out_nums = []
+            for x in sel:
+                try:
+                    out_nums.append(int(x))
+                except (TypeError, ValueError):
+                    continue
+            tu["selected_row_numbers"] = out_nums
+        if scf is not None:
+            tu["selection_confirmed"] = bool(scf)
+        await redis_store.set_trainer_ui(session_id, tu)
+        try:
+            await merge_session_metadata_pg(
+                session_id,
+                {
+                    "trainer_ui": tu,
+                    "selected_row_numbers": tu.get("selected_row_numbers"),
+                    "selection_confirmed": tu.get("selection_confirmed"),
+                },
+            )
+        except Exception:
+            logger.exception("merge selection state to PG failed for %s", session_id)
+
     return {"ok": True}
 
 

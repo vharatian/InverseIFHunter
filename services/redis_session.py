@@ -94,12 +94,19 @@ async def _apply_post_submit_ttl(session_id: str):
 # Session Lifecycle
 # ============================================================
 
-async def create_session(session_id: str, notebook: ParsedNotebook, config: HuntConfig) -> None:
+async def create_session(
+    session_id: str,
+    notebook: ParsedNotebook,
+    config: HuntConfig,
+    *,
+    review_status: str = "draft",
+) -> None:
     """Create a new session with all initial keys."""
     from datetime import datetime, timezone
     r = await get_redis()
     pipe = r.pipeline()
 
+    rs = review_status if review_status in REVIEW_STATUS_VALUES else "draft"
     pipe.set(_key(session_id, "config"), config.model_dump_json())
     pipe.set(_key(session_id, "notebook"), notebook.model_dump_json())
     pipe.set(_key(session_id, "status"), HuntStatus.PENDING.value)
@@ -114,11 +121,11 @@ async def create_session(session_id: str, notebook: ParsedNotebook, config: Hunt
     })
     pipe.set(_key(session_id, "history"), "[]")
     pipe.set(_key(session_id, "reviews"), "{}")
-    pipe.set(_key(session_id, "review_status"), "draft")
+    pipe.set(_key(session_id, "review_status"), rs)
     # results, all_results, turns — start as empty lists (created on first RPUSH)
-    # No TTL on creation — keys live until session is submitted/approved (then POST_SUBMIT_TTL applies).
 
     await pipe.execute()
+    await _refresh_ttl(r, session_id)
     logger.info(f"Session {session_id} created in Redis")
 
 
@@ -127,6 +134,7 @@ async def save_full_session(
     session: HuntSession,
     *,
     sqlite_workflow: Optional[Dict[str, Any]] = None,
+    workflow_metadata: Optional[Dict[str, Any]] = None,
 ) -> None:
     """
     Save a full session object to Redis.
@@ -134,12 +142,20 @@ async def save_full_session(
 
     sqlite_workflow: optional workflow row dict (legacy SQLite-shaped) so review_status, qc_done,
     and reviewer feedback are not lost after create_session resets them.
+
+    workflow_metadata: JSON from PostgreSQL `sessions.metadata` (review_status, active_phase, etc.)
     """
     notebook = session.notebook
     if notebook is None:
         notebook = ParsedNotebook(filename="restored.ipynb")
 
-    await create_session(session.session_id, notebook, session.config)
+    rs = "draft"
+    if workflow_metadata and isinstance(workflow_metadata.get("review_status"), str):
+        rs = workflow_metadata["review_status"]
+    if sqlite_workflow and isinstance(sqlite_workflow.get("review_status"), str):
+        rs = str(sqlite_workflow["review_status"]).strip().lower() or rs
+
+    await create_session(session.session_id, notebook, session.config, review_status=rs)
 
     # Update status
     await set_status(session.session_id, session.status)
@@ -167,10 +183,136 @@ async def save_full_session(
     await set_all_results(session.session_id, session.all_results or [])
     await set_turns(session.session_id, dedupe_turns_to_models(session.turns or []))
 
+    if workflow_metadata:
+        await apply_workflow_metadata_to_redis(session.session_id, workflow_metadata)
     if sqlite_workflow:
         await apply_sqlite_workflow_snapshot(session.session_id, sqlite_workflow)
 
     logger.info(f"Full session {session.session_id} restored to Redis")
+
+
+async def snapshot_workflow_for_pg(session_id: str) -> Dict[str, Any]:
+    """Snapshot Redis-only reviewer/trainer workflow keys for merging into PostgreSQL `sessions.metadata`."""
+    r = await get_redis()
+    if await r.get(_key(session_id, "status")) is None:
+        return {}
+
+    out: Dict[str, Any] = {}
+    rs = await get_review_status(session_id)
+    if rs:
+        out["review_status"] = rs
+
+    meta = await get_meta(session_id)
+    ap = meta.get("active_phase")
+    if isinstance(ap, str) and ap.strip():
+        out["active_phase"] = ap.strip()
+    try:
+        rr = int(meta.get("review_round", 0) or 0)
+        out["review_round"] = rr
+    except (TypeError, ValueError):
+        pass
+
+    if await get_qc_done(session_id):
+        out["qc_done"] = True
+    else:
+        out["qc_done"] = False
+
+    raw_rs = await r.get(_key(session_id, "resubmitted_at"))
+    if raw_rs:
+        out["resubmitted_at"] = raw_rs.decode("utf-8", errors="replace") if isinstance(raw_rs, (bytes, bytearray)) else str(raw_rs)
+
+    try:
+        from agentic_reviewer.versioning import get_acknowledged_at
+        rconn = await get_redis()
+        ack = await get_acknowledged_at(rconn, session_id)
+        if isinstance(ack, str) and ack.strip():
+            out["acknowledged_at"] = ack.strip()
+    except Exception:
+        pass
+
+    fb = await get_review_feedback(session_id)
+    if fb:
+        out["review_feedback"] = fb
+
+    tu = await get_trainer_ui(session_id)
+    if tu:
+        out["trainer_ui"] = tu
+        if tu.get("selected_row_numbers") is not None:
+            out["selected_row_numbers"] = tu["selected_row_numbers"]
+        if tu.get("selection_confirmed") is not None:
+            out["selection_confirmed"] = tu["selection_confirmed"]
+
+    return out
+
+
+async def apply_workflow_metadata_to_redis(session_id: str, meta: Dict[str, Any]) -> None:
+    """Restore Redis workflow keys from PostgreSQL `sessions.metadata` (or equivalent dict)."""
+    if not meta:
+        return
+    r = await get_redis()
+    if await r.get(_key(session_id, "status")) is None:
+        return
+
+    rs = meta.get("review_status")
+    if isinstance(rs, str) and rs.strip() and rs.strip().lower() in REVIEW_STATUS_VALUES:
+        k = _key(session_id, "review_status")
+        await r.set(k, rs.strip().lower())
+        await r.expire(k, SESSION_TTL)
+
+    ap = meta.get("active_phase")
+    if isinstance(ap, str) and ap.strip():
+        await set_meta_field(session_id, "active_phase", ap.strip())
+
+    if meta.get("qc_done") is True:
+        try:
+            await set_qc_done(session_id)
+        except ValueError:
+            pass
+    elif meta.get("qc_done") is False:
+        await clear_qc_done(session_id)
+
+    rr = meta.get("review_round")
+    if rr is not None:
+        try:
+            await set_meta_field(session_id, "review_round", int(rr))
+        except (TypeError, ValueError):
+            pass
+
+    rsa = meta.get("resubmitted_at")
+    if isinstance(rsa, str) and rsa.strip():
+        k = _key(session_id, "resubmitted_at")
+        await r.set(k, rsa.strip())
+        await r.expire(k, SESSION_TTL)
+
+    ack = meta.get("acknowledged_at")
+    if isinstance(ack, str) and ack.strip():
+        await set_meta_field(session_id, "acknowledged_at", ack.strip())
+
+    fb = meta.get("review_feedback")
+    if fb and isinstance(fb, (dict, list)):
+        fb_key = f"{_FB_PREFIX}:{session_id}"
+        await r.set(fb_key, json.dumps(fb, default=str))
+        await r.expire(fb_key, SESSION_TTL)
+
+    tu = meta.get("trainer_ui")
+    if isinstance(tu, dict) and tu:
+        merged = dict(tu)
+    else:
+        merged = await get_trainer_ui(session_id)
+
+    if meta.get("selected_row_numbers") is not None:
+        merged["selected_row_numbers"] = meta["selected_row_numbers"]
+    if meta.get("selection_confirmed") is not None:
+        merged["selection_confirmed"] = meta["selection_confirmed"]
+
+    if merged:
+        await set_trainer_ui(session_id, merged)
+
+    final_rs = await get_review_status(session_id)
+    if final_rs in ("submitted", "approved"):
+        await _apply_post_submit_ttl(session_id)
+    else:
+        await _refresh_ttl(r, session_id)
 
 
 # ============================================================

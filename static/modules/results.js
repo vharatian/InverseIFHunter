@@ -2090,7 +2090,10 @@ export async function confirmSelection() {
     
     // Lock selection after confirmation
     state.selectionConfirmed = true;
-    setActivePhase('grading');
+    setActivePhase('grading', {
+        selected_row_numbers: state.selectedRowNumbers,
+        selection_confirmed: true,
+    });
     
     // Keep selection section visible, but selection is now locked
     elements.resultsSection.classList.remove('hidden');

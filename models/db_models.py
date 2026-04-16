@@ -77,6 +77,7 @@ class HuntResultRow(Base):
         server_default=text("gen_random_uuid()"),
     )
     session_id: Mapped[str] = mapped_column(String, ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False)
+    turn_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     hunt_id: Mapped[int] = mapped_column(Integer, nullable=False)
     model: Mapped[str] = mapped_column(String, nullable=False)
     provider: Mapped[str] = mapped_column(String, nullable=False, server_default="openrouter")

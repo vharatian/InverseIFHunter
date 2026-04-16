@@ -22,6 +22,19 @@ import { applyTrainerUiAfterHydrate } from './alignment.js';
 import { syncHuntModeFromConfig } from './hunt.js';
 import { syncTurnUI } from './multiturn.js';
 
+/** Last-wins dedupe by turn_number (matches server + multiturn.js). */
+function _dedupeTurnsByNumber(turns) {
+    const byNum = new Map();
+    for (const t of turns || []) {
+        const n = Number(t.turn_number ?? t.turnNumber);
+        if (!Number.isFinite(n) || n < 1) continue;
+        byNum.set(n, t);
+    }
+    return Array.from(byNum.entries())
+        .sort((a, b) => a[0] - b[0])
+        .map(([, t]) => t);
+}
+
 /**
  * Fetch full session state from backend and hydrate the UI.
  * @param {string} sessionId
@@ -46,13 +59,10 @@ export async function hydrateSession(sessionId) {
     state.originalNotebookJson = data.notebook ? JSON.stringify(data.notebook) : null;
     state.config = _mergeConfig(data.config);
     state.humanReviews = data.human_reviews || {};
-    if (data.trainer_ui) {
-        applyTrainerUiAfterHydrate(data.trainer_ui);
-    }
     state.allResponses = data.all_results || [];
     state.results = data.results || [];
     state.conversationHistory = data.conversation_history || [];
-    state.turns = data.turns || [];
+    state.turns = _dedupeTurnsByNumber(data.turns || []);
     state.currentTurn = data.meta?.current_turn || 1;
     state.isMultiTurn = (state.currentTurn > 1 || state.turns.length > 0);
     state.activePhase = data.meta?.active_phase || _inferPhase(data);
@@ -75,6 +85,9 @@ export async function hydrateSession(sessionId) {
     _hydrateNotebookSection(data.notebook);
     // human_reviews already on state; _hydrateResultsSection normalizes keys — do not overwrite after.
     _hydrateResultsSection(data.all_results || []);
+    if (data.trainer_ui) {
+        applyTrainerUiAfterHydrate(data.trainer_ui);
+    }
     _hydrateMetaInfo(data);
 
     // Restore section visibility based on hydrated state
