@@ -166,6 +166,30 @@ class EnhancedLogReader:
             return f"session_{session_id[:12]}"
         return None
 
+    def _overview_note_trainer_for_session(
+        self,
+        active_trainers: Set[str],
+        session_id: Optional[str],
+        data: Dict[str, Any],
+        ctx: Dict[str, Dict[str, str]],
+        trainer_mapping: Dict[str, str],
+        allowed: Optional[Set[str]],
+    ) -> None:
+        """Unique-trainer tally: same keys as leaderboard (session_created + hunt activity)."""
+        if not session_id:
+            return
+        if allowed is not None:
+            te = (
+                (ctx.get(session_id) or {}).get("trainer_email")
+                or (data.get("trainer_email") or "")
+            ).strip().lower()
+            if te and te in allowed:
+                active_trainers.add(te)
+        else:
+            tid = self._resolve_trainer_key(session_id, trainer_mapping, ctx, data)
+            if tid:
+                active_trainers.add(tid)
+
     def _load_session_context(self) -> Dict[str, Dict[str, str]]:
         """session_id -> {trainer_email, colab_url}. Disk wins for conflicts; telemetry fills missing."""
         now = datetime.utcnow()
@@ -361,20 +385,9 @@ class EnhancedLogReader:
             
             if event_type == "session_created":
                 stats["total_sessions"] += 1
-                if session_id:
-                    if allowed is not None:
-                        te = (
-                            (ctx.get(session_id) or {}).get("trainer_email")
-                            or (data.get("trainer_email") or "")
-                        ).strip().lower()
-                        if te and te in allowed:
-                            active_trainers.add(te)
-                    else:
-                        tid = self._resolve_trainer_key(
-                            session_id, trainer_mapping, ctx, data
-                        )
-                        if tid:
-                            active_trainers.add(tid)
+                self._overview_note_trainer_for_session(
+                    active_trainers, session_id, data, ctx, trainer_mapping, allowed
+                )
             
             elif event_type == "hunt_start":
                 stats["total_hunts"] += 1
@@ -392,6 +405,10 @@ class EnhancedLogReader:
                     sessions_with_running[session_id] -= 1
                     if sessions_with_running[session_id] <= 0:
                         del sessions_with_running[session_id]
+
+                self._overview_note_trainer_for_session(
+                    active_trainers, session_id, data, ctx, trainer_mapping, allowed
+                )
             
             elif event_type == "api_call_start":
                 stats["total_api_calls"] += 1
@@ -917,7 +934,8 @@ class EnhancedLogReader:
         ctx = self._merge_session_created_from_events(events, ctx)
         
         trainer_stats = defaultdict(lambda: {
-            "sessions": 0,
+            # Distinct sessions with activity in-window (session_created may be older than `hours`)
+            "session_ids": set(),
             "hunts": 0,
             "breaks": 0,
             "api_calls": 0,
@@ -949,8 +967,9 @@ class EnhancedLogReader:
                     stats["last_seen"] = ts
             
             if event_type == "session_created":
-                stats["sessions"] += 1
+                stats["session_ids"].add(session_id)
             elif event_type == "hunt_complete":
+                stats["session_ids"].add(session_id)
                 stats["hunts"] += data.get("completed_hunts", 0)
                 stats["breaks"] += data.get("breaks_found", 0)
         
@@ -962,15 +981,16 @@ class EnhancedLogReader:
             
             # Each hunt = 1 model call + 1 judge call = 2 API calls
             estimated_api_calls = stats["hunts"] * 2
+            n_sessions = len(stats["session_ids"])
             
             leaderboard.append({
                 "trainer_id": trainer_id,
-                "total_sessions": stats["sessions"],
+                "total_sessions": n_sessions,
                 "total_hunts": stats["hunts"],
                 "total_breaks": stats["breaks"],
                 "break_rate": stats["breaks"] / stats["hunts"] if stats["hunts"] else 0,
                 "api_calls": estimated_api_calls,
-                "efficiency": stats["breaks"] / stats["sessions"] if stats["sessions"] else 0,
+                "efficiency": stats["breaks"] / n_sessions if n_sessions else 0,
                 "first_seen": stats["first_seen"],
                 "last_seen": stats["last_seen"]
             })
