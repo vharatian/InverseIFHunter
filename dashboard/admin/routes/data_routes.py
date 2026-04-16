@@ -595,25 +595,28 @@ async def sync_trainers_from_sessions(_=Depends(verify_super_admin)):
     try:
         await _ensure_tables(conn)
         before = await conn.fetchval("SELECT COUNT(*) FROM trainers")
+        # Quote "metadata" — unquoted `metadata` can confuse the parser in UPDATE ... FROM.
         await conn.execute(
             """
-            INSERT INTO trainers (email, display_name, team, role)
-            SELECT email, NULLIF(dname, ''), NULL, 'trainer'
+            INSERT INTO trainers (email, display_name, team, role, config)
+            SELECT email, NULLIF(dname, ''), NULL, 'trainer', '{}'::jsonb
             FROM (
-                SELECT DISTINCT ON (lower(trim(BOTH FROM metadata->>'trainer_email')))
-                    lower(trim(BOTH FROM metadata->>'trainer_email')) AS email,
+                SELECT DISTINCT ON (lower(trim(BOTH FROM s."metadata"->>'trainer_email')))
+                    lower(trim(BOTH FROM s."metadata"->>'trainer_email')) AS email,
                     COALESCE(
-                        NULLIF(trim(BOTH FROM metadata->>'trainer_name'), ''),
+                        NULLIF(trim(BOTH FROM s."metadata"->>'trainer_name'), ''),
                         split_part(
-                            lower(trim(BOTH FROM metadata->>'trainer_email')),
+                            lower(trim(BOTH FROM s."metadata"->>'trainer_email')),
                             '@',
                             1
                         )
                     ) AS dname
-                FROM sessions
-                WHERE metadata->>'trainer_email' IS NOT NULL
-                  AND position('@' IN trim(BOTH FROM metadata->>'trainer_email')) > 0
-                ORDER BY lower(trim(BOTH FROM metadata->>'trainer_email')), updated_at DESC NULLS LAST
+                FROM sessions s
+                WHERE s."metadata"->>'trainer_email' IS NOT NULL
+                  AND position(
+                      '@' IN trim(BOTH FROM s."metadata"->>'trainer_email')
+                  ) > 0
+                ORDER BY lower(trim(BOTH FROM s."metadata"->>'trainer_email')), s.updated_at DESC NULLS LAST
             ) sub
             ON CONFLICT (email) DO UPDATE SET
                 display_name = COALESCE(EXCLUDED.display_name, trainers.display_name),
@@ -622,11 +625,18 @@ async def sync_trainers_from_sessions(_=Depends(verify_super_admin)):
         )
         linked = await conn.execute(
             """
-            UPDATE sessions s
-            SET trainer_id = t.id, updated_at = NOW()
-            FROM trainers t
-            WHERE lower(trim(BOTH FROM coalesce(s.metadata->>'trainer_email', ''))) = lower(t.email)
-              AND s.trainer_id IS DISTINCT FROM t.id
+            WITH matches AS (
+                SELECT s.id AS sid, t.id AS tid
+                FROM sessions s
+                INNER JOIN trainers t
+                  ON lower(trim(BOTH FROM coalesce(s."metadata"->>'trainer_email', ''))) = lower(t.email)
+                WHERE trim(BOTH FROM coalesce(s."metadata"->>'trainer_email', '')) <> ''
+                  AND (s.trainer_id IS DISTINCT FROM t.id)
+            )
+            UPDATE sessions AS sess
+            SET trainer_id = m.tid, updated_at = NOW()
+            FROM matches AS m
+            WHERE sess.id = m.sid
             """
         )
         after = await conn.fetchval("SELECT COUNT(*) FROM trainers")
@@ -641,6 +651,9 @@ async def sync_trainers_from_sessions(_=Depends(verify_super_admin)):
             "trainers_after": after,
             "sessions_updated": linked_n,
         }
+    except Exception as e:
+        logger.exception("sync_trainers_from_sessions failed")
+        raise HTTPException(status_code=400, detail=str(e)) from e
     finally:
         await conn.close()
 
