@@ -69,7 +69,11 @@ export function showSimpleUpdateModal(options) {
 }
 
 function hardRefresh() {
-  window.location.href = window.location.pathname + "?_v=" + Date.now();
+  const url = new URL(window.location.href);
+  url.searchParams.delete("_v");
+  const path = url.pathname + (url.searchParams.toString() ? `?${url.searchParams.toString()}` : "");
+  window.history.replaceState(null, "", path);
+  window.location.reload();
 }
 
 /**
