@@ -4,6 +4,8 @@ import logging
 import os
 import re
 import uuid
+
+import asyncpg
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -160,7 +162,13 @@ async def _ensure_tables(conn):
 async def data_stats(_=Depends(verify_super_admin)):
     """Quick counts for the data management panel."""
     if not DATABASE_URL:
-        return {"total_sessions": 0, "total_results": 0}
+        return {
+            "total_sessions": 0,
+            "submitted_sessions": 0,
+            "draft_sessions": 0,
+            "total_hunt_results": 0,
+            "total_trainers": 0,
+        }
 
     conn = await _get_conn()
     try:
@@ -169,11 +177,13 @@ async def data_stats(_=Depends(verify_super_admin)):
         submitted = await conn.fetchval("SELECT COUNT(*) FROM sessions WHERE status IN ('submitted', 'approved')")
         draft = await conn.fetchval("SELECT COUNT(*) FROM sessions WHERE status NOT IN ('submitted', 'approved')")
         results = await conn.fetchval("SELECT COUNT(*) FROM hunt_results")
+        trainers_n = await conn.fetchval("SELECT COUNT(*) FROM trainers")
         return {
             "total_sessions": total,
             "submitted_sessions": submitted,
             "draft_sessions": draft,
             "total_hunt_results": results,
+            "total_trainers": trainers_n,
         }
     finally:
         await conn.close()
@@ -300,7 +310,7 @@ async def _coerce_body_for_write(
     col_by_name = {c["name"]: c for c in columns}
     out: dict[str, Any] = {}
     for key, val in body.items():
-        if key not in allowed:
+        if key not in col_by_name:
             continue
         meta = col_by_name[key]
         if meta["is_pk"] and partial:
@@ -496,6 +506,141 @@ async def browse_update(
         if not rec:
             raise HTTPException(404, "Row not found")
         return _serialize_row(dict(rec))
+    finally:
+        await conn.close()
+
+
+class BulkDeleteRequest(BaseModel):
+    """Delete up to 500 rows by primary key (same table as browse)."""
+
+    ids: list[str]
+    confirm: str = ""
+
+    model_config = {"extra": "forbid"}
+
+
+@router.post("/browse/{table}/bulk-delete")
+async def browse_bulk_delete(
+    table: str,
+    body: BulkDeleteRequest,
+    _=Depends(verify_super_admin),
+):
+    """Delete many rows by PK. For `trainers`, clears sessions.trainer_id first."""
+    table = _assert_allowed_table(table)
+    if body.confirm != "yes":
+        raise HTTPException(400, "Set confirm to 'yes'")
+    if not body.ids:
+        raise HTTPException(400, "ids must be non-empty")
+    if len(body.ids) > 500:
+        raise HTTPException(400, "At most 500 ids per request")
+    if not DATABASE_URL:
+        raise HTTPException(503, "DATABASE_URL not configured")
+
+    conn = await _get_conn()
+    try:
+        columns = await _fetch_columns(conn, table)
+        if not columns:
+            raise HTTPException(404, "Table not found")
+        pk = await _get_pk_name(columns)
+        pk_meta = next(c for c in columns if c["name"] == pk)
+        t_ref = _quote_ident(table)
+        pk_ref = _quote_ident(pk)
+        dt = pk_meta["data_type"]
+        is_uuid = dt == "uuid" or "uuid" in str(dt).lower()
+
+        if is_uuid:
+            try:
+                parsed = [uuid.UUID(str(x)) for x in body.ids]
+            except (ValueError, AttributeError) as e:
+                raise HTTPException(400, f"Invalid UUID in ids: {e}") from e
+            if table == "trainers":
+                await conn.execute(
+                    f'UPDATE sessions SET trainer_id = NULL, updated_at = NOW() '
+                    f"WHERE trainer_id = ANY($1::uuid[])",
+                    parsed,
+                )
+            res = await conn.execute(
+                f"DELETE FROM {t_ref} WHERE {pk_ref} = ANY($1::uuid[])",
+                parsed,
+            )
+        else:
+            res = await conn.execute(
+                f"DELETE FROM {t_ref} WHERE {pk_ref} = ANY($1::text[])",
+                body.ids,
+            )
+        # asyncpg returns e.g. "DELETE 3"
+        deleted = 0
+        if res and res.startswith("DELETE "):
+            try:
+                deleted = int(res.split()[-1])
+            except (ValueError, IndexError):
+                deleted = 0
+        return {"deleted": deleted, "table": table}
+    except asyncpg.exceptions.ForeignKeyViolationError as e:
+        raise HTTPException(409, f"Cannot delete: rows still referenced ({e})") from e
+    finally:
+        await conn.close()
+
+
+@router.post("/sync-trainers-from-sessions")
+async def sync_trainers_from_sessions(_=Depends(verify_super_admin)):
+    """
+    Upsert `trainers` from distinct emails in `sessions.metadata`, then link sessions.trainer_id.
+    Normal runtime never populated `trainers` (only migrations did); this backfills from PG sessions.
+    """
+    if not DATABASE_URL:
+        raise HTTPException(503, "DATABASE_URL not configured")
+
+    conn = await _get_conn()
+    try:
+        await _ensure_tables(conn)
+        before = await conn.fetchval("SELECT COUNT(*) FROM trainers")
+        await conn.execute(
+            """
+            INSERT INTO trainers (email, display_name, team, role)
+            SELECT email, NULLIF(dname, ''), NULL, 'trainer'
+            FROM (
+                SELECT DISTINCT ON (lower(trim(BOTH FROM metadata->>'trainer_email')))
+                    lower(trim(BOTH FROM metadata->>'trainer_email')) AS email,
+                    COALESCE(
+                        NULLIF(trim(BOTH FROM metadata->>'trainer_name'), ''),
+                        split_part(
+                            lower(trim(BOTH FROM metadata->>'trainer_email')),
+                            '@',
+                            1
+                        )
+                    ) AS dname
+                FROM sessions
+                WHERE metadata->>'trainer_email' IS NOT NULL
+                  AND position('@' IN trim(BOTH FROM metadata->>'trainer_email')) > 0
+                ORDER BY lower(trim(BOTH FROM metadata->>'trainer_email')), updated_at DESC NULLS LAST
+            ) sub
+            ON CONFLICT (email) DO UPDATE SET
+                display_name = COALESCE(EXCLUDED.display_name, trainers.display_name),
+                updated_at = NOW()
+            """
+        )
+        linked = await conn.execute(
+            """
+            UPDATE sessions s
+            SET trainer_id = t.id, updated_at = NOW()
+            FROM trainers t
+            WHERE lower(trim(BOTH FROM coalesce(s.metadata->>'trainer_email', ''))) = lower(t.email)
+              AND s.trainer_id IS DISTINCT FROM t.id
+            """
+        )
+        after = await conn.fetchval("SELECT COUNT(*) FROM trainers")
+        linked_n = 0
+        if linked and linked.startswith("UPDATE "):
+            try:
+                linked_n = int(linked.split()[-1])
+            except (ValueError, IndexError):
+                linked_n = 0
+        return {
+            "trainers_before": before,
+            "trainers_after": after,
+            "sessions_updated": linked_n,
+        }
     finally:
         await conn.close()
 

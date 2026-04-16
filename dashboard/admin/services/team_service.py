@@ -152,6 +152,16 @@ def set_reviewer(pod_id: str, email: str, name: str = "") -> None:
     _save(data)
 
 
+def remove_reviewer(pod_id: str) -> None:
+    """Clear reviewer for a pod."""
+    data = _load_raw()
+    pods = data.get("pods") or {}
+    if pod_id not in pods:
+        raise ValueError(f"Pod '{pod_id}' not found")
+    pods[pod_id]["reviewer"] = None
+    _save(data)
+
+
 def set_pod_lead(pod_id: str, email: str, name: str = "") -> None:
     """Set pod lead. Same person may lead multiple pods — no global uniqueness check."""
     em = _validate_email(email)

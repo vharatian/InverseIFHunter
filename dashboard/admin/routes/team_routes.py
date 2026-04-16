@@ -52,6 +52,16 @@ async def set_reviewer(pod_id: str, body: SetReviewerRequest, _=Depends(verify_s
     return {"ok": True}
 
 
+@router.delete("/pods/{pod_id}/reviewer")
+async def remove_reviewer(pod_id: str, _=Depends(verify_super_admin)):
+    """Remove the reviewer from a pod."""
+    try:
+        team_service.remove_reviewer(pod_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
+
+
 @router.put("/pods/{pod_id}/pod-lead")
 async def set_pod_lead(pod_id: str, body: SetPodLeadRequest, _=Depends(verify_super_admin)):
     """Set the pod lead for a pod."""

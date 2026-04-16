@@ -8,7 +8,7 @@ let currentUser = null;
 let dbBrowseLastRows = [];
 let dbBrowseLastSchema = null;
 let dbModalCtx = { mode: 'edit', table: '', pk: '', row: null };
-let dbBrowseState = { table: 'sessions', page: 1, limit: 25, search: '', sort: '', order: 'desc', schemaCache: {} };
+let dbBrowseState = { table: 'sessions', page: 1, limit: 25, search: '', sort: '', order: 'desc', schemaCache: {}, selected: new Set() };
 let dbBrowseContainer = null;
 
 // Base path prefix — detects /staging or similar prefix from the current URL.
@@ -246,6 +246,7 @@ function renderTeam(data, container) {
                        </div>`
             : `<span class="pod-reviewer-none">Unassigned</span>`}
                     ${su ? `<button type="button" class="btn btn-xs btn-ghost pod-change-rev" data-action="set-reviewer" data-pod="${esc(pod.pod_id)}" data-rev-email="${rev ? esc(rev.email) : ''}" data-rev-name="${rev && rev.name ? esc(rev.name) : ''}">${rev ? 'Change' : 'Assign'}</button>` : ''}
+                    ${su && rev && rev.email ? `<button type="button" class="btn btn-xs btn-ghost" data-action="remove-pod-reviewer" data-pod="${esc(pod.pod_id)}">Unassign</button>` : ''}
                 </div>
             </div>
             ${trainers.length ? `<div class="pod-trainer-tools"><input type="search" class="pod-trainer-filter" placeholder="Filter trainers…" data-pod-filter="${esc(pod.pod_id)}" aria-label="Filter trainers" /></div>` : ''}
@@ -325,6 +326,10 @@ async function handleTeamAction(action, params) {
                 if (!confirm('Remove pod lead from this pod?')) return;
                 await api(`team/pods/${encodeURIComponent(params.pod)}/pod-lead`, { method: 'DELETE' });
                 toast('Pod lead removed'); break;
+            case 'remove-pod-reviewer':
+                if (!confirm('Remove reviewer from this pod?')) return;
+                await api(`team/pods/${encodeURIComponent(params.pod)}/reviewer`, { method: 'DELETE' });
+                toast('Reviewer removed'); break;
         }
         loadTeam();
     } catch (e) { toast(e.message, 'error'); }
@@ -789,6 +794,7 @@ function renderDataTab(stats, container) {
             <div class="summary-card"><div class="summary-value">${stats.submitted_sessions}</div><div class="summary-label">Submitted / Approved</div></div>
             <div class="summary-card"><div class="summary-value">${stats.draft_sessions}</div><div class="summary-label">Draft / In-Progress</div></div>
             <div class="summary-card"><div class="summary-value">${stats.total_hunt_results}</div><div class="summary-label">Hunt Results</div></div>
+            <div class="summary-card"><div class="summary-value">${stats.total_trainers ?? 0}</div><div class="summary-label">Trainer rows (PG)</div></div>
         </div>
         <div class="card" style="margin-bottom:1rem;">
             <div class="card-header"><h3>Delete Single Session</h3></div>
@@ -836,7 +842,11 @@ function renderDataTab(stats, container) {
                         <label for="db-browse-limit">Per page</label>
                         <select id="db-browse-limit"><option value="25">25</option><option value="50">50</option><option value="100">100</option></select>
                     </div>
-                    <button type="button" class="btn btn-sm" id="db-browse-add">Add row</button>
+                    <div class="db-toolbar-actions">
+                        <button type="button" class="btn btn-sm btn-danger" id="db-browse-bulk-del" disabled>Delete selected</button>
+                        <button type="button" class="btn btn-sm btn-ghost hidden" id="db-browse-sync-trainers" title="Upsert trainers from sessions.metadata emails and link trainer_id">Sync trainers from sessions</button>
+                        <button type="button" class="btn btn-sm" id="db-browse-add">Add row</button>
+                    </div>
                 </div>
                 <div id="db-browse-table-wrap" class="db-table-wrap"><div class="loading">Loading…</div></div>
                 <div id="db-browse-pager"></div>
@@ -1033,17 +1043,75 @@ function _dbCellTitle(val) {
     return flat.length > 1600 ? `${flat.slice(0, 1597)}…` : flat;
 }
 
+function _dbUpdateBulkDeleteButton(container) {
+    const btn = container.querySelector('#db-browse-bulk-del');
+    if (!btn) return;
+    const n = dbBrowseState.selected.size;
+    btn.disabled = n === 0;
+    btn.textContent = n ? `Delete selected (${n})` : 'Delete selected';
+}
+
+function _dbUpdateSelectAllState(wrap) {
+    const selAll = wrap.querySelector('#db-browse-select-all');
+    if (!selAll || !dbBrowseLastRows.length) return;
+    const pk = dbBrowseLastSchema?.pk;
+    if (!pk) return;
+    const onPage = dbBrowseLastRows.map(r => String(r[pk]));
+    const nSel = onPage.filter(id => dbBrowseState.selected.has(id)).length;
+    selAll.checked = nSel === onPage.length && onPage.length > 0;
+    selAll.indeterminate = nSel > 0 && nSel < onPage.length;
+}
+
+async function dbBrowseBulkDelete(container) {
+    const ids = [...dbBrowseState.selected];
+    if (!ids.length) return;
+    if (!confirm(`Permanently delete ${ids.length} row(s) from "${dbBrowseState.table}"?`)) return;
+    try {
+        const r = await api(_dbPath(`${dbBrowseState.table}/bulk-delete`), {
+            method: 'POST',
+            body: JSON.stringify({ ids, confirm: 'yes' }),
+        });
+        dbBrowseState.selected.clear();
+        toast(`Deleted ${r.deleted} row(s)`);
+        if (dbBrowseContainer) refreshDbBrowse(dbBrowseContainer);
+        try {
+            const stats = await api('data/stats');
+            const cards = document.querySelectorAll('#data-content .summary-card .summary-value');
+            if (cards.length >= 5) {
+                cards[0].textContent = stats.total_sessions;
+                cards[1].textContent = stats.submitted_sessions;
+                cards[2].textContent = stats.draft_sessions;
+                cards[3].textContent = stats.total_hunt_results;
+                cards[4].textContent = stats.total_trainers ?? 0;
+            }
+        } catch (_) { /* ignore */ }
+    } catch (e) { toast(e.message, 'error'); }
+}
+
+async function dbBrowseSyncTrainers(container) {
+    if (!confirm('Upsert trainer rows from session metadata emails and link sessions.trainer_id?')) return;
+    try {
+        const r = await api('data/sync-trainers-from-sessions', { method: 'POST', body: '{}' });
+        toast(`Trainers ${r.trainers_before} → ${r.trainers_after}; sessions updated: ${r.sessions_updated}`);
+        loadDataTab();
+    } catch (e) { toast(e.message, 'error'); }
+}
+
 function renderDbTableHtml(schema, listData) {
     const cols = schema.columns.slice(0, 12);
     const pk = schema.pk;
-    let th = cols.map(c => `<th title="${attrEsc(c.name)}"><span class="db-th-inner">${esc(c.name)}</span></th>`).join('');
+    let th = `<th class="db-col-check"><input type="checkbox" id="db-browse-select-all" aria-label="Select all on this page" /></th>`;
+    th += cols.map(c => `<th title="${attrEsc(c.name)}"><span class="db-th-inner">${esc(c.name)}</span></th>`).join('');
     th += '<th class="db-cell-actions"> </th>';
     const rows = listData.rows || [];
     dbBrowseLastRows = rows;
     dbBrowseLastSchema = schema;
     let tr = '';
     rows.forEach((row, i) => {
-        let tds = cols.map((c) => {
+        const pkStr = String(row[pk]);
+        const checked = dbBrowseState.selected.has(pkStr) ? 'checked' : '';
+        let tds = `<td class="db-cell-check" onclick="event.stopPropagation()"><input type="checkbox" class="db-row-select" data-db-pk="${attrEsc(pkStr)}" ${checked} aria-label="Select row" /></td>`;
+        tds += cols.map((c) => {
             const v = row[c.name];
             const jsonish = c.data_type === 'jsonb' || /json|history|notebook|config|reviews|turns|payload|metadata|blob/i.test(c.name);
             const cls = jsonish ? 'db-cell-json' : '';
@@ -1054,7 +1122,7 @@ function renderDbTableHtml(schema, listData) {
         tds += `<td class="db-cell-actions"><button type="button" class="btn btn-xs btn-danger db-row-del" data-row-index="${i}">Del</button></td>`;
         tr += `<tr class="db-row" data-row-index="${i}">${tds}</tr>`;
     });
-    const colSpan = cols.length + 1;
+    const colSpan = cols.length + 2;
     return `<table class="db-table"><thead><tr>${th}</tr></thead><tbody>${tr || `<tr><td colspan="${colSpan}" style="padding:1rem;color:var(--text-muted)">No rows</td></tr>`}</tbody></table>`;
 }
 
@@ -1103,9 +1171,37 @@ async function refreshDbBrowse(container) {
         const listData = await api(_dbPath(`${dbBrowseState.table}?${params}`));
         wrap.innerHTML = renderDbTableHtml(schema, listData);
         if (pager) pager.innerHTML = renderDbPagerHtml(listData);
+        const syncBtn = container.querySelector('#db-browse-sync-trainers');
+        if (syncBtn) syncBtn.classList.toggle('hidden', dbBrowseState.table !== 'trainers');
+        _dbUpdateBulkDeleteButton(container);
+        const selAll = wrap.querySelector('#db-browse-select-all');
+        if (selAll) {
+            selAll.addEventListener('change', () => {
+                const on = selAll.checked;
+                (listData.rows || []).forEach((r) => {
+                    const id = String(r[schema.pk]);
+                    if (on) dbBrowseState.selected.add(id);
+                    else dbBrowseState.selected.delete(id);
+                });
+                wrap.querySelectorAll('.db-row-select').forEach((cb) => { cb.checked = on; });
+                _dbUpdateBulkDeleteButton(container);
+            });
+        }
+        wrap.querySelectorAll('.db-row-select').forEach((cb) => {
+            cb.addEventListener('click', (ev) => ev.stopPropagation());
+            cb.addEventListener('change', () => {
+                const id = cb.getAttribute('data-db-pk');
+                if (!id) return;
+                if (cb.checked) dbBrowseState.selected.add(id);
+                else dbBrowseState.selected.delete(id);
+                _dbUpdateBulkDeleteButton(container);
+                _dbUpdateSelectAllState(wrap);
+            });
+        });
+        _dbUpdateSelectAllState(wrap);
         wrap.querySelectorAll('.db-row').forEach((tr) => {
             tr.addEventListener('click', (e) => {
-                if (e.target.closest('.db-row-del')) return;
+                if (e.target.closest('.db-row-del') || e.target.closest('.db-row-select') || e.target.closest('.db-cell-check')) return;
                 const i = parseInt(tr.dataset.rowIndex, 10);
                 openDbModal('edit', dbBrowseState.table, schema, dbBrowseLastRows[i]);
             });
@@ -1120,6 +1216,7 @@ async function refreshDbBrowse(container) {
                 try {
                     await api(_dbPath(`${dbBrowseState.table}/${encodeURIComponent(String(row[pk]))}`), { method: 'DELETE' });
                     toast('Row deleted');
+                    dbBrowseState.selected.delete(String(row[pk]));
                     refreshDbBrowse(container);
                 } catch (err) { toast(err.message, 'error'); }
             });
@@ -1136,7 +1233,7 @@ async function refreshDbBrowse(container) {
 
 function initDbBrowse(container) {
     dbBrowseContainer = container;
-    dbBrowseState = { table: 'sessions', page: 1, limit: 25, search: '', sort: '', order: 'desc', schemaCache: {} };
+    dbBrowseState = { table: 'sessions', page: 1, limit: 25, search: '', sort: '', order: 'desc', schemaCache: {}, selected: new Set() };
     const tabs = container.querySelector('#db-sub-tabs');
     if (!tabs) return;
     tabs.innerHTML = DB_TABLES.map(t => `<button type="button" class="db-sub-tab ${t === dbBrowseState.table ? 'active' : ''}" data-db-table="${t}">${t}</button>`).join('');
@@ -1146,6 +1243,7 @@ function initDbBrowse(container) {
             dbBrowseState.page = 1;
             dbBrowseState.search = '';
             dbBrowseState.sort = '';
+            dbBrowseState.selected = new Set();
             tabs.querySelectorAll('.db-sub-tab').forEach(b => b.classList.toggle('active', b.dataset.dbTable === dbBrowseState.table));
             const search = container.querySelector('#db-browse-search');
             if (search) search.value = '';
@@ -1156,22 +1254,26 @@ function initDbBrowse(container) {
     const debounced = debounce(() => {
         dbBrowseState.search = searchIn.value.trim();
         dbBrowseState.page = 1;
+        dbBrowseState.selected.clear();
         refreshDbBrowse(container);
     }, 350);
     searchIn.addEventListener('input', debounced);
     container.querySelector('#db-browse-sort').addEventListener('change', (e) => {
         dbBrowseState.sort = e.target.value;
         dbBrowseState.page = 1;
+        dbBrowseState.selected.clear();
         refreshDbBrowse(container);
     });
     container.querySelector('#db-browse-order').addEventListener('change', (e) => {
         dbBrowseState.order = e.target.value;
         dbBrowseState.page = 1;
+        dbBrowseState.selected.clear();
         refreshDbBrowse(container);
     });
     container.querySelector('#db-browse-limit').addEventListener('change', (e) => {
         dbBrowseState.limit = parseInt(e.target.value, 10);
         dbBrowseState.page = 1;
+        dbBrowseState.selected.clear();
         refreshDbBrowse(container);
     });
     container.querySelector('#db-browse-add').addEventListener('click', async () => {
@@ -1180,6 +1282,10 @@ function initDbBrowse(container) {
             openDbModal('add', dbBrowseState.table, schema, null);
         } catch (e) { toast(e.message, 'error'); }
     });
+    const bulkBtn = container.querySelector('#db-browse-bulk-del');
+    if (bulkBtn) bulkBtn.addEventListener('click', () => dbBrowseBulkDelete(container));
+    const syncTr = container.querySelector('#db-browse-sync-trainers');
+    if (syncTr) syncTr.addEventListener('click', () => dbBrowseSyncTrainers(container));
     refreshDbBrowse(container);
 }
 
@@ -1267,6 +1373,7 @@ function init() {
         }
         if (action === 'remove-pod') { handleTeamAction('remove-pod', { pod: act.dataset.pod }); return; }
         if (action === 'remove-pod-lead') { handleTeamAction('remove-pod-lead', { pod: act.dataset.pod }); return; }
+        if (action === 'remove-pod-reviewer') { handleTeamAction('remove-pod-reviewer', { pod: act.dataset.pod }); return; }
         if (action === 'remove-dashboard-admin') { handleAdminsAction('remove-dashboard-admin', { email: act.dataset.email }); return; }
         if (action === 'remove-test-account') { handleAdminsAction('remove-test-account', { email: act.dataset.email }); return; }
         if (action === 'save-config-section') { saveConfigSection(act.dataset.section); return; }
