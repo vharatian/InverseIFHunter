@@ -51,7 +51,7 @@ import { hydrateSession, clearSectionLocks } from './modules/sessionHydrator.js?
 import { initOfflineQueue } from './modules/offlineQueue.js?v=46';
 // Lit components — side-effect imports register custom elements.
 import './modules/components/mh-skeleton.js?v=1';
-import './modules/components/mh-connection-banner.js?v=1';
+import './modules/components/mh-connection-banner.js?v=2';
 import './modules/components/mh-shortcut-help.js?v=1';
 import './modules/components/mh-turn-journey.js?v=1';
 import { initAdminMode, deactivateAdminMode } from './modules/adminMode.js?v=43';

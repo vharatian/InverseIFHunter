@@ -3708,6 +3708,13 @@ input[type="range"]::-moz-range-thumb:hover {
     justify-content: center;
 }
 
+/* <mh-turn-journey> is a custom element wrapper; let its children participate
+   directly in the .turn-journey-bar flex row so nodes + connectors align
+   horizontally instead of stacking. */
+.turn-journey-bar mh-turn-journey {
+    display: contents;
+}
+
 .journey-step {
     display: flex;
     align-items: center;

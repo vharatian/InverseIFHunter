@@ -42,11 +42,20 @@ export class MhConnectionBanner extends LitElement {
             this._refreshPending();
         });
         this._onPendingEvent = () => this._refreshPending();
+        this._onNativeOnline = () => { this._online = true; this._refreshPending(); };
+        this._onNativeOffline = () => { this._online = false; };
         window.addEventListener('mh:queue-pending-changed', this._onPendingEvent);
+        window.addEventListener('online', this._onNativeOnline);
+        window.addEventListener('offline', this._onNativeOffline);
         this._refreshPending();
         // Safety net poll in case an event is missed. 5s feels responsive
         // without being chatty — matches the existing reachability probe cadence.
-        this._pollId = setInterval(() => this._refreshPending(), 5000);
+        // Also re-syncs _online from the source-of-truth helper so a missed
+        // state transition (e.g. stale navigator.onLine on reload) self-heals.
+        this._pollId = setInterval(() => {
+            this._online = isOnline();
+            this._refreshPending();
+        }, 5000);
     }
 
     disconnectedCallback() {
@@ -56,6 +65,14 @@ export class MhConnectionBanner extends LitElement {
         if (this._onPendingEvent) {
             window.removeEventListener('mh:queue-pending-changed', this._onPendingEvent);
             this._onPendingEvent = null;
+        }
+        if (this._onNativeOnline) {
+            window.removeEventListener('online', this._onNativeOnline);
+            this._onNativeOnline = null;
+        }
+        if (this._onNativeOffline) {
+            window.removeEventListener('offline', this._onNativeOffline);
+            this._onNativeOffline = null;
         }
     }
 

@@ -474,37 +474,51 @@ async function loadEvents() {
     const filter = document.getElementById('eventFilter').value;
     const endpoint = filter ? `events?event_type=${filter}&limit=50` : 'events?limit=50';
     const data = await fetchAPI(endpoint);
-    if (!data) return;
-    
     const container = document.getElementById('eventList');
-    
+    if (!container) return;
+
+    if (!data) {
+        // Request failed or was superseded. If another fetch is still in
+        // flight it will update the UI; otherwise surface the failure so the
+        // feed doesn't stay stuck on "Loading..." forever.
+        if (_inflight.has('events')) return;
+        container.innerHTML = '<div class="loading">Failed to load events. Retrying…</div>';
+        return;
+    }
+
     if (!data.events || data.events.length === 0) {
         container.innerHTML = '<div class="loading">No events found</div>';
         return;
     }
     
-    container.innerHTML = data.events.map(event => {
-        const marker = getEventTypeMarker(event.type);
-        const time = escapeHtml(fmtTime(event.ts));
-        const details = formatEventDetails(event);
-        const d = event.data || {};
-        const colabUrl = (event.colab_url || d.colab_url || d.url || '').trim();
-        const viewTask = colabUrl && /^https?:\/\//i.test(colabUrl)
-            ? `<a class="event-view-task" href="${escapeHtml(colabUrl)}" target="_blank" rel="noopener noreferrer">View task</a>`
-            : '';
-        const typeSafe = escapeHtml(event.type || '');
-        return `
-            <div class="event-item">
-                <span class="event-type-marker" title="${typeSafe}">${escapeHtml(marker)}</span>
-                <div class="event-content">
-                    <div class="event-type">${escapeHtml(String(event.type || '').replace(/_/g, ' '))}</div>
-                    <div class="event-details">${details}</div>
+    try {
+        container.innerHTML = data.events.map(event => {
+            const marker = getEventTypeMarker(event.type);
+            const time = escapeHtml(fmtTime(event.ts));
+            const details = formatEventDetails(event);
+            const d = event.data || {};
+            const rawColab = event.colab_url || d.colab_url || d.url || '';
+            const colabUrl = typeof rawColab === 'string' ? rawColab.trim() : '';
+            const viewTask = colabUrl && /^https?:\/\//i.test(colabUrl)
+                ? `<a class="event-view-task" href="${escapeHtml(colabUrl)}" target="_blank" rel="noopener noreferrer">View task</a>`
+                : '';
+            const typeSafe = escapeHtml(event.type || '');
+            return `
+                <div class="event-item">
+                    <span class="event-type-marker" title="${typeSafe}">${escapeHtml(marker)}</span>
+                    <div class="event-content">
+                        <div class="event-type">${escapeHtml(String(event.type || '').replace(/_/g, ' '))}</div>
+                        <div class="event-details">${details}</div>
+                    </div>
+                    <div class="event-actions">${viewTask}</div>
+                    <span class="event-time">${time}</span>
                 </div>
-                <div class="event-actions">${viewTask}</div>
-                <span class="event-time">${time}</span>
-            </div>
-        `;
-    }).join('');
+            `;
+        }).join('');
+    } catch (err) {
+        console.error('Error rendering live events:', err);
+        container.innerHTML = '<div class="loading">Failed to render events</div>';
+    }
 }
 
 function getEventTypeMarker(type) {
@@ -517,20 +531,27 @@ function getEventTypeMarker(type) {
         api_call_end: 'A−',
         judge_call: 'JG'
     };
-    return abbrev[type] || type.slice(0, 2).toUpperCase();
+    const key = String(type || '');
+    return abbrev[key] || (key ? key.slice(0, 2).toUpperCase() : '??');
 }
 
 function formatEventDetails(event) {
     const data = event.data || {};
-    switch(event.type) {
-        case 'session_created':
-            return `Session: ${escapeHtml(data.session_id || 'N/A')}`;
-        case 'hunt_result':
-            return `Score: ${escapeHtml(String(data.score ?? 'N/A'))} | ${data.is_breaking ? 'BREAK' : 'Pass'} | ${escapeHtml(data.model?.split('/').pop() || '')}`;
-        case 'api_call_end':
-            return `${escapeHtml(String(data.provider))} | ${escapeHtml(String(data.latency_ms))}ms | ${data.success ? 'OK' : 'Failed'}`;
-        default:
-            return escapeHtml(JSON.stringify(data));
+    try {
+        switch(event.type) {
+            case 'session_created':
+                return `Session: ${escapeHtml(data.session_id || 'N/A')}`;
+            case 'hunt_result': {
+                const model = typeof data.model === 'string' ? data.model.split('/').pop() : '';
+                return `Score: ${escapeHtml(String(data.score ?? 'N/A'))} | ${data.is_breaking ? 'BREAK' : 'Pass'} | ${escapeHtml(model || '')}`;
+            }
+            case 'api_call_end':
+                return `${escapeHtml(String(data.provider ?? ''))} | ${escapeHtml(String(data.latency_ms ?? ''))}ms | ${data.success ? 'OK' : 'Failed'}`;
+            default:
+                return escapeHtml(JSON.stringify(data));
+        }
+    } catch (_) {
+        return '';
     }
 }
 
