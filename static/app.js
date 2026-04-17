@@ -8,8 +8,8 @@
 // Base Modules
 import { elements } from './modules/dom.js?v=43';
 import { initTheme, toggleTheme } from './modules/theme.js?v=43';
-import { state, resetTurnState } from './modules/state.js?v=43';
-import { showTestbed, hideTestbed, initTestbed, resetTestbed, goBackToNotebook, syncActiveRunToNotebook } from './modules/testbed.js?v=43';
+import { state } from './modules/state.js?v=43';
+import { showTestbed, hideTestbed, initTestbed, goBackToNotebook, syncActiveRunToNotebook } from './modules/testbed.js?v=43';
 
 // Auth & API
 import { initTrainerRegistration, startHeartbeat } from './modules/auth.js?v=43';
@@ -41,7 +41,7 @@ import {
 } from './modules/results.js?v=43';
 import { initMultiTurnListeners, initCalibrationListeners, syncTurnUI } from './modules/multiturn.js?v=43';
 import { updateModelOptions, clearModelMismatchWarning } from './modules/editors.js?v=43';
-import { initAutosave, initNextTurnAutosave, initGradingAutosave, resetAllStatuses } from './modules/autosave.js?v=43';
+import { initAutosave, initNextTurnAutosave, initGradingAutosave } from './modules/autosave.js?v=43';
 import { handleHumanJudgment, showNextBlindJudge, showToast, showError } from './modules/celebrations.js?v=43';
 import { updateCriteriaButtonsState } from './modules/utils.js?v=43';
 import { initReviewSync, refreshReviewSync } from './modules/reviewSync.js?v=43';
@@ -49,6 +49,7 @@ import { initTrainerQueue, showQueueView, showTaskView } from './modules/trainer
 import { initNotifications } from './modules/notifications.js?v=43';
 import { hydrateSession, clearSectionLocks } from './modules/sessionHydrator.js?v=43';
 import { initOfflineQueue } from './modules/offlineQueue.js?v=46';
+import { startNewTask, refreshTasksTodayUI } from './modules/newTask.js?v=43';
 // Lit components — side-effect imports register custom elements.
 import './modules/components/mh-skeleton.js?v=1';
 import './modules/components/mh-connection-banner.js?v=2';
@@ -140,73 +141,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                     showToast('Session loaded — some data may not be available. ' + (e.message || ''), 'info');
                 }
             },
-            onNewTask: () => {
-                showTaskView();
-
-                // ── Clear session identity ──
-                state.sessionId = null;
-                state.notebook = null;
-                state.notebookId = null;
-                state.metadata = null;
-                state.metadataModel = null;
-                state.criteria = null;
-                state.initialCriteria = null;
-                state.referenceValidated = false;
-                state.originalNotebookJson = null;
-                state.isHunting = false;
-                state.huntLimitReached = false;
-                state.totalHuntsCount = 0;
-                state.reviewFeedback = null;
-                state.adminMode = false;
-                localStorage.removeItem('modelHunter_sessionId');
-
-                // ── Reset multi-turn state ──
-                state.currentTurn = 1;
-                state.isMultiTurn = false;
-                state.conversationHistory = [];
-                state.turns = [];
-                state.multiTurnTotalHunts = 0;
-                state.previousTurnHuntIds = new Set();
-                resetTurnState();
-
-                // ── Hide multi-turn UI ──
-                const journeyBar = document.getElementById('turnJourneyBar');
-                if (journeyBar) journeyBar.classList.remove('visible');
-                const container = document.getElementById('mainContainer');
-                if (container) container.classList.remove('multi-turn-layout');
-
-                // ── Hide all task sections except upload ──
-                elements.configSection?.classList.add('hidden');
-                elements.progressSection?.classList.add('hidden');
-                elements.resultsSection?.classList.add('hidden');
-                elements.summarySection?.classList.add('hidden');
-                elements.multiTurnSection?.classList.add('hidden');
-                elements.selectionSection?.classList.add('hidden');
-                document.getElementById('multiTurnDecisionCard')?.classList.add('hidden');
-                document.getElementById('goodResponsePicker')?.classList.add('hidden');
-
-                // ── Show upload section, expanded ──
-                const uploadSection = elements.uploadSection;
-                if (uploadSection) uploadSection.classList.remove('hidden');
-                const uploadBody = document.getElementById('uploadBody');
-                const uploadChevron = document.getElementById('uploadChevron');
-                const uploadHeaderText = document.getElementById('uploadHeaderText');
-                if (uploadBody) uploadBody.classList.remove('collapsed');
-                if (uploadChevron) uploadChevron.classList.remove('collapsed');
-                if (uploadHeaderText) uploadHeaderText.textContent = 'Load Notebook';
-
-                // ── Reset testbed ──
-                resetTestbed();
-                hideTestbed();
-
-                // ── Clear input and focus ──
-                const urlInput = document.getElementById('colabUrlInput');
-                if (urlInput) { urlInput.value = ''; urlInput.focus(); }
-
-                clearSectionLocks();
-                resetAllStatuses();
-            },
+            onNewTask: startNewTask,
         });
+
+        refreshTasksTodayUI();
 
         // 7d. Handle "resume existing session" from duplicate-task modal
         document.addEventListener('open-existing-session', async (e) => {

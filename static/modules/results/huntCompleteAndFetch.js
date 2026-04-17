@@ -22,7 +22,11 @@ export function handleHuntComplete(data) {
     elements.startHuntBtn.disabled = false;
     elements.startHuntBtn.title = '';
 
-    document.querySelector('.section')?.classList.remove('hidden');
+    // NOTE: do NOT unhide the first `.section` here — that element is the
+    // Load Notebook upload card and it must stay hidden for the entire
+    // task lifecycle. Load Notebook is only ever shown by the "+ New Task"
+    // flow in app.js. Re-showing it after each hunt was a bug that let
+    // trainers swap the notebook mid-task.
     elements.configSection?.classList.remove('hidden');
     elements.progressSection?.classList.remove('hunt-active');
 

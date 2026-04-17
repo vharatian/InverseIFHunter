@@ -328,7 +328,14 @@ export function applyTrainerUiAfterHydrate(trainerUi) {
         state.alignmentLastSnapshot = trainerUi.alignment_last_snapshot;
     }
     if (Array.isArray(trainerUi.selected_row_numbers)) {
-        state.selectedRowNumbers = trainerUi.selected_row_numbers.map((n) => parseInt(n, 10)).filter((n) => !isNaN(n));
+        // Clamp to indices that actually exist in the current turn's
+        // allResponses. Without this, stale selections saved during a prior
+        // turn (which had more hunts) leak in and cause "Too many selected:
+        // 5/4" plus blank slots after the UI rehydrates.
+        const total = Array.isArray(state.allResponses) ? state.allResponses.length : 0;
+        state.selectedRowNumbers = trainerUi.selected_row_numbers
+            .map((n) => parseInt(n, 10))
+            .filter((n) => !isNaN(n) && n >= 0 && n < total);
     }
     if (typeof trainerUi.selection_confirmed === 'boolean') {
         state.selectionConfirmed = trainerUi.selection_confirmed;

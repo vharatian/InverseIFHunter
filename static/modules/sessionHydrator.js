@@ -285,10 +285,16 @@ function _hydrateResultsSection(allResults, trainerUi) {
             continue;
         }
 
-        // Preferred: row_N key with review data
+        // Preferred: row_N key with review data.
+        // Only treat the row as "selected" if N actually exists in the
+        // current turn's allResults. Stale row_N entries from prior turns
+        // (reviews are merged across turns on the backend) would otherwise
+        // inflate the selection count and render "5/4 selected".
         if (key.startsWith('row_')) {
             const rowNum = parseInt(key.replace('row_', ''), 10);
-            if (!isNaN(rowNum) && (val.hunt_id !== undefined || val.judgment !== undefined)) {
+            const rowInCurrentTurn =
+                !isNaN(rowNum) && rowNum >= 0 && rowNum < results.length;
+            if (rowInCurrentTurn && (val.hunt_id !== undefined || val.judgment !== undefined)) {
                 selectedRows.add(rowNum);
             }
             normalizedReviews[key] = val;
@@ -297,11 +303,20 @@ function _hydrateResultsSection(allResults, trainerUi) {
 
         // Fallback: huntId key from auto-save — map back to row index
         if (val.judgment !== undefined || val.grading_basis) {
-            let rowIdx = val.row_number;
+            // Prefer the live huntId→index map (matches the CURRENT turn's
+            // allResults). Only fall back to val.row_number as a last resort.
+            // Trusting val.row_number blindly leaks stale indices from prior
+            // turns into this turn's selection and produces the classic
+            // "5/4 selected, only 2 hunts visible" bug on rehydration.
+            let rowIdx = huntIdToIndex[key];
             if (rowIdx === undefined || rowIdx === null) {
-                rowIdx = huntIdToIndex[key];
+                rowIdx = val.row_number;
             }
-            if (rowIdx !== undefined && rowIdx !== null) {
+            const isValidForCurrentTurn =
+                typeof rowIdx === 'number' &&
+                rowIdx >= 0 &&
+                rowIdx < results.length;
+            if (isValidForCurrentTurn) {
                 selectedRows.add(rowIdx);
                 const rowKey = `row_${rowIdx}`;
                 const mapped = { ...val, hunt_id: val.hunt_id ?? parseInt(key, 10), row_number: rowIdx };

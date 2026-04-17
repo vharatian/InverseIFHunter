@@ -596,9 +596,19 @@ export async function startHunt() {
     document.getElementById('modelPillGrid')?.classList.add('hc-locked');
     document.getElementById('providerSegment')?.classList.add('hc-locked');
     
-    // Hide upload and config sections during hunt
-    document.querySelector('.section')?.classList.add('hidden'); // Hide upload section
-    elements.configSection?.classList.add('hidden'); // Hide config section
+    // Hide every actionable panel while the hunt is live. Trainers must
+    // not be able to click "Continue to Next Turn", "End & Review",
+    // "Confirm & Start Review", or load a new notebook mid-hunt. Turn
+    // History stays visible so prior-turn context is still referenceable.
+    elements.uploadSection?.classList.add('hidden');
+    elements.configSection?.classList.add('hidden');
+    elements.selectionSection?.classList.add('hidden');
+    elements.resultsSection?.classList.add('hidden');
+    elements.summarySection?.classList.add('hidden');
+    document.getElementById('multiTurnDecisionCard')?.classList.add('hidden');
+    document.getElementById('multiTurnDecisionPanel')?.classList.add('hidden');
+    document.getElementById('goodResponsePicker')?.classList.add('hidden');
+    document.getElementById('nextTurnEditor')?.classList.add('hidden');
     
     // Start rotating hunting tips (model-aware)
     const selectedModel = elements.modelSelect?.value || '';

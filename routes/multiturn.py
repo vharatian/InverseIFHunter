@@ -162,6 +162,12 @@ async def _do_advance_turn(session_id: str, request: AdvanceTurnRequest):
     session.passes_found = 0
     session.status = HuntStatus.PENDING
     
+    # Turn-scoped trainer state must reset when we advance; otherwise prior
+    # turns' reviews, selection, and alignment UI leak into the new turn and
+    # cause "5/4 selected", phantom slots, and stale llm_revealed flags on
+    # rehydration.
+    session.human_reviews = {}
+
     # Persist to Redis (granular writes)
     try:
         await redis_store.set_config(session_id, session.config)
@@ -172,6 +178,8 @@ async def _do_advance_turn(session_id: str, request: AdvanceTurnRequest):
         await redis_store.set_hunt_counters(session_id, total_hunts=0, completed_hunts=0, breaks_found=0, passes_found=0)
         await redis_store.clear_results(session_id)
         await redis_store.clear_all_results(session_id)
+        await redis_store.set_human_reviews(session_id, {})
+        await redis_store.set_trainer_ui(session_id, {})
         await redis_store.set_turns(session_id, session.turns)
     except Exception as e:
         logger.error(f"Failed to persist session after turn advance: {e}")

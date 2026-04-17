@@ -111,6 +111,11 @@ export function showQueueView() {
     const taskInfoChip = document.getElementById('taskInfoChip');
     if (taskInfoChip) taskInfoChip.classList.add('hidden');
 
+    // "X tasks done today" pill belongs to the task view only (queue view
+    // has its own momentum strip).
+    const todayPill = document.getElementById('taskDoneToday');
+    if (todayPill) todayPill.classList.add('hidden');
+
     // Hide multi-turn UI elements that belong to the task view
     const journeyBar = document.getElementById('turnJourneyBar');
     if (journeyBar) journeyBar.classList.remove('visible');
@@ -125,6 +130,24 @@ export function showTaskView() {
     if (els.view)     els.view.classList.add('hidden');
     if (els.taskView) els.taskView.classList.remove('hidden');
     if (els.backBtn)  els.backBtn.classList.remove('hidden');
+
+    const todayPill = document.getElementById('taskDoneToday');
+    if (todayPill) todayPill.classList.remove('hidden');
+
+    // If we're re-entering the task view after a prior submit (button was
+    // morphed into "+ New Task"), snap it back to the Submit-to-Colab
+    // baseline. Whatever workflow stage we end up in will re-enable it as
+    // needed (llmRevealAndReviewCards.js / selectionConfirmAndProgress.js).
+    const submitBtn = document.getElementById('submitColabBtn');
+    if (submitBtn && submitBtn.dataset.mode === 'new-task') {
+        submitBtn.dataset.mode = 'submit';
+        submitBtn.textContent = 'Submit to Colab';
+        submitBtn.classList.remove('btn-primary');
+        submitBtn.classList.add('btn-success');
+        submitBtn.disabled = true;
+        submitBtn.style.opacity = '0.5';
+        submitBtn.title = 'Reveal AI Evaluation first to enable';
+    }
 }
 
 // ── Render ──────────────────────────────────────────────────────

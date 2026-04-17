@@ -5,6 +5,9 @@ import { getModelDisplayName } from '../utils.js';
 import { showToast, showError, triggerColabConfetti } from '../celebrations.js?v=43';
 import { playFinalSubmission, playFinalSubmissionError } from '../sounds.js?v=43';
 import { progressiveSaveToColab } from './drive-save.js';
+import { startNewTask, incrementTasksToday } from '../newTask.js?v=43';
+import { getHuntTimingForSubmit } from '../hunt.js';
+import { refreshReviewSync } from '../reviewSync.js';
 function _makeCell(heading, content, cellId) {
     return {
         cell_type: 'markdown',
@@ -80,9 +83,42 @@ function _modelCellName(modelId) {
     // Remove spaces, keep dots so "GPT 5.2" → "GPT5.2", "Claude Opus 4 6" → "ClaudeOpus46"
     return display.replace(/\s+/g, '');
 }
+/**
+ * Delay before morphing "Submitted ✓" → "+ New Task".
+ * Long enough for the trainer to register the success state and enjoy the
+ * confetti; short enough that power users (8 tasks/day) don't wait.
+ */
+const POST_SUBMIT_MORPH_DELAY_MS = 1500;
+
+/**
+ * Swap the submit button into "+ New Task" mode after a successful submit.
+ * Reuses the same DOM node (muscle memory: same on-screen position across
+ * tasks) and flips `dataset.mode` so the existing click listener routes to
+ * startNewTask instead of submitToColab. startNewTask() resets the mode back
+ * to 'submit' when the trainer begins the next task.
+ */
+function _morphToNewTaskButton(btn) {
+    btn.dataset.mode = 'new-task';
+    btn.textContent = '+ New Task';
+    btn.classList.remove('btn-success');
+    btn.classList.add('btn-primary');
+    btn.disabled = false;
+    btn.style.opacity = '';
+    btn.title = 'Start a new task (Enter)';
+    // Focus so Enter triggers it natively — no global key listener needed.
+    btn.focus();
+}
+
 export async function submitToColab() {
     const btn = elements.submitColabBtn;
     if (!btn) return;
+
+    // Dual-mode: after a successful submit the same button becomes a
+    // "+ New Task" action. Route accordingly.
+    if (btn.dataset.mode === 'new-task') {
+        startNewTask();
+        return;
+    }
 
     if (!state.llmRevealed) {
         showToast('Reveal AI Evaluation first before submitting to Colab.', 'error');
@@ -216,12 +252,31 @@ export async function submitToColab() {
             throw new Error(result.message || 'Progressive save failed');
         }
 
+        // Flip review_status: draft → submitted so the task lands in the
+        // trainer's "Completed" tab and the queue journey shows Submit as
+        // done. Without this, Submit to Colab was a no-op for queue
+        // bookkeeping and the card stayed under "In progress" forever.
+        await _markSubmittedForReview(state.sessionId);
+
         playFinalSubmission();
         showToast(`Submitted to Colab! (${cells.length} cells saved)`, 'success');
         triggerColabConfetti();
 
-        btn.textContent = 'Submitted';
+        btn.textContent = 'Submitted \u2713';
         btn.disabled = true;
+
+        incrementTasksToday();
+
+        // Morph button into a "+ New Task" CTA after the success moment,
+        // preserving on-screen position for muscle memory across tasks.
+        setTimeout(() => {
+            // Guard: trainer may have navigated away (queue view, new session)
+            // before the timer fires. Only morph if we're still in the post-
+            // submit state (button still shows the success checkmark).
+            if (btn.textContent === 'Submitted \u2713') {
+                _morphToNewTaskButton(btn);
+            }
+        }, POST_SUBMIT_MORPH_DELAY_MS);
 
     } catch (error) {
         console.error('submitToColab error:', error);
@@ -229,5 +284,31 @@ export async function submitToColab() {
         showError(error, { operation: 'Submit to Colab', retry: () => submitToColab() });
         btn.disabled = false;
         btn.textContent = originalText;
+    }
+}
+
+/**
+ * Move the session into the reviewer queue (review_status: draft → submitted).
+ *
+ * Idempotent: a 409 from the server means the task was already submitted (e.g.
+ * user double-clicked or a prior attempt half-succeeded). We refresh the local
+ * review-sync block either way so the trainer queue repaint sees the new
+ * status when the user navigates home.
+ */
+async function _markSubmittedForReview(sessionId) {
+    if (!sessionId) return;
+    try {
+        const huntTiming = getHuntTimingForSubmit();
+        const res = await fetch(`api/session/${sessionId}/submit-for-review`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ hunt_timing: huntTiming }),
+        });
+        if (!res.ok && res.status !== 409) {
+            const data = await res.json().catch(() => ({}));
+            throw new Error(data.detail || `submit-for-review failed (${res.status})`);
+        }
+    } finally {
+        try { await refreshReviewSync(sessionId); } catch { /* non-fatal */ }
     }
 }
