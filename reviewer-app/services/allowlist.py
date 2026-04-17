@@ -16,13 +16,13 @@ from agentic_reviewer.team_config import get_role  # noqa: E402
 
 
 def is_reviewer_allowed(email_or_id: str) -> bool:
-    """Return True if the email has reviewer-level access (reviewer, admin, or super_admin)."""
+    """Return True if the email has reviewer-level access (reviewer, pod_lead, admin, or super_admin)."""
     if not email_or_id or not str(email_or_id).strip():
         return False
     normalized = str(email_or_id).strip().lower()
 
     role = get_role(normalized)
-    if role in ("super_admin", "admin", "reviewer"):
+    if role in ("super_admin", "admin", "pod_lead", "reviewer"):
         return True
 
     # Backward compat: check global.yaml reviewer.allowed_emails

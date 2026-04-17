@@ -26,7 +26,8 @@ from agentic_reviewer.team_config import get_role, get_allowed_trainer_emails_fo
 from agentic_reviewer.notifications import (
     extract_task_display_id,
     notify_user,
-    resolve_reviewer_email_for_trainer,
+    resolve_reviewer_emails_for_trainer,
+    resolve_pod_lead_email_for_trainer,
 )
 from agentic_reviewer.resilience import safe_notify
 from agentic_reviewer.versioning import (
@@ -176,7 +177,7 @@ async def trainer_queue(
 
     if role == "super_admin":
         sessions = all_sessions
-    elif role in ("admin", "reviewer"):
+    elif role in ("admin", "reviewer", "pod_lead"):
         allowed = get_allowed_trainer_emails_for_role(email)
         sessions = [s for s in all_sessions if s.get("trainer_email") in allowed] if allowed is not None else all_sessions
     else:
@@ -275,17 +276,29 @@ async def update_config(session_id: str, config: HuntConfig):
 
 
 async def _notify_reviewer_for_session(session_id: str, notif_type: str, message: str) -> None:
-    """Push a notification to the reviewer responsible for the trainer who owns this session."""
+    """Push a notification to every reviewer mapped to the trainer who owns this session,
+    plus the pod lead (who has pod-wide visibility). If no reviewer is mapped, the task is
+    still visible via the pod lead; silently skip when neither exists (unassigned trainer)."""
     r = await redis_store.get_redis()
     meta = await redis_store.get_meta(session_id)
     trainer_email = (meta.get("trainer_email") or "").strip().lower()
     if not trainer_email:
         return
-    reviewer_email = resolve_reviewer_email_for_trainer(trainer_email)
-    if not reviewer_email:
+    recipients: List[str] = []
+    seen = set()
+    for em in resolve_reviewer_emails_for_trainer(trainer_email):
+        if em and em not in seen:
+            recipients.append(em)
+            seen.add(em)
+    pod_lead = resolve_pod_lead_email_for_trainer(trainer_email)
+    if pod_lead and pod_lead not in seen:
+        recipients.append(pod_lead)
+        seen.add(pod_lead)
+    if not recipients:
         return
     task_display_id = await extract_task_display_id(r, session_id)
-    await notify_user(r, reviewer_email, notif_type, session_id, message, task_display_id)
+    for email in recipients:
+        await notify_user(r, email, notif_type, session_id, message, task_display_id)
 
 
 async def _notify_escalation(session_id: str, round_num: int, max_rounds: int) -> None:

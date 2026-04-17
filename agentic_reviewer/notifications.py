@@ -200,12 +200,28 @@ async def mark_all_read(redis_conn, email: str) -> int:
 
 
 def resolve_reviewer_email_for_trainer(trainer_email: str) -> Optional[str]:
-    """Given a trainer email, find the reviewer for their pod via team_config."""
+    """Back-compat: first mapped reviewer (or first pod reviewer as fallback) for a trainer."""
+    emails = resolve_reviewer_emails_for_trainer(trainer_email)
+    return emails[0] if emails else None
+
+
+def resolve_reviewer_emails_for_trainer(trainer_email: str) -> List[str]:
+    """Return ALL reviewer emails that should see this trainer's tasks.
+    Uses the per-trainer assignment mapping; empty list if trainer is unassigned."""
     try:
-        from agentic_reviewer.team_config import get_pod_for_email, get_reviewer_email_for_pod
+        from agentic_reviewer.team_config import get_mapped_reviewers_for_trainer
+        return [e for e in (get_mapped_reviewers_for_trainer(trainer_email) or []) if e]
+    except Exception:
+        return []
+
+
+def resolve_pod_lead_email_for_trainer(trainer_email: str) -> Optional[str]:
+    """Return the pod lead email for a trainer's pod, if any."""
+    try:
+        from agentic_reviewer.team_config import get_pod_for_email, get_pod_lead_email_for_pod
         pod_id = get_pod_for_email(trainer_email)
         if pod_id:
-            return get_reviewer_email_for_pod(pod_id)
+            return get_pod_lead_email_for_pod(pod_id)
     except Exception:
         pass
     return None

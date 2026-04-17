@@ -37,8 +37,9 @@ class PodSummary(BaseModel):
     pod_id: str
     name: str
     pod_lead: Optional[Dict[str, str]] = None
-    reviewer: Optional[Dict[str, str]] = None
+    reviewers: List[Dict[str, str]] = []
     trainers: List[str] = []
+    trainer_assignments: Dict[str, List[str]] = {}
 
 class TeamResponse(BaseModel):
     super_admins: List[Dict[str, str]] = []
@@ -61,6 +62,16 @@ class SetReviewerRequest(BaseModel):
     @classmethod
     def validate_email(cls, v: str) -> str:
         return _check_email(v)
+
+
+class SetTrainerReviewersRequest(BaseModel):
+    """Replace a trainer's reviewer assignments. Empty list clears the mapping."""
+    reviewers: List[str] = Field(default_factory=list)
+
+    @field_validator("reviewers")
+    @classmethod
+    def _validate_each(cls, v: List[str]) -> List[str]:
+        return [_check_email(x) for x in v]
 
 
 class SetPodLeadRequest(BaseModel):

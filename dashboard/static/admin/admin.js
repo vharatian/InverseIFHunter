@@ -309,10 +309,15 @@ function _initAdminTabKeyboardNav() {
 // TEAM TAB
 // ═════════════════════════════════════════════════════════════════
 
+let _teamCache = null;
+
 async function loadTeam() {
     const c = document.getElementById('team-content');
     c.innerHTML = skeleton(6);
-    try { renderTeam(await api('team'), c); }
+    try {
+        _teamCache = await api('team');
+        renderTeam(_teamCache, c);
+    }
     catch (e) { c.innerHTML = `<div class="error-msg">${esc(e.message)}</div>`; }
 }
 
@@ -388,21 +393,37 @@ function renderTeam(data, container) {
 
     pods.forEach(pod => {
         const lead = pod.pod_lead;
-        const rev = pod.reviewer;
+        const reviewers = pod.reviewers || [];
         const trainers = pod.trainers || [];
+        const assignments = pod.trainer_assignments || {};
+        const revByEmail = {}; reviewers.forEach(r => { if (r && r.email) revByEmail[r.email.toLowerCase()] = r; });
         const firstN = 12;
         const vis = trainers.slice(0, firstN);
         const more = trainers.slice(firstN);
+        const renderTrainerChip = (t) => {
+            const mapped = assignments[t] || [];
+            const label = mapped.length
+                ? `${mapped.length} reviewer${mapped.length !== 1 ? 's' : ''}`
+                : 'Unassigned';
+            const labelClass = mapped.length ? 'trainer-assign-pill ok' : 'trainer-assign-pill warn';
+            const title = mapped.length ? `Mapped to: ${mapped.join(', ')}` : 'No reviewer assigned — reviewer app will not show this trainer';
+            return `<span class="trainer-chip" data-trainer-email="${esc(t)}" title="${esc(title)}">
+                <span>${esc(t)}</span>
+                <span class="${labelClass}">${esc(label)}</span>
+                ${su ? `<button type="button" class="btn btn-xs btn-ghost" data-action="assign-trainer-reviewers" data-pod="${esc(pod.pod_id)}" data-email="${esc(t)}" title="Assign reviewers">Assign</button>` : ''}
+                ${su ? `<button type="button" class="remove-btn" data-action="remove-trainer" data-pod="${esc(pod.pod_id)}" data-email="${esc(t)}" aria-label="Remove ${esc(t)}">&times;</button>` : ''}
+            </span>`;
+        };
         h += `<article class="pod-card" data-pod="${esc(pod.pod_id)}">
             <header class="pod-card-head">
                 <div class="pod-card-title"><h3>${esc(pod.name)}</h3><span class="pod-id-pill" title="Pod id">${esc(pod.pod_id)}</span></div>
                 <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
-                    <span class="pod-trainer-count">${trainers.length} trainer${trainers.length !== 1 ? 's' : ''}</span>
+                    <span class="pod-trainer-count">${trainers.length} trainer${trainers.length !== 1 ? 's' : ''} · ${reviewers.length} reviewer${reviewers.length !== 1 ? 's' : ''}</span>
                     ${su ? `<button type="button" class="btn btn-xs btn-danger" data-action="remove-pod" data-pod="${esc(pod.pod_id)}">Delete pod</button>` : ''}
                 </div>
             </header>
             <div class="pod-reviewer-block">
-                <span class="pod-reviewer-label">Pod lead</span>
+                <span class="pod-reviewer-label">Pod lead <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted)">· sees all pod tasks</span></span>
                 <div class="pod-reviewer-main">
                     ${lead && lead.email
             ? `<div class="team-member-row pod-reviewer-row" style="flex:1;border:0;padding:0;background:transparent">
@@ -415,31 +436,38 @@ function renderTeam(data, container) {
                 </div>
             </div>
             <div class="pod-reviewer-block">
-                <span class="pod-reviewer-label">Reviewer</span>
-                <div class="pod-reviewer-main">
-                    ${rev
-            ? `<div class="team-member-row pod-reviewer-row" style="flex:1;border:0;padding:0;background:transparent">
-                        <div class="team-member-avatar reviewer">${esc(_initials(rev.email, rev.name || ''))}</div>
-                        <div class="team-member-body"><div class="team-member-email">${esc(rev.email)}</div>${rev.name ? `<div class="team-member-name">${esc(rev.name)}</div>` : ''}</div>
-                       </div>`
-            : `<span class="pod-reviewer-none">Unassigned</span>`}
-                    ${su ? `<button type="button" class="btn btn-xs btn-ghost pod-change-rev" data-action="set-reviewer" data-pod="${esc(pod.pod_id)}" data-rev-email="${rev ? esc(rev.email) : ''}" data-rev-name="${rev && rev.name ? esc(rev.name) : ''}">${rev ? 'Change' : 'Assign'}</button>` : ''}
-                    ${su && rev && rev.email ? `<button type="button" class="btn btn-xs btn-ghost" data-action="remove-pod-reviewer" data-pod="${esc(pod.pod_id)}">Unassign</button>` : ''}
-                </div>
-            </div>
+                <span class="pod-reviewer-label">Reviewers <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted)">· only see mapped trainers</span></span>
+                <div class="pod-reviewer-main" style="flex-direction:column;align-items:stretch;gap:0.35rem">`;
+        if (!reviewers.length) {
+            h += `<span class="pod-reviewer-none">No reviewers yet</span>`;
+        } else {
+            h += `<div class="team-member-list">`;
+            reviewers.forEach(r => {
+                h += `<div class="team-member-row">
+                    <div class="team-member-avatar reviewer">${esc(_initials(r.email, r.name || ''))}</div>
+                    <div class="team-member-body"><div class="team-member-email">${esc(r.email)}</div>${r.name ? `<div class="team-member-name">${esc(r.name)}</div>` : ''}</div>
+                    ${su ? `<button type="button" class="team-member-remove" data-action="remove-pod-reviewer" data-pod="${esc(pod.pod_id)}" data-email="${esc(r.email)}" title="Remove reviewer">&times;</button>` : ''}
+                </div>`;
+            });
+            h += `</div>`;
+        }
+        if (su) {
+            h += `<div class="team-add-form" data-form="add-reviewer" data-pod="${esc(pod.pod_id)}" style="margin-top:0.25rem">
+                <input type="email" placeholder="reviewer@example.com" data-field="email" autocomplete="off" />
+                <input type="text" placeholder="Name (optional)" data-field="name" autocomplete="off" />
+                <button type="button" class="btn btn-sm team-add-btn">Add reviewer</button>
+            </div>`;
+        }
+        h += `</div></div>
             ${trainers.length ? `<div class="pod-trainer-tools"><input type="search" class="pod-trainer-filter" placeholder="Filter trainers…" data-pod-filter="${esc(pod.pod_id)}" aria-label="Filter trainers" /></div>` : ''}
             <div class="trainer-chip-list" data-pod-chips="${esc(pod.pod_id)}">`;
         if (!trainers.length) {
             h += `<span class="team-empty inline"><span class="team-empty-hint">No trainers in this pod yet.</span></span>`;
         } else {
-            vis.forEach(t => {
-                h += `<span class="trainer-chip" data-trainer-email="${esc(t)}">${esc(t)}${su ? `<button type="button" class="remove-btn" data-action="remove-trainer" data-pod="${esc(pod.pod_id)}" data-email="${esc(t)}" aria-label="Remove ${esc(t)}">&times;</button>` : ''}</span>`;
-            });
+            vis.forEach(t => { h += renderTrainerChip(t); });
             if (more.length) {
                 h += `<details class="trainer-more-details"><summary>+${more.length} more</summary><div class="trainer-more-inner">`;
-                more.forEach(t => {
-                    h += `<span class="trainer-chip" data-trainer-email="${esc(t)}">${esc(t)}${su ? `<button type="button" class="remove-btn" data-action="remove-trainer" data-pod="${esc(pod.pod_id)}" data-email="${esc(t)}" aria-label="Remove ${esc(t)}">&times;</button>` : ''}</span>`;
-                });
+                more.forEach(t => { h += renderTrainerChip(t); });
                 h += `</div></details>`;
             }
         }
@@ -505,9 +533,15 @@ async function handleTeamAction(action, params) {
                 await api(`team/pods/${encodeURIComponent(params.pod)}/pod-lead`, { method: 'DELETE' });
                 toast('Pod lead removed'); break;
             case 'remove-pod-reviewer':
-                if (!await openConfirm({ title: 'Remove reviewer', body: 'Remove reviewer from this pod?', okLabel: 'Remove' })) return;
-                await api(`team/pods/${encodeURIComponent(params.pod)}/reviewer`, { method: 'DELETE' });
+                if (!await openConfirm({ title: 'Remove reviewer', body: `Remove reviewer ${params.email} from this pod? They will also be removed from all trainer assignments.`, okLabel: 'Remove' })) return;
+                await api(`team/pods/${encodeURIComponent(params.pod)}/reviewers/${encodeURIComponent(params.email)}`, { method: 'DELETE' });
                 toast('Reviewer removed'); break;
+            case 'add-reviewer':
+                await api(`team/pods/${encodeURIComponent(params.pod)}/reviewers`, { method: 'POST', body: JSON.stringify({ email: params.email, name: params.name || '' }) });
+                toast('Reviewer added'); break;
+            case 'set-trainer-reviewers':
+                await api(`team/pods/${encodeURIComponent(params.pod)}/trainers/${encodeURIComponent(params.email)}/reviewers`, { method: 'PUT', body: JSON.stringify({ reviewers: params.reviewers || [] }) });
+                toast('Assignment saved'); break;
         }
         loadTeam();
     } catch (e) { toast(e.message, 'error'); }
@@ -1605,17 +1639,14 @@ function init() {
         if (action === 'remove-trainer') { handleTeamAction('remove-trainer', { pod: act.dataset.pod, email: act.dataset.email }); return; }
         if (action === 'remove-admin') { handleTeamAction('remove-admin', { email: act.dataset.email }); return; }
         if (action === 'remove-super-admin') { handleTeamAction('remove-super-admin', { email: act.dataset.email }); return; }
-        if (action === 'set-reviewer') {
-            openTeamReviewerModal(act.dataset.pod, act.dataset.revEmail || '', act.dataset.revName || '', 'reviewer');
-            return;
-        }
         if (action === 'set-pod-lead') {
             openTeamReviewerModal(act.dataset.pod, act.dataset.leadEmail || '', act.dataset.leadName || '', 'pod-lead');
             return;
         }
         if (action === 'remove-pod') { handleTeamAction('remove-pod', { pod: act.dataset.pod }); return; }
         if (action === 'remove-pod-lead') { handleTeamAction('remove-pod-lead', { pod: act.dataset.pod }); return; }
-        if (action === 'remove-pod-reviewer') { handleTeamAction('remove-pod-reviewer', { pod: act.dataset.pod }); return; }
+        if (action === 'remove-pod-reviewer') { handleTeamAction('remove-pod-reviewer', { pod: act.dataset.pod, email: act.dataset.email }); return; }
+        if (action === 'assign-trainer-reviewers') { openAssignModal(act.dataset.pod, act.dataset.email); return; }
         if (action === 'remove-dashboard-admin') { handleAdminsAction('remove-dashboard-admin', { email: act.dataset.email }); return; }
         if (action === 'remove-test-account') { handleAdminsAction('remove-test-account', { email: act.dataset.email }); return; }
         if (action === 'save-config-section') { saveConfigSection(act.dataset.section); return; }
@@ -1645,6 +1676,7 @@ function init() {
             const ft = form.dataset.form, fields = {};
             form.querySelectorAll('[data-field]').forEach(inp => { fields[inp.dataset.field] = inp.value.trim(); });
             if (ft === 'add-trainer') { if (!fields.email) { toast('Email required', 'error'); return; } handleTeamAction('add-trainer', { pod: form.dataset.pod, email: fields.email }); }
+            else if (ft === 'add-reviewer') { if (!fields.email) { toast('Email required', 'error'); return; } handleTeamAction('add-reviewer', { pod: form.dataset.pod, email: fields.email, name: fields.name }); }
             else if (ft === 'add-admin') { if (!fields.email) { toast('Email required', 'error'); return; } handleTeamAction('add-admin', { email: fields.email, name: fields.name }); }
             else if (ft === 'add-super-admin') { if (!fields.email) { toast('Email required', 'error'); return; } handleTeamAction('add-super-admin', { email: fields.email, name: fields.name }); }
             else if (ft === 'create-pod') { if (!fields.pod_id || !fields.name) { toast('Both fields required', 'error'); return; } handleTeamAction('create-pod', { pod_id: fields.pod_id, name: fields.name }); }
@@ -1685,16 +1717,10 @@ function wireTeamReviewerModal() {
         const pod = document.getElementById('reviewer-modal-pod').value;
         const em = document.getElementById('reviewer-modal-email').value.trim();
         const nm = document.getElementById('reviewer-modal-name').value.trim();
-        const mode = document.getElementById('reviewer-modal-mode')?.value || 'reviewer';
-        if (!em) { toast(mode === 'pod-lead' ? 'Pod lead email required' : 'Reviewer email required', 'error'); return; }
+        if (!em) { toast('Pod lead email required', 'error'); return; }
         try {
-            if (mode === 'pod-lead') {
-                await api(`team/pods/${encodeURIComponent(pod)}/pod-lead`, { method: 'PUT', body: JSON.stringify({ email: em, name: nm }) });
-                toast('Pod lead updated');
-            } else {
-                await api(`team/pods/${encodeURIComponent(pod)}/reviewer`, { method: 'PUT', body: JSON.stringify({ email: em, name: nm }) });
-                toast('Reviewer updated');
-            }
+            await api(`team/pods/${encodeURIComponent(pod)}/pod-lead`, { method: 'PUT', body: JSON.stringify({ email: em, name: nm }) });
+            toast('Pod lead updated');
             closeTeamReviewerModal();
             loadTeam();
         } catch (err) { toast(err.message, 'error'); }
@@ -1703,6 +1729,59 @@ function wireTeamReviewerModal() {
     document.addEventListener('keydown', e => {
         if (e.key === 'Escape' && !document.getElementById('team-reviewer-modal')?.classList.contains('hidden')) closeTeamReviewerModal();
     });
+}
+
+// ── Per-trainer reviewer assignment modal ──────────────────────────
+function openAssignModal(podId, trainerEmail) {
+    const pod = (_teamCache?.pods || []).find(p => p.pod_id === podId);
+    if (!pod) { toast('Pod not found — refresh', 'error'); return; }
+    const reviewers = pod.reviewers || [];
+    if (!reviewers.length) {
+        toast('Add at least one reviewer to this pod first', 'error'); return;
+    }
+    const current = new Set((pod.trainer_assignments || {})[trainerEmail] || []);
+    let overlay = document.getElementById('assign-trainer-modal');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'assign-trainer-modal';
+        overlay.className = 'modal-overlay hidden';
+        overlay.setAttribute('role', 'dialog');
+        overlay.setAttribute('aria-modal', 'true');
+        overlay.innerHTML = `<div class="modal-panel">
+            <h2 class="modal-title">Assign reviewers</h2>
+            <p class="modal-sub" id="assign-modal-sub"></p>
+            <div id="assign-modal-list" style="display:flex;flex-direction:column;gap:0.4rem;max-height:40vh;overflow:auto;margin-top:0.5rem"></div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-ghost" id="assign-modal-cancel">Cancel</button>
+                <button type="button" class="btn" id="assign-modal-save">Save</button>
+            </div>
+        </div>`;
+        document.body.appendChild(overlay);
+        overlay.addEventListener('click', e => { if (e.target === overlay) overlay.classList.add('hidden'); });
+        document.getElementById('assign-modal-cancel').addEventListener('click', () => overlay.classList.add('hidden'));
+        document.getElementById('assign-modal-save').addEventListener('click', async () => {
+            const checked = [...overlay.querySelectorAll('input[type="checkbox"][data-rev-email]:checked')].map(x => x.dataset.revEmail);
+            const p = overlay.dataset.pod, t = overlay.dataset.trainer;
+            overlay.classList.add('hidden');
+            await handleTeamAction('set-trainer-reviewers', { pod: p, email: t, reviewers: checked });
+        });
+    }
+    overlay.dataset.pod = podId;
+    overlay.dataset.trainer = trainerEmail;
+    document.getElementById('assign-modal-sub').textContent = `Pod ${podId} · Trainer ${trainerEmail}`;
+    const list = document.getElementById('assign-modal-list');
+    list.innerHTML = reviewers.map(r => {
+        const em = (r.email || '').toLowerCase();
+        const chk = current.has(em) ? 'checked' : '';
+        return `<label style="display:flex;align-items:center;gap:0.5rem;padding:0.35rem 0.5rem;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-surface);cursor:pointer">
+            <input type="checkbox" data-rev-email="${esc(em)}" ${chk} style="accent-color:var(--accent-primary)" />
+            <div style="display:flex;flex-direction:column;flex:1;min-width:0">
+                <span style="font-size:0.78rem">${esc(r.email)}</span>
+                ${r.name ? `<span style="font-size:0.68rem;color:var(--text-muted)">${esc(r.name)}</span>` : ''}
+            </div>
+        </label>`;
+    }).join('');
+    overlay.classList.remove('hidden');
 }
 
 if (window.location.search.includes('_v=')) {

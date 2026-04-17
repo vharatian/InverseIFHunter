@@ -7,6 +7,7 @@ from admin.schemas import (
     AddTrainerRequest,
     SetReviewerRequest,
     SetPodLeadRequest,
+    SetTrainerReviewersRequest,
     AddAdminRequest,
     AddSuperAdminRequest,
     CreatePodRequest,
@@ -42,21 +43,38 @@ async def remove_trainer(pod_id: str, email: str, _=Depends(verify_super_admin))
     return {"ok": True}
 
 
-@router.put("/pods/{pod_id}/reviewer")
-async def set_reviewer(pod_id: str, body: SetReviewerRequest, _=Depends(verify_super_admin)):
-    """Set the reviewer for a pod."""
+@router.post("/pods/{pod_id}/reviewers")
+async def add_reviewer(pod_id: str, body: SetReviewerRequest, _=Depends(verify_super_admin)):
+    """Add a reviewer to a pod (pods support multiple reviewers)."""
     try:
-        team_service.set_reviewer(pod_id, body.email, body.name)
+        team_service.add_reviewer(pod_id, body.email, body.name)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"ok": True}
 
 
-@router.delete("/pods/{pod_id}/reviewer")
-async def remove_reviewer(pod_id: str, _=Depends(verify_super_admin)):
-    """Remove the reviewer from a pod."""
+@router.delete("/pods/{pod_id}/reviewers/{email}")
+async def remove_reviewer(pod_id: str, email: str, _=Depends(verify_super_admin)):
+    """Remove a specific reviewer from a pod. Also scrubs them from all trainer_assignments."""
     try:
-        team_service.remove_reviewer(pod_id)
+        team_service.remove_reviewer(pod_id, email)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True}
+
+
+@router.put("/pods/{pod_id}/trainers/{trainer_email}/reviewers")
+async def set_trainer_reviewers(
+    pod_id: str,
+    trainer_email: str,
+    body: SetTrainerReviewersRequest,
+    _=Depends(verify_super_admin),
+):
+    """Replace a trainer's reviewer assignments with the given list.
+    Empty list clears the mapping (trainer becomes unassigned).
+    All entries must already be reviewers of this pod."""
+    try:
+        team_service.set_trainer_reviewers(pod_id, trainer_email, body.reviewers)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"ok": True}

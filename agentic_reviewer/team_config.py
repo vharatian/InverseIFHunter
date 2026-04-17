@@ -103,10 +103,23 @@ def _norm(email: str) -> str:
     return str(email).strip().lower() if email else ""
 
 
+def _pod_reviewers(pod: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Return normalized list of reviewers for a pod.
+    Back-compat: treats legacy singular `reviewer: {email,name}` as a one-item list."""
+    revs = pod.get("reviewers")
+    if isinstance(revs, list):
+        return [r for r in revs if isinstance(r, dict) and r.get("email")]
+    legacy = pod.get("reviewer")
+    if isinstance(legacy, dict) and legacy.get("email"):
+        return [legacy]
+    return []
+
+
 # ── Role lookup ──────────────────────────────────────────────────
 
 def get_role(email: str) -> Optional[str]:
-    """Return the highest role for this email: super_admin > admin > reviewer > trainer, or None."""
+    """Return the highest role for this email:
+    super_admin > admin > pod_lead > reviewer > trainer, or None."""
     em = _norm(email)
     if not em:
         return None
@@ -121,9 +134,12 @@ def get_role(email: str) -> Optional[str]:
             return "admin"
 
     for pod_id, pod in (data.get("pods") or {}).items():
-        reviewer = pod.get("reviewer") or {}
-        if _norm(reviewer.get("email")) == em:
-            return "reviewer"
+        lead = pod.get("pod_lead") or {}
+        if _norm(lead.get("email")) == em:
+            return "pod_lead"
+        for rev in _pod_reviewers(pod):
+            if _norm(rev.get("email")) == em:
+                return "reviewer"
         for trainer_email in pod.get("trainers") or []:
             if _norm(trainer_email) == em:
                 return "trainer"
@@ -154,9 +170,12 @@ def get_pod_for_email(email: str) -> Optional[str]:
             return None
 
     for pod_id, pod in (data.get("pods") or {}).items():
-        reviewer = pod.get("reviewer") or {}
-        if _norm(reviewer.get("email")) == em:
+        lead = pod.get("pod_lead") or {}
+        if _norm(lead.get("email")) == em:
             return pod_id
+        for rev in _pod_reviewers(pod):
+            if _norm(rev.get("email")) == em:
+                return pod_id
         for trainer_email in pod.get("trainers") or []:
             if _norm(trainer_email) == em:
                 return pod_id
@@ -173,14 +192,74 @@ def get_trainer_emails_in_pod(pod_id: str) -> List[str]:
     return [_norm(e) for e in (pod.get("trainers") or []) if _norm(e)]
 
 
+def get_reviewer_emails_for_pod(pod_id: str) -> List[str]:
+    """Return all reviewer emails for a pod."""
+    data = _load()
+    pod = (data.get("pods") or {}).get(pod_id)
+    if not pod:
+        return []
+    return [_norm(r.get("email")) for r in _pod_reviewers(pod) if _norm(r.get("email"))]
+
+
 def get_reviewer_email_for_pod(pod_id: str) -> Optional[str]:
-    """Return the reviewer email for a pod."""
+    """Back-compat: return first reviewer email for a pod, or None."""
+    emails = get_reviewer_emails_for_pod(pod_id)
+    return emails[0] if emails else None
+
+
+def get_pod_lead_email_for_pod(pod_id: str) -> Optional[str]:
+    """Return the pod lead email for a pod, if set."""
     data = _load()
     pod = (data.get("pods") or {}).get(pod_id)
     if not pod:
         return None
-    reviewer = pod.get("reviewer") or {}
-    return _norm(reviewer.get("email")) or None
+    lead = pod.get("pod_lead") or {}
+    return _norm(lead.get("email")) or None
+
+
+def get_trainer_assignments(pod_id: str) -> Dict[str, List[str]]:
+    """Return {trainer_email: [reviewer_email, ...]} mapping for a pod (normalized)."""
+    data = _load()
+    pod = (data.get("pods") or {}).get(pod_id)
+    if not pod:
+        return {}
+    raw = pod.get("trainer_assignments") or {}
+    out: Dict[str, List[str]] = {}
+    if not isinstance(raw, dict):
+        return {}
+    for t, revs in raw.items():
+        tn = _norm(t)
+        if not tn:
+            continue
+        if isinstance(revs, list):
+            out[tn] = [_norm(r) for r in revs if _norm(r)]
+        elif isinstance(revs, str) and revs.strip():
+            out[tn] = [_norm(revs)]
+    return out
+
+
+def get_mapped_reviewers_for_trainer(trainer_email: str) -> List[str]:
+    """Return the list of reviewer emails mapped to this trainer. Empty if unassigned."""
+    em = _norm(trainer_email)
+    if not em:
+        return []
+    pod_id = get_pod_for_email(em)
+    if not pod_id:
+        return []
+    mapping = get_trainer_assignments(pod_id)
+    return list(mapping.get(em) or [])
+
+
+def get_trainers_mapped_to_reviewer(reviewer_email: str) -> List[str]:
+    """Return the list of trainer emails that have this reviewer in their assignment."""
+    em = _norm(reviewer_email)
+    if not em:
+        return []
+    pod_id = get_pod_for_email(em)
+    if not pod_id:
+        return []
+    mapping = get_trainer_assignments(pod_id)
+    return [t for t, revs in mapping.items() if em in (revs or [])]
 
 
 def get_pods_for_admin(email: str) -> List[str]:
@@ -203,18 +282,27 @@ def get_all_pod_ids() -> List[str]:
 
 def get_allowed_trainer_emails_for_role(email: str) -> Optional[List[str]]:
     """Return the set of trainer emails this person is allowed to see sessions for.
-    Returns None to mean 'all sessions' (super_admin), or a list of emails."""
+    Returns None to mean 'all sessions' (super_admin), or a list of emails.
+
+    - super_admin: None (sees everything)
+    - admin: union of trainers across their assigned pods
+    - pod_lead: all trainers in their pod
+    - reviewer: ONLY trainers explicitly mapped to them via trainer_assignments
+      (empty list = sees nothing until super-admin assigns)
+    - trainer/unknown: None (caller filters to own email)
+    """
     role = get_role(email)
     if role == "super_admin":
-        return None  # sees everything
+        return None
     if role == "admin":
         pod_ids = get_pods_for_admin(email)
-        emails = []
+        emails: List[str] = []
         for pid in pod_ids:
             emails.extend(get_trainer_emails_in_pod(pid))
         return emails
-    if role == "reviewer":
+    if role == "pod_lead":
         pod_id = get_pod_for_email(email)
         return get_trainer_emails_in_pod(pod_id) if pod_id else []
-    # trainer or unknown — will be filtered to own email by caller
+    if role == "reviewer":
+        return get_trainers_mapped_to_reviewer(email)
     return None

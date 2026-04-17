@@ -514,6 +514,13 @@
             transition: border-color var(--transition-fast);
         }
         .trainer-chip:hover { border-color: var(--border-hover); }
+        .trainer-chip .trainer-assign-pill {
+            font-size: 0.62rem; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 0.05em; padding: 0.1rem 0.4rem; border-radius: 999px;
+            margin-left: 0.15rem;
+        }
+        .trainer-chip .trainer-assign-pill.ok { background: rgba(34, 197, 94, 0.12); color: var(--success); }
+        .trainer-chip .trainer-assign-pill.warn { background: rgba(234, 179, 8, 0.12); color: var(--warning); }
         .trainer-chip .remove-btn {
             background: none; border: none; color: var(--danger); cursor: pointer;
             font-size: 0.9rem; line-height: 1; padding: 0; opacity: 0.5;
@@ -906,6 +913,6 @@
     <script type="module">
       import('/static_shared/errorPipeline.js').then(m => m.initErrorPipeline({ endpoint: '/api/client-errors', app: 'admin' })).catch(() => {});
     </script>
-    <script type="module" src="static/admin.js?v=9"></script>
+    <script type="module" src="static/admin.js?v=10"></script>
 </body>
 </html>
