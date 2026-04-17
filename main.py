@@ -135,6 +135,18 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"Rate limiter initialization: {e}")
     
+    # Expose the HuntEngine singleton on app.state so routes can use the
+    # `get_hunt_engine` dependency and tests can swap a fake via
+    # `app.dependency_overrides[get_hunt_engine] = lambda: fake`.
+    from services.hunt_engine import hunt_engine as _hunt_engine_singleton
+    app.state.hunt_engine = _hunt_engine_singleton
+
+    # Expose the SessionStore facade (Phase 4 skeleton) so routes can
+    # migrate to `Depends(get_session_store)` without touching Redis/PG
+    # imports directly.
+    from services.session_store import session_store as _session_store_singleton
+    app.state.session_store = _session_store_singleton
+
     from services.hunt_worker import run_worker_loop
     worker_task = asyncio.create_task(run_worker_loop())
     logger.info("Hunt worker started")
@@ -263,6 +275,11 @@ class NoCacheStaticFiles(StaticFiles):
         await super().__call__(scope, receive, send_wrapper)
 
 app.mount(TRAINER_STATIC, NoCacheStaticFiles(directory="static"), name="static")
+
+# Shared static assets (tokens, httpClient, toast, escape, relativeTime) — served at /static_shared.
+_shared_static = os.path.join(os.path.dirname(__file__), "static_shared")
+if os.path.isdir(_shared_static):
+    app.mount("/static_shared", StaticFiles(directory=_shared_static), name="static-shared")
 
 # Reviewer static files
 _reviewer_static = os.path.join(os.path.dirname(__file__), "reviewer-app", "static")

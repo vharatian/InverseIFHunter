@@ -11,6 +11,7 @@ import { state, getCumulativeStats } from './state.js';
 import { displayBreakingResults } from './results.js';
 import { renderInsightTip, getUserFriendlyError, escapeHtml } from './utils.js';
 import { getHuntModeById } from './config.js';
+import { createFocusTrap } from './focusTrap.js';
 
 // ============== Celebration Effects Engine ==============
 // Lightweight canvas particle engine for spark/firework effects
@@ -186,6 +187,7 @@ const _TOAST_KIND = new Set(['success', 'error', 'warning', 'info']);
 
 let _simpleToastTimer = null;
 let _retryToastTimer = null;
+let _errorToastTimer = null;
 
 function _hideRetryToastImmediate() {
     clearTimeout(_retryToastTimer);
@@ -207,12 +209,23 @@ function _hideSimpleToastImmediate() {
     toast.style.transform = '';
 }
 
+function _hideErrorTraceToastImmediate() {
+    clearTimeout(_errorToastTimer);
+    _errorToastTimer = null;
+    const toast = document.getElementById('mh-toast-error-trace-singleton');
+    if (!toast) return;
+    toast.hidden = true;
+    toast.style.opacity = '';
+    toast.style.transform = '';
+}
+
 function _ensureSimpleToast(dock) {
     let toast = document.getElementById('mh-toast-singleton');
     if (!toast) {
         toast = document.createElement('div');
         toast.id = 'mh-toast-singleton';
         toast.setAttribute('role', 'status');
+        toast.setAttribute('aria-live', 'polite');
         toast.innerHTML = '<span class="mh-toast__bar" aria-hidden="true"></span><span class="mh-toast__msg"></span>';
         dock.appendChild(toast);
     }
@@ -261,6 +274,8 @@ export function showToastWithRetry(message, hint, onRetry) {
         toast = document.createElement('div');
         toast.id = 'mh-toast-retry-singleton';
         toast.className = 'mh-toast mh-toast--error toast-with-retry fade-in';
+        toast.setAttribute('role', 'alert');
+        toast.setAttribute('aria-live', 'assertive');
         toast.innerHTML = `
             <span class="mh-toast__bar" aria-hidden="true"></span>
             <div class="mh-toast__body">
@@ -308,28 +323,292 @@ export function showToastWithRetry(message, hint, onRetry) {
 }
 
 /**
+ * Show an error toast carrying the server-side trace id as a monospace,
+ * copy-to-clipboard chip. Used when showError gets a traceId in the error
+ * or options. Singleton DOM, aria-live assertive.
+ */
+function _showErrorTraceToast(message, hint, traceId, onRetry) {
+    const dock = elements.toastContainer;
+    if (!dock) return;
+
+    _hideSimpleToastImmediate();
+    _hideRetryToastImmediate();
+
+    let toast = document.getElementById('mh-toast-error-trace-singleton');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'mh-toast-error-trace-singleton';
+        toast.className = 'mh-toast mh-toast--error mh-toast--with-trace fade-in';
+        toast.setAttribute('role', 'alert');
+        toast.setAttribute('aria-live', 'assertive');
+        toast.innerHTML = `
+            <span class="mh-toast__bar" aria-hidden="true"></span>
+            <div class="mh-toast__body">
+                <div class="mh-toast__msg"></div>
+                <div class="mh-toast__hint" hidden></div>
+                <div class="mh-toast__actions">
+                    <button type="button" class="mh-toast__trace-chip"
+                            title="Copy trace ID to clipboard"
+                            aria-label="Copy trace ID to clipboard"></button>
+                    <button type="button" class="btn btn-sm btn-outline mh-toast__retry" hidden>Retry</button>
+                </div>
+            </div>`;
+        dock.appendChild(toast);
+    }
+
+    toast.hidden = false;
+    toast.style.opacity = '';
+    toast.style.transform = '';
+
+    const msgEl = toast.querySelector('.mh-toast__msg');
+    const hintEl = toast.querySelector('.mh-toast__hint');
+    const chipEl = toast.querySelector('.mh-toast__trace-chip');
+    const retryEl = toast.querySelector('.mh-toast__retry');
+
+    if (msgEl) msgEl.textContent = message;
+    if (hintEl) {
+        if (hint) {
+            hintEl.textContent = hint;
+            hintEl.hidden = false;
+        } else {
+            hintEl.textContent = '';
+            hintEl.hidden = true;
+        }
+    }
+    if (chipEl) {
+        const tid = traceId || '';
+        chipEl.textContent = tid ? `trace: ${tid}` : '';
+        chipEl.hidden = !tid;
+        chipEl.onclick = async () => {
+            if (!tid) return;
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    await navigator.clipboard.writeText(tid);
+                } else {
+                    const ta = document.createElement('textarea');
+                    ta.value = tid;
+                    ta.setAttribute('readonly', '');
+                    ta.style.position = 'absolute';
+                    ta.style.left = '-9999px';
+                    document.body.appendChild(ta);
+                    ta.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(ta);
+                }
+                const prev = chipEl.textContent;
+                chipEl.textContent = 'copied ✓';
+                setTimeout(() => { chipEl.textContent = prev; }, 1400);
+            } catch (e) {
+                console.warn('[Model Hunter] trace-id copy failed', e);
+            }
+        };
+    }
+    if (retryEl) {
+        if (typeof onRetry === 'function') {
+            retryEl.hidden = false;
+            retryEl.onclick = () => {
+                _hideErrorTraceToastImmediate();
+                onRetry();
+            };
+        } else {
+            retryEl.hidden = true;
+            retryEl.onclick = null;
+        }
+    }
+
+    clearTimeout(_errorToastTimer);
+    _errorToastTimer = setTimeout(() => {
+        if (!toast.hidden) {
+            toast.style.opacity = '0';
+            toast.style.transform = 'translateY(-6px)';
+            setTimeout(() => _hideErrorTraceToastImmediate(), 300);
+        }
+    }, 10000);
+}
+
+/**
+ * Show an undo toast for destructive, optimistic actions.
+ *
+ *   const handle = showUndoToast({
+ *       message: 'Session deleted',
+ *       delayMs: 5000,
+ *       onUndo: () => { ... restore UI ... },
+ *       onCommit: async () => { ... perform the real API call ... },
+ *       onCommitError: (err) => { ... restore UI + surface error ... },
+ *   });
+ *   handle.dismiss(); // optional — commit immediately
+ *
+ * Behaviour:
+ *   - Renders a singleton toast with a live countdown + Undo button.
+ *   - If Undo is clicked within delayMs: cancels the timer, calls onUndo.
+ *   - If the timer fires: calls onCommit (awaited). Any throw is forwarded
+ *     to onCommitError (if provided) so the caller can revert the UI.
+ *   - Only one undo toast may be visible at a time; creating a new one
+ *     commits the previous one immediately (safest default for queue ops).
+ *
+ * @param {{
+ *   message: string,
+ *   delayMs?: number,
+ *   undoLabel?: string,
+ *   onUndo?: () => void,
+ *   onCommit?: () => (void | Promise<void>),
+ *   onCommitError?: (err: unknown) => void,
+ * }} options
+ * @returns {{ dismiss: () => void, undo: () => void }}
+ */
+let _undoToastState = null;
+
+function _hideUndoToastImmediate() {
+    if (_undoToastState?.interval) clearInterval(_undoToastState.interval);
+    if (_undoToastState?.timer) clearTimeout(_undoToastState.timer);
+    _undoToastState = null;
+    const toast = document.getElementById('mh-toast-undo-singleton');
+    if (!toast) return;
+    toast.hidden = true;
+    toast.style.opacity = '';
+    toast.style.transform = '';
+}
+
+export function showUndoToast(options) {
+    const {
+        message,
+        delayMs = 5000,
+        undoLabel = 'Undo',
+        onUndo,
+        onCommit,
+        onCommitError,
+    } = options || {};
+    const dock = elements.toastContainer;
+    if (!dock) {
+        // No toast dock — commit synchronously as a safe default.
+        Promise.resolve()
+            .then(() => (typeof onCommit === 'function' ? onCommit() : undefined))
+            .catch((err) => { if (typeof onCommitError === 'function') onCommitError(err); });
+        return { dismiss() {}, undo() {} };
+    }
+
+    // Any in-flight undo commits now (flush previous before showing a new one).
+    if (_undoToastState) {
+        const prev = _undoToastState;
+        _undoToastState = null;
+        clearInterval(prev.interval);
+        clearTimeout(prev.timer);
+        try {
+            const res = typeof prev.onCommit === 'function' ? prev.onCommit() : undefined;
+            if (res && typeof res.then === 'function') {
+                res.catch((err) => {
+                    if (typeof prev.onCommitError === 'function') prev.onCommitError(err);
+                });
+            }
+        } catch (err) {
+            if (typeof prev.onCommitError === 'function') prev.onCommitError(err);
+        }
+    }
+
+    _hideSimpleToastImmediate();
+    _hideRetryToastImmediate();
+
+    let toast = document.getElementById('mh-toast-undo-singleton');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'mh-toast-undo-singleton';
+        toast.className = 'mh-toast mh-toast--info mh-toast--with-undo fade-in';
+        toast.setAttribute('role', 'status');
+        toast.setAttribute('aria-live', 'polite');
+        toast.innerHTML = `
+            <span class="mh-toast__bar" aria-hidden="true"></span>
+            <div class="mh-toast__body">
+                <div class="mh-toast__msg"></div>
+                <div class="mh-toast__actions">
+                    <span class="mh-toast__countdown" aria-hidden="true"></span>
+                    <button type="button" class="btn btn-sm btn-outline mh-toast__undo"></button>
+                </div>
+            </div>`;
+        dock.appendChild(toast);
+    }
+    toast.hidden = false;
+    toast.style.opacity = '';
+    toast.style.transform = '';
+
+    const msgEl = toast.querySelector('.mh-toast__msg');
+    const cdEl = toast.querySelector('.mh-toast__countdown');
+    const undoEl = toast.querySelector('.mh-toast__undo');
+    if (msgEl) msgEl.textContent = message || 'Action pending…';
+    if (undoEl) undoEl.textContent = undoLabel;
+
+    const startedAt = Date.now();
+    const state = { interval: null, timer: null, onCommit, onCommitError };
+    _undoToastState = state;
+
+    function _tick() {
+        const remaining = Math.max(0, delayMs - (Date.now() - startedAt));
+        if (cdEl) cdEl.textContent = `${Math.ceil(remaining / 1000)}s`;
+    }
+    _tick();
+    state.interval = setInterval(_tick, 250);
+
+    async function _commit() {
+        if (_undoToastState !== state) return; // superseded
+        _hideUndoToastImmediate();
+        try {
+            if (typeof onCommit === 'function') await onCommit();
+        } catch (err) {
+            if (typeof onCommitError === 'function') onCommitError(err);
+            else console.error('[Model Hunter] undo commit failed', err);
+        }
+    }
+    function _undo() {
+        if (_undoToastState !== state) return;
+        _hideUndoToastImmediate();
+        try {
+            if (typeof onUndo === 'function') onUndo();
+        } catch (err) {
+            console.error('[Model Hunter] undo handler threw', err);
+        }
+    }
+
+    if (undoEl) undoEl.onclick = _undo;
+    state.timer = setTimeout(_commit, delayMs);
+
+    return { dismiss: _commit, undo: _undo };
+}
+
+/**
  * P7: Show user-friendly error toast. Maps technical errors to readable messages.
- * @param {Error|string} error - Caught error
- * @param {{ operation?: string, status?: number, retry?: () => void }} [options] - Context and optional retry callback
+ *
+ * When a trace id is available (from `options.traceId` or `error.traceId` —
+ * as attached by `apiFetch`), a monospace copy-to-clipboard chip is rendered
+ * so trainers can paste the id into a bug report.
+ *
+ * @param {Error|string} error - Caught error. ApiError instances carry `.traceId` and `.status`.
+ * @param {{ operation?: string, status?: number, retry?: () => void, traceId?: string }} [options]
  */
 export function showError(error, options = {}) {
+    const status = options.status ?? (error && typeof error === 'object' ? error.status : undefined);
+    const traceId = options.traceId || (error && typeof error === 'object' ? error.traceId : '') || '';
     const { message, hint, canRetry } = getUserFriendlyError(error, {
         operation: options.operation || 'Operation',
-        status: options.status
+        status,
     });
-    if (canRetry && options.retry) {
-        showToastWithRetry(message, hint, options.retry);
+    const retry = typeof options.retry === 'function' ? options.retry : null;
+
+    if (traceId) {
+        _showErrorTraceToast(message, hint, traceId, canRetry ? retry : null);
+    } else if (canRetry && retry) {
+        showToastWithRetry(message, hint, retry);
     } else {
         const fullMessage = hint ? `${message} ${hint}` : message;
         showToast(fullMessage, 'error');
     }
     if (error && error.message && typeof console !== 'undefined') {
-        console.error('[Model Hunter]', error);
+        console.error('[Model Hunter]', error, traceId ? { traceId } : '');
     }
 }
 
 
 // ============== Blind Judging ==============
+
+let _blindJudgeTrap = null;
 
 export function showNextBlindJudge() {
     if (state.blindJudging.queue.length === 0) {
@@ -353,8 +632,16 @@ export function showNextBlindJudge() {
     elements.judgeHuntId.textContent = result.hunt_id;
     elements.judgeResponseText.textContent = result.response || 'No response content available';
     
-    // Show modal
-    elements.blindJudgeModal.classList.remove('hidden');
+    // Show modal + trap focus. Modal is role=dialog via index.html; we
+    // add aria-modal here defensively in case markup is missed.
+    const modal = elements.blindJudgeModal;
+    modal.classList.remove('hidden');
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    if (_blindJudgeTrap) { try { _blindJudgeTrap.release(); } catch { /* ignore */ } }
+    _blindJudgeTrap = createFocusTrap(modal, {
+        initialFocus: elements.humanJudgePass,
+    });
 }
 
 export function handleHumanJudgment(humanScore) {
@@ -427,6 +714,10 @@ export function updateRowWithScore(huntId, result) {
 export function hideBlindJudgeModal() {
     elements.blindJudgeModal.classList.add('hidden');
     state.blindJudging.currentResult = null;
+    if (_blindJudgeTrap) {
+        try { _blindJudgeTrap.release(); } catch { /* ignore */ }
+        _blindJudgeTrap = null;
+    }
 }
 
 export function showFinalResults() {

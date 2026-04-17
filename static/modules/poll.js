@@ -13,15 +13,26 @@
  * @returns {() => void} stop - Call to permanently stop polling.
  */
 export function createPoller(fn, intervalMs) {
-    let id = setInterval(fn, intervalMs);
+    const safeFn = () => {
+        try {
+            const ret = fn();
+            if (ret && typeof ret.catch === 'function') {
+                ret.catch(err => console.warn('[poll] async callback error:', err));
+            }
+        } catch (err) {
+            console.warn('[poll] callback error:', err);
+        }
+    };
+
+    let id = setInterval(safeFn, intervalMs);
 
     function onVisibility() {
         if (document.hidden) {
             clearInterval(id);
             id = null;
         } else {
-            fn();
-            if (!id) id = setInterval(fn, intervalMs);
+            safeFn();
+            if (!id) id = setInterval(safeFn, intervalMs);
         }
     }
 

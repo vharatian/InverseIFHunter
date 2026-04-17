@@ -13,6 +13,22 @@ async function _runSSE(url, fetchOptions, slotsEl, summaryEl, detailEl, bar) {
   const abortCtrl = new AbortController();
   _state.abortCtrl = abortCtrl;
 
+  // Overall wall-clock cap (10 min) + idle-timeout (no bytes for 90s) so a
+  // stuck stream doesn't hang the UI forever.
+  const OVERALL_TIMEOUT_MS = 10 * 60 * 1000;
+  const IDLE_TIMEOUT_MS = 90_000;
+  let idleTimer = null;
+  const overallTimer = setTimeout(() => {
+    try { abortCtrl.abort(new DOMException("Timed out", "AbortError")); } catch (_) {}
+  }, OVERALL_TIMEOUT_MS);
+  const resetIdleTimer = () => {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      if (summaryEl) summaryEl.textContent = "No updates from council for 90s. Stopping.";
+      try { abortCtrl.abort(new DOMException("Idle timeout", "AbortError")); } catch (_) {}
+    }, IDLE_TIMEOUT_MS);
+  };
+
   try {
     const response = await fetch(url, { ...fetchOptions, signal: abortCtrl.signal });
 
@@ -24,10 +40,12 @@ async function _runSSE(url, fetchOptions, slotsEl, summaryEl, detailEl, bar) {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
+    resetIdleTimer();
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
+      resetIdleTimer();
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split("\n");
       buffer = lines.pop() || "";
@@ -49,6 +67,8 @@ async function _runSSE(url, fetchOptions, slotsEl, summaryEl, detailEl, bar) {
       if (bar) bar.className = "council-bar council-bar--error";
     }
   } finally {
+    if (idleTimer) clearTimeout(idleTimer);
+    clearTimeout(overallTimer);
     _state.running = false;
     showRunBtn();
     const barEl = document.getElementById("council-bar");

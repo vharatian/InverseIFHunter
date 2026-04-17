@@ -6,11 +6,12 @@ POST /api/heartbeat         — trainer heartbeat (every 60s)
 """
 import logging
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from pydantic import BaseModel
 
 from helpers.shared import _log_telemetry_safe
+from middleware.trace_id import get_trace_id
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +42,20 @@ async def api_register_trainer(request: TrainerRegistrationRequest):
         })
         return {"success": True, "trainer": trainer}
     except Exception as e:
-        logger.error(f"Error registering trainer: {e}")
-        return {"success": True}  # Don't block the frontend on registry errors
+        # Previously swallowed into {"success": True} — now surfaces so the
+        # client toast can show the trace id. global_exception_handler also
+        # logs with trace_id; this explicit raise lets us attach a clearer
+        # detail without waiting for the catch-all.
+        trace_id = get_trace_id()
+        logger.error(
+            f"Error registering trainer: {e}",
+            extra={"trace_id": trace_id},
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to register trainer (trace_id={trace_id}): {e}",
+        )
 
 
 @router.post("/heartbeat")

@@ -145,7 +145,11 @@ export function initOfflineQueue() {
     });
 
     _online = navigator.onLine;
-    _ensureBanner();
+    // UI banner/badge is now a Lit component — see
+    // [components/mh-connection-banner.js](./components/mh-connection-banner.js).
+    // It subscribes to onStatusChange + polls pendingCount on its own, so
+    // we no longer create the banner DOM here. Badge updates happen via
+    // the component's internal poll.
     void (async () => {
         await _syncReachability();
         if (_online) _flush();
@@ -183,22 +187,29 @@ async function _flush() {
         for (const entry of entries) {
             if (!_online) break;
 
-            const shouldReplay = await _canReplay(entry);
-            if (!shouldReplay) {
+            const verdict = await _canReplay(entry);
+            if (verdict === 'discard') {
                 await _remove(entry.id);
                 continue;
+            }
+            if (verdict === 'defer') {
+                // Network/server check failed; treat as transient and stop flushing for now.
+                break;
             }
 
             try {
                 const res = await fetch(entry.url, entry.options);
                 if (res.ok || res.status === 409) {
                     await _remove(entry.id);
-                } else if (res.status >= 500) {
-                    break;
-                } else {
+                } else if (res.status === 400 || res.status === 422) {
+                    // Permanent client error — drop so it doesn't retry forever.
                     await _remove(entry.id);
+                } else {
+                    // 401/403/408/5xx/etc → keep and retry later.
+                    break;
                 }
             } catch {
+                // Network error → keep for next flush.
                 break;
             }
         }
@@ -212,23 +223,27 @@ async function _flush() {
 
 /**
  * Check if a queued write should still be replayed.
- * Discard submits/resubmits if review_status has changed server-side.
+ * Returns 'replay' (safe to send), 'discard' (status changed, drop), or
+ * 'defer' (couldn't verify — keep for later).
  */
 async function _canReplay(entry) {
-    if (!entry.session_id) return true;
+    if (!entry.session_id) return 'replay';
     const actionTypes = new Set(['submit-for-review', 'resubmit']);
-    if (!actionTypes.has(entry.type)) return true;
+    if (!actionTypes.has(entry.type)) return 'replay';
 
     try {
         const res = await fetch(`api/session/${entry.session_id}`, { cache: 'no-store' });
-        if (!res.ok) return false;
+        if (!res.ok) {
+            // 404 → session gone, drop; anything else → try again later.
+            return res.status === 404 ? 'discard' : 'defer';
+        }
         const data = await res.json();
         const status = data.review_status || 'draft';
-        if (entry.type === 'submit-for-review' && status !== 'draft') return false;
-        if (entry.type === 'resubmit' && status !== 'returned') return false;
-        return true;
+        if (entry.type === 'submit-for-review' && status !== 'draft') return 'discard';
+        if (entry.type === 'resubmit' && status !== 'returned') return 'discard';
+        return 'replay';
     } catch {
-        return false;
+        return 'defer';
     }
 }
 
@@ -262,37 +277,20 @@ function _promisify(idbReq) {
     });
 }
 
-/* ---- UI: offline banner + pending badge ---- */
+/* ---- UI: offline banner + pending badge ----
+ *
+ * Rendering lives in [components/mh-connection-banner.js](./components/mh-connection-banner.js).
+ * This module only owns data (online state, queue count) and the pubsub
+ * hooks. _updateBanner and _updateBadge are kept as no-ops so existing
+ * call-sites in this file compile without conditionals.
+ */
 
-function _ensureBanner() {
-    if (document.getElementById('offlineBanner')) return;
-    const banner = document.createElement('div');
-    banner.id = 'offlineBanner';
-    banner.className = 'offline-banner offline-banner--hidden';
-    banner.innerHTML = `
-        <span class="offline-banner__icon">⚡</span>
-        <span class="offline-banner__text">You're offline — changes will sync when you reconnect</span>
-        <span class="offline-banner__badge" id="offlinePendingBadge"></span>
-    `;
-    const header = document.querySelector('header.header');
-    if (header) header.insertAdjacentElement('afterend', banner);
-    else document.body.prepend(banner);
-    _updateBanner();
-}
-
-function _updateBanner() {
-    const el = document.getElementById('offlineBanner');
-    if (!el) return;
-    if (_online) {
-        el.classList.add('offline-banner--hidden');
-    } else {
-        el.classList.remove('offline-banner--hidden');
-    }
-}
+function _updateBanner() { /* handled by <mh-connection-banner> */ }
 
 async function _updateBadge() {
-    const badge = document.getElementById('offlinePendingBadge');
-    if (!badge) return;
-    const n = await pendingCount();
-    badge.textContent = n > 0 ? `${n} pending` : '';
+    // Let the banner component refresh immediately instead of waiting for
+    // its 5s interval. Fire-and-forget — failures are non-fatal.
+    try {
+        window.dispatchEvent(new CustomEvent('mh:queue-pending-changed'));
+    } catch { /* no-op */ }
 }

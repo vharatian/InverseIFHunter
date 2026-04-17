@@ -839,12 +839,18 @@ export function handleHuntProgress(data) {
     
     const display = stepDisplay[step] || { text: (step === 'running' ? 'Model thinking' : (step || 'Model thinking')), color: 'var(--text-muted)' };
     
-    // Update status cell with detailed progress
-    row.querySelector('.status-cell').innerHTML = `
-        <span class="score-badge pending" style="font-size: 0.75rem;">
-            <span class="spinner"></span> ${display.text}
-        </span>
-    `;
+    const statusCell = row.querySelector('.status-cell');
+    if (statusCell) {
+        statusCell.replaceChildren();
+        const badge = document.createElement('span');
+        badge.className = 'score-badge pending';
+        badge.style.fontSize = '0.75rem';
+        const spinner = document.createElement('span');
+        spinner.className = 'spinner';
+        badge.appendChild(spinner);
+        badge.appendChild(document.createTextNode(' ' + display.text));
+        statusCell.appendChild(badge);
+    }
     
 }
 
@@ -918,7 +924,7 @@ export function handleHuntResult(data) {
         const passingMode = state.config?.passing_mode === true;
         if (resultCell) {
             if (error) {
-                resultCell.textContent = error.substring(0, 50) + '...';
+                resultCell.textContent = String(error).slice(0, 50) + '...';
             } else if (sample_label === 'ERROR') {
                 resultCell.innerHTML = `<span style="color: var(--warning);">Missing criteria</span>`;
             } else if (passingMode && score === 1) {

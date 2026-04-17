@@ -6,7 +6,7 @@
  */
 import { state } from './state.js';
 import { elements } from './dom.js';
-import { escapeHtml } from './utils.js';
+import { escapeHtml, dedupeTurnsByNumber } from './utils.js';
 import { adminBypass, getSelectionSlots, getHuntModeById } from './config.js';
 import { refreshReviewSync } from './reviewSync.js';
 import { populatePreviewTabs, parseCriteria, validateModelReferenceAndCriteria } from './notebook.js';
@@ -21,19 +21,6 @@ import {
 import { applyTrainerUiAfterHydrate } from './alignment.js';
 import { syncHuntModeFromConfig } from './hunt.js';
 import { syncTurnUI } from './multiturn.js';
-
-/** Last-wins dedupe by turn_number (matches server + multiturn.js). */
-function _dedupeTurnsByNumber(turns) {
-    const byNum = new Map();
-    for (const t of turns || []) {
-        const n = Number(t.turn_number ?? t.turnNumber);
-        if (!Number.isFinite(n) || n < 1) continue;
-        byNum.set(n, t);
-    }
-    return Array.from(byNum.entries())
-        .sort((a, b) => a[0] - b[0])
-        .map(([, t]) => t);
-}
 
 /**
  * Fetch full session state from backend and hydrate the UI.
@@ -62,7 +49,7 @@ export async function hydrateSession(sessionId) {
     state.allResponses = data.all_results || [];
     state.results = data.results || [];
     state.conversationHistory = data.conversation_history || [];
-    state.turns = _dedupeTurnsByNumber(data.turns || []);
+    state.turns = dedupeTurnsByNumber(data.turns || []);
     state.currentTurn = data.meta?.current_turn || 1;
     state.isMultiTurn = (state.currentTurn > 1 || state.turns.length > 0);
     state.activePhase = data.meta?.active_phase || _inferPhase(data);
@@ -180,15 +167,23 @@ function _hydrateNotebookSection(notebook) {
  * Infer the UI phase from session data when no explicit phase was persisted.
  */
 function _inferPhase(data) {
+    const status = data.hunt_status;
+    if (status === 'running') return 'hunting';
+
     const reviews = data.human_reviews || {};
     const hasReviews = Object.keys(reviews).length > 0 && Object.values(reviews).some(v => v?.judgment != null);
     if (hasReviews) return 'grading';
+
     const allResults = data.all_results || [];
     const tu = data.trainer_ui;
     if (tu?.selection_confirmed && allResults.length > 0) return 'grading';
+
+    // Any terminal/interrupted state with results should surface the review UI,
+    // not drop the trainer back to the editor.
     if (allResults.length > 0) return 'reviewing';
-    const status = data.hunt_status;
-    if (status === 'running') return 'hunting';
+    if (status === 'needs_attention' || status === 'failed' || status === 'stopped_budget' || status === 'completed') {
+        return 'reviewing';
+    }
     return 'editing';
 }
 
@@ -260,19 +255,21 @@ function _populateMetadataSidebar(metadata) {
 
 
 function _hydrateResultsSection(allResults, trainerUi) {
-    if (!allResults || allResults.length === 0) return;
-
+    const results = Array.isArray(allResults) ? allResults : [];
     const explicitSelectionConfirmed =
         trainerUi && typeof trainerUi.selection_confirmed === 'boolean';
 
-    state.allResponses = allResults;
-    state.totalHuntsCount = allResults.length;
+    state.allResponses = results;
+    state.totalHuntsCount = results.length;
 
     // Build hunt_id → array index lookup so we can map huntId-keyed reviews
     // back to row numbers. Backend auto-save stores reviews with huntId keys
-    // (e.g. "1", "2") while the frontend uses row_N keys (e.g. "row_0").
+    // (e.g. "1", "2") while the frontend uses row_N keys (e.g. "row_0"). We run
+    // normalization unconditionally so that if a trainer opens the session before
+    // hunt results are rehydrated, review keys still get mapped as soon as
+    // possible and persist across subsequent state writes.
     const huntIdToIndex = {};
-    allResults.forEach((r, i) => {
+    results.forEach((r, i) => {
         if (r.hunt_id !== undefined && r.hunt_id !== null) {
             huntIdToIndex[String(r.hunt_id)] = i;
         }
@@ -334,7 +331,7 @@ function _hydrateResultsSection(allResults, trainerUi) {
     }
 
     // Populate hunt response data map
-    allResults.forEach((r, i) => {
+    results.forEach((r, i) => {
         state.huntResponseData[i] = {
             model: r.model_id || r.model || '',
             status: r.status || '',

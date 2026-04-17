@@ -15,6 +15,35 @@ from collections import defaultdict
 import threading
 
 
+_PASS_TOKENS = {"pass", "passed", "true", "1", "yes", "ok", "success"}
+_FAIL_TOKENS = {"fail", "failed", "false", "0", "no", "error"}
+
+
+def _normalize_verdict(value: Any) -> Optional[str]:
+    """Normalize a criteria verdict to 'PASS', 'FAIL', or None (unknown)."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return "PASS" if value else "FAIL"
+    if isinstance(value, (int, float)):
+        if value in (0, 1):
+            return "PASS" if value == 1 else "FAIL"
+        return None
+    if isinstance(value, dict):
+        for k in ("verdict", "result", "status", "value"):
+            if k in value:
+                return _normalize_verdict(value[k])
+        return None
+    s = str(value).strip().lower()
+    if not s:
+        return None
+    if s in _PASS_TOKENS:
+        return "PASS"
+    if s in _FAIL_TOKENS:
+        return "FAIL"
+    return None
+
+
 class EnhancedLogReader:
     """
     Enhanced log reader with trainer analytics and ML-ready aggregations.
@@ -257,13 +286,13 @@ class EnhancedLogReader:
         if allowed is None:
             return True
         sid = (event.get("data") or {}).get("session_id")
-        if not sid:
-            return True
         email = (event.get("trainer_email") or "").strip().lower()
-        if not email:
+        if not email and sid:
             email = (ctx.get(sid) or {}).get("trainer_email") or ""
         if not email:
             email = ((event.get("data") or {}).get("trainer_email") or "").strip().lower()
+        # When a filter is active, exclude events that cannot be attributed
+        # to a trainer. Previously events without session_id bypassed the filter.
         return bool(email) and email in allowed
 
     def _filter_events_by_trainer_emails(
@@ -288,6 +317,46 @@ class EnhancedLogReader:
         if cu:
             row["colab_url"] = cu
     
+    def _test_account_emails(self) -> Set[str]:
+        """Cached set of test-account emails loaded from the admin registry."""
+        now = datetime.utcnow()
+        cached_at = getattr(self, "_test_cache_at", None)
+        if cached_at and (now - cached_at).total_seconds() < 60:
+            return getattr(self, "_test_cache_set", set())
+        try:
+            from auth import get_test_accounts  # lazy to avoid import cycles
+            emails = {e.strip().lower() for e in get_test_accounts() if e}
+        except Exception:
+            emails = set()
+        self._test_cache_set = emails
+        self._test_cache_at = now
+        return emails
+
+    def _drop_test_accounts(
+        self,
+        events: List[Dict[str, Any]],
+        ctx: Optional[Dict[str, Dict[str, str]]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Remove events whose trainer email is marked as a test account."""
+        test_emails = self._test_account_emails()
+        if not test_emails:
+            return events
+        ctx = ctx if ctx is not None else self._load_session_context()
+        out: List[Dict[str, Any]] = []
+        for event in events:
+            data = event.get("data") or {}
+            email = (event.get("trainer_email") or "").strip().lower()
+            if not email:
+                sid = data.get("session_id")
+                if sid:
+                    email = (ctx.get(sid) or {}).get("trainer_email", "").strip().lower()
+            if not email:
+                email = (data.get("trainer_email") or "").strip().lower()
+            if email and email in test_emails:
+                continue
+            out.append(event)
+        return out
+
     def _read_events(self, since: Optional[datetime] = None, limit: Optional[int] = None) -> List[Dict]:
         """Read events from log file."""
         events = []
@@ -314,10 +383,13 @@ class EnhancedLogReader:
                         continue
             
             events.sort(key=lambda x: x.get("_ts", datetime.min), reverse=True)
-            
+
+            # Exclude events authored by test accounts from all analytics by default.
+            events = self._drop_test_accounts(events)
+
             if limit:
                 events = events[:limit]
-            
+
             return events
         except Exception as e:
             print(f"Error reading log file: {e}")
@@ -353,7 +425,10 @@ class EnhancedLogReader:
         stats = {
             "active_sessions": 0,
             "total_sessions": 0,
+            # Backward-compatible field: now counts completed hunts to match the
+            # trainer leaderboard. `total_hunts_started` exposes hunt_start count.
             "total_hunts": 0,
+            "total_hunts_started": 0,
             "total_api_calls": 0,
             "successful_api_calls": 0,
             "failed_api_calls": 0,
@@ -390,13 +465,14 @@ class EnhancedLogReader:
                 )
             
             elif event_type == "hunt_start":
-                stats["total_hunts"] += 1
+                stats["total_hunts_started"] = stats.get("total_hunts_started", 0) + 1
                 if session_id:
                     sessions_with_running[session_id] = sessions_with_running.get(session_id, 0) + 1
-            
+
             elif event_type == "hunt_complete":
                 breaks = data.get("breaks_found", 0)
                 completed = data.get("completed_hunts", 0)
+                stats["total_hunts"] += 1  # Completed-hunt count (matches leaderboard)
                 stats["breaks_found"] += breaks
                 if completed > 0:
                     break_rates.append(breaks / completed)
@@ -1014,26 +1090,29 @@ class EnhancedLogReader:
         """
         since = datetime.utcnow() - timedelta(hours=hours)
         events = self._read_events(since=since)
-        
+
         criteria_stats = defaultdict(lambda: {
             "total": 0,
             "passes": 0,
             "fails": 0,
             "sessions": set()
         })
-        
+
         for event in events:
             if event.get("type") == "hunt_result":
                 data = event.get("data", {})
                 criteria = data.get("criteria", {})
                 session_id = data.get("session_id", "")
-                
+
                 for crit_id, result in criteria.items():
+                    verdict = _normalize_verdict(result)
+                    if verdict is None:
+                        continue
                     stats = criteria_stats[crit_id]
                     stats["total"] += 1
-                    if result == "PASS":
+                    if verdict == "PASS":
                         stats["passes"] += 1
-                    elif result == "FAIL":
+                    elif verdict == "FAIL":
                         stats["fails"] += 1
                     stats["sessions"].add(session_id)
         
@@ -1083,25 +1162,37 @@ class EnhancedLogReader:
         }
     
     def get_realtime_stats(self) -> Dict[str, Any]:
-        """
-        Get real-time stats (last 5 minutes).
+        """Real-time stats (last 5 minutes).
+
+        `hunts_in_progress` is computed as hunt_start events whose `hunt_id`
+        has no matching `hunt_complete` in the same window. Events arrive
+        newest-first, so we derive completion per (session_id, hunt_id) key.
         """
         since = datetime.utcnow() - timedelta(minutes=5)
         events = self._read_events(since=since)
         trainer_mapping = self._load_trainer_mapping()
         ctx = self._load_session_context()
         ctx = self._merge_session_created_from_events(events, ctx)
-        
+
         active_sessions = set()
         active_trainers = set()
-        hunts_in_progress = 0
+        started_keys: Set[tuple] = set()
+        completed_keys: Set[tuple] = set()
         recent_breaks = 0
-        
+
+        def _hunt_key(sid: Optional[str], d: Dict[str, Any]) -> Optional[tuple]:
+            if not sid:
+                return None
+            hunt_id = d.get("hunt_id") or d.get("run_id") or d.get("turn_id")
+            if hunt_id is None:
+                return None
+            return (sid, str(hunt_id))
+
         for event in events:
             event_type = event.get("type", "")
-            data = event.get("data", {})
+            data = event.get("data", {}) or {}
             session_id = data.get("session_id")
-            
+
             if session_id:
                 active_sessions.add(session_id)
                 tid = self._resolve_trainer_key(
@@ -1109,19 +1200,32 @@ class EnhancedLogReader:
                 )
                 if tid:
                     active_trainers.add(tid)
-            
+
             if event_type == "hunt_start":
-                hunts_in_progress += 1
+                key = _hunt_key(session_id, data)
+                if key:
+                    started_keys.add(key)
             elif event_type == "hunt_complete":
-                hunts_in_progress = max(0, hunts_in_progress - 1)
-                recent_breaks += data.get("breaks_found", 0)
-        
+                key = _hunt_key(session_id, data)
+                if key:
+                    completed_keys.add(key)
+                recent_breaks += int(data.get("breaks_found", 0) or 0)
+
+        # Hunts started with no matching complete in this window are "in progress".
+        # Falls back to delta when hunt_id missing across emitters.
+        if started_keys or completed_keys:
+            hunts_in_progress = len(started_keys - completed_keys)
+        else:
+            starts = sum(1 for e in events if e.get("type") == "hunt_start")
+            completes = sum(1 for e in events if e.get("type") == "hunt_complete")
+            hunts_in_progress = max(0, starts - completes)
+
         return {
             "active_sessions": len(active_sessions),
             "active_trainers": len(active_trainers),
             "hunts_in_progress": hunts_in_progress,
             "recent_breaks": recent_breaks,
-            "last_updated": datetime.utcnow().isoformat() + "Z"
+            "last_updated": datetime.utcnow().isoformat() + "Z",
         }
 
 

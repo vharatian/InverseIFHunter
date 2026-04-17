@@ -26,10 +26,21 @@ function _dashboardServicePrefix() {
 
 // ─── Helpers ─────────────────────────────────────────────────────
 
+function _getCsrfCookie() {
+    const m = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/);
+    return m ? decodeURIComponent(m[1]) : '';
+}
+
 async function api(path, options = {}) {
+    const method = (options.method || 'GET').toUpperCase();
+    const headers = { 'Content-Type': 'application/json', ...options.headers };
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+        const csrf = _getCsrfCookie();
+        if (csrf) headers['X-CSRF-Token'] = csrf;
+    }
     const res = await fetch(`${_basePath}/api/admin/${path}`, {
         credentials: 'include',
-        headers: { 'Content-Type': 'application/json', ...options.headers },
+        headers,
         ...options,
     });
     if (!res.ok) {
@@ -92,11 +103,137 @@ function _initials(email, name) {
 
 function isSuper() { return currentUser && currentUser.is_super; }
 
+function skeleton(rows = 4) {
+    return `<div class="mth-skeleton-list">${Array(rows).fill(0).map((_, i) => `<div class="mth-skeleton" style="height:${12 + (i % 3) * 6}px;margin:${i ? '10px' : '0'} 0;width:${100 - (i * 7) % 40}%"></div>`).join('')}</div>`;
+}
+
+function emptyState({ title, hint }) {
+    return `<div class="mth-empty"><strong>${esc(title || 'Nothing here yet')}</strong>${hint ? `<span>${esc(hint)}</span>` : ''}</div>`;
+}
+
+// ─── Confirm modal (replaces native confirm) ─────────────────────
+
+let _confirmState = null;
+
+function openConfirm({ title = 'Are you sure?', body = '', okLabel = 'Confirm', okClass = 'btn-danger', cancelLabel = 'Cancel' } = {}) {
+    return new Promise(resolve => {
+        const modal = document.getElementById('confirm-modal');
+        if (!modal) return resolve(window.confirm(body || title));
+        document.getElementById('confirm-modal-title').textContent = title;
+        const bodyEl = document.getElementById('confirm-modal-body');
+        bodyEl.textContent = body;
+        bodyEl.style.display = body ? '' : 'none';
+        const ok = document.getElementById('confirm-modal-ok');
+        const cancel = document.getElementById('confirm-modal-cancel');
+        ok.textContent = okLabel;
+        ok.className = `btn ${okClass}`;
+        cancel.textContent = cancelLabel;
+
+        _confirmState = {
+            resolve,
+            lastFocus: document.activeElement,
+            onKey: null,
+            onBackdrop: null,
+        };
+
+        modal.classList.remove('hidden');
+        const close = (result) => {
+            modal.classList.add('hidden');
+            ok.onclick = null;
+            cancel.onclick = null;
+            modal.removeEventListener('keydown', _confirmState.onKey);
+            modal.removeEventListener('click', _confirmState.onBackdrop);
+            const prev = _confirmState.lastFocus;
+            _confirmState = null;
+            if (prev && typeof prev.focus === 'function') { try { prev.focus(); } catch (_) {} }
+            resolve(result);
+        };
+        ok.onclick = () => close(true);
+        cancel.onclick = () => close(false);
+        _confirmState.onKey = (e) => {
+            if (e.key === 'Escape') { e.preventDefault(); close(false); }
+            else if (e.key === 'Enter') { e.preventDefault(); close(true); }
+            else if (e.key === 'Tab') _trapFocus(e, modal);
+        };
+        _confirmState.onBackdrop = (e) => { if (e.target === modal) close(false); };
+        modal.addEventListener('keydown', _confirmState.onKey);
+        modal.addEventListener('click', _confirmState.onBackdrop);
+        setTimeout(() => ok.focus(), 10);
+    });
+}
+
+function _trapFocus(e, root) {
+    const focusables = root.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])');
+    if (!focusables.length) return;
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+}
+
 // ─── Auth ────────────────────────────────────────────────────────
 
 async function checkSession() {
-    try { currentUser = await api('me'); showPanel(); loadTeam(); }
+    try {
+        currentUser = await api('me');
+        showPanel();
+        loadTeam();
+        setupAdminLiveStream();
+    }
     catch { showLoginGate(); }
+}
+
+// ─── SSE live updates ────────────────────────────────────────────
+
+let _adminStream = null;
+let _adminStreamBackoff = 1000;
+const _adminSseDebounces = {};
+
+function _adminDebounce(name, fn, ms = 400) {
+    clearTimeout(_adminSseDebounces[name]);
+    _adminSseDebounces[name] = setTimeout(fn, ms);
+}
+
+function _activeAdminTab() {
+    const btn = document.querySelector('#tab-nav .tab-btn.active');
+    return btn ? btn.dataset.tab : '';
+}
+
+function _refreshIfActive(tab, loader) {
+    if (_activeAdminTab() === tab) loader();
+}
+
+function setupAdminLiveStream() {
+    if (typeof EventSource === 'undefined') return;
+    if (_adminStream) { try { _adminStream.close(); } catch (_) {} }
+    try {
+        const url = `${_basePath}/api/admin/stream`;
+        const es = new EventSource(url, { withCredentials: true });
+        _adminStream = es;
+
+        es.addEventListener('open', () => { _adminStreamBackoff = 1000; });
+
+        es.addEventListener('config', () => {
+            _adminDebounce('config', () => _refreshIfActive('config', loadConfig));
+        });
+        es.addEventListener('team', () => {
+            _adminDebounce('team', () => _refreshIfActive('team', loadTeam));
+        });
+        es.addEventListener('admins', () => {
+            _adminDebounce('admins', () => _refreshIfActive('admins', loadDashboardAdmins));
+        });
+        es.addEventListener('db', () => {
+            _adminDebounce('db', () => _refreshIfActive('data', loadDataTab));
+        });
+
+        es.onerror = () => {
+            es.close();
+            _adminStream = null;
+            const delay = Math.min(_adminStreamBackoff, 30000);
+            _adminStreamBackoff = Math.min(_adminStreamBackoff * 2, 60000);
+            setTimeout(setupAdminLiveStream, delay);
+        };
+    } catch (_) {}
 }
 
 function showLoginGate() {
@@ -111,20 +248,61 @@ function showPanel() {
     const b = document.getElementById('role-badge');
     b.textContent = currentUser.is_super ? 'Super Admin' : 'Admin';
     b.className = `role-badge ${currentUser.is_super ? 'super' : 'admin'}`;
+    _applyRoleTabVisibility();
+}
+
+function _applyRoleTabVisibility() {
+    const superOnly = ['admins', 'data'];
+    const su = isSuper();
+    const nav = document.getElementById('tab-nav');
+    if (!nav) return;
+    for (const name of superOnly) {
+        const btn = nav.querySelector(`.tab-btn[data-tab="${name}"]`);
+        if (!btn) continue;
+        btn.hidden = !su;
+        if (!su && btn.classList.contains('active')) {
+            showTab('team');
+        }
+    }
 }
 
 async function logout() {
     try { await api('logout', { method: 'POST' }); } catch {}
     currentUser = null;
+    if (_adminStream) { try { _adminStream.close(); } catch (_) {} _adminStream = null; }
     showLoginGate();
 }
 
 // ─── Tab switching ───────────────────────────────────────────────
 
 function showTab(tabName) {
-    document.querySelectorAll('#tab-nav .tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tabName));
+    document.querySelectorAll('#tab-nav .tab-btn').forEach(b => {
+        const active = b.dataset.tab === tabName;
+        b.classList.toggle('active', active);
+        b.setAttribute('aria-selected', active ? 'true' : 'false');
+        b.setAttribute('tabindex', active ? '0' : '-1');
+    });
     document.querySelectorAll('.content-area > .section').forEach(s => s.classList.toggle('active', s.id === `section-${tabName}`));
     ({ team: loadTeam, config: loadConfig, tracking: loadTracking, admins: loadDashboardAdmins, data: loadDataTab })[tabName]?.();
+}
+
+function _initAdminTabKeyboardNav() {
+    const tablist = document.getElementById('tab-nav');
+    if (!tablist) return;
+    tablist.addEventListener('keydown', (e) => {
+        const visibleTabs = Array.from(tablist.querySelectorAll('[role="tab"]:not([hidden])'));
+        const idx = visibleTabs.indexOf(document.activeElement);
+        if (idx < 0) return;
+        let next = idx;
+        if (e.key === 'ArrowRight') next = (idx + 1) % visibleTabs.length;
+        else if (e.key === 'ArrowLeft') next = (idx - 1 + visibleTabs.length) % visibleTabs.length;
+        else if (e.key === 'Home') next = 0;
+        else if (e.key === 'End') next = visibleTabs.length - 1;
+        else return;
+        e.preventDefault();
+        visibleTabs[next].focus();
+        visibleTabs[next].click();
+    });
 }
 
 // ═════════════════════════════════════════════════════════════════
@@ -133,7 +311,7 @@ function showTab(tabName) {
 
 async function loadTeam() {
     const c = document.getElementById('team-content');
-    c.innerHTML = '<div class="loading">Loading team...</div>';
+    c.innerHTML = skeleton(6);
     try { renderTeam(await api('team'), c); }
     catch (e) { c.innerHTML = `<div class="error-msg">${esc(e.message)}</div>`; }
 }
@@ -302,7 +480,7 @@ async function handleTeamAction(action, params) {
                 await api(`team/pods/${encodeURIComponent(params.pod)}/trainers/${encodeURIComponent(params.email)}`, { method: 'DELETE' });
                 toast('Trainer removed'); break;
             case 'remove-admin':
-                if (!confirm(`Remove admin ${params.email}?`)) return;
+                if (!await openConfirm({ title: 'Remove admin', body: `Remove admin ${params.email}?`, okLabel: 'Remove' })) return;
                 await api(`team/admins/${encodeURIComponent(params.email)}`, { method: 'DELETE' });
                 toast('Admin removed'); break;
             case 'add-admin':
@@ -312,22 +490,22 @@ async function handleTeamAction(action, params) {
                 await api('team/super-admins', { method: 'POST', body: JSON.stringify({ email: params.email, name: params.name || '' }) });
                 toast('Super admin added'); break;
             case 'remove-super-admin':
-                if (!confirm(`Remove super admin ${params.email}?`)) return;
+                if (!await openConfirm({ title: 'Remove super admin', body: `Remove super admin ${params.email}?`, okLabel: 'Remove' })) return;
                 await api(`team/super-admins/${encodeURIComponent(params.email)}`, { method: 'DELETE' });
                 toast('Super admin removed'); break;
             case 'create-pod':
                 await api('team/pods', { method: 'POST', body: JSON.stringify({ pod_id: params.pod_id, name: params.name }) });
                 toast('Pod created'); break;
             case 'remove-pod':
-                if (!confirm(`Delete pod "${params.pod}"? It must be empty (no trainers, reviewer, or pod lead) first.`)) return;
+                if (!await openConfirm({ title: 'Delete pod', body: `Delete pod "${params.pod}"? It must be empty (no trainers, reviewer, or pod lead) first.`, okLabel: 'Delete' })) return;
                 await api(`team/pods/${encodeURIComponent(params.pod)}`, { method: 'DELETE' });
                 toast('Pod removed'); break;
             case 'remove-pod-lead':
-                if (!confirm('Remove pod lead from this pod?')) return;
+                if (!await openConfirm({ title: 'Remove pod lead', body: 'Remove pod lead from this pod?', okLabel: 'Remove' })) return;
                 await api(`team/pods/${encodeURIComponent(params.pod)}/pod-lead`, { method: 'DELETE' });
                 toast('Pod lead removed'); break;
             case 'remove-pod-reviewer':
-                if (!confirm('Remove reviewer from this pod?')) return;
+                if (!await openConfirm({ title: 'Remove reviewer', body: 'Remove reviewer from this pod?', okLabel: 'Remove' })) return;
                 await api(`team/pods/${encodeURIComponent(params.pod)}/reviewer`, { method: 'DELETE' });
                 toast('Reviewer removed'); break;
         }
@@ -343,7 +521,7 @@ let _configData = null;
 
 async function loadConfig() {
     const c = document.getElementById('config-content');
-    c.innerHTML = '<div class="loading">Loading config...</div>';
+    c.innerHTML = skeleton(8);
     try { _configData = await api('config'); renderConfig(_configData, c); }
     catch (e) { c.innerHTML = `<div class="error-msg">${esc(e.message)}</div>`; }
 }
@@ -369,7 +547,9 @@ function _renderArrayEditor(arr, fullKey, sectionName) {
     if (isSuper()) h += '<th></th>';
     h += '</tr></thead><tbody>';
     arr.forEach((item, i) => {
-        h += '<tr>';
+        const stableId = (item && (item.id || item.name || item.key)) != null ? String(item.id || item.name || item.key) : '';
+        const idAttr = stableId ? ` data-id="${attrEsc(stableId)}"` : '';
+        h += `<tr data-idx="${i}"${idAttr}>`;
         keys.forEach(k => {
             const v = item[k];
             if (isSuper()) {
@@ -385,7 +565,10 @@ function _renderArrayEditor(arr, fullKey, sectionName) {
                 h += `<td><span class="${f.c}">${esc(f.t)}</span></td>`;
             }
         });
-        if (isSuper()) h += `<td><button class="btn btn-xs btn-danger" data-action="remove-array-item" data-array-key="${esc(fullKey)}" data-idx="${i}">&times;</button></td>`;
+        if (isSuper()) {
+            const idAttrBtn = stableId ? ` data-id="${attrEsc(stableId)}"` : '';
+            h += `<td><button class="btn btn-xs btn-danger" data-action="remove-array-item" data-array-key="${esc(fullKey)}" data-idx="${i}"${idAttrBtn}>&times;</button></td>`;
+        }
         h += '</tr>';
     });
     h += '</tbody></table>';
@@ -397,8 +580,8 @@ function _renderArrayEditor(arr, fullKey, sectionName) {
 function _renderEmailChips(emails, fullKey, sectionName) {
     const list = Array.isArray(emails) ? emails : [];
     let h = `<div class="chip-editor" data-chip-key="${esc(fullKey)}" data-section="${esc(sectionName)}">`;
-    list.forEach((em, i) => {
-        h += `<span class="email-chip">${esc(em)}${isSuper() ? `<button class="chip-remove" data-action="remove-chip" data-chip-key="${esc(fullKey)}" data-idx="${i}">&times;</button>` : ''}</span>`;
+    list.forEach((em) => {
+        h += `<span class="email-chip" data-email="${attrEsc(em)}">${esc(em)}${isSuper() ? `<button class="chip-remove" data-action="remove-chip" data-chip-key="${esc(fullKey)}" data-email="${attrEsc(em)}">&times;</button>` : ''}</span>`;
     });
     if (isSuper()) h += `<span class="chip-add-form"><input type="email" placeholder="add email" data-chip-input="${esc(fullKey)}" /><button class="btn btn-xs" data-action="add-chip" data-chip-key="${esc(fullKey)}">+</button></span>`;
     h += '</div>';
@@ -523,7 +706,7 @@ function renderConfig(data, container) {
         const sid = _configSectionDomId(slugForId !== undefined ? slugForId : prefix);
         const accent = String(slugForId !== undefined ? slugForId : (prefix || 'general')).toLowerCase().replace(/[^a-z0-9]/g, '') || 'general';
         return `<div class="config-section config-section--${esc(accent)}" id="${sid}" data-config-section="${esc(prefix)}">
-            <div class="config-section-header${collapsed ? ' collapsed' : ''}" role="button" tabindex="0" aria-expanded="${collapsed ? 'false' : 'true'}" onclick="this.classList.toggle('collapsed');this.nextElementSibling.classList.toggle('collapsed');this.setAttribute('aria-expanded',(!this.classList.contains('collapsed')).toString())">
+            <div class="config-section-header${collapsed ? ' collapsed' : ''}" role="button" tabindex="0" aria-expanded="${collapsed ? 'false' : 'true'}" data-action="toggle-config-section">
                 <div class="config-section-header-main"><span class="config-section-accent-bar" aria-hidden="true"></span>
                 <h3>${esc(name)} <span class="count-badge">${entries.length} keys${isSuper() && editableCount ? ` · ${editableCount} editable` : ''}</span></h3></div>
                 <span class="chevron" aria-hidden="true">&#x25BC;</span>
@@ -609,12 +792,17 @@ function _getNestedVal(obj, dottedKey) {
     return obj;
 }
 
-function _handleArrayAction(action, key, idx) {
+function _handleArrayAction(action, key, idx, stableId) {
     if (!_configData) return;
     const arr = _getNestedVal(_configData, key);
     if (!Array.isArray(arr)) return;
     if (action === 'remove') {
-        arr.splice(idx, 1);
+        let pos = -1;
+        if (stableId) {
+            pos = arr.findIndex(x => x && (String(x.id) === stableId || String(x.name) === stableId || String(x.key) === stableId));
+        }
+        if (pos < 0 && Number.isInteger(idx)) pos = idx;
+        if (pos >= 0 && pos < arr.length) arr.splice(pos, 1);
     } else if (action === 'add') {
         const template = arr.length > 0 ? Object.fromEntries(Object.keys(arr[0]).filter(k => k !== 'params' && k !== 'prohibited_text').map(k => [k, ''])) : { id: '', name: '' };
         arr.push(template);
@@ -622,12 +810,18 @@ function _handleArrayAction(action, key, idx) {
     renderConfig(_configData, document.getElementById('config-content'));
 }
 
-function _handleChipAction(action, key, idx, value) {
+function _handleChipAction(action, key, emailOrValue) {
     if (!_configData) return;
     const arr = _getNestedVal(_configData, key);
     if (!Array.isArray(arr)) return;
-    if (action === 'remove') arr.splice(idx, 1);
-    else if (action === 'add' && value) arr.push(value.trim().toLowerCase());
+    if (action === 'remove') {
+        const target = String(emailOrValue || '').toLowerCase();
+        const i = arr.findIndex(x => String(x).toLowerCase() === target);
+        if (i >= 0) arr.splice(i, 1);
+    } else if (action === 'add' && emailOrValue) {
+        const val = String(emailOrValue).trim().toLowerCase();
+        if (val && !arr.some(x => String(x).toLowerCase() === val)) arr.push(val);
+    }
     renderConfig(_configData, document.getElementById('config-content'));
 }
 
@@ -757,14 +951,14 @@ async function handleAdminsAction(action, params) {
                 await api('dashboard-admins', { method: 'POST', body: JSON.stringify({ email: params.email, name: params.name || '' }) });
                 toast('Admin added'); break;
             case 'remove-dashboard-admin':
-                if (!confirm(`Remove ${params.email}?`)) return;
+                if (!await openConfirm({ title: 'Remove admin', body: `Remove ${params.email}?`, okLabel: 'Remove' })) return;
                 await api(`dashboard-admins/${encodeURIComponent(params.email)}`, { method: 'DELETE' });
                 toast('Admin removed'); break;
             case 'add-test-account':
                 await api('test-accounts', { method: 'POST', body: JSON.stringify({ email: params.email, name: params.name || '' }) });
                 toast('Test account added'); break;
             case 'remove-test-account':
-                if (!confirm(`Remove ${params.email}?`)) return;
+                if (!await openConfirm({ title: 'Remove test account', body: `Remove ${params.email}?`, okLabel: 'Remove' })) return;
                 await api(`test-accounts/${encodeURIComponent(params.email)}`, { method: 'DELETE' });
                 toast('Removed'); break;
         }
@@ -856,7 +1050,7 @@ function renderDataTab(stats, container) {
     document.getElementById('delete-session-btn').addEventListener('click', async () => {
         const sid = document.getElementById('delete-session-id').value.trim();
         if (!sid) { toast('Enter a session ID', 'error'); return; }
-        if (!confirm(`Delete session ${sid}? This cannot be undone.`)) return;
+        if (!await openConfirm({ title: 'Delete session', body: `Delete session ${sid}? This cannot be undone.`, okLabel: 'Delete' })) return;
         try {
             await api(`data/session/${encodeURIComponent(sid)}`, { method: 'DELETE' });
             toast(`Session ${sid} deleted`);
@@ -868,7 +1062,7 @@ function renderDataTab(stats, container) {
         const msg = days
             ? `Wipe all draft sessions older than ${days} days?`
             : 'Wipe ALL draft/in-progress sessions? Submitted & approved are safe.';
-        if (!confirm(msg)) return;
+        if (!await openConfirm({ title: 'Wipe sessions', body: msg, okLabel: 'Wipe' })) return;
         try {
             const body = { confirm: 'yes' };
             if (days) body.older_than_days = parseInt(days);
@@ -963,6 +1157,9 @@ function _dbCollectPayload(schema) {
     return out;
 }
 
+let _dbModalLastFocus = null;
+let _dbModalKeyHandler = null;
+
 function openDbModal(mode, table, schema, row) {
     dbBrowseLastSchema = schema;
     dbModalCtx = { mode, table, pk: schema.pk, row: row || null };
@@ -979,11 +1176,31 @@ function openDbModal(mode, table, schema, row) {
     }
     fields.innerHTML = h;
     delBtn.style.display = mode === 'edit' ? '' : 'none';
-    document.getElementById('db-row-modal').classList.remove('hidden');
+    const modal = document.getElementById('db-row-modal');
+    modal.classList.remove('hidden');
+    _dbModalLastFocus = document.activeElement;
+    _dbModalKeyHandler = (e) => {
+        if (e.key === 'Escape') { e.preventDefault(); closeDbModal(); }
+        else if (e.key === 'Tab') _trapFocus(e, modal);
+    };
+    modal.addEventListener('keydown', _dbModalKeyHandler);
+    setTimeout(() => {
+        const first = modal.querySelector('input:not([type=hidden]), select, textarea, button:not([disabled])');
+        if (first) first.focus();
+    }, 10);
 }
 
 function closeDbModal() {
-    document.getElementById('db-row-modal').classList.add('hidden');
+    const modal = document.getElementById('db-row-modal');
+    modal.classList.add('hidden');
+    if (_dbModalKeyHandler) {
+        modal.removeEventListener('keydown', _dbModalKeyHandler);
+        _dbModalKeyHandler = null;
+    }
+    if (_dbModalLastFocus && typeof _dbModalLastFocus.focus === 'function') {
+        try { _dbModalLastFocus.focus(); } catch (_) {}
+    }
+    _dbModalLastFocus = null;
 }
 
 async function saveDbModal() {
@@ -1016,7 +1233,8 @@ async function saveDbModal() {
 
 async function deleteDbModalRow() {
     const { table, pk, row } = dbModalCtx;
-    if (!row || !confirm('Delete this row?')) return;
+    if (!row) return;
+    if (!await openConfirm({ title: 'Delete row', body: 'Delete this row?', okLabel: 'Delete' })) return;
     const rid = row[pk];
     try {
         await api(_dbPath(`${table}/${encodeURIComponent(String(rid))}`), { method: 'DELETE' });
@@ -1065,7 +1283,7 @@ function _dbUpdateSelectAllState(wrap) {
 async function dbBrowseBulkDelete(container) {
     const ids = [...dbBrowseState.selected];
     if (!ids.length) return;
-    if (!confirm(`Permanently delete ${ids.length} row(s) from "${dbBrowseState.table}"?`)) return;
+    if (!await openConfirm({ title: 'Delete rows', body: `Permanently delete ${ids.length} row(s) from "${dbBrowseState.table}"?`, okLabel: 'Delete' })) return;
     try {
         const r = await api(_dbPath(`${dbBrowseState.table}/bulk-delete`), {
             method: 'POST',
@@ -1089,7 +1307,7 @@ async function dbBrowseBulkDelete(container) {
 }
 
 async function dbBrowseSyncTrainers(container) {
-    if (!confirm('Upsert trainer rows from session metadata emails and link sessions.trainer_id?')) return;
+    if (!await openConfirm({ title: 'Sync trainers', body: 'Upsert trainer rows from session metadata emails and link sessions.trainer_id?', okLabel: 'Sync', okClass: 'btn-primary' })) return;
     try {
         const r = await api('data/sync-trainers-from-sessions', { method: 'POST', body: '{}' });
         toast(`Trainers ${r.trainers_before} → ${r.trainers_after}; sessions updated: ${r.sessions_updated}`);
@@ -1110,7 +1328,7 @@ function renderDbTableHtml(schema, listData) {
     rows.forEach((row, i) => {
         const pkStr = String(row[pk]);
         const checked = dbBrowseState.selected.has(pkStr) ? 'checked' : '';
-        let tds = `<td class="db-cell-check" onclick="event.stopPropagation()"><input type="checkbox" class="db-row-select" data-db-pk="${attrEsc(pkStr)}" ${checked} aria-label="Select row" /></td>`;
+        let tds = `<td class="db-cell-check" data-db-stop-propagation="1"><input type="checkbox" class="db-row-select" data-db-pk="${attrEsc(pkStr)}" ${checked} aria-label="Select row" /></td>`;
         tds += cols.map((c) => {
             const v = row[c.name];
             const jsonish = c.data_type === 'jsonb' || /json|history|notebook|config|reviews|turns|payload|metadata|blob/i.test(c.name);
@@ -1212,7 +1430,8 @@ async function refreshDbBrowse(container) {
                 const i = parseInt(btn.dataset.rowIndex, 10);
                 const row = dbBrowseLastRows[i];
                 const pk = schema.pk;
-                if (!row || !confirm(`Delete row ${row[pk]}?`)) return;
+                if (!row) return;
+                if (!await openConfirm({ title: 'Delete row', body: `Delete row ${row[pk]}?`, okLabel: 'Delete' })) return;
                 try {
                     await api(_dbPath(`${dbBrowseState.table}/${encodeURIComponent(String(row[pk]))}`), { method: 'DELETE' });
                     toast('Row deleted');
@@ -1294,6 +1513,28 @@ function initDbBrowse(container) {
 function init() {
     checkSession();
 
+    const dashLink = document.getElementById('admin-dashboard-link');
+    if (dashLink) dashLink.href = _dashboardServicePrefix() + '/';
+
+    document.body.addEventListener('click', (e) => {
+        const stop = e.target.closest('[data-db-stop-propagation]');
+        if (stop) { e.stopPropagation(); }
+        const hdr = e.target.closest('[data-action="toggle-config-section"]');
+        if (hdr) {
+            hdr.classList.toggle('collapsed');
+            if (hdr.nextElementSibling) hdr.nextElementSibling.classList.toggle('collapsed');
+            hdr.setAttribute('aria-expanded', (!hdr.classList.contains('collapsed')).toString());
+        }
+    });
+    document.body.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        const hdr = e.target.closest('[data-action="toggle-config-section"]');
+        if (hdr) {
+            e.preventDefault();
+            hdr.click();
+        }
+    });
+
     const superToggle = document.getElementById('super-toggle');
     const passwordGroup = document.getElementById('password-group');
     const loginBtn = document.getElementById('login-btn');
@@ -1328,6 +1569,7 @@ function init() {
     document.getElementById('db-row-modal-save').addEventListener('click', () => saveDbModal());
     document.getElementById('db-row-modal-delete').addEventListener('click', () => deleteDbModalRow());
     document.getElementById('tab-nav').addEventListener('click', e => { const b = e.target.closest('.tab-btn'); if (b?.dataset.tab) showTab(b.dataset.tab); });
+    _initAdminTabKeyboardNav();
 
     document.addEventListener('input', e => {
         if (e.target.classList?.contains('pod-trainer-filter')) {
@@ -1388,12 +1630,12 @@ function init() {
             return;
         }
         if (t.id === 'config-reload-btn' || act?.id === 'config-reload-btn') { api('config/reload', { method: 'POST' }).then(() => { toast('Cache reloaded'); loadConfig(); }).catch(err => toast(err.message, 'error')); return; }
-        if (action === 'remove-array-item') { _handleArrayAction('remove', act.dataset.arrayKey, parseInt(act.dataset.idx, 10)); return; }
+        if (action === 'remove-array-item') { _handleArrayAction('remove', act.dataset.arrayKey, parseInt(act.dataset.idx, 10), act.dataset.id || ''); return; }
         if (action === 'add-array-item') { _handleArrayAction('add', act.dataset.arrayKey); return; }
-        if (action === 'remove-chip') { _handleChipAction('remove', act.dataset.chipKey, parseInt(act.dataset.idx, 10)); return; }
+        if (action === 'remove-chip') { _handleChipAction('remove', act.dataset.chipKey, act.dataset.email); return; }
         if (action === 'add-chip') {
             const input = document.querySelector(`[data-chip-input="${act.dataset.chipKey}"]`);
-            if (input?.value.trim()) { _handleChipAction('add', act.dataset.chipKey, null, input.value); }
+            if (input?.value.trim()) { _handleChipAction('add', act.dataset.chipKey, input.value); }
             return;
         }
 

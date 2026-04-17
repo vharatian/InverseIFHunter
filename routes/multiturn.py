@@ -6,6 +6,7 @@ POST /api/mark-breaking/{session_id}  — mark current turn as breaking
 GET  /api/turn-status/{session_id}    — get turn status and history
 """
 import logging
+import secrets
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
@@ -34,25 +35,40 @@ class AdvanceTurnRequest(BaseModel):
     current_criteria: Optional[str] = None
 
 
+_ADVANCE_LOCK_TTL = 60  # seconds — covers slow PG saves under load
+_ADVANCE_UNLOCK_LUA = """
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+    return redis.call('DEL', KEYS[1])
+end
+return 0
+"""
+
+
 @router.post("/advance-turn/{session_id}")
 async def advance_turn(session_id: str, request: AdvanceTurnRequest):
     """
     Advance to the next turn in a multi-turn session.
-    
+
     Takes the selected "good" response from the current turn,
     builds conversation history, and prepares the session for
     the next turn with new prompt and criteria.
     """
-    # Redis lock prevents concurrent advance-turn (e.g. double-click that bypasses frontend guard)
+    # Redis lock prevents concurrent advance-turn (e.g. double-click that bypasses frontend guard).
+    # TTL is generous to cover slow PG saves; release is token-guarded so a stale holder
+    # cannot delete someone else's lock if the TTL expired mid-operation.
     r = await redis_store.get_redis()
     lock_key = f"mh:lock:advance:{session_id}"
-    acquired = await r.set(lock_key, "1", nx=True, ex=10)
+    token = secrets.token_hex(16)
+    acquired = await r.set(lock_key, token, nx=True, ex=_ADVANCE_LOCK_TTL)
     if not acquired:
         raise HTTPException(409, "Turn advance already in progress. Please wait.")
     try:
         return await _do_advance_turn(session_id, request)
     finally:
-        await r.delete(lock_key)
+        try:
+            await r.eval(_ADVANCE_UNLOCK_LUA, 1, lock_key, token)
+        except Exception:
+            logger.exception("Failed to release advance-turn lock for %s", session_id)
 
 
 async def _do_advance_turn(session_id: str, request: AdvanceTurnRequest):

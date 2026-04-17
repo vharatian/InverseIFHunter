@@ -13,10 +13,10 @@ POST /api/session/{session_id}/acknowledge
 """
 import logging
 import os
-from typing import Any, Dict, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request  # noqa: F401 - HTTPException used in handlers
-from typing import Annotated
+from pydantic import BaseModel, Field
 
 from models.schemas import HuntConfig, HuntStatus
 from services.pg_session import save_session_pg, get_session_metadata_pg, delete_session_pg, merge_session_metadata_pg
@@ -98,33 +98,41 @@ async def get_session_full_state(session_id: str):
     return data
 
 
-VALID_PHASES = {"editing", "hunting", "reviewing", "grading"}
+SessionPhase = Literal["editing", "hunting", "reviewing", "grading"]
+
+
+class SetSessionPhaseRequest(BaseModel):
+    """Body for POST /api/session/{session_id}/phase.
+
+    `phase` is required; the trainer-ui selection fields are optional and
+    preserve the legacy behaviour of the former dict-body handler.
+    """
+    phase: SessionPhase
+    selected_row_numbers: Optional[List[int]] = Field(default=None)
+    selection_confirmed: Optional[bool] = Field(default=None)
+
 
 @router.post("/session/{session_id}/phase")
-async def set_session_phase(session_id: str, request: dict):
+async def set_session_phase(session_id: str, request: SetSessionPhaseRequest):
     """Persist the trainer's current UI phase (editing/hunting/reviewing/grading) to Redis meta."""
-    phase = (request.get("phase") or "").strip()
-    if phase not in VALID_PHASES:
-        raise HTTPException(400, f"Invalid phase: {phase}")
+    phase = request.phase
     await _get_validated_session(session_id)
     await redis_store.set_meta_field(session_id, "active_phase", phase)
+    # Also persist to PG metadata immediately so the phase survives Redis eviction
+    # / restart before the next save_session_pg snapshot.
+    try:
+        await merge_session_metadata_pg(session_id, {"active_phase": phase})
+    except Exception:
+        logger.exception("merge active_phase to PG failed for %s", session_id)
 
-    sel = request.get("selected_row_numbers")
-    scf = request.get("selection_confirmed")
-    if sel is not None or scf is not None:
+    if request.selected_row_numbers is not None or request.selection_confirmed is not None:
         tu = await redis_store.get_trainer_ui(session_id)
         if not isinstance(tu, dict):
             tu = {}
-        if sel is not None and isinstance(sel, list):
-            out_nums = []
-            for x in sel:
-                try:
-                    out_nums.append(int(x))
-                except (TypeError, ValueError):
-                    continue
-            tu["selected_row_numbers"] = out_nums
-        if scf is not None:
-            tu["selection_confirmed"] = bool(scf)
+        if request.selected_row_numbers is not None:
+            tu["selected_row_numbers"] = list(request.selected_row_numbers)
+        if request.selection_confirmed is not None:
+            tu["selection_confirmed"] = bool(request.selection_confirmed)
         await redis_store.set_trainer_ui(session_id, tu)
         try:
             await merge_session_metadata_pg(
@@ -237,6 +245,7 @@ async def update_config(session_id: str, config: HuntConfig):
     ):
         await redis_store.set_status(session_id, HuntStatus.PENDING)
         await redis_store.clear_results(session_id)
+        await redis_store.clear_all_results(session_id)
         await redis_store.set_hunt_counters(
             session_id,
             total_hunts=config.parallel_workers,
@@ -244,11 +253,18 @@ async def update_config(session_id: str, config: HuntConfig):
             breaks_found=0,
             passes_found=0,
         )
+        # Keep accumulated_hunt_count aligned with config.hunt_offset so the next run's
+        # hunt_ids don't overlap or jump relative to the list we just cleared.
+        await redis_store.set_accumulated_hunt_count(
+            session_id, getattr(config, "hunt_offset", 0) or 0
+        )
         session.status = HuntStatus.PENDING
         session.results = []
+        session.all_results = []
         session.completed_hunts = 0
         session.breaks_found = 0
         session.passes_found = 0
+        session.accumulated_hunt_count = getattr(config, "hunt_offset", 0) or 0
 
     try:
         await save_session_pg(session)
@@ -337,13 +353,16 @@ async def submit_for_review(session_id: str, request: Request):
             status_code=400,
             detail=f"Need 4 human reviews before submitting. Currently have {review_count}.",
         )
-    ok, actual = await redis_store.cas_review_status(session_id, "draft", "submitted")
+    ok, actual = await redis_store.cas_review_status(
+        session_id, "draft", "submitted", bump_review_round=True
+    )
     if not ok:
         raise HTTPException(
             status_code=409,
             detail=f"Cannot submit: task is currently '{actual}'. Only drafts can be submitted.",
         )
-    round_num = await redis_store.incr_review_round(session_id)
+    # review_round was incremented atomically with the CAS; read it back.
+    round_num = await redis_store.get_review_round(session_id)
     r = await redis_store.get_redis()
     await snapshot_for_history(r, session_id, round_num)
     await redis_store.append_audit(session_id, "submitted", "trainer")
@@ -385,35 +404,45 @@ async def resubmit_for_review(session_id: str, request: Request):
             status_code=400,
             detail="Acknowledge reviewer feedback before resubmitting.",
         )
-    await redis_store.archive_and_clear_feedback(session_id)
-    await redis_store.set_resubmitted_at(session_id)
-    await clear_acknowledged(r, session_id)
 
     current_round = await redis_store.get_review_round(session_id)
     next_round = current_round + 1
     max_rounds = redis_store.get_max_review_rounds()
 
     if next_round > max_rounds:
-        ok, actual = await redis_store.cas_review_status(session_id, "returned", "escalated")
+        # CAS first — only apply side-effects if the state transition actually succeeded.
+        ok, actual = await redis_store.cas_review_status(
+            session_id, "returned", "escalated", bump_review_round=True
+        )
         if not ok:
             raise HTTPException(
                 status_code=409,
                 detail=f"Cannot resubmit: task is currently '{actual}'.",
             )
-        await redis_store.incr_review_round(session_id)
+        await redis_store.archive_and_clear_feedback(session_id)
+        await redis_store.set_resubmitted_at(session_id)
+        await clear_acknowledged(r, session_id)
+        next_round = await redis_store.get_review_round(session_id)
         await redis_store.append_audit(session_id, "escalated", "trainer", {"reason": f"Max rounds ({max_rounds}) exceeded"})
         await _notify_escalation(session_id, next_round, max_rounds)
         await _maybe_persist_hunt_timing(session_id, hunt_timing)
         logger.info(f"Session {session_id} escalated to admin (round {next_round} > max {max_rounds})")
         return {"ok": True, "review_status": "escalated", "review_round": next_round, "escalated": True}
 
-    ok, actual = await redis_store.cas_review_status(session_id, "returned", "submitted")
+    ok, actual = await redis_store.cas_review_status(
+        session_id, "returned", "submitted", bump_review_round=True
+    )
     if not ok:
         raise HTTPException(
             status_code=409,
             detail=f"Cannot resubmit: task is currently '{actual}'. Only returned tasks can be resubmitted.",
         )
-    await redis_store.incr_review_round(session_id)
+    # Side-effects only after CAS success so a status race cannot archive feedback
+    # without actually resubmitting.
+    await redis_store.archive_and_clear_feedback(session_id)
+    await redis_store.set_resubmitted_at(session_id)
+    await clear_acknowledged(r, session_id)
+    next_round = await redis_store.get_review_round(session_id)
     await snapshot_for_history(r, session_id, next_round)
     await redis_store.append_audit(session_id, "resubmitted", "trainer")
     await safe_notify(

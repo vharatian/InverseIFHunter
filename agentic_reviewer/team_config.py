@@ -54,6 +54,51 @@ def reload() -> Dict[str, Any]:
     return _load()
 
 
+_pubsub_thread = None
+
+
+def start_redis_reload_listener() -> None:
+    """Subscribe to `mth:team` and invalidate the team config on publish.
+
+    Safe to call multiple times. No-op when Redis is unavailable.
+    """
+    global _pubsub_thread
+    if _pubsub_thread is not None:
+        return
+    try:
+        import os
+        import threading
+        import redis as _redis
+    except Exception:
+        return
+
+    url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+
+    def _runner() -> None:
+        try:
+            client = _redis.Redis.from_url(url, decode_responses=True,
+                                           socket_connect_timeout=2,
+                                           socket_timeout=2)
+            client.ping()
+            pubsub = client.pubsub(ignore_subscribe_messages=True)
+            pubsub.subscribe("mth:team")
+            logger.info("team_config: listening on mth:team for live reload")
+            for message in pubsub.listen():
+                if message.get("type") != "message":
+                    continue
+                try:
+                    reload()
+                    logger.info("team_config: reloaded via mth:team event")
+                except Exception as exc:
+                    logger.warning("team_config reload failed: %s", exc)
+        except Exception as exc:
+            logger.warning("team_config redis listener stopped: %s", exc)
+
+    t = threading.Thread(target=_runner, name="mth-team-reload", daemon=True)
+    t.start()
+    _pubsub_thread = t
+
+
 def _norm(email: str) -> str:
     return str(email).strip().lower() if email else ""
 

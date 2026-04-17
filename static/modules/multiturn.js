@@ -14,7 +14,8 @@ import {
     renderInsightTip,
     getTurnColor,
     getTurnColorClass,
-    getModelDisplayName
+    getModelDisplayName,
+    dedupeTurnsByNumber
 } from './utils.js';
 import { showToast, showError } from './celebrations.js?v=43';
 import { fetchAllResponses, fetchAllResponsesAndShowSelection, isResultBreaking, isResultPassing, isResultError } from './results.js';
@@ -26,24 +27,14 @@ import { playEndTask, playEndTaskError, playNextTurn, playNextTurnError } from '
 // It uses startHunt (for calibration).
 import { updateHuntLimitUI, resetHuntNumberToDefault } from './hunt.js';
 import { getConfigValue, adminBypass, getHuntModeById } from './config.js';
+import { notify } from './stateBridge.js';
 // This circular dependency is fine as long as they are not used at top-level.
 // startHunt is called inside handleCalibrationGenerate -> fine.
 // showMultiTurnDecision is called inside handleHuntComplete -> fine.
 
 // ============== Turn-Aware UI Functions (Journey Bar, Badges) ==============
 
-/** One row per turn number; last entry wins (hydration/merges can duplicate). */
-function dedupeCompletedTurns(turns) {
-    const byNum = new Map();
-    for (const t of turns || []) {
-        const n = Number(t.turnNumber ?? t.turn_number);
-        if (!Number.isFinite(n) || n < 1) continue;
-        byNum.set(n, t);
-    }
-    return Array.from(byNum.entries())
-        .sort((a, b) => a[0] - b[0])
-        .map(([, t]) => t);
-}
+const dedupeCompletedTurns = dedupeTurnsByNumber;
 
 /**
  * Single entry point to sync all turn-related DOM after state.currentTurn changes.
@@ -91,85 +82,40 @@ export function activateTurnTab(turnNumber) {
 
 /**
  * Render the Turn Journey Bar — horizontal stepper showing all turns.
+ *
+ * Thin wrapper around the <mh-turn-journey> Lit component. We still own
+ * visibility (depends on whether we're in the task view) and event
+ * delegation (click → activateTurnTab). All DOM rendering lives in
+ * [components/mh-turn-journey.js](./components/mh-turn-journey.js).
  */
+let _journeyBarWired = false;
 export function renderJourneyBar() {
     const bar = document.getElementById('turnJourneyBar');
     if (!bar) return;
 
     const taskView = document.getElementById('trainerTaskView');
-    if (!taskView || taskView.classList.contains('hidden')) {
+    const inTask = taskView && !taskView.classList.contains('hidden');
+
+    // Ensure there's exactly one <mh-turn-journey> inside the nav. Convert
+    // the nav into the hosting slot — its ancestor nav keeps the landmark.
+    let journey = bar.querySelector('mh-turn-journey');
+    if (!journey) {
         bar.innerHTML = '';
-        bar.classList.remove('visible');
-        return;
+        journey = document.createElement('mh-turn-journey');
+        bar.appendChild(journey);
     }
 
-    bar.innerHTML = '';
-    
-    // Build list: completed turns + current turn + one future placeholder
-    const steps = [];
-    dedupeCompletedTurns(state.turns).forEach(t => {
-        const st = t.status;
-        if (st === 'breaking') return;
-        steps.push({ turnNumber: t.turnNumber || t.turn_number, status: 'completed' });
-    });
-    steps.push({ turnNumber: state.currentTurn, status: 'active' });
-    steps.push({ turnNumber: state.currentTurn + 1, status: 'future' });
-    
-    steps.forEach((step, idx) => {
-        // Add connector before each step (except the first)
-        if (idx > 0) {
-            const connector = document.createElement('div');
-            connector.className = 'journey-connector';
-            if (step.status === 'completed' || step.status === 'active') {
-                connector.classList.add('completed');
-            } else {
-                connector.classList.add('dashed');
-            }
-            bar.appendChild(connector);
-        }
-        
-        const node = document.createElement('div');
-        node.className = `journey-node ${step.status}`;
-        
-        const circle = document.createElement('div');
-        circle.className = 'journey-circle';
-        const color = getTurnColor(step.turnNumber);
-        
-        if (step.status === 'completed') {
-            circle.style.background = color;
-            circle.textContent = step.turnNumber;
-        } else if (step.status === 'active') {
-            circle.style.background = color;
-            circle.textContent = step.turnNumber;
-        } else {
-            circle.textContent = '?';
-        }
-        
-        const label = document.createElement('div');
-        label.className = 'journey-label';
-        if (step.status === 'completed') {
-            label.textContent = `Turn ${step.turnNumber}`;
-        } else if (step.status === 'active') {
-            label.textContent = state.isHunting ? 'Hunting' : 'Active';
-        } else {
-            label.textContent = 'Next';
-        }
-        
-        node.appendChild(circle);
-        node.appendChild(label);
-        
-        // Click any turn to show its content in the turn history panel
-        if (step.status === 'completed' || step.status === 'active') {
-            node.addEventListener('click', () => {
-                activateTurnTab(step.turnNumber);
-            });
-        }
-        
-        bar.appendChild(node);
-    });
-    
-    // Show the bar
-    bar.classList.add('visible');
+    if (!_journeyBarWired) {
+        bar.addEventListener('mh-turn-activate', (e) => {
+            const n = e?.detail?.turnNumber;
+            if (typeof n === 'number') activateTurnTab(n);
+        });
+        _journeyBarWired = true;
+    }
+
+    bar.classList.toggle('visible', !!inTask);
+    // Kick the component to re-read state.
+    notify('turns');
 }
 
 /**
@@ -352,7 +298,12 @@ export function showMultiTurnDecision() {
             markBreakingBtn.title = readinessMsg;
         }
         if (reviewWarning) {
-            reviewWarning.innerHTML = `<span style="margin-right: 0.5rem;">!</span>${readinessMsg}`;
+            reviewWarning.replaceChildren();
+            const bang = document.createElement('span');
+            bang.style.marginRight = '0.5rem';
+            bang.textContent = '!';
+            reviewWarning.appendChild(bang);
+            reviewWarning.appendChild(document.createTextNode(readinessMsg));
             reviewWarning.classList.remove('hidden');
         }
     }
@@ -710,6 +661,7 @@ let _advancingTurn = false;
 async function useIdealResponseAndAdvance() {
     if (_advancingTurn) return;
     _advancingTurn = true;
+    try {
     syncActiveRunToNotebook();
     const idealResponse = (state.notebook?.response || '').trim();
     if (!idealResponse) {
@@ -759,6 +711,7 @@ async function useIdealResponseAndAdvance() {
     } catch (error) {
         console.error('Error advancing turn (ideal response):', error);
         showError(error, { operation: 'Advance turn (ideal response)' });
+    }
     } finally {
         _advancingTurn = false;
     }
@@ -1192,7 +1145,10 @@ export async function calibrationJudge() {
     }
 }
 
+let _calibrationListenersInited = false;
 export function initCalibrationListeners() {
+    if (_calibrationListenersInited) return;
+    _calibrationListenersInited = true;
     const genBtn = document.getElementById('generateOneBtn');
     const regenBtn = document.getElementById('regenerateBtn');
     const judgeBtn = document.getElementById('judgeCalibrationBtn');
@@ -1261,7 +1217,10 @@ export async function startNextTurn() {
 /**
  * Initialize multi-turn event listeners.
  */
+let _multiTurnListenersInited = false;
 export function initMultiTurnListeners() {
+    if (_multiTurnListenersInited) return;
+    _multiTurnListenersInited = true;
     const markBreakingBtn = document.getElementById('markBreakingBtn');
     if (markBreakingBtn) {
         markBreakingBtn.addEventListener('click', handleMarkBreaking);

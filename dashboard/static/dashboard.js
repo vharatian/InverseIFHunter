@@ -3,26 +3,105 @@
  */
 
 const API_BASE = window.BASE_PATH || '';
+
+const TZ_KEY = 'mth-tz-mode';
+let _tzMode = (() => { try { return localStorage.getItem(TZ_KEY) || 'local'; } catch (_) { return 'local'; } })();
+
+function fmtDateTime(ts, opts = {}) {
+    if (ts === null || ts === undefined || ts === '') return '';
+    const d = ts instanceof Date ? ts : new Date(ts);
+    if (isNaN(d.getTime())) return '';
+    const o = { ...opts };
+    if (_tzMode === 'utc') o.timeZone = 'UTC';
+    return d.toLocaleString([], o);
+}
+function fmtTime(ts) {
+    if (ts === null || ts === undefined || ts === '') return '';
+    const d = ts instanceof Date ? ts : new Date(ts);
+    if (isNaN(d.getTime())) return '';
+    const o = {};
+    if (_tzMode === 'utc') o.timeZone = 'UTC';
+    return d.toLocaleTimeString([], o);
+}
+function setTzMode(mode) {
+    _tzMode = mode === 'utc' ? 'utc' : 'local';
+    try { localStorage.setItem(TZ_KEY, _tzMode); } catch (_) {}
+    const btn = document.getElementById('tzToggle');
+    if (btn) {
+        btn.textContent = _tzMode === 'utc' ? 'UTC' : 'Local';
+        btn.setAttribute('aria-pressed', _tzMode === 'utc' ? 'true' : 'false');
+    }
+    if (typeof loadSectionData === 'function') {
+        const active = document.querySelector('.tab-btn.active');
+        if (active) loadSectionData(active.dataset.section);
+    }
+}
 const TRAINER_EMAILS_STORAGE_KEY = 'dashboard_trainer_emails';
 let timelineChart = null;
 let weekdayChart = null;
 let modelBreakChart = null;
 let modelUsageChart = null;
 let refreshInterval = null;
+let fullRefreshInterval = null;
+// Tracks in-flight requests per endpoint so rapid filter/tab switches
+// can cancel older fetches and avoid stale UI overwrites.
+const _inflight = new Map();
+
+function showSectionError(sectionId, message) {
+    const el = document.getElementById(`section-${sectionId}`) || document.body;
+    let banner = el.querySelector('.section-error-banner');
+    if (!banner) {
+        banner = document.createElement('div');
+        banner.className = 'section-error-banner';
+        banner.setAttribute('role', 'alert');
+        el.prepend(banner);
+    }
+    banner.textContent = message;
+    banner.style.display = 'block';
+    setTimeout(() => { if (banner) banner.style.display = 'none'; }, 8000);
+}
 
 // ============== Section Navigation ==============
 
 function showSection(sectionId, tabButtonEl) {
     document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-btn').forEach(b => {
+        b.classList.remove('active');
+        b.setAttribute('aria-selected', 'false');
+        b.setAttribute('tabindex', '-1');
+    });
 
     const section = document.getElementById(`section-${sectionId}`);
     if (section) section.classList.add('active');
-    if (tabButtonEl && tabButtonEl.classList.contains('tab-btn')) {
-        tabButtonEl.classList.add('active');
+    const btn = tabButtonEl && tabButtonEl.classList.contains('tab-btn')
+        ? tabButtonEl
+        : document.querySelector(`.tab-btn[data-section="${sectionId}"]`);
+    if (btn) {
+        btn.classList.add('active');
+        btn.setAttribute('aria-selected', 'true');
+        btn.setAttribute('tabindex', '0');
     }
 
     loadSectionData(sectionId);
+}
+
+function _initTabKeyboardNav(rootSelector) {
+    const tablist = document.querySelector(rootSelector);
+    if (!tablist) return;
+    const tabs = Array.from(tablist.querySelectorAll('[role="tab"]'));
+    tablist.addEventListener('keydown', (e) => {
+        const idx = tabs.indexOf(document.activeElement);
+        if (idx < 0) return;
+        let next = idx;
+        if (e.key === 'ArrowRight') next = (idx + 1) % tabs.length;
+        else if (e.key === 'ArrowLeft') next = (idx - 1 + tabs.length) % tabs.length;
+        else if (e.key === 'Home') next = 0;
+        else if (e.key === 'End') next = tabs.length - 1;
+        else return;
+        e.preventDefault();
+        tabs[next].focus();
+        tabs[next].click();
+    });
 }
 
 function showSubTab(tabId, subTabButtonEl) {
@@ -78,17 +157,60 @@ function onTrainerEmailsChange() {
     refreshAll();
 }
 
-async function fetchAPI(endpoint) {
+function _getCsrfCookie() {
+    const m = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/);
+    return m ? decodeURIComponent(m[1]) : '';
+}
+
+function _redirectToLogin() {
     try {
-        const hours = document.getElementById('timeRange').value;
-        const te = trainerEmailsQuery();
-        const sep = endpoint.includes('?') ? '&' : '?';
-        const url = `${API_BASE}/api/${endpoint}${sep}hours=${hours}${te}`;
-        const response = await fetch(url);
+        const stagingPrefix = API_BASE.replace(/\/dashboard\/?$/, '');
+        const adminBase = (stagingPrefix && stagingPrefix !== '/') ? `${stagingPrefix}/admin/` : '/admin/';
+        window.location.href = adminBase;
+    } catch (_) {}
+}
+
+async function fetchAPI(endpoint) {
+    const hours = document.getElementById('timeRange').value;
+    const te = trainerEmailsQuery();
+    const sep = endpoint.includes('?') ? '&' : '?';
+    const url = `${API_BASE}/api/${endpoint}${sep}hours=${hours}${te}`;
+
+    const key = endpoint.split('?')[0];
+    const prev = _inflight.get(key);
+    if (prev) { try { prev.abort(); } catch (_) {} }
+    const controller = new AbortController();
+    _inflight.set(key, controller);
+
+    try {
+        const response = await fetch(url, {
+            signal: controller.signal,
+            credentials: 'include',
+        });
+        if (response.status === 401 || response.status === 503) {
+            _redirectToLogin();
+            throw new Error('Not authenticated');
+        }
+        if (!response.ok) {
+            const body = await response.text().catch(() => '');
+            throw new Error(`HTTP ${response.status}${body ? ': ' + body.slice(0, 120) : ''}`);
+        }
+        const ct = response.headers.get('content-type') || '';
+        if (!ct.includes('application/json')) {
+            throw new Error('Unexpected response type: ' + ct);
+        }
         return await response.json();
     } catch (error) {
+        if (error.name === 'AbortError') return null;
         console.error(`Error fetching ${endpoint}:`, error);
+        const activeSection = document.querySelector('.section.active');
+        if (activeSection) {
+            const sectionId = activeSection.id.replace('section-', '');
+            showSectionError(sectionId, `Failed to load ${key}: ${error.message}`);
+        }
         return null;
+    } finally {
+        if (_inflight.get(key) === controller) _inflight.delete(key);
     }
 }
 
@@ -158,8 +280,11 @@ async function loadTimeline() {
     let lastDate = null;
     const labels = data.timestamps.map(t => {
         const d = new Date(t);
-        const dateStr = d.toLocaleDateString([], {month: 'short', day: 'numeric'});
-        const timeStr = d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+        const dOpts = { month: 'short', day: 'numeric' };
+        const tOpts = { hour: '2-digit', minute: '2-digit' };
+        if (_tzMode === 'utc') { dOpts.timeZone = 'UTC'; tOpts.timeZone = 'UTC'; }
+        const dateStr = d.toLocaleDateString([], dOpts);
+        const timeStr = d.toLocaleTimeString([], tOpts);
         
         if (lastDate !== dateStr) {
             lastDate = dateStr;
@@ -227,12 +352,7 @@ async function loadTimeline() {
                         title: function(tooltipItems) {
                             const idx = tooltipItems[0].dataIndex;
                             const ts = data.timestamps[idx];
-                            return new Date(ts).toLocaleString([], {
-                                month: 'short', 
-                                day: 'numeric',
-                                hour: '2-digit', 
-                                minute: '2-digit'
-                            });
+                            return fmtDateTime(ts, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
                         }
                     }
                 }
@@ -365,19 +485,19 @@ async function loadEvents() {
     
     container.innerHTML = data.events.map(event => {
         const marker = getEventTypeMarker(event.type);
-        const time = new Date(event.ts).toLocaleTimeString();
+        const time = escapeHtml(fmtTime(event.ts));
         const details = formatEventDetails(event);
         const d = event.data || {};
         const colabUrl = (event.colab_url || d.colab_url || d.url || '').trim();
-        const viewTask = colabUrl
+        const viewTask = colabUrl && /^https?:\/\//i.test(colabUrl)
             ? `<a class="event-view-task" href="${escapeHtml(colabUrl)}" target="_blank" rel="noopener noreferrer">View task</a>`
             : '';
-        
+        const typeSafe = escapeHtml(event.type || '');
         return `
             <div class="event-item">
-                <span class="event-type-marker" title="${escapeHtml(event.type)}">${marker}</span>
+                <span class="event-type-marker" title="${typeSafe}">${escapeHtml(marker)}</span>
                 <div class="event-content">
-                    <div class="event-type">${event.type.replace(/_/g, ' ')}</div>
+                    <div class="event-type">${escapeHtml(String(event.type || '').replace(/_/g, ' '))}</div>
                     <div class="event-details">${details}</div>
                 </div>
                 <div class="event-actions">${viewTask}</div>
@@ -404,13 +524,13 @@ function formatEventDetails(event) {
     const data = event.data || {};
     switch(event.type) {
         case 'session_created':
-            return `Session: ${data.session_id || 'N/A'}`;
+            return `Session: ${escapeHtml(data.session_id || 'N/A')}`;
         case 'hunt_result':
-            return `Score: ${data.score ?? 'N/A'} | ${data.is_breaking ? 'BREAK' : 'Pass'} | ${data.model?.split('/').pop() || ''}`;
+            return `Score: ${escapeHtml(String(data.score ?? 'N/A'))} | ${data.is_breaking ? 'BREAK' : 'Pass'} | ${escapeHtml(data.model?.split('/').pop() || '')}`;
         case 'api_call_end':
-            return `${data.provider} | ${data.latency_ms}ms | ${data.success ? 'OK' : 'Failed'}`;
+            return `${escapeHtml(String(data.provider))} | ${escapeHtml(String(data.latency_ms))}ms | ${data.success ? 'OK' : 'Failed'}`;
         default:
-            return JSON.stringify(data);
+            return escapeHtml(JSON.stringify(data));
     }
 }
 
@@ -419,23 +539,21 @@ async function loadTrainers() {
     if (!data) return;
     
     const leaderboard = data.leaderboard || [];
-    
-    // Update podium
-    if (leaderboard.length >= 1) {
-        const p1 = leaderboard[0];
-        document.querySelector('#podium1 .podium-name').textContent = p1.trainer_id;
-        document.querySelector('#podium1 .podium-stat').textContent = `${p1.total_breaks} breaks`;
+
+    // Always reset all podiums first to avoid stale names/stats.
+    for (let i = 1; i <= 3; i++) {
+        const name = document.querySelector(`#podium${i} .podium-name`);
+        const stat = document.querySelector(`#podium${i} .podium-stat`);
+        if (name) name.textContent = '--';
+        if (stat) stat.textContent = '--';
     }
-    if (leaderboard.length >= 2) {
-        const p2 = leaderboard[1];
-        document.querySelector('#podium2 .podium-name').textContent = p2.trainer_id;
-        document.querySelector('#podium2 .podium-stat').textContent = `${p2.total_breaks} breaks`;
-    }
-    if (leaderboard.length >= 3) {
-        const p3 = leaderboard[2];
-        document.querySelector('#podium3 .podium-name').textContent = p3.trainer_id;
-        document.querySelector('#podium3 .podium-stat').textContent = `${p3.total_breaks} breaks`;
-    }
+    leaderboard.slice(0, 3).forEach((p, idx) => {
+        const n = idx + 1;
+        const name = document.querySelector(`#podium${n} .podium-name`);
+        const stat = document.querySelector(`#podium${n} .podium-stat`);
+        if (name) name.textContent = p.trainer_id || '--';
+        if (stat) stat.textContent = `${p.total_breaks ?? 0} breaks`;
+    });
     
     // Update table
     const tbody = document.querySelector('#trainerTable tbody');
@@ -446,13 +564,13 @@ async function loadTrainers() {
     
     tbody.innerHTML = leaderboard.map(t => `
         <tr>
-            <td>${t.rank}</td>
-            <td>${t.trainer_id}</td>
-            <td>${t.total_sessions}</td>
-            <td>${t.total_hunts}</td>
-            <td><strong>${t.total_breaks}</strong></td>
-            <td>${(t.break_rate * 100).toFixed(1)}%</td>
-            <td>${t.efficiency.toFixed(2)}</td>
+            <td>${escapeHtml(String(t.rank ?? ''))}</td>
+            <td>${escapeHtml(t.trainer_id || '')}</td>
+            <td>${escapeHtml(String(t.total_sessions ?? 0))}</td>
+            <td>${escapeHtml(String(t.total_hunts ?? 0))}</td>
+            <td><strong>${escapeHtml(String(t.total_breaks ?? 0))}</strong></td>
+            <td>${((Number(t.break_rate) || 0) * 100).toFixed(1)}%</td>
+            <td>${(Number(t.efficiency) || 0).toFixed(2)}</td>
         </tr>
     `).join('');
 }
@@ -466,7 +584,11 @@ async function loadCriteria() {
     // Update chart
     const chartData = criteria.slice(0, 15);
     const chartDiv = document.getElementById('criteriaChart');
-    
+
+    if (chartDiv && window.Plotly) {
+        try { Plotly.purge(chartDiv); } catch (_) {}
+    }
+
     Plotly.newPlot(chartDiv, [{
         type: 'bar',
         orientation: 'h',
@@ -496,20 +618,23 @@ async function loadCriteria() {
     
     // Update table
     const tbody = document.querySelector('#criteriaTable tbody');
-    tbody.innerHTML = criteria.map(c => `
+    tbody.innerHTML = criteria.map(c => {
+        const diff = Math.max(0, Math.min(1, Number(c.difficulty_score) || 0));
+        return `
         <tr>
-            <td>${c.criteria_id}</td>
-            <td>${c.total_evaluations}</td>
-            <td>${c.pass_count}</td>
-            <td>${c.fail_count}</td>
-            <td>${(c.fail_rate * 100).toFixed(1)}%</td>
+            <td>${escapeHtml(c.criteria_id || '')}</td>
+            <td>${escapeHtml(String(c.total_evaluations ?? 0))}</td>
+            <td>${escapeHtml(String(c.pass_count ?? 0))}</td>
+            <td>${escapeHtml(String(c.fail_count ?? 0))}</td>
+            <td>${((Number(c.fail_rate) || 0) * 100).toFixed(1)}%</td>
             <td>
                 <div style="width: 100px; height: 8px; background: #1e293b; border-radius: 4px; overflow: hidden;">
-                    <div style="width: ${c.difficulty_score * 100}%; height: 100%; background: linear-gradient(90deg, #f59e0b, #ef4444);"></div>
+                    <div style="width: ${diff * 100}%; height: 100%; background: linear-gradient(90deg, #f59e0b, #ef4444);"></div>
                 </div>
             </td>
         </tr>
-    `).join('');
+        `;
+    }).join('');
 }
 
 async function loadModels() {
@@ -585,12 +710,12 @@ async function loadModels() {
     const tbody = document.querySelector('#modelTable tbody');
     tbody.innerHTML = models.map(m => `
         <tr>
-            <td title="${m.fullName}">${m.name}</td>
-            <td>${m.hunts}</td>
-            <td>${m.breaks}</td>
-            <td>${(m.break_rate * 100).toFixed(1)}%</td>
+            <td title="${escapeHtml(m.fullName || '')}">${escapeHtml(m.name || '')}</td>
+            <td>${escapeHtml(String(m.hunts ?? 0))}</td>
+            <td>${escapeHtml(String(m.breaks ?? 0))}</td>
+            <td>${((Number(m.break_rate) || 0) * 100).toFixed(1)}%</td>
             <td>${m.avg_latency_ms ? (m.avg_latency_ms / 1000).toFixed(1) + 's' : '--'}</td>
-            <td>${(m.success_rate * 100).toFixed(1)}%</td>
+            <td>${((Number(m.success_rate) || 0) * 100).toFixed(1)}%</td>
         </tr>
     `).join('');
 }
@@ -625,11 +750,11 @@ async function loadCosts() {
     const tbody = document.querySelector('#costTable tbody');
     tbody.innerHTML = rows.map(r => `
         <tr style="${r.isProvider ? 'font-weight: bold;' : ''}">
-            <td>${r.name}</td>
-            <td>${r.calls}</td>
-            <td>${r.tokens_in.toLocaleString()}</td>
-            <td>${r.tokens_out.toLocaleString()}</td>
-            <td>$${r.cost.toFixed(4)}</td>
+            <td>${escapeHtml(r.name || '')}</td>
+            <td>${escapeHtml(String(r.calls ?? 0))}</td>
+            <td>${Number(r.tokens_in || 0).toLocaleString()}</td>
+            <td>${Number(r.tokens_out || 0).toLocaleString()}</td>
+            <td>$${(Number(r.cost) || 0).toFixed(4)}</td>
         </tr>
     `).join('');
 }
@@ -677,14 +802,14 @@ function toggleCollapse(btn) {
 
 function collapsibleBlock(label, text, defaultCollapsed = true) {
     if (!text) return '';
-    const isLong = text.length > 300;
+    const isLong = String(text).length > 300;
     const collapsed = isLong && defaultCollapsed ? 'collapsed' : '';
     const btnText = collapsed ? '▼ Show full' : '▲ Collapse';
     return `
         <div class="collapsible-wrapper">
-            <div class="collapsible-label">${label}</div>
+            <div class="collapsible-label">${escapeHtml(label)}</div>
             <div class="collapsible-content detail-content ${collapsed}">${escapeHtml(text)}</div>
-            ${isLong ? `<button class="expand-btn" onclick="toggleCollapse(this)">${btnText}</button>` : ''}
+            ${isLong ? `<button type="button" class="expand-btn" data-action="toggleCollapse">${btnText}</button>` : ''}
         </div>
     `;
 }
@@ -693,21 +818,33 @@ function formatCriteriaBadges(criteria) {
     if (!criteria || Object.keys(criteria).length === 0) return '<span class="criteria-empty">No criteria data</span>';
     return Object.entries(criteria).map(([k, v]) => {
         const cls = v === 'PASS' ? 'criteria-pass' : v === 'FAIL' ? 'criteria-fail' : 'criteria-missing';
-        return `<span class="criteria-badge ${cls}">${k}: ${v}</span>`;
+        return `<span class="criteria-badge ${cls}">${escapeHtml(k)}: ${escapeHtml(String(v))}</span>`;
     }).join(' ');
 }
 
+function safeUrl(u) {
+    if (!u) return '';
+    return /^https?:\/\//i.test(u) ? escapeHtml(u) : '';
+}
+
 function formatDetailItem(item, type) {
-    const time = new Date(item.timestamp).toLocaleString();
-    
+    const time = escapeHtml(fmtDateTime(item.timestamp));
+    const modelShort = escapeHtml(item.model?.split('/').pop() || 'Unknown');
+    const trainerEmail = item.trainer_email
+        ? `<span class="trainer-email">${escapeHtml(item.trainer_email)}</span>` : '';
+    const colab = safeUrl(item.colab_url);
+    const colabLink = colab
+        ? `<a class="detail-colab-link" href="${colab}" target="_blank" rel="noopener noreferrer">View task</a>` : '';
+    const idLabel = escapeHtml(item.trainer_id || item.session_id || '');
+
     switch(type) {
         case 'hunts':
             return `
                 <div class="detail-item ${item.is_breaking ? 'breaking' : ''}">
                     <div class="detail-header">
-                        <span>${item.model?.split('/').pop() || 'Unknown'}</span>
+                        <span>${modelShort}</span>
                         <span class="detail-badge ${item.is_breaking ? 'fail' : 'success'}">
-                            Score: ${item.score ?? 'N/A'} ${item.is_breaking ? 'BREAK' : 'Pass'}
+                            Score: ${escapeHtml(String(item.score ?? 'N/A'))} ${item.is_breaking ? 'BREAK' : 'Pass'}
                         </span>
                     </div>
                     ${collapsibleBlock('Model response', item.response_preview, true)}
@@ -717,19 +854,18 @@ function formatDetailItem(item, type) {
                         ${item.judge_explanation ? collapsibleBlock('Judge reasoning', item.judge_explanation, true) : ''}
                     </div>
                     <div class="detail-meta">
-                        <span>${item.trainer_id || item.session_id}</span>
-                        ${item.trainer_email ? `<span class="trainer-email">${escapeHtml(item.trainer_email)}</span>` : ''}
-                        ${item.colab_url ? `<a class="detail-colab-link" href="${escapeHtml(item.colab_url)}" target="_blank" rel="noopener noreferrer">View task</a>` : ''}
+                        <span>${idLabel}</span>
+                        ${trainerEmail}
+                        ${colabLink}
                         <span class="detail-time">${time}</span>
                     </div>
                 </div>
             `;
-        
         case 'breaks':
             return `
                 <div class="detail-item breaking">
                     <div class="detail-header">
-                        <span>${item.model?.split('/').pop()}</span>
+                        <span>${modelShort}</span>
                         <span class="detail-badge fail">BREAK</span>
                     </div>
                     ${collapsibleBlock('Model response', item.response_preview, true)}
@@ -739,45 +875,43 @@ function formatDetailItem(item, type) {
                         ${item.judge_explanation ? collapsibleBlock('Judge reasoning', item.judge_explanation, true) : ''}
                     </div>
                     <div class="detail-meta">
-                        <span>${item.trainer_id || item.session_id}</span>
-                        ${item.trainer_email ? `<span class="trainer-email">${escapeHtml(item.trainer_email)}</span>` : ''}
-                        ${item.colab_url ? `<a class="detail-colab-link" href="${escapeHtml(item.colab_url)}" target="_blank" rel="noopener noreferrer">View task</a>` : ''}
+                        <span>${idLabel}</span>
+                        ${trainerEmail}
+                        ${colabLink}
                         <span class="detail-time">${time}</span>
                     </div>
                 </div>
             `;
-        
         case 'calls':
             return `
                 <div class="detail-item ${item.success ? '' : 'error'}">
                     <div class="detail-header">
-                        <span>${item.provider} / ${item.model?.split('/').pop()}</span>
+                        <span>${escapeHtml(item.provider || '')} / ${modelShort}</span>
                         <span class="detail-badge ${item.success ? 'success' : 'fail'}">${item.success ? 'OK' : 'Failed'}</span>
                     </div>
                     <div class="detail-meta">
-                        <span>${item.latency_ms}ms</span>
-                        <span>${item.tokens_in || 0} in</span>
-                        <span>${item.tokens_out || 0} out</span>
-                        <span>$${item.cost?.toFixed(6) || '0'}</span>
-                        ${item.trainer_email ? `<span class="trainer-email">${escapeHtml(item.trainer_email)}</span>` : ''}
-                        ${item.colab_url ? `<a class="detail-colab-link" href="${escapeHtml(item.colab_url)}" target="_blank" rel="noopener noreferrer">View task</a>` : ''}
+                        <span>${escapeHtml(String(item.latency_ms ?? 0))}ms</span>
+                        <span>${escapeHtml(String(item.tokens_in || 0))} in</span>
+                        <span>${escapeHtml(String(item.tokens_out || 0))} out</span>
+                        <span>$${(Number(item.cost) || 0).toFixed(6)}</span>
+                        ${trainerEmail}
+                        ${colabLink}
                         <span class="detail-time">${time}</span>
                     </div>
                 </div>
             `;
-        
         case 'failures':
             return `
                 <div class="detail-item error">
                     <div class="detail-header">
-                        <span>${item.type} error</span>
-                        <span>${item.model?.split('/').pop() || ''}</span>
+                        <span>${escapeHtml(item.type || '')} error</span>
+                        <span>${modelShort}</span>
                     </div>
-                    <div class="detail-content">${escapeHtml(item.error) || 'Unknown error'}</div>
+                    <div class="detail-content">${escapeHtml(item.error || 'Unknown error')}</div>
                     <div class="detail-meta">
-                        <span>${item.session_id || 'N/A'}</span>
-                        ${item.trainer_email ? `<span class="trainer-email">${escapeHtml(item.trainer_email)}</span>` : ''}
-                        ${item.colab_url ? `<a class="detail-colab-link" href="${escapeHtml(item.colab_url)}" target="_blank" rel="noopener noreferrer">View task</a>` : ''}
+                        <span>${escapeHtml(item.session_id || 'N/A')}</span>
+                        ${trainerEmail}
+                        ${colabLink}
                         <span class="detail-time">${time}</span>
                     </div>
                 </div>
@@ -808,18 +942,33 @@ async function performSearch() {
         return;
     }
     
-    container.innerHTML = `
-        <p style="margin-bottom: 1rem;">Found ${data.count} results for "${query}"</p>
-        ${data.results.map(r => `
-            <div class="detail-item">
-                <div class="detail-header">
-                    <span>${r.type}</span>
-                    <span class="detail-time">${new Date(r.ts).toLocaleString()}</span>
-                </div>
-                <div class="detail-content"><pre>${JSON.stringify(r.data, null, 2)}</pre></div>
-            </div>
-        `).join('')}
-    `;
+    container.replaceChildren();
+    const header = document.createElement('p');
+    header.style.marginBottom = '1rem';
+    header.textContent = `Found ${data.count} results for "${query}"`;
+    container.appendChild(header);
+    for (const r of data.results) {
+        const row = document.createElement('div');
+        row.className = 'detail-item';
+        const hdr = document.createElement('div');
+        hdr.className = 'detail-header';
+        const typeEl = document.createElement('span');
+        typeEl.textContent = r.type || '';
+        hdr.appendChild(typeEl);
+        const timeEl = document.createElement('span');
+        timeEl.className = 'detail-time';
+        timeEl.textContent = fmtDateTime(r.ts);
+        hdr.appendChild(timeEl);
+        row.appendChild(hdr);
+        const body = document.createElement('div');
+        body.className = 'detail-content';
+        const pre = document.createElement('pre');
+        // textContent: JSON characters cannot break out of <pre>.
+        pre.textContent = JSON.stringify(r.data, null, 2);
+        body.appendChild(pre);
+        row.appendChild(body);
+        container.appendChild(row);
+    }
 }
 
 function clearSearch() {
@@ -836,7 +985,7 @@ function refreshAll() {
         loadSectionData(sectionId);
     }
     loadRealtimeStats();
-    document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
+    document.getElementById('lastUpdate').textContent = fmtTime(new Date());
 }
 
 // ============== Initialize ==============
@@ -846,10 +995,17 @@ document.addEventListener('DOMContentLoaded', () => {
     if (te) {
         const saved = localStorage.getItem(TRAINER_EMAILS_STORAGE_KEY);
         if (saved) te.value = saved;
+        let filterTimer = null;
+        const debouncedApply = () => {
+            clearTimeout(filterTimer);
+            filterTimer = setTimeout(onTrainerEmailsChange, 400);
+        };
+        te.addEventListener('input', debouncedApply);
         te.addEventListener('change', onTrainerEmailsChange);
         te.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
+                clearTimeout(filterTimer);
                 onTrainerEmailsChange();
             }
         });
@@ -863,19 +1019,99 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
-    // Initial load
+    // Wire buttons/tabs that previously used inline handlers.
+    document.getElementById('searchBtn')?.addEventListener('click', () => performSearch());
+    document.getElementById('refreshBtn')?.addEventListener('click', () => refreshAll());
+    document.getElementById('timeRange')?.addEventListener('change', () => refreshAll());
+    document.getElementById('eventFilter')?.addEventListener('change', () => loadEvents());
+    document.getElementById('clearSearchBtn')?.addEventListener('click', () => clearSearch());
+    document.querySelectorAll('.tab-btn[data-section]').forEach((btn) => {
+        btn.addEventListener('click', (e) => showSection(btn.dataset.section, btn));
+    });
+    document.querySelectorAll('.sub-tab[data-subtab]').forEach((btn) => {
+        btn.addEventListener('click', (e) => showSubTab(btn.dataset.subtab, btn));
+    });
+    document.body.addEventListener('click', (e) => {
+        const btn = e.target.closest('button[data-action="toggleCollapse"]');
+        if (btn) toggleCollapse(btn);
+    });
+    _initTabKeyboardNav('.tab-nav');
+
+    const tzBtn = document.getElementById('tzToggle');
+    if (tzBtn) {
+        tzBtn.textContent = _tzMode === 'utc' ? 'UTC' : 'Local';
+        tzBtn.setAttribute('aria-pressed', _tzMode === 'utc' ? 'true' : 'false');
+        tzBtn.addEventListener('click', () => setTzMode(_tzMode === 'utc' ? 'local' : 'utc'));
+    }
+
     loadSectionData('overview');
     loadRealtimeStats();
-    
-    // Auto-refresh realtime stats every 30 seconds (was 5s - too aggressive)
+
+    setupLiveStream();
+
     refreshInterval = setInterval(() => {
         loadRealtimeStats();
-    }, 30000);
-    
-    // Full dashboard refresh every 2 minutes
-    setInterval(() => {
+    }, 60000);
+
+    fullRefreshInterval = setInterval(() => {
         refreshAll();
-    }, 120000);
-    
-    document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
+    }, 300000);
+
+    window.addEventListener('pagehide', () => {
+        if (refreshInterval) { clearInterval(refreshInterval); refreshInterval = null; }
+        if (fullRefreshInterval) { clearInterval(fullRefreshInterval); fullRefreshInterval = null; }
+        if (_liveStream && _liveStream.close) { try { _liveStream.close(); } catch (_) {} _liveStream = null; }
+        _inflight.forEach(c => { try { c.abort(); } catch (_) {} });
+        _inflight.clear();
+    });
+
+    document.getElementById('lastUpdate').textContent = fmtTime(new Date());
 });
+
+// ============== Live stream (SSE) ==============
+
+let _liveStream = null;
+let _liveStreamBackoff = 1000;
+const _sseDebounces = {};
+
+function _sseDebounce(name, fn, ms = 500) {
+    clearTimeout(_sseDebounces[name]);
+    _sseDebounces[name] = setTimeout(fn, ms);
+}
+
+function setupLiveStream() {
+    if (typeof EventSource === 'undefined') return;
+    try {
+        const url = `${API_BASE}/api/stream`;
+        const es = new EventSource(url, { withCredentials: true });
+        _liveStream = es;
+
+        es.addEventListener('open', () => { _liveStreamBackoff = 1000; });
+
+        es.addEventListener('telemetry', () => {
+            _sseDebounce('realtime', () => loadRealtimeStats(), 250);
+            _sseDebounce('active-section', () => refreshAll(), 1500);
+        });
+        es.addEventListener('config', () => {
+            _sseDebounce('full', () => refreshAll(), 500);
+        });
+        es.addEventListener('team', () => {
+            _sseDebounce('trainers', () => {
+                if (document.getElementById('section-trainers')?.classList.contains('active')) {
+                    loadTrainers();
+                }
+            }, 500);
+        });
+        es.addEventListener('db', () => {
+            _sseDebounce('full', () => refreshAll(), 750);
+        });
+
+        es.onerror = () => {
+            es.close();
+            _liveStream = null;
+            const delay = Math.min(_liveStreamBackoff, 30000);
+            _liveStreamBackoff = Math.min(_liveStreamBackoff * 2, 60000);
+            setTimeout(setupLiveStream, delay);
+        };
+    } catch (_) {}
+}

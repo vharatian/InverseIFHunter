@@ -156,6 +156,53 @@ def reload_config(path: Optional[Path] = None) -> _ConfigNode:
     return load_config(path or DEFAULT_CONFIG_PATH)
 
 
+# ---------------- Redis pub/sub live reload ----------------
+_pubsub_thread = None
+
+
+def start_redis_reload_listener() -> None:
+    """Subscribe to `mth:config` and invalidate the cached config on publish.
+
+    Safe to call multiple times; only starts the subscriber once. Degrades
+    silently if the `redis` package or the server are unavailable.
+    """
+    global _pubsub_thread
+    if _pubsub_thread is not None:
+        return
+    try:
+        import os
+        import threading
+        import redis as _redis
+    except Exception:
+        return
+
+    url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+
+    def _runner() -> None:
+        try:
+            client = _redis.Redis.from_url(url, decode_responses=True,
+                                           socket_connect_timeout=2,
+                                           socket_timeout=2)
+            client.ping()
+            pubsub = client.pubsub(ignore_subscribe_messages=True)
+            pubsub.subscribe("mth:config")
+            logger.info("config_loader: listening on mth:config for live reload")
+            for message in pubsub.listen():
+                if message.get("type") != "message":
+                    continue
+                try:
+                    reload_config()
+                    logger.info("config_loader: reloaded via mth:config event")
+                except Exception as exc:
+                    logger.warning("config_loader reload failed: %s", exc)
+        except Exception as exc:
+            logger.warning("config_loader redis listener stopped: %s", exc)
+
+    t = threading.Thread(target=_runner, name="mth-config-reload", daemon=True)
+    t.start()
+    _pubsub_thread = t
+
+
 def get_agentic_rules(config_path: Optional[Path] = None) -> List[Dict[str, Any]]:
     """Get agentic rules: from global config, or from file if path given. Fallback to agentic_rules.yaml."""
     if config_path is not None and config_path.exists():

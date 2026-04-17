@@ -21,7 +21,7 @@ import re
 from typing import Any, Dict, List, Optional
 
 
-from fastapi import APIRouter, File, UploadFile, HTTPException, Request, BackgroundTasks
+from fastapi import APIRouter, File, UploadFile, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel
 
@@ -67,12 +67,7 @@ def _extract_google_file_id(url: str) -> str:
 
 def _extract_task_id_from_parsed(parsed: ParsedNotebook) -> str:
     """Extract task display ID from a ParsedNotebook's metadata."""
-    meta = parsed.metadata or {}
-    for key in redis_store._get_task_id_fields():
-        val = meta.get(key)
-        if val is not None and str(val).strip():
-            return str(val).strip()
-    return ""
+    return redis_store.task_id_from_metadata(parsed.metadata or {})
 
 
 def _merge_prompt_preview_for_duplicate(
@@ -436,18 +431,18 @@ async def create_notebook(http_request: Request, request: CreateNotebookRequest)
 
 
 @router.post("/warmup-connections")
-async def warmup_connections(background_tasks: BackgroundTasks):
+async def warmup_connections():
     from services.http_config import warmup_all_connections
-    
+
     async def do_warmup():
         try:
             results = await warmup_all_connections()
             logger.info(f"Connection warm-up completed: {results}")
         except Exception as e:
             logger.error(f"Connection warm-up failed: {e}")
-    
+
     asyncio.create_task(do_warmup())
-    
+
     return {"status": "warming_up", "message": "Connection warm-up started in background"}
 
 

@@ -5,6 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Panel — Model Hunter</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static_shared/tokens.css">
+    <script>
+    (function () {
+        var p = (location.pathname || '/').replace(/\/+$/, '') || '/';
+        var i = p.indexOf('/admin');
+        var basePath = i > 0 ? p.slice(0, i) : '';
+        var href = basePath + '/static/theme.css';
+        document.write('<link rel="stylesheet" href="' + href + '">');
+    })();
+    </script>
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -775,6 +785,17 @@
         </div>
     </div>
 
+    <div id="confirm-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="confirm-modal-title">
+        <div class="modal-panel">
+            <h2 id="confirm-modal-title" class="modal-title">Are you sure?</h2>
+            <p class="modal-sub" id="confirm-modal-body"></p>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-ghost" id="confirm-modal-cancel">Cancel</button>
+                <button type="button" class="btn btn-danger" id="confirm-modal-ok">Confirm</button>
+            </div>
+        </div>
+    </div>
+
     <div id="db-row-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="db-row-modal-title">
         <div class="modal-panel db-modal-panel">
             <h2 id="db-row-modal-title" class="modal-title">Row</h2>
@@ -826,7 +847,7 @@
                 <div class="header-right">
                     <span class="user-email" id="user-email"></span>
                     <span class="role-badge" id="role-badge"></span>
-                    <a href="/dashboard/" class="btn btn-ghost btn-sm">Dashboard</a>
+                    <a href="#" id="admin-dashboard-link" class="btn btn-ghost btn-sm">Dashboard</a>
                     <button type="button" class="update-indicator hidden" id="adminUpdateIndicator" title="Update available">
                         <span class="update-indicator-dot"></span>
                         <span class="update-indicator-label">Update</span>
@@ -834,12 +855,12 @@
                     <button class="btn btn-sm btn-danger" id="logout-btn">Logout</button>
                 </div>
             </div>
-            <nav class="tab-bar" id="tab-nav">
-                <button class="tab-btn active" data-tab="team">Team</button>
-                <button class="tab-btn" data-tab="config">Config</button>
-                <button class="tab-btn" data-tab="tracking">Tracking</button>
-                <button class="tab-btn" data-tab="admins">Dashboard Admins</button>
-                <button class="tab-btn" data-tab="data">Data</button>
+            <nav class="tab-bar" id="tab-nav" role="tablist" aria-label="Admin sections">
+                <button type="button" class="tab-btn active" role="tab" aria-selected="true" aria-controls="section-team" id="tab-team" data-tab="team">Team</button>
+                <button type="button" class="tab-btn" role="tab" aria-selected="false" tabindex="-1" aria-controls="section-config" id="tab-config" data-tab="config">Config</button>
+                <button type="button" class="tab-btn" role="tab" aria-selected="false" tabindex="-1" aria-controls="section-tracking" id="tab-tracking" data-tab="tracking">Tracking</button>
+                <button type="button" class="tab-btn" role="tab" aria-selected="false" tabindex="-1" aria-controls="section-admins" id="tab-admins" data-tab="admins">Dashboard Admins</button>
+                <button type="button" class="tab-btn" role="tab" aria-selected="false" tabindex="-1" aria-controls="section-data" id="tab-data" data-tab="data">Data</button>
             </nav>
         </div>
 
@@ -882,6 +903,9 @@
         </div>
     </div>
 
+    <script type="module">
+      import('/static_shared/errorPipeline.js').then(m => m.initErrorPipeline({ endpoint: '/api/client-errors', app: 'admin' })).catch(() => {});
+    </script>
     <script type="module" src="static/admin.js?v=9"></script>
 </body>
 </html>

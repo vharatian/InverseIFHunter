@@ -32,14 +32,52 @@ export function setTipsPaused(paused) {
     } catch (_) {}
 }
 
+/**
+ * Last-wins dedupe by turn_number/turnNumber. Shared by sessionHydrator and multiturn
+ * so hydration merges never produce duplicate turn rows. Matches server-side dedupe.
+ */
+export function dedupeTurnsByNumber(turns) {
+    const byNum = new Map();
+    for (const t of turns || []) {
+        const n = Number(t?.turn_number ?? t?.turnNumber);
+        if (!Number.isFinite(n) || n < 1) continue;
+        byNum.set(n, t);
+    }
+    return Array.from(byNum.entries())
+        .sort((a, b) => a[0] - b[0])
+        .map(([, t]) => t);
+}
+
 export function escapeHtml(unsafe) {
-    if (!unsafe) return '';
-    return unsafe
+    if (unsafe === null || unsafe === undefined) return '';
+    return String(unsafe)
          .replace(/&/g, "&amp;")
          .replace(/</g, "&lt;")
          .replace(/>/g, "&gt;")
          .replace(/"/g, "&quot;")
          .replace(/'/g, "&#039;");
+}
+
+/**
+ * Render markdown to sanitised HTML. Falls back to an escaped <pre> block when
+ * marked/DOMPurify aren't available yet. SAFE to insert via innerHTML.
+ */
+export function renderMarkdownSafe(source) {
+    const src = source == null ? '' : String(source);
+    try {
+        if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
+            const html = marked.parse(src, { breaks: true, gfm: true });
+            return DOMPurify.sanitize(html, { USE_PROFILES: { html: true } });
+        }
+        if (typeof marked !== 'undefined') {
+            // marked without DOMPurify — strip script/style via a small regex safety net.
+            const html = marked.parse(src, { breaks: true, gfm: true });
+            return html.replace(/<script[\s\S]*?<\/script>/gi, '')
+                       .replace(/\son\w+\s*=\s*"[^"]*"/gi, '')
+                       .replace(/\son\w+\s*=\s*'[^']*'/gi, '');
+        }
+    } catch (_) { /* fall through */ }
+    return `<pre>${escapeHtml(src)}</pre>`;
 }
 
 export function countWords(text) {

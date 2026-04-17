@@ -11,12 +11,17 @@
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
         rel="stylesheet">
+    <link rel="stylesheet" href="/static_shared/tokens.css">
     <link rel="stylesheet" href="static/style.css?v=45">
-    <!-- Marked.js for Markdown parsing -->
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- Marked.js for Markdown parsing (pinned) -->
+    <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js" defer crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <!-- DOMPurify for sanitising rendered markdown -->
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js" defer crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 </head>
 
 <body>
+<!-- Skip link — visible only on keyboard focus, jumps past header/nav -->
+<a class="mh-skip-link" href="#mainContainer">Skip to main content</a>
 <!-- Aurora ambient background — purely visual, no interaction -->
 <div id="auroraCanvas" aria-hidden="true">
     <div class="aurora-blob aurora-blob-1"></div>
@@ -74,7 +79,7 @@
         <div class="trainer-reg-card">
             <h2 class="trainer-reg-title">Welcome to Model Hunter</h2>
             <p class="trainer-reg-subtitle">Please enter your details to get started. You only need to do this once.</p>
-            <form id="trainerRegForm" class="trainer-reg-form" autocomplete="on" onsubmit="return false;">
+            <form id="trainerRegForm" class="trainer-reg-form" autocomplete="on">
                 <div class="trainer-reg-field">
                     <label for="trainerNameInput">Name</label>
                     <input type="text" id="trainerNameInput" name="name" placeholder="e.g. Tyler" required
@@ -175,6 +180,12 @@
             <!-- Journey steps rendered dynamically by JS -->
         </nav>
     </header>
+
+    <!-- Persistent offline/sync banner (Lit component) -->
+    <mh-connection-banner></mh-connection-banner>
+
+    <!-- Global keyboard-shortcut help overlay (opens with `?`) -->
+    <mh-shortcut-help></mh-shortcut-help>
 
     <!-- Main Content -->
     <main class="container" id="mainContainer">
@@ -935,8 +946,12 @@
     <!-- Toast Container -->
     <div id="toastContainer" style="position: fixed; top: 1rem; left: 0; right: 0; z-index: 10000; display: flex; flex-direction: column; align-items: center; gap: 0.45rem; pointer-events: none; padding: 0 0.75rem;"></div>
 
-    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js" defer crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
+    <script type="module">
+      import { initErrorPipeline } from '/static_shared/errorPipeline.js';
+      initErrorPipeline({ endpoint: '/api/client-errors', app: 'hunter' });
+    </script>
     <script type="module" src="static/app.js?v=46"></script>
 </body>
 

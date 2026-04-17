@@ -10,26 +10,51 @@ Admin registry stored in .storage/dashboard_admins.json
 import os
 import json
 import logging
+import secrets as _secrets
 
 logger = logging.getLogger(__name__)
 import hashlib
+import hmac
 import time
 from typing import Optional, List, Dict
 from pathlib import Path
 from fastapi import Request, HTTPException, Response
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
-# Configuration
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 COOKIE_NAME = "admin_session"
-COOKIE_MAX_AGE = 30 * 24 * 60 * 60  # 30 days (long-lived for "one-time login" feel)
+CSRF_COOKIE_NAME = "csrf_token"
+CSRF_HEADER_NAME = "X-CSRF-Token"
+COOKIE_MAX_AGE = 30 * 24 * 60 * 60
 
-# Admin registry path
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+COOKIE_SECURE = _env_bool("COOKIE_SECURE", True)
+COOKIE_SAMESITE = os.environ.get("COOKIE_SAMESITE", "lax").lower()
+ALLOW_OPEN_ADMIN = _env_bool("ALLOW_OPEN_ADMIN", False)
+
 _STORAGE_PATH = os.environ.get("SESSION_STORAGE_PATH", "/app/.storage")
 ADMINS_FILE = os.path.join(_STORAGE_PATH, "dashboard_admins.json")
 
-# Derive signing key from password hash
-_SECRET_KEY = hashlib.sha256(f"model-hunter-dashboard-{ADMIN_PASSWORD}".encode()).hexdigest()
+# Signing key: prefer SESSION_SECRET, fallback to password-derived (warn).
+_SESSION_SECRET = os.environ.get("SESSION_SECRET", "").strip()
+if _SESSION_SECRET:
+    _SECRET_KEY = hashlib.sha256(
+        f"mth-dash|{_SESSION_SECRET}|{ADMIN_PASSWORD}".encode()
+    ).hexdigest()
+else:
+    if ADMIN_PASSWORD:
+        logger.warning(
+            "SESSION_SECRET not set; deriving signing key from ADMIN_PASSWORD only. "
+            "Set SESSION_SECRET for stronger session integrity."
+        )
+    _SECRET_KEY = hashlib.sha256(
+        f"model-hunter-dashboard-{ADMIN_PASSWORD}".encode()
+    ).hexdigest()
 _serializer = URLSafeTimedSerializer(_SECRET_KEY)
 
 
@@ -81,66 +106,105 @@ def verify_session_token(token: str) -> Optional[Dict]:
         return None
 
 
-def set_auth_cookie(response: Response, token: str):
-    """Set the authentication cookie on a response."""
+def _generate_csrf_token() -> str:
+    return _secrets.token_urlsafe(32)
+
+
+def set_auth_cookie(response: Response, token: str, csrf_token: Optional[str] = None):
+    """Set the authentication cookie + a readable CSRF cookie on a response."""
     response.set_cookie(
         key=COOKIE_NAME,
         value=token,
         max_age=COOKIE_MAX_AGE,
         httponly=True,
-        samesite="lax",
-        secure=False,  # Set to True if using HTTPS
+        samesite=COOKIE_SAMESITE,
+        secure=COOKIE_SECURE,
+    )
+    # CSRF double-submit: readable by JS, same lifetime as session.
+    response.set_cookie(
+        key=CSRF_COOKIE_NAME,
+        value=csrf_token or _generate_csrf_token(),
+        max_age=COOKIE_MAX_AGE,
+        httponly=False,
+        samesite=COOKIE_SAMESITE,
+        secure=COOKIE_SECURE,
     )
 
 
 def clear_auth_cookie(response: Response):
-    """Clear the authentication cookie."""
+    """Clear the authentication + CSRF cookies."""
     response.delete_cookie(key=COOKIE_NAME)
+    response.delete_cookie(key=CSRF_COOKIE_NAME)
 
 
 def get_session_token(request: Request) -> Optional[str]:
-    """Extract session token from request cookies."""
     return request.cookies.get(COOKIE_NAME)
 
 
 def get_current_user(request: Request) -> Optional[Dict]:
-    """Get the current authenticated user's token data, or None."""
     token = get_session_token(request)
     if not token:
         return None
     return verify_session_token(token)
 
 
+def _fail_unauth() -> HTTPException:
+    return HTTPException(status_code=401, detail="Not authenticated")
+
+
+def _fail_misconfigured() -> HTTPException:
+    return HTTPException(
+        status_code=503,
+        detail="Auth not configured (ADMIN_PASSWORD required)",
+    )
+
+
 async def verify_admin(request: Request):
-    """
-    FastAPI dependency that verifies admin authentication.
-    When ADMIN_PASSWORD is not set, skips auth (allows unauthenticated access).
-    Raises 401 if auth is configured but not authenticated.
-    """
+    """Require a valid admin session. Fail-closed when auth is not configured
+    unless ``ALLOW_OPEN_ADMIN=1`` is set (development only)."""
     if not is_auth_configured():
-        return
+        if ALLOW_OPEN_ADMIN:
+            logger.warning("ALLOW_OPEN_ADMIN=1: admin endpoints are unauthenticated")
+            return {"auth": True, "email": "dev_open_admin", "is_super": True}
+        raise _fail_misconfigured()
     token = get_session_token(request)
     if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+        raise _fail_unauth()
     data = verify_session_token(token)
     if not data:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+        raise _fail_unauth()
+    return data
 
 
 async def verify_super_admin(request: Request):
-    """
-    FastAPI dependency that verifies SUPER admin (password-based) authentication.
-    Only super admins can manage the admin list.
-    When ADMIN_PASSWORD is not set, skips (no super admin features available).
-    """
+    """Require a super-admin session. Fail-closed when auth is not configured."""
     if not is_auth_configured():
-        return
+        if ALLOW_OPEN_ADMIN:
+            logger.warning("ALLOW_OPEN_ADMIN=1: super-admin endpoints are unauthenticated")
+            return {"auth": True, "email": "dev_open_admin", "is_super": True}
+        raise _fail_misconfigured()
     token = get_session_token(request)
     if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+        raise _fail_unauth()
     data = verify_session_token(token)
     if not data or not data.get("is_super"):
         raise HTTPException(status_code=403, detail="Super admin access required")
+    return data
+
+
+# CSRF double-submit: mutating admin routes must include matching header.
+CSRF_HEADER_NAME = "x-csrf-token"
+_CSRF_SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+
+
+def verify_csrf(request: Request) -> None:
+    """Compare cookie CSRF value vs header. Raises 403 on mismatch."""
+    if request.method.upper() in _CSRF_SAFE_METHODS:
+        return
+    cookie_val = request.cookies.get(CSRF_COOKIE_NAME, "")
+    header_val = request.headers.get(CSRF_HEADER_NAME, "")
+    if not cookie_val or not header_val or not hmac.compare_digest(cookie_val, header_val):
+        raise HTTPException(status_code=403, detail="CSRF token invalid")
 
 
 # ============== Admin Registry ==============

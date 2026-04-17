@@ -31,12 +31,21 @@ export function connectHuntChannel(sessionId, userEmail, callbacks) {
     onReconnect
   } = callbacks;
 
+  // Always clean any prior connection before opening a new one.
+  disconnectHuntChannel();
+
   const seenEventIds = new Set();
 
   function isDuplicateWs(payload) {
-    const id = payload.trace_id || payload.hunt_id;
-    if (id && seenEventIds.has(id)) return true;
-    if (id) seenEventIds.add(id);
+    // Key on (event type, hunt_id/trace_id) so different event types sharing a
+    // hunt_id (progress + result) don't stomp on each other.
+    const data = payload && payload.data ? payload.data : {};
+    const type = payload?.type || payload?.event_type || '';
+    const id = payload?.trace_id || data.hunt_id || payload?.hunt_id;
+    if (!id) return false;
+    const key = `${type}:${id}`;
+    if (seenEventIds.has(key)) return true;
+    seenEventIds.add(key);
     return false;
   }
 
@@ -89,7 +98,15 @@ export function connectHuntChannel(sessionId, userEmail, callbacks) {
       .receive('ok', () => {
         console.log(`[HuntChannel] Joined hunt:${sessionId}`);
         fetch(`api/start-hunt/${sessionId}`, { method: 'POST' })
-          .catch(err => console.warn('[HuntChannel] Failed to submit hunt job:', err));
+          .then(res => {
+            if (!res.ok && callbacks.onError) {
+              callbacks.onError({ message: `Failed to start hunt (HTTP ${res.status})`, status: res.status });
+            }
+          })
+          .catch(err => {
+            console.warn('[HuntChannel] Failed to submit hunt job:', err);
+            if (callbacks.onError) callbacks.onError({ message: 'Failed to start hunt', error: err });
+          });
       })
       .receive('error', (resp) => {
         console.warn('[HuntChannel] Join failed:', resp);

@@ -17,9 +17,17 @@
         return p.slice(0, i + '/dashboard'.length);
     })();
     </script>
-    <link rel="stylesheet" href="static/style.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <link rel="stylesheet" href="/static_shared/tokens.css">
+    <script>
+    (function () {
+        var bp = window.BASE_PATH || '';
+        var base = bp + '/static/';
+        document.write('<link rel="stylesheet" href="' + base + 'theme.css?v=' + (window.APP_VERSION || 'dev') + '">');
+        document.write('<link rel="stylesheet" href="' + base + 'style.css?v=' + (window.APP_VERSION || 'dev') + '">');
+    })();
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js" defer crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js" defer crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 </head>
 <body>
     <header>
@@ -34,30 +42,31 @@
             </div>
             <div class="search-box">
                 <input type="text" id="searchInput" placeholder="Search...">
-                <button type="button" onclick="performSearch()">Search</button>
+                <button type="button" id="searchBtn">Search</button>
             </div>
-            <select id="timeRange" onchange="refreshAll()">
+            <select id="timeRange">
                 <option value="1">Last 1 hour</option>
                 <option value="6">Last 6 hours</option>
                 <option value="24" selected>Last 24 hours</option>
                 <option value="72">Last 3 days</option>
                 <option value="168">Last 7 days</option>
             </select>
+            <button type="button" id="tzToggle" class="tz-toggle" title="Toggle timezone" aria-pressed="false">Local</button>
             <button class="update-indicator hidden" id="dashboardUpdateIndicator" type="button" title="Update available">
                 <span class="update-indicator-dot"></span>
                 <span class="update-indicator-label">Update</span>
             </button>
-            <button type="button" id="refreshBtn" onclick="refreshAll()">Refresh</button>
+            <button type="button" id="refreshBtn">Refresh</button>
         </div>
     </header>
 
-    <nav class="tab-nav">
-        <button type="button" class="tab-btn active" data-section="overview" onclick="showSection('overview', this)">Overview</button>
-        <button type="button" class="tab-btn" data-section="trainers" onclick="showSection('trainers', this)">Trainers</button>
-        <button type="button" class="tab-btn" data-section="criteria" onclick="showSection('criteria', this)">Criteria</button>
-        <button type="button" class="tab-btn" data-section="models" onclick="showSection('models', this)">Models</button>
-        <button type="button" class="tab-btn" data-section="costs" onclick="showSection('costs', this)">Costs</button>
-        <button type="button" class="tab-btn" data-section="details" onclick="showSection('details', this)">Details</button>
+    <nav class="tab-nav" role="tablist" aria-label="Dashboard sections">
+        <button type="button" class="tab-btn active" role="tab" aria-selected="true" aria-controls="section-overview" id="tab-overview" data-section="overview">Overview</button>
+        <button type="button" class="tab-btn" role="tab" aria-selected="false" tabindex="-1" aria-controls="section-trainers" id="tab-trainers" data-section="trainers">Trainers</button>
+        <button type="button" class="tab-btn" role="tab" aria-selected="false" tabindex="-1" aria-controls="section-criteria" id="tab-criteria" data-section="criteria">Criteria</button>
+        <button type="button" class="tab-btn" role="tab" aria-selected="false" tabindex="-1" aria-controls="section-models" id="tab-models" data-section="models">Models</button>
+        <button type="button" class="tab-btn" role="tab" aria-selected="false" tabindex="-1" aria-controls="section-costs" id="tab-costs" data-section="costs">Costs</button>
+        <button type="button" class="tab-btn" role="tab" aria-selected="false" tabindex="-1" aria-controls="section-details" id="tab-details" data-section="details">Details</button>
     </nav>
 
     <main>
@@ -152,7 +161,7 @@
                 </div>
                 <div class="panel-header">
                     <h3>Live event feed</h3>
-                    <select id="eventFilter" onchange="loadEvents()">
+                    <select id="eventFilter">
                         <option value="">All Events</option>
                         <option value="hunt_result">Hunt Results</option>
                         <option value="session_created">Sessions</option>
@@ -330,10 +339,10 @@
             </div>
 
             <div class="sub-tabs">
-                <button type="button" class="sub-tab active" onclick="showSubTab('hunts', this)">Hunts</button>
-                <button type="button" class="sub-tab" onclick="showSubTab('breaks', this)">Breaks</button>
-                <button type="button" class="sub-tab" onclick="showSubTab('calls', this)">API Calls</button>
-                <button type="button" class="sub-tab" onclick="showSubTab('failures', this)">Failures</button>
+                <button type="button" class="sub-tab active" data-subtab="hunts">Hunts</button>
+                <button type="button" class="sub-tab" data-subtab="breaks">Breaks</button>
+                <button type="button" class="sub-tab" data-subtab="calls">API Calls</button>
+                <button type="button" class="sub-tab" data-subtab="failures">Failures</button>
             </div>
 
             <div class="sub-content active" id="subtab-hunts">
@@ -354,7 +363,7 @@
         <section id="section-search" class="section">
             <div class="section-header">
                 <h2>Search results</h2>
-                <button onclick="clearSearch()" class="clear-btn">Clear</button>
+                <button type="button" id="clearSearchBtn" class="clear-btn">Clear</button>
             </div>
             <div id="searchResults"></div>
         </section>
@@ -368,7 +377,16 @@
     <script type="module">
     const base = window.BASE_PATH || '';
     import(base + '/static/version-init.js').catch(function (e) { console.error('[dashboard] version-init failed', e); });
+    import('/static_shared/errorPipeline.js').then(m => m.initErrorPipeline({ endpoint: '/api/client-errors', app: 'dashboard' })).catch(() => {});
     </script>
-    <script src="static/dashboard.js"></script>
+    <script>
+    (function () {
+        var bp = window.BASE_PATH || '';
+        var s = document.createElement('script');
+        s.src = bp + '/static/dashboard.js?v=' + (window.APP_VERSION || 'dev');
+        s.defer = true;
+        document.body.appendChild(s);
+    })();
+    </script>
 </body>
 </html>

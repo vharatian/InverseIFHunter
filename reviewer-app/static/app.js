@@ -11,6 +11,9 @@ let currentSessionId = null;
 let currentTask = null;
 let _isLoadingTask = false;
 let _currentNotebookUrl = null;
+// Monotonic id to ignore stale `api/notebook-preview` responses when
+// multiple loads are in flight.
+let _notebookLoadSeq = 0;
 
 function _normalizeNotebookUrl(s) {
   let t = (s || "").trim();
@@ -120,10 +123,20 @@ async function loadNotebookOnly(url) {
     _setFetchStatus("Enter a notebook URL.", true);
     return;
   }
+  if (_isLoadingTask) {
+    _setFetchStatus("A notebook is already loading\u2026", false);
+    return;
+  }
+  const loadId = ++_notebookLoadSeq;
   _isLoadingTask = true;
   _hideLookupMatches();
   currentSessionId = null;
   currentTask = null;
+  const fetchBtn = document.getElementById("btn-fetch-task");
+  if (fetchBtn) {
+    fetchBtn.disabled = true;
+    fetchBtn.setAttribute("aria-busy", "true");
+  }
 
   const panel = document.getElementById("task-panel");
   const banner = document.getElementById("notebook-only-banner");
@@ -163,6 +176,7 @@ async function loadNotebookOnly(url) {
       method: "POST",
       body: JSON.stringify({ url: raw }),
     });
+    if (loadId !== _notebookLoadSeq) return; // stale response — a newer load superseded this one
     if (taskContentEl) {
       taskContentEl.classList.remove("loading-placeholder");
       taskContentEl.setAttribute("aria-busy", "false");
@@ -176,7 +190,7 @@ async function loadNotebookOnly(url) {
         "<strong>Content check.</strong> " +
         escapeHtml(data.warnings.join(" ")) +
         ' <span class="notebook-only-sub">Cells scanned: ' +
-        (data.cells_scanned ?? 0) +
+        escapeHtml(String(data.cells_scanned ?? 0)) +
         ".</span>";
     }
     _setFetchStatus(
@@ -184,6 +198,7 @@ async function loadNotebookOnly(url) {
       !data.has_structured_content,
     );
   } catch (e) {
+    if (loadId !== _notebookLoadSeq) return;
     if (taskContentEl) {
       taskContentEl.classList.remove("loading-placeholder");
       taskContentEl.textContent = "";
@@ -197,7 +212,11 @@ async function loadNotebookOnly(url) {
     _setFetchStatus(e.message || "Notebook fetch failed.", true);
     showToast(e.message || "Notebook fetch failed.", "error");
   } finally {
-    _isLoadingTask = false;
+    if (loadId === _notebookLoadSeq) _isLoadingTask = false;
+    if (fetchBtn) {
+      fetchBtn.disabled = false;
+      fetchBtn.setAttribute("aria-busy", "false");
+    }
   }
 }
 
@@ -435,7 +454,10 @@ function _renderNotebookPreviewBody(data) {
       const hasFail = lj.toLowerCase().includes("fail") || hj.toLowerCase().includes("fail");
       const hasPass = lj.toLowerCase().includes("pass") || hj.toLowerCase().includes("pass");
       const dot = hasFail ? "dot-fail" : hasPass ? "dot-pass" : "";
-      return `<button type="button" class="slot-tab${i === 0 ? " active" : ""}" data-slot="${s.slot}"><span class="slot-tab-num">${s.slot}</span><span class="slot-tab-model">${name}</span>${dot ? `<span class="slot-tab-dot ${dot}"></span>` : ""}</button>`;
+      const selected = i === 0 ? 'true' : 'false';
+      const tabindex = i === 0 ? '0' : '-1';
+      const slotSafe = escapeHtml(String(s.slot));
+      return `<button type="button" role="tab" id="slot-tab-${slotSafe}" aria-controls="slot-panel-${slotSafe}" aria-selected="${selected}" tabindex="${tabindex}" class="slot-tab${i === 0 ? " active" : ""}" data-slot="${slotSafe}"><span class="slot-tab-num">${slotSafe}</span><span class="slot-tab-model">${name}</span>${dot ? `<span class="slot-tab-dot ${dot}"></span>` : ""}</button>`;
     }).join("");
 
     const panels = slots.map((s, i) => {
@@ -443,6 +465,7 @@ function _renderNotebookPreviewBody(data) {
       const ljText = s.llm_judge || "";
       const hjText = s.human_judge || "";
       const rtText = s.reasoning_trace || "";
+      const slotSafe = escapeHtml(String(s.slot));
 
       let rightHtml = "";
       if (hjText) rightHtml += _formatJudgment("Human Judge", hjText, "slot-judgment-human");
@@ -450,7 +473,7 @@ function _renderNotebookPreviewBody(data) {
       if (rtText) rightHtml += `<details class="slot-trace-details"><summary class="slot-trace-summary">Reasoning Trace</summary><div class="slot-judgment-body">${escapeHtml(rtText)}</div></details>`;
       if (!rightHtml) rightHtml = `<span class="nbp-empty">No judgments</span>`;
 
-      return `<div class="slot-tab-content" data-slot="${s.slot}"${i > 0 ? " hidden" : ""}>
+      return `<div class="slot-tab-content" id="slot-panel-${slotSafe}" role="tabpanel" aria-labelledby="slot-tab-${slotSafe}" data-slot="${slotSafe}"${i > 0 ? " hidden" : ""}>
         <div class="task-slot-body">
           <div class="slot-left"><div class="slot-section"><div class="slot-section-label">Model Response</div><div class="task-slot-response">${resp}</div></div></div>
           <div class="slot-right">${rightHtml}</div>
@@ -459,7 +482,7 @@ function _renderNotebookPreviewBody(data) {
     }).join("");
 
     slotsBlock = `<div class="slot-viewer">
-      <div class="slot-tabs-bar" id="slot-tabs-bar">${tabs}</div>
+      <div class="slot-tabs-bar" id="slot-tabs-bar" role="tablist" aria-label="Review slots">${tabs}</div>
       <div class="slot-panels">${panels}</div>
     </div>`;
   }
@@ -523,15 +546,36 @@ async function hydrateGateCouncilFooter() {
 function _wireSlotTabs(container) {
   const bar = container.querySelector("#slot-tabs-bar");
   if (!bar) return;
-  bar.addEventListener("click", (e) => {
-    const tab = e.target.closest(".slot-tab");
+  const activate = (tab) => {
     if (!tab) return;
-    bar.querySelectorAll(".slot-tab").forEach((t) => t.classList.remove("active"));
-    tab.classList.add("active");
-    const panels = container.querySelectorAll(".slot-tab-content");
-    panels.forEach((p) => (p.hidden = true));
+    const tabs = Array.from(bar.querySelectorAll(".slot-tab"));
+    tabs.forEach((t) => {
+      const on = t === tab;
+      t.classList.toggle("active", on);
+      t.setAttribute("aria-selected", on ? "true" : "false");
+      t.setAttribute("tabindex", on ? "0" : "-1");
+    });
+    container.querySelectorAll(".slot-tab-content").forEach((p) => (p.hidden = true));
     const target = container.querySelector(`.slot-tab-content[data-slot="${tab.dataset.slot}"]`);
     if (target) target.hidden = false;
+  };
+  bar.addEventListener("click", (e) => {
+    const tab = e.target.closest(".slot-tab");
+    activate(tab);
+  });
+  bar.addEventListener("keydown", (e) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
+    const tabs = Array.from(bar.querySelectorAll(".slot-tab"));
+    if (!tabs.length) return;
+    const idx = tabs.findIndex((t) => t.classList.contains("active"));
+    let next = idx;
+    if (e.key === "ArrowLeft") next = (idx - 1 + tabs.length) % tabs.length;
+    else if (e.key === "ArrowRight") next = (idx + 1) % tabs.length;
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = tabs.length - 1;
+    e.preventDefault();
+    activate(tabs[next]);
+    tabs[next].focus();
   });
 }
 
@@ -541,9 +585,29 @@ setCouncilRunningCheck(() => getCouncilState().running);
 initVersionCheck();
 hydrateGateCouncilFooter();
 
-if (getEmail()) {
-  document.getElementById("reviewer-email").textContent = getEmail();
+async function _bootstrapAuthState() {
+  const email = getEmail();
+  if (!email) {
+    showGate(true);
+    return;
+  }
+  const emailSpan = document.getElementById("reviewer-email");
+  if (emailSpan) emailSpan.textContent = email;
   showGate(false);
-} else {
-  showGate(true);
+  try {
+    await api("/api/auth/session", {}, { timeoutMs: 15_000, retries: 0 });
+  } catch (e) {
+    const msg = (e && e.message) || "";
+    // Treat explicit auth failures as "re-login". Don't boot people for
+    // transient network errors.
+    if (/403|unauth|allowlist|not\s*allow|forbidden|Missing/i.test(msg)) {
+      setEmail("");
+      currentSessionId = null;
+      currentTask = null;
+      if (emailSpan) emailSpan.textContent = "";
+      showGate(true);
+      showToast("Your reviewer access is no longer valid. Please sign in again.", "error");
+    }
+  }
 }
+_bootstrapAuthState();

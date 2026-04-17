@@ -12,7 +12,7 @@
 
 import { state } from './state.js';
 import { PROVIDER_MODELS, getProviderModels, getJudgeModels, getConfigValue, adminBypass } from './config.js';
-import { escapeHtml } from './utils.js';
+import { escapeHtml, renderMarkdownSafe } from './utils.js';
 import { showToast } from './celebrations.js?v=43';
 import { parseCriteria, validateModelReferenceAndCriteria, progressiveSaveToColab } from './notebook.js';
 import { parseCriteriaToJSON } from './utils.js';
@@ -894,7 +894,7 @@ function renderJudgeResult(run) {
 
     const collapseId = `tbJudgeCollapse-${run.id}`;
     return `<div class="tb-judge-result tb-judge-collapsible">
-        <div class="tb-judge-header" style="cursor:pointer;" onclick="(function(e){var body=document.getElementById('${collapseId}');var arrow=e.currentTarget.querySelector('.tb-judge-toggle');if(body.classList.contains('collapsed')){body.classList.remove('collapsed');arrow.textContent='▾';}else{body.classList.add('collapsed');arrow.textContent='▸';}})(event)">
+        <div class="tb-judge-header" style="cursor:pointer;" data-tb-toggle="${collapseId}">
             <span class="tb-judge-toggle" style="font-size:0.75rem;color:var(--text-muted);">▾</span>
             <span class="tb-judge-label">Judge Result</span>
             ${verdict ? `<span class="tb-verdict ${verdictCls}">${verdict}</span>` : ''}
@@ -987,9 +987,7 @@ function renderActiveTab() {
                 id="tbResponseEdit-${run.id}"
                 spellcheck="false"
               >${escapeHtml(run.response)}</textarea>`
-            : (typeof marked !== 'undefined'
-                ? `<div class="tb-response-markdown">${marked.parse(run.response)}</div>`
-                : `<pre class="tb-response-pre">${escapeHtml(run.response)}</pre>`);
+            : `<div class="tb-response-markdown">${renderMarkdownSafe(run.response)}</div>`;
     } else {
         responseArea = `<div class="tb-response-placeholder">
                <div class="tb-placeholder-icon">◎</div>
@@ -1018,9 +1016,7 @@ function renderActiveTab() {
                            id="tbReasoningEdit-${run.id}"
                            spellcheck="false"
                          >${escapeHtml(run.reasoningTrace)}</textarea>`
-                       : (typeof marked !== 'undefined'
-                           ? `<div class="tb-response-markdown tb-reasoning-content">${marked.parse(run.reasoningTrace)}</div>`
-                           : `<pre class="tb-response-pre tb-reasoning-content">${escapeHtml(run.reasoningTrace)}</pre>`)}
+                       : `<div class="tb-response-markdown tb-reasoning-content">${renderMarkdownSafe(run.reasoningTrace)}</div>`}
                </div>
            </div>`
         : '';
@@ -1923,9 +1919,7 @@ export function showNotebookPreview(run) {
         : criteriaStringToChips(nb.response_reference || '');
     const judgePrompt = left.judgePrompt  || '';
 
-    const md = typeof marked !== 'undefined'
-        ? (s) => marked.parse(s)
-        : (s) => `<pre>${escapeHtml(s)}</pre>`;
+    const md = (s) => renderMarkdownSafe(s);
 
     // Score pill
     const scorePill = run?.score != null
@@ -2568,7 +2562,7 @@ export function renderPriorConversationBanner() {
     }
 
     const isCollapsed = localStorage.getItem(BANNER_COLLAPSE_KEY) === 'true';
-    const md = typeof marked !== 'undefined' ? (s) => marked.parse(s) : (s) => `<pre>${escapeHtml(s)}</pre>`;
+    const md = (s) => renderMarkdownSafe(s);
 
     const turnsHtml = turns.map((t, idx) => {
         const n          = t.turnNumber ?? t.turn_number ?? idx + 1;
@@ -2631,5 +2625,24 @@ export function initTestbed() {
     if (!document._tbCopyWired) {
         document._tbCopyWired = true;
         document.addEventListener('click', _handleTbCopy, true);
+    }
+
+    // Delegated listener for judge-result collapse toggles.
+    if (!document._tbJudgeToggleWired) {
+        document._tbJudgeToggleWired = true;
+        document.addEventListener('click', (e) => {
+            const hdr = e.target.closest('[data-tb-toggle]');
+            if (!hdr) return;
+            const body = document.getElementById(hdr.dataset.tbToggle);
+            const arrow = hdr.querySelector('.tb-judge-toggle');
+            if (!body) return;
+            if (body.classList.contains('collapsed')) {
+                body.classList.remove('collapsed');
+                if (arrow) arrow.textContent = '▾';
+            } else {
+                body.classList.add('collapsed');
+                if (arrow) arrow.textContent = '▸';
+            }
+        });
     }
 }

@@ -110,12 +110,19 @@ export function createIndicatorClickVersionCheck(options) {
     return pendingUpdateVersion !== null;
   }
 
+  let _intervalId = null;
   function initVersionCheck() {
+    if (_intervalId) return;
     checkVersion();
-    setInterval(checkVersion, intervalMs);
+    _intervalId = setInterval(checkVersion, intervalMs);
+    window.addEventListener('pagehide', stopVersionCheck, { once: true });
   }
 
-  return { checkVersion, initVersionCheck, hasPendingUpdate };
+  function stopVersionCheck() {
+    if (_intervalId) { clearInterval(_intervalId); _intervalId = null; }
+  }
+
+  return { checkVersion, initVersionCheck, stopVersionCheck, hasPendingUpdate };
 }
 
 /**

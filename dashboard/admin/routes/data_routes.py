@@ -13,12 +13,21 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from auth import verify_super_admin
+from events_bus import publish as publish_event
 
 logger = logging.getLogger(__name__)
+
+
+async def _notify_db(kind: str, payload: dict) -> None:
+    try:
+        await publish_event("db", {"kind": kind, **payload})
+    except Exception:
+        pass
 
 router = APIRouter(prefix="/api/admin/data", tags=["admin-data"])
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
+ADMIN_ALLOW_DDL = os.getenv("ADMIN_ALLOW_DDL", "").strip().lower() in ("1", "true", "yes", "on")
 
 # Admin DB browser — allowlisted table names only (see plan).
 ALLOWED_TABLES = frozenset({"sessions", "hunt_results", "trainers", "qc_runs"})
@@ -42,6 +51,7 @@ async def delete_session(session_id: str, _=Depends(verify_super_admin)):
         results_deleted = await conn.execute("DELETE FROM hunt_results WHERE session_id = $1", session_id)
         session_deleted = await conn.execute("DELETE FROM sessions WHERE id = $1", session_id)
         logger.info(f"Admin deleted session {session_id}: {session_deleted}, results: {results_deleted}")
+        await _notify_db("session_deleted", {"session_id": session_id})
         return {
             "deleted": True,
             "session_id": session_id,
@@ -77,6 +87,7 @@ async def wipe_sessions(body: WipeRequest, _=Depends(verify_super_admin)):
         )
         session_rows = await conn.execute(f"DELETE FROM sessions {where}")
         logger.info(f"Admin wiped sessions: {session_rows}, results: {result_rows}")
+        await _notify_db("sessions_wiped", {"sessions": session_rows, "results": result_rows})
         return {"wiped": True, "sessions": session_rows, "results": result_rows}
     finally:
         await conn.close()
@@ -89,7 +100,13 @@ async def _get_conn():
 
 
 async def _ensure_tables(conn):
-    """Create all browseable tables if they don't exist."""
+    """Create all browseable tables if they don't exist.
+
+    Production safety: only runs when ADMIN_ALLOW_DDL=1. Schema creation in
+    production should be handled by alembic migrations, not admin traffic.
+    """
+    if not ADMIN_ALLOW_DDL:
+        return
     await conn.execute("""
         CREATE TABLE IF NOT EXISTS trainers (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -467,7 +484,9 @@ async def browse_create(
             f"VALUES ({', '.join(placeholders)}) RETURNING *"
         )
         rec = await conn.fetchrow(sql, *[coerced[c] for c in cols])
-        return _serialize_row(dict(rec))
+        row = _serialize_row(dict(rec))
+        await _notify_db("row_inserted", {"table": table})
+        return row
     finally:
         await conn.close()
 
@@ -505,7 +524,9 @@ async def browse_update(
         rec = await conn.fetchrow(sql, *vals, pk_val)
         if not rec:
             raise HTTPException(404, "Row not found")
-        return _serialize_row(dict(rec))
+        row = _serialize_row(dict(rec))
+        await _notify_db("row_updated", {"table": table, "pk": str(pk_val)})
+        return row
     finally:
         await conn.close()
 
@@ -575,6 +596,7 @@ async def browse_bulk_delete(
                 deleted = int(res.split()[-1])
             except (ValueError, IndexError):
                 deleted = 0
+        await _notify_db("bulk_deleted", {"table": table, "count": deleted})
         return {"deleted": deleted, "table": table}
     except asyncpg.exceptions.ForeignKeyViolationError as e:
         raise HTTPException(409, f"Cannot delete: rows still referenced ({e})") from e
@@ -677,6 +699,7 @@ async def browse_delete(table: str, row_id: str, _=Depends(verify_super_admin)):
         )
         if res == "DELETE 0":
             raise HTTPException(404, "Row not found")
+        await _notify_db("row_deleted", {"table": table, "pk": str(pk_val)})
         return {"deleted": True, "table": table, "pk": pk, "row_id": row_id}
     finally:
         await conn.close()

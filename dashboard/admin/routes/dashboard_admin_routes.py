@@ -11,8 +11,16 @@ from auth import (
     remove_test_account as auth_remove_test,
 )
 from admin.schemas import AddDashboardAdminRequest, AddTestAccountRequest
+from events_bus import publish
 
 router = APIRouter(prefix="/api/admin", tags=["admin-dashboard-admins"])
+
+
+async def _notify(kind: str, payload: dict) -> None:
+    try:
+        await publish("admins", {"kind": kind, **payload})
+    except Exception:
+        pass
 
 
 @router.get("/dashboard-admins")
@@ -27,6 +35,7 @@ async def add_dashboard_admin(body: AddDashboardAdminRequest, _=Depends(verify_s
     added = auth_add_admin(body.email, body.name)
     if not added:
         raise HTTPException(status_code=409, detail="Email already in admin list")
+    await _notify("admin_added", {"email": body.email.lower()})
     return {"ok": True}
 
 
@@ -36,6 +45,7 @@ async def remove_dashboard_admin(email: str, _=Depends(verify_super_admin)):
     removed = auth_remove_admin(email)
     if not removed:
         raise HTTPException(status_code=404, detail="Email not found in admin list")
+    await _notify("admin_removed", {"email": email.lower()})
     return {"ok": True}
 
 
@@ -51,6 +61,7 @@ async def add_test_account(body: AddTestAccountRequest, _=Depends(verify_super_a
     added = auth_add_test(body.email, body.name)
     if not added:
         raise HTTPException(status_code=409, detail="Email already a test account")
+    await _notify("test_account_added", {"email": body.email.lower()})
     return {"ok": True}
 
 
@@ -60,4 +71,5 @@ async def remove_test_account(email: str, _=Depends(verify_super_admin)):
     removed = auth_remove_test(email)
     if not removed:
         raise HTTPException(status_code=404, detail="Email not found in test accounts")
+    await _notify("test_account_removed", {"email": email.lower()})
     return {"ok": True}

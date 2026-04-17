@@ -118,16 +118,21 @@ export function initTrainerRegistration() {
     
     if (changeBtn) {
         changeBtn.addEventListener('click', () => {
+            // Capture previous values BEFORE clearing storage so the
+            // registration form can be pre-filled for convenience.
+            const info = getTrainerInfo();
             localStorage.removeItem('trainer_name');
             localStorage.removeItem('trainer_email');
             const identityEl = document.getElementById('trainerIdentity');
             if (identityEl) identityEl.style.display = 'none';
-            // Pre-fill with previous values for convenience
-            const info = getTrainerInfo();
             showTrainerRegistration();
-            // Focus the name field
             const nameInput = document.getElementById('trainerNameInput');
-            if (nameInput) nameInput.focus();
+            const emailInput = document.getElementById('trainerEmailInput');
+            if (nameInput) {
+                if (info && info.name) nameInput.value = info.name;
+                nameInput.focus();
+            }
+            if (emailInput && info && info.email) emailInput.value = info.email;
         });
     }
 }

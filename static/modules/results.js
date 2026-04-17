@@ -35,6 +35,11 @@ import {
     syncAlignmentSlotDisplays,
 } from './alignment.js';
 import { playHuntComplete, playHuntCompleteEmpty } from './sounds.js?v=43';
+import { createFocusTrap } from './focusTrap.js';
+
+// Module-level focus trap handles for slideouts — released on close.
+let _responseSlideoutTrap = null;
+let _gradingSlideoutTrap = null;
 
 // ============== Hunt Result Classification Helpers ==============
 // SINGLE SOURCE OF TRUTH for break/pass/error classification on the frontend.
@@ -327,13 +332,19 @@ export function openResponseSlideout(rowNum) {
     // Open the slide-out (reset right position for opening)
     slideout.style.right = '0';
     slideout.classList.add('open');
+    slideout.setAttribute('role', 'dialog');
+    slideout.setAttribute('aria-modal', 'true');
     if (backdrop) {
         backdrop.classList.add('visible');
     }
     
     // Prevent body scroll when panel is open
     document.body.style.overflow = 'hidden';
-    
+
+    if (_responseSlideoutTrap) { try { _responseSlideoutTrap.release(); } catch { /* ignore */ } }
+    _responseSlideoutTrap = createFocusTrap(slideout, {
+        onEscape: closeResponseSlideout,
+    });
 }
 
 export function closeResponseSlideout() {
@@ -352,6 +363,11 @@ export function closeResponseSlideout() {
     
     // Restore body scroll
     document.body.style.overflow = '';
+
+    if (_responseSlideoutTrap) {
+        try { _responseSlideoutTrap.release(); } catch { /* ignore */ }
+        _responseSlideoutTrap = null;
+    }
 }
 
 // Open slide-out for selection table details
@@ -410,11 +426,18 @@ export function openSelectionDetailSlideout(rowNumber, result) {
     // Open the slide-out (reset right position for opening)
     slideout.style.right = '0';
     slideout.classList.add('open');
+    slideout.setAttribute('role', 'dialog');
+    slideout.setAttribute('aria-modal', 'true');
     if (backdrop) {
         backdrop.classList.add('visible');
     }
     
     document.body.style.overflow = 'hidden';
+
+    if (_responseSlideoutTrap) { try { _responseSlideoutTrap.release(); } catch { /* ignore */ } }
+    _responseSlideoutTrap = createFocusTrap(slideout, {
+        onEscape: closeResponseSlideout,
+    });
 }
 
 // ============== Grading Slide-out Panel ==============
@@ -601,6 +624,8 @@ export function openGradingSlideout(result, slotIndex, rowNumber) {
     slideout.style.right = '0';
     slideout.style.visibility = 'visible';
     slideout.classList.add('open');
+    slideout.setAttribute('role', 'dialog');
+    slideout.setAttribute('aria-modal', 'true');
     if (backdrop) {
         backdrop.classList.add('visible');
     }
@@ -608,6 +633,11 @@ export function openGradingSlideout(result, slotIndex, rowNumber) {
     
     // Store current slot for reference
     state.currentGradingSlot = { result, slotIndex, rowNumber, huntId };
+
+    if (_gradingSlideoutTrap) { try { _gradingSlideoutTrap.release(); } catch { /* ignore */ } }
+    _gradingSlideoutTrap = createFocusTrap(slideout, {
+        onEscape: closeGradingSlideout,
+    });
 }
 
 function setupGradingSplitResize(container) {
@@ -887,6 +917,11 @@ export function closeGradingSlideout() {
     }
     document.body.style.overflow = '';
     state.currentGradingSlot = null;
+
+    if (_gradingSlideoutTrap) {
+        try { _gradingSlideoutTrap.release(); } catch { /* ignore */ }
+        _gradingSlideoutTrap = null;
+    }
 }
 
 // Toggle response expansion in selection table

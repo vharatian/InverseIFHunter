@@ -25,6 +25,11 @@ let _progress = 0;               // 0 → 1
 let _auraEl   = null;
 let _brandEl  = null;
 
+// In-memory only — never persisted. Re-prompts on page reload.
+let _adminPwdMemory = null;
+export function getAdminPassword() { return _adminPwdMemory; }
+export function clearAdminPassword() { _adminPwdMemory = null; }
+
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 export function initAdminMode() {
@@ -40,6 +45,9 @@ export function initAdminMode() {
     document.addEventListener('pointermove', _onPointerMove, { passive: false });
     document.addEventListener('pointerup',   _onPointerUp);
     document.addEventListener('pointercancel', _onPointerUp);
+
+    // Security: remove any legacy persisted password. Admin must re-auth each session.
+    try { localStorage.removeItem('modelHunter_adminPwd'); } catch (_) {}
 
     if (localStorage.getItem('modelHunter_adminMode') === '1') {
         activateAdminMode();
@@ -65,7 +73,9 @@ export function activateAdminMode() {
 
 export function deactivateAdminMode() {
     state.adminMode = false;
+    _adminPwdMemory = null;
     localStorage.removeItem('modelHunter_adminMode');
+    try { localStorage.removeItem('modelHunter_adminPwd'); } catch (_) {}
     _showAdminIndicator(false);
     // Re-apply locks
     try {
@@ -201,7 +211,7 @@ async function _showPasswordModal() {
         const pwd = document.getElementById('adminPwdInput').value;
         const expected = getConfigValue('admin_mode_password', ADMIN_MODE_PASSWORD);
         if (pwd === expected) {
-            localStorage.setItem('modelHunter_adminPwd', pwd);
+            _adminPwdMemory = pwd;
             close();
             activateAdminMode();
         } else {

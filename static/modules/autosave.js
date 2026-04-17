@@ -266,7 +266,11 @@ export async function initAutosave() {
     await _loadAutoSaveConfig();
     setupRetryOnClick();
     onStatusChange((online) => {
-        _setGlobalStatus(online ? 'saved' : 'offline');
+        if (!online) { _setGlobalStatus('offline'); return; }
+        // Coming back online ≠ "saved": only flip to saved if nothing is
+        // actually dirty; otherwise keep the unsaved state visible.
+        const dirty = state.unsavedChanges && Object.values(state.unsavedChanges).some(Boolean);
+        _setGlobalStatus(dirty ? 'unsaved' : 'saved');
     });
 
 }
@@ -340,14 +344,21 @@ export function initGradingAutosave() {
     });
 }
 
-let gradingSaveTimer = null;
+// Per-hunt debounce timers so typing in one grading row doesn't cancel
+// the save of another.
+const gradingSaveTimers = new Map();
 let gradingSaveInProgress = false;
 let gradingPendingRetry = null;
 
 function scheduleGradingSave(huntId) {
-    if (gradingSaveTimer) clearTimeout(gradingSaveTimer);
+    const existing = gradingSaveTimers.get(huntId);
+    if (existing) clearTimeout(existing);
     setStatus(`grading-${huntId}`, STATUS.UNSAVED);
-    gradingSaveTimer = setTimeout(() => saveGradingDraft(huntId), DEBOUNCE_MS);
+    const timer = setTimeout(() => {
+        gradingSaveTimers.delete(huntId);
+        saveGradingDraft(huntId);
+    }, DEBOUNCE_MS);
+    gradingSaveTimers.set(huntId, timer);
 }
 
 function getGradingDraftKey(huntId) {

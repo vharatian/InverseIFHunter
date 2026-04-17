@@ -9,18 +9,32 @@ Run: python dashboard/main.py
 import glob as _glob
 import hashlib as _hashlib
 import json
+import logging
 import os
 import sys
+import time
+import uuid
 from pathlib import Path
 from typing import Optional, List
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Query
+from fastapi import Depends, FastAPI, Query, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from log_reader import get_log_reader
+from auth import (
+    is_auth_configured,
+    verify_admin,
+    verify_csrf,
+    CSRF_COOKIE_NAME,
+    _generate_csrf_token,
+    COOKIE_SECURE,
+    COOKIE_SAMESITE,
+    COOKIE_MAX_AGE,
+)
+from sse import dashboard_stream, admin_stream, start_tailer, stop_tailer
 
 try:
     _repo_root = str(Path(__file__).resolve().parent.parent)
@@ -46,10 +60,36 @@ LOG_PATH = os.getenv("TELEMETRY_LOG_PATH", None)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print(f"Model Hunter Enhanced Dashboard starting on port {DASHBOARD_PORT}...")
+    if not is_auth_configured():
+        msg = (
+            "ADMIN_PASSWORD is not set. The dashboard refuses to start without auth. "
+            "Set ADMIN_PASSWORD (and SESSION_SECRET) before launch."
+        )
+        if os.environ.get("DASHBOARD_ALLOW_INSECURE") == "1":
+            print(f"WARNING: {msg} (DASHBOARD_ALLOW_INSECURE=1; continuing)")
+        else:
+            raise RuntimeError(msg)
     log_reader = get_log_reader(LOG_PATH)
     print(f"   Reading logs from: {log_reader.log_path}")
     print(f"   Session storage: {log_reader.storage_path}")
+    try:
+        start_tailer(log_reader.log_path)
+        print("   Telemetry tailer: started")
+    except Exception as exc:
+        print(f"   Telemetry tailer: not started ({exc})")
+    try:
+        from agentic_reviewer.config_loader import start_redis_reload_listener as _cfg_sub
+        from agentic_reviewer.team_config import start_redis_reload_listener as _team_sub
+        _cfg_sub()
+        _team_sub()
+        print("   Config/team Redis reload listeners: started")
+    except Exception as exc:
+        print(f"   Config/team Redis reload listeners: not started ({exc})")
     yield
+    try:
+        await stop_tailer()
+    except Exception:
+        pass
     print("Dashboard shutting down...")
 
 
@@ -60,35 +100,83 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS
+_ALLOWED_ORIGINS = [
+    o.strip()
+    for o in os.environ.get("ALLOWED_ORIGINS", "").split(",")
+    if o.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_ALLOWED_ORIGINS or ["http://localhost", "http://localhost:8001"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "x-csrf-token"],
 )
 
 
-def _compute_dashboard_version() -> str:
-    """Content hash for soft-reload detection (static, Python, changelog notes)."""
-    dash_root = Path(__file__).resolve().parent
-    repo_root = dash_root.parent
-    content_hash = _hashlib.md5()
-    patterns = [
-        str(dash_root / "static" / "**" / "*.html"),
-        str(dash_root / "static" / "**" / "*.js"),
-        str(dash_root / "static" / "**" / "*.css"),
-        str(dash_root / "**" / "*.py"),
-        str(repo_root / "updates" / "*.md"),
-    ]
-    for pat in patterns:
-        for f in sorted(_glob.glob(pat, recursive=True)):
-            try:
-                with open(f, "rb") as fh:
-                    content_hash.update(fh.read())
-            except OSError:
-                pass
-    return f"dash.{content_hash.hexdigest()[:10]}"
+_request_log = logging.getLogger("mth.request")
+if not _request_log.handlers:
+    _h = logging.StreamHandler()
+    _h.setFormatter(logging.Formatter("%(message)s"))
+    _request_log.addHandler(_h)
+    _request_log.setLevel(os.environ.get("MTH_LOG_LEVEL", "INFO").upper())
+    _request_log.propagate = False
+
+
+@app.middleware("http")
+async def request_logging_middleware(request: Request, call_next):
+    """Structured request/response logging with X-Request-Id propagation."""
+    req_id = request.headers.get("x-request-id") or uuid.uuid4().hex[:16]
+    request.state.request_id = req_id
+    start = time.perf_counter()
+    status = 500
+    try:
+        response = await call_next(request)
+        status = response.status_code
+        return response
+    finally:
+        try:
+            dur_ms = (time.perf_counter() - start) * 1000.0
+            entry = {
+                "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "req_id": req_id,
+                "method": request.method,
+                "path": request.url.path,
+                "status": status,
+                "dur_ms": round(dur_ms, 2),
+                "client": (request.client.host if request.client else None),
+            }
+            _request_log.info(json.dumps(entry, separators=(",", ":")))
+            if "response" in locals():
+                response.headers["X-Request-Id"] = req_id
+        except Exception:
+            pass
+
+
+@app.middleware("http")
+async def csrf_middleware(request: Request, call_next):
+    """Enforce CSRF double-submit on all mutating requests."""
+    method = request.method.upper()
+    if method not in ("GET", "HEAD", "OPTIONS"):
+        try:
+            verify_csrf(request)
+        except Exception as exc:
+            from fastapi.responses import JSONResponse
+            status = getattr(exc, "status_code", 403)
+            detail = getattr(exc, "detail", "CSRF token invalid")
+            return JSONResponse({"detail": detail}, status_code=status)
+    response = await call_next(request)
+    # Ensure a CSRF cookie is always present so clients have a token to echo back.
+    if not request.cookies.get(CSRF_COOKIE_NAME):
+        response.set_cookie(
+            key=CSRF_COOKIE_NAME,
+            value=_generate_csrf_token(),
+            max_age=COOKIE_MAX_AGE,
+            httponly=False,
+            samesite=COOKIE_SAMESITE,
+            secure=COOKIE_SECURE,
+        )
+    return response
 
 
 # Monorepo: InverseIFHunter/static/js/updates | Docker (context ./dashboard): dashboard/static/js/updates
@@ -106,10 +194,67 @@ if _updates_js:
     )
 
 
+_version_cache: dict = {"mtime": 0.0, "value": "", "checked_at": 0.0}
+_VERSION_FILES_CACHE: list = []
+_VERSION_FILES_REFRESH_SEC = 30
+
+
+def _refresh_version_file_list() -> list:
+    """Rebuild the watched-file list at most every _VERSION_FILES_REFRESH_SEC seconds."""
+    global _VERSION_FILES_CACHE
+    now = time.time()
+    last = _version_cache.get("files_refreshed_at", 0.0)
+    if _VERSION_FILES_CACHE and now - last < _VERSION_FILES_REFRESH_SEC:
+        return _VERSION_FILES_CACHE
+    dash_root = Path(__file__).resolve().parent
+    repo_root = dash_root.parent
+    patterns = [
+        str(dash_root / "static" / "**" / "*.html"),
+        str(dash_root / "static" / "**" / "*.js"),
+        str(dash_root / "static" / "**" / "*.css"),
+        str(dash_root / "**" / "*.py"),
+        str(repo_root / "updates" / "*.md"),
+    ]
+    files: list = []
+    for pat in patterns:
+        files.extend(_glob.glob(pat, recursive=True))
+    files.sort()
+    _VERSION_FILES_CACHE = files
+    _version_cache["files_refreshed_at"] = now
+    return files
+
+
+def _compute_dashboard_version_cached() -> str:
+    """mtime-keyed soft-reload version; recomputes only when any watched file changed."""
+    files = _refresh_version_file_list()
+    max_mtime = 0.0
+    for f in files:
+        try:
+            m = os.path.getmtime(f)
+            if m > max_mtime:
+                max_mtime = m
+        except OSError:
+            continue
+    if max_mtime == _version_cache.get("mtime") and _version_cache.get("value"):
+        return _version_cache["value"]
+    content_hash = _hashlib.md5()
+    for f in files:
+        try:
+            with open(f, "rb") as fh:
+                content_hash.update(fh.read())
+        except OSError:
+            continue
+    value = f"dash.{content_hash.hexdigest()[:10]}"
+    _version_cache["mtime"] = max_mtime
+    _version_cache["value"] = value
+    _version_cache["checked_at"] = time.time()
+    return value
+
+
 @app.get("/api/version")
 async def get_app_version():
-    """Version for soft-reload detection; recomputed each request."""
-    version = _compute_dashboard_version()
+    """Version for soft-reload detection (publicly readable; no secrets)."""
+    version = _compute_dashboard_version_cached()
     return Response(
         content=json.dumps({"version": version}),
         media_type="application/json",
@@ -120,9 +265,14 @@ async def get_app_version():
     )
 
 
-# ============== Original Endpoints ==============
+# ============== Protected Dashboard API ==============
 
-@app.get("/api/overview")
+from fastapi import APIRouter
+
+api_router = APIRouter(prefix="/api", dependencies=[Depends(verify_admin)])
+
+
+@api_router.get("/overview")
 async def get_overview(
     hours: int = Query(default=24, ge=1, le=720),
     trainer_emails: Optional[List[str]] = Query(default=None),
@@ -132,7 +282,7 @@ async def get_overview(
     return log_reader.get_overview(hours=hours, trainer_emails=trainer_emails)
 
 
-@app.get("/api/events")
+@api_router.get("/events")
 async def get_events(
     limit: int = Query(default=50, ge=1, le=200),
     event_type: Optional[str] = Query(default=None),
@@ -146,7 +296,7 @@ async def get_events(
     return {"count": len(events), "events": events}
 
 
-@app.get("/api/timeline")
+@api_router.get("/timeline")
 async def get_timeline(
     hours: int = Query(default=24, ge=1, le=168),
     bucket_minutes: int = Query(default=60, ge=5, le=360),
@@ -159,14 +309,14 @@ async def get_timeline(
     )
 
 
-@app.get("/api/models")
+@api_router.get("/models")
 async def get_model_stats(hours: int = Query(default=24, ge=1, le=168)):
     """Get model statistics."""
     log_reader = get_log_reader()
     return log_reader.get_model_stats(hours=hours)
 
 
-@app.get("/api/sessions")
+@api_router.get("/sessions")
 async def get_sessions(limit: int = Query(default=20, ge=1, le=100)):
     """Get recent sessions."""
     log_reader = get_log_reader()
@@ -174,7 +324,7 @@ async def get_sessions(limit: int = Query(default=20, ge=1, le=100)):
     return {"count": len(sessions), "sessions": sessions}
 
 
-@app.get("/api/search")
+@api_router.get("/search")
 async def search_events(
     q: str = Query(..., min_length=1),
     hours: int = Query(default=168, ge=1, le=720),
@@ -186,14 +336,14 @@ async def search_events(
     return {"query": q, "count": len(results), "results": results}
 
 
-@app.get("/api/costs")
+@api_router.get("/costs")
 async def get_costs(hours: int = Query(default=24, ge=1, le=720)):
     """Get cost summary."""
     log_reader = get_log_reader()
     return log_reader.get_cost_summary(hours=hours)
 
 
-@app.get("/api/hunts")
+@api_router.get("/hunts")
 async def get_detailed_hunts(
     hours: int = Query(default=24, ge=1, le=720),
     limit: int = Query(default=50, ge=1, le=200),
@@ -207,7 +357,7 @@ async def get_detailed_hunts(
     return {"count": len(hunts), "hunts": hunts}
 
 
-@app.get("/api/calls")
+@api_router.get("/calls")
 async def get_detailed_calls(
     hours: int = Query(default=24, ge=1, le=720),
     limit: int = Query(default=100, ge=1, le=500),
@@ -221,7 +371,7 @@ async def get_detailed_calls(
     return {"count": len(calls), "calls": calls}
 
 
-@app.get("/api/breaks")
+@api_router.get("/breaks")
 async def get_breaks(
     hours: int = Query(default=168, ge=1, le=720),
     limit: int = Query(default=50, ge=1, le=200),
@@ -235,7 +385,7 @@ async def get_breaks(
     return {"count": len(breaks), "breaks": breaks}
 
 
-@app.get("/api/failures")
+@api_router.get("/failures")
 async def get_failures(
     hours: int = Query(default=168, ge=1, le=720),
     limit: int = Query(default=50, ge=1, le=200),
@@ -251,7 +401,7 @@ async def get_failures(
 
 # ============== NEW: Trainer Analytics ==============
 
-@app.get("/api/trainers")
+@api_router.get("/trainers")
 async def get_trainer_leaderboard(
     hours: int = Query(default=168, ge=1, le=720),
     limit: int = Query(default=20, ge=1, le=100)
@@ -263,7 +413,7 @@ async def get_trainer_leaderboard(
     return log_reader.get_trainer_leaderboard(hours=hours, limit=limit)
 
 
-@app.get("/api/criteria")
+@api_router.get("/criteria")
 async def get_criteria_analysis(hours: int = Query(default=168, ge=1, le=720)):
     """
     Get criteria difficulty analysis.
@@ -272,7 +422,7 @@ async def get_criteria_analysis(hours: int = Query(default=168, ge=1, le=720)):
     return log_reader.get_criteria_analysis(hours=hours)
 
 
-@app.get("/api/weekday_activity")
+@api_router.get("/weekday_activity")
 async def get_weekday_activity(
     hours: int = Query(default=168, ge=1, le=720),
     trainer_emails: Optional[List[str]] = Query(default=None),
@@ -284,7 +434,7 @@ async def get_weekday_activity(
     )
 
 
-@app.get("/api/realtime")
+@api_router.get("/realtime")
 async def get_realtime_stats():
     """
     Get real-time stats (last 5 minutes).
@@ -293,7 +443,7 @@ async def get_realtime_stats():
     return log_reader.get_realtime_stats()
 
 
-@app.get("/api/health")
+@api_router.get("/health")
 async def health_check():
     """Health check."""
     log_reader = get_log_reader()
@@ -303,6 +453,14 @@ async def health_check():
         "log_exists": log_reader.log_path.exists(),
         "storage_exists": log_reader.storage_path.exists()
     }
+
+
+app.include_router(api_router)
+
+
+# Live streams (SSE)
+app.get("/api/stream")(dashboard_stream)
+app.get("/api/admin/stream")(admin_stream)
 
 
 # ============== Admin Panel ==============
@@ -336,6 +494,11 @@ if admin_static_dir.exists():
 static_dir = Path(__file__).parent / "static"
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+# Shared static assets — parent repo's static_shared/ mounted at /static_shared.
+_shared_static = Path(__file__).parent.parent / "static_shared"
+if _shared_static.exists():
+    app.mount("/static_shared", StaticFiles(directory=str(_shared_static)), name="static-shared")
 
 
 @app.get("/")

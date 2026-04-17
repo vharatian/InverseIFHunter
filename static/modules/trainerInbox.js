@@ -58,11 +58,22 @@ export async function refreshTrainerInbox() {
     }
 }
 
+let _trainerInboxStop = null;
+let _trainerInboxBtnBound = false;
+
 export function initTrainerInbox() {
+    if (_trainerInboxStop) return;
     const btn = document.getElementById(REFRESH_ID);
-    if (btn) btn.addEventListener('click', refreshTrainerInbox);
+    if (btn && !_trainerInboxBtnBound) {
+        btn.addEventListener('click', refreshTrainerInbox);
+        _trainerInboxBtnBound = true;
+    }
     refreshTrainerInbox();
-    createPoller(refreshTrainerInbox, 30_000);
+    _trainerInboxStop = createPoller(refreshTrainerInbox, 30_000);
+}
+
+export function stopTrainerInbox() {
+    if (_trainerInboxStop) { _trainerInboxStop(); _trainerInboxStop = null; }
 }
 
 function _escapeHtml(s) {

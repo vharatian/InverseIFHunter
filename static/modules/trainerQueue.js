@@ -14,6 +14,9 @@
 import { createPoller } from './poll.js';
 import { state } from './state.js';
 import { ADMIN_MODE_PASSWORD, getConfigValue } from './config.js';
+import { getAdminPassword } from './adminMode.js';
+import { showUndoToast, showError, showToast } from './celebrations.js?v=43';
+import { apiFetch } from './api.js';
 
 // ── DOM refs (cached on init) ───────────────────────────────────
 let els = {};
@@ -56,14 +59,14 @@ let _activeTab = 'drafts';
 // ── Public API ──────────────────────────────────────────────────
 
 export function initTrainerQueue({ onOpenTask, onNewTask }) {
-    cacheDom();
     _onOpenTask = onOpenTask;
     _onNewTask = onNewTask;
+    if (_stopPoller) return; // already initialised; just refresh callbacks
+    cacheDom();
 
     if (els.newTaskBtn) els.newTaskBtn.addEventListener('click', () => _onNewTask?.());
     if (els.backBtn)    els.backBtn.addEventListener('click', showQueueView);
 
-    // Tab switching
     if (els.tabs) {
         els.tabs.addEventListener('click', (e) => {
             const btn = e.target.closest('.tq-tab');
@@ -75,6 +78,10 @@ export function initTrainerQueue({ onOpenTask, onNewTask }) {
     showSkeletons();
     refreshQueue();
     _stopPoller = createPoller(refreshQueue, 30_000);
+}
+
+export function stopTrainerQueue() {
+    if (_stopPoller) { _stopPoller(); _stopPoller = null; }
 }
 
 export async function refreshQueue() {
@@ -390,7 +397,7 @@ function buildTaskCard(t, showJourney) {
     if (delEl) {
         delEl.addEventListener('click', (e) => {
             e.stopPropagation();
-            _confirmDeleteSession(t.session_id, label);
+            _confirmDeleteSession(t.session_id, label, card);
         });
     }
 
@@ -430,23 +437,44 @@ function computeStep(t) {
 
 // ── Admin: delete session ────────────────────────────────────────
 
-async function _confirmDeleteSession(sessionId, label) {
-    if (!confirm(`Delete session "${label}" (${sessionId})?\n\nThis removes it from Redis and PostgreSQL. Cannot be undone.`)) return;
-    try {
-        const pwd = getConfigValue('admin_mode_password', ADMIN_MODE_PASSWORD);
-        const res = await fetch(`api/admin/session/${sessionId}`, {
-            method: 'DELETE',
-            headers: { 'X-Admin-Password': localStorage.getItem('modelHunter_adminPwd') || pwd },
-        });
-        if (!res.ok) {
-            const data = await res.json().catch(() => ({}));
-            alert(data.detail || 'Delete failed');
-            return;
-        }
-        refreshQueue();
-    } catch (e) {
-        alert('Delete failed: ' + (e.message || e));
-    }
+/**
+ * Optimistic delete with a 5-second client-side undo window.
+ *
+ *   1. Hide the card immediately (optimistic) and show an undo toast.
+ *   2. If the trainer clicks Undo within 5s: restore the card, no API call.
+ *   3. Otherwise the DELETE fires. On failure we restore the card and
+ *      surface the trace id via showError.
+ *
+ * Backend stays unchanged — the undo window lives entirely on the client.
+ */
+async function _confirmDeleteSession(sessionId, label, cardEl) {
+    if (!confirm(`Delete session "${label}" (${sessionId})?\n\nThis removes it from Redis and PostgreSQL.`)) return;
+
+    const prevDisplay = cardEl ? cardEl.style.display : '';
+    if (cardEl) cardEl.style.display = 'none';
+
+    showUndoToast({
+        message: `Deleting "${label}"…`,
+        delayMs: 5000,
+        undoLabel: 'Undo',
+        onUndo: () => {
+            if (cardEl) cardEl.style.display = prevDisplay;
+            showToast(`Kept "${label}"`, 'info');
+        },
+        onCommit: async () => {
+            const pwd = getAdminPassword() || getConfigValue('admin_mode_password', ADMIN_MODE_PASSWORD);
+            await apiFetch(`api/admin/session/${sessionId}`, {
+                method: 'DELETE',
+                headers: { 'X-Admin-Password': pwd || '' },
+            });
+            showToast(`Deleted "${label}"`, 'success');
+            refreshQueue();
+        },
+        onCommitError: (err) => {
+            if (cardEl) cardEl.style.display = prevDisplay;
+            showError(err, { operation: 'Delete session' });
+        },
+    });
 }
 
 // ── Helpers ─────────────────────────────────────────────────────

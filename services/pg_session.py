@@ -19,9 +19,7 @@ from services.turn_dedupe import dedupe_turns_to_models
 
 logger = logging.getLogger(__name__)
 
-_REVIEW_STATUS_PG = frozenset(
-    {"draft", "submitted", "returned", "approved", "rejected", "escalated"}
-)
+from services.redis_session import REVIEW_STATUS_VALUES as _REVIEW_STATUS_PG  # noqa: E402
 
 
 def _normalize_pg_review_status(raw: Optional[str]) -> str:
@@ -193,6 +191,9 @@ async def load_session_pg(session_id: str) -> Optional[HuntSession]:
         else:
             turn_filter = HuntResultRow.turn_number == ct
 
+        # Redis clears all_results on advance_turn, so Redis all_results reflects only the
+        # current turn's accumulated completed results. Match that semantic when restoring
+        # from PG — one query, used for both results and all_results.
         result_rows = await db.execute(
             select(HuntResultRow)
             .where(HuntResultRow.session_id == session_id)
@@ -205,20 +206,8 @@ async def load_session_pg(session_id: str) -> Optional[HuntSession]:
             if hr:
                 hunt_results.append(hr)
 
-        # Accumulated across all turns (current-turn only for `results` above)
-        all_rows = await db.execute(
-            select(HuntResultRow)
-            .where(HuntResultRow.session_id == session_id)
-            .order_by(HuntResultRow.created_at)
-        )
-        all_hunt_results: List[HuntResult] = []
-        for r in all_rows.scalars():
-            hr = _row_to_hunt_result(r)
-            if hr:
-                all_hunt_results.append(hr)
-
         fields["results"] = hunt_results
-        fields["all_results"] = all_hunt_results
+        fields["all_results"] = list(hunt_results)
 
         return HuntSession(**fields)
 

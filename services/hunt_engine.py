@@ -13,8 +13,8 @@ import asyncio
 import time
 import uuid
 import logging
-from typing import List, Dict, Any, Optional, Callable
-from datetime import datetime
+from typing import List, Dict, Any, Optional, Callable, Set
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -166,6 +166,7 @@ class HuntEngine:
             ))
 
         # Build the list of hunts to run (skip already-completed ones from THIS run only)
+        pending_persist: Set[asyncio.Task] = set()
         tasks = []
         for i in range(config.parallel_workers):
             hunt_id = run_start_id + i + 1
@@ -182,6 +183,7 @@ class HuntEngine:
                     model=model,
                     config=config,
                     notebook=notebook,
+                    pending_persist=pending_persist,
                 )
             )
             tasks.append(task)
@@ -198,6 +200,13 @@ class HuntEngine:
                     event_type="error",
                     data={"error": str(e)}
                 ))
+
+        # Drain PG persist tasks so results aren't lost if the worker exits right after run_hunt.
+        if pending_persist:
+            try:
+                await asyncio.gather(*pending_persist, return_exceptions=True)
+            except Exception:
+                logger.exception("Draining PG persist tasks failed for %s", session_id)
 
         # Final status
         current_status = await store.get_status(session_id)
@@ -396,6 +405,7 @@ class HuntEngine:
         batch_index: int,
         config: HuntConfig,
         notebook: ParsedNotebook,
+        pending_persist: Optional[Set[asyncio.Task]] = None,
     ) -> List[HuntResult]:
         """Run exactly config.batch_size samples in parallel; hunt_id = hunt_offset + batch_index*batch_size + sample_index + 1."""
         batch_size = getattr(config, "batch_size", 4)
@@ -408,7 +418,10 @@ class HuntEngine:
         results_sorted = sorted(results, key=lambda r: r.hunt_id)
         for result in results_sorted:
             await store.append_result(session_id, result)
-            asyncio.create_task(_persist_result_pg(session_id, result))
+            persist_task = asyncio.create_task(_persist_result_pg(session_id, result))
+            if pending_persist is not None:
+                pending_persist.add(persist_task)
+                persist_task.add_done_callback(pending_persist.discard)
             completed = await store.incr_completed_hunts(session_id)
             if result.sample_label == "BREAK":
                 await store.incr_breaks_found(session_id)
@@ -475,10 +488,11 @@ class HuntEngine:
             }
         ))
 
-        episode_start = datetime.utcnow()
+        episode_start = datetime.now(timezone.utc)
         batch_index = 0
         batches_completed = 0
         error_batches_run = 0
+        pending_persist: Set[asyncio.Task] = set()
 
         try:
             while True:
@@ -491,12 +505,14 @@ class HuntEngine:
                     await store.set_status(session_id, HuntStatus.STOPPED_BUDGET)
                     break
 
-                elapsed = (datetime.utcnow() - episode_start).total_seconds()
+                elapsed = (datetime.now(timezone.utc) - episode_start).total_seconds()
                 if elapsed >= max_wall:
                     await store.set_status(session_id, HuntStatus.STOPPED_BUDGET)
                     break
 
-                batch_results = await self._run_batch(session_id, batch_index, config, notebook)
+                batch_results = await self._run_batch(
+                    session_id, batch_index, config, notebook, pending_persist=pending_persist
+                )
                 batches_completed += 1
                 labels = [r.sample_label or "ERROR" for r in batch_results]
                 agg = aggregate_batch(labels, config)
@@ -539,6 +555,13 @@ class HuntEngine:
             await store.set_status(session_id, HuntStatus.FAILED)
             await events.publish(session_id, HuntEvent(event_type="error", data={"error": str(e)}))
 
+        # Drain PG persist tasks so results aren't lost if the worker exits right after.
+        if pending_persist:
+            try:
+                await asyncio.gather(*pending_persist, return_exceptions=True)
+            except Exception:
+                logger.exception("Draining PG persist tasks failed for %s", session_id)
+
         # Accumulate and final event
         current_results = await store.get_results(session_id)
         for result in current_results:
@@ -577,6 +600,7 @@ class HuntEngine:
         model: str,
         config: HuntConfig,
         notebook: ParsedNotebook,
+        pending_persist: Optional[Set[asyncio.Task]] = None,
     ):
         """Run a single hunt: call model, then judge. Write result to Redis."""
         provider = getattr(config, 'provider', 'openrouter')
@@ -703,7 +727,10 @@ class HuntEngine:
 
         # Write result to Redis (atomic RPUSH) + PostgreSQL (durable)
         await store.append_result(session_id, result)
-        asyncio.create_task(_persist_result_pg(session_id, result))
+        persist_task = asyncio.create_task(_persist_result_pg(session_id, result))
+        if pending_persist is not None:
+            pending_persist.add(persist_task)
+            persist_task.add_done_callback(pending_persist.discard)
 
         # Update counters atomically in Redis (no locks needed)
         completed = await store.incr_completed_hunts(session_id)
@@ -875,5 +902,36 @@ class HuntEngine:
         ]
 
 
-# Singleton instance
+# Singleton instance.
+#
+# Kept for backwards compatibility with call-sites that import this symbol
+# directly (`from services.hunt_engine import hunt_engine`). New code should
+# prefer the `get_hunt_engine` dependency so tests can override it via
+# `app.dependency_overrides`.
 hunt_engine = HuntEngine()
+
+
+def get_hunt_engine(request: "Request") -> "HuntEngine":
+    """FastAPI dependency — returns the request-scoped HuntEngine.
+
+    Routes declare ``engine: HuntEngine = Depends(get_hunt_engine)``.
+    Resolution order:
+      1. ``request.app.state.hunt_engine`` when the attribute has been set
+         during lifespan startup.
+      2. The module-level singleton as a fallback (so local dev and legacy
+         call-sites keep working even if startup wiring is skipped).
+
+    Tests swap a fake with::
+
+        app.dependency_overrides[get_hunt_engine] = lambda: fake_engine
+    """
+    state_engine = getattr(request.app.state, "hunt_engine", None)
+    return state_engine if state_engine is not None else hunt_engine
+
+
+# Deferred import to avoid a hard FastAPI dependency at module import time
+# (hunt_engine.py is also imported by scripts / workers without FastAPI).
+try:
+    from fastapi import Request  # noqa: E402,F401 — re-exported for typing only
+except Exception:  # pragma: no cover
+    Request = object  # type: ignore[assignment]

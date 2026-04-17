@@ -1,24 +1,19 @@
 """
 Agentic Reviewer — Pre-flight and Final QA routes.
 
-Calls agentic_reviewer (lives in parent agentic-reviewer folder).
+Calls agentic_reviewer, which lives as a sibling package under
+InverseIFHunter/ and is on sys.path whenever uvicorn runs `main:app`
+from the project root. No path hacks required.
 """
-import sys
 import json
-from pathlib import Path
-
-# Add agentic-reviewer root to path so we can import agentic_reviewer
-_agentic_root = Path(__file__).resolve().parent.parent.parent.parent
-if str(_agentic_root) not in sys.path:
-    sys.path.insert(0, str(_agentic_root))
-
 import logging
-from fastapi import APIRouter, HTTPException
+
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from helpers.shared import _get_validated_session
-from services.hunt_engine import hunt_engine
+from services.hunt_engine import HuntEngine, get_hunt_engine
 from routes.agentic_stream import build_content_checked, build_rationale
 
 logger = logging.getLogger(__name__)
@@ -48,7 +43,11 @@ def _stream_review_events(snapshot):
 
 
 @router.post("/review-final-stream/{session_id}")
-async def review_final_stream(session_id: str, req: FinalReviewRequest):
+async def review_final_stream(
+    session_id: str,
+    req: FinalReviewRequest,
+    engine: HuntEngine = Depends(get_hunt_engine),
+):
     """
     Run agentic final QA with Server-Sent Events for live UI.
     Streams rule_start, rule_done, then complete.
@@ -74,7 +73,7 @@ async def review_final_stream(session_id: str, req: FinalReviewRequest):
         )
 
     session = await _get_validated_session(session_id)
-    all_results = await hunt_engine.export_results_async(session_id)
+    all_results = await engine.export_results_async(session_id)
 
     human_reviews_for_agentic = {}
     for hid in req.selected_hunt_ids:

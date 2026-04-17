@@ -142,6 +142,16 @@ def _save_cells_to_drive(storage: dict, notebook_data: dict) -> bool:
     return False
 
 
+def _apply_turn_cells(session: HuntSession, notebook_data: dict, cells: List[tuple]) -> dict:
+    """Apply (cell_type, content) updates to a parsed notebook dict using turn-aware headings."""
+    from helpers.notebook_helpers import _find_or_create_turn_cell
+
+    current_turn = session.current_turn if session.current_turn else 1
+    for cell_type, content in cells:
+        _find_or_create_turn_cell(notebook_data, cell_type, content, current_turn)
+    return notebook_data
+
+
 def _save_turn_cells_to_drive(session: HuntSession, storage: Optional[dict],
                                has_url: bool, cells: List[tuple]) -> bool:
     """
@@ -155,16 +165,11 @@ def _save_turn_cells_to_drive(session: HuntSession, storage: Optional[dict],
 
     Returns True if saved to Colab, False otherwise.
     """
-    from helpers.notebook_helpers import _find_or_create_turn_cell
-
     if not has_url or not storage:
         return False
     try:
         original_content = storage.get("original_content", "{}")
-        notebook_data = json.loads(original_content)
-        current_turn = session.current_turn if session.current_turn else 1
-        for cell_type, content in cells:
-            _find_or_create_turn_cell(notebook_data, cell_type, content, current_turn)
+        notebook_data = _apply_turn_cells(session, json.loads(original_content), cells)
         return _save_cells_to_drive(storage, notebook_data)
     except Exception as e:
         logger.error(f"Error saving turn cells to Drive: {e}")
@@ -185,16 +190,12 @@ async def _save_cells_to_drive_via_url(
     """
     from services.google_drive_client import drive_client
     from services.notebook_parser import notebook_parser
-    from helpers.notebook_helpers import _find_or_create_turn_cell
 
     if not colab_url or not colab_url.strip():
         return False
     try:
         _, content_str = await notebook_parser.load_from_url(colab_url.strip())
-        notebook_data = json.loads(content_str)
-        current_turn = session.current_turn if session.current_turn else 1
-        for cell_type, content in cells:
-            _find_or_create_turn_cell(notebook_data, cell_type, content, current_turn)
+        notebook_data = _apply_turn_cells(session, json.loads(content_str), cells)
         updated_content = json.dumps(notebook_data, indent=2)
         file_id = drive_client.get_file_id_from_url(colab_url)
         if not file_id:

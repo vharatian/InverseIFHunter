@@ -434,35 +434,72 @@ function showSummaryAndActions(panel, result, onClose, overlay, tabs) {
         actionsEl.appendChild(copyBtn);
     }
 
-    setupOverlayKeyboard(overlay, result, onClose);
+    const detach = setupOverlayKeyboard(overlay, result, onClose);
+    overlay._cleanupKeyboard = detach;
     const primaryBtn = actionsEl.querySelector('.qc-btn-primary');
     if (primaryBtn) primaryBtn.focus();
 }
 
 /**
  * Setup keyboard shortcuts for overlay.
+ * Uses capture on document so Escape/Enter work regardless of which element
+ * inside the overlay has focus. Returns a detach function.
  */
 function setupOverlayKeyboard(overlay, result, onClose) {
     const handler = (e) => {
+        if (!overlay.isConnected) {
+            document.removeEventListener('keydown', handler, true);
+            return;
+        }
         if (e.key === 'Escape') {
             e.preventDefault();
             onClose(result);
-            overlay.removeEventListener('keydown', handler);
         } else if (e.key === 'Enter' && !e.target.matches('textarea, input')) {
             e.preventDefault();
             const primaryBtn = overlay.querySelector('.qc-btn-primary');
             if (primaryBtn) primaryBtn.click();
-            overlay.removeEventListener('keydown', handler);
         }
     };
-    overlay.addEventListener('keydown', handler);
+    document.addEventListener('keydown', handler, true);
+    return () => document.removeEventListener('keydown', handler, true);
 }
 
 /**
- * Setup focus trap and initial focus when overlay is shown.
+ * Focus trap: keep Tab / Shift+Tab inside the overlay so keyboard users
+ * can't accidentally leave the modal context.
  */
 function setupOverlayAccessibility(overlay, panel) {
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
     overlay.setAttribute('aria-live', 'polite');
+    panel.tabIndex = -1;
+    const previouslyFocused = document.activeElement;
+
+    const trap = (e) => {
+        if (e.key !== 'Tab' || !overlay.isConnected) return;
+        const focusables = overlay.querySelectorAll(
+            'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        );
+        if (!focusables.length) { e.preventDefault(); panel.focus(); return; }
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        const active = document.activeElement;
+        if (e.shiftKey && (active === first || !overlay.contains(active))) {
+            e.preventDefault(); last.focus();
+        } else if (!e.shiftKey && active === last) {
+            e.preventDefault(); first.focus();
+        }
+    };
+    document.addEventListener('keydown', trap, true);
+
+    setTimeout(() => panel.focus(), 0);
+
+    overlay._cleanupAccessibility = () => {
+        document.removeEventListener('keydown', trap, true);
+        if (previouslyFocused && typeof previouslyFocused.focus === 'function') {
+            try { previouslyFocused.focus(); } catch (_) {}
+        }
+    };
 }
 
 /**
@@ -481,6 +518,8 @@ export async function runQualityCheckOverlay(sessionId, selectedHuntIds, humanRe
 
     return new Promise((resolve, reject) => {
         const handleClose = (res) => {
+            if (typeof overlay._cleanupKeyboard === 'function') overlay._cleanupKeyboard();
+            if (typeof overlay._cleanupAccessibility === 'function') overlay._cleanupAccessibility();
             overlay.remove();
             resolve(res);
         };

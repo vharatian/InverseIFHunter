@@ -7,6 +7,7 @@ import { getHuntTimingForSubmit } from './hunt.js';
 import { createPoller } from './poll.js';
 import { setReviewStatus } from './autosave.js';
 import { applySectionLocksFromFeedback } from './sessionHydrator.js';
+import { escapeHtml } from './utils.js';
 
 const BLOCK_ID = 'reviewSyncBlock';
 const STATUS_ID = 'reviewSyncStatus';
@@ -47,7 +48,8 @@ export async function refreshReviewSync(sessionId) {
         setReviewStatus(reviewStatus);
         block.classList.remove('hidden');
         const roundInfo = reviewRound > 0 ? ` · Round ${reviewRound} of ${maxRounds}` : '';
-        statusEl.innerHTML = `<span class="review-sync-status-label">Review status</span><span class="review-sync-status-badge review-sync-status-${reviewStatus}">${reviewStatus}${roundInfo}</span>`;
+        const safeStatus = escapeHtml(reviewStatus);
+        statusEl.innerHTML = `<span class="review-sync-status-label">Review status</span><span class="review-sync-status-badge review-sync-status-${safeStatus}">${safeStatus}${escapeHtml(roundInfo)}</span>`;
         statusEl.className = 'review-sync-status';
 
         if (feedbackEl) {
@@ -55,7 +57,14 @@ export async function refreshReviewSync(sessionId) {
                 feedbackEl.classList.remove('hidden');
                 const overall = reviewFeedback.overall_comment || '';
                 if (reviewStatus === 'rejected') {
-                    feedbackEl.innerHTML = `<strong style="color:var(--danger)">Rejected</strong>${overall ? ` — ${overall}` : ''}`;
+                    feedbackEl.replaceChildren();
+                    const strong = document.createElement('strong');
+                    strong.style.color = 'var(--danger)';
+                    strong.textContent = 'Rejected';
+                    feedbackEl.appendChild(strong);
+                    if (overall) {
+                        feedbackEl.appendChild(document.createTextNode(' — ' + overall));
+                    }
                 } else {
                     feedbackEl.textContent = overall || 'No overall comment from reviewer.';
                 }
@@ -203,9 +212,19 @@ async function resubmitForReview(sessionId) {
     }
 }
 
+let _reviewSyncPollerStop = null;
+
 export function initReviewSync() {
+    if (_reviewSyncPollerStop) return; // already initialised
     if (state.sessionId) refreshReviewSync(state.sessionId);
-    createPoller(() => {
+    _reviewSyncPollerStop = createPoller(() => {
         if (state.sessionId) refreshReviewSync(state.sessionId);
     }, 15_000);
+}
+
+export function stopReviewSync() {
+    if (_reviewSyncPollerStop) {
+        _reviewSyncPollerStop();
+        _reviewSyncPollerStop = null;
+    }
 }

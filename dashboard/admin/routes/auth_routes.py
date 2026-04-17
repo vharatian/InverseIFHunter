@@ -13,6 +13,7 @@ from auth import (
     is_auth_configured,
 )
 from admin.schemas import LoginPasswordRequest, LoginEmailRequest, MeResponse
+from rate_limit import enforce as enforce_rate
 
 logger = logging.getLogger(__name__)
 
@@ -20,8 +21,9 @@ router = APIRouter(prefix="/api/admin", tags=["admin-auth"])
 
 
 @router.post("/login")
-async def login_password(body: LoginPasswordRequest, response: Response):
+async def login_password(body: LoginPasswordRequest, request: Request, response: Response):
     """Super admin login via password."""
+    await enforce_rate(request, "login")
     if not is_auth_configured():
         raise HTTPException(status_code=503, detail="Auth not configured (ADMIN_PASSWORD not set)")
     if not verify_password(body.password):
@@ -32,8 +34,9 @@ async def login_password(body: LoginPasswordRequest, response: Response):
 
 
 @router.post("/login-email")
-async def login_email(body: LoginEmailRequest, response: Response):
+async def login_email(body: LoginEmailRequest, request: Request, response: Response):
     """Invited admin login via email."""
+    await enforce_rate(request, "login-email")
     email = body.email.strip().lower()
     if not is_approved_admin(email):
         raise HTTPException(status_code=403, detail="Email not in approved admin list")

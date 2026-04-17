@@ -20,6 +20,25 @@ _GLOBAL_FILE = _CONFIG_DIR / "global.yaml"
 
 BLOCKED_PREFIXES = ("secrets.",)
 
+# Editable dotted-key prefixes for global.yaml. Anything outside this set
+# is rejected to prevent mass assignment into arbitrary config surfaces.
+ALLOWED_EDIT_PREFIXES = (
+    "alignment.",
+    "models.",
+    "hunting.",
+    "reviewer.",
+    "scoring.",
+    "rate_limits.",
+    "judges.",
+    "providers.",
+    "runtime.",
+    "features.",
+    "notifications.",
+    "teams.",
+    "ui.",
+    "analytics.",
+)
+
 
 def _load_raw() -> Dict[str, Any]:
     """Load raw global.yaml."""
@@ -28,11 +47,10 @@ def _load_raw() -> Dict[str, Any]:
 
 
 def _ensure_agentic_path():
+    """Make the repo root importable so agentic_reviewer can be loaded."""
     root = str(Path(__file__).resolve().parent.parent.parent.parent)
     if root not in sys.path:
-        sys.path.append(root)
-    if "/" not in sys.path:
-        sys.path.append("/")
+        sys.path.insert(0, root)
 
 
 def _save(data: Dict[str, Any]) -> None:
@@ -53,11 +71,25 @@ def _save(data: Dict[str, Any]) -> None:
 
 
 def _set_nested(d: dict, dotted_key: str, value: Any) -> None:
-    """Set a value in a nested dict by dotted path (e.g. 'alignment.target_rate')."""
+    """Set a value in a nested dict by dotted path.
+
+    Raises ValueError if an intermediate path segment is a non-dict, because
+    silently clobbering scalar config nodes risks data loss.
+    """
     keys = dotted_key.split(".")
-    for k in keys[:-1]:
-        d = d.setdefault(k, {})
-    d[keys[-1]] = value
+    node = d
+    for i, k in enumerate(keys[:-1]):
+        nxt = node.get(k)
+        if nxt is None:
+            nxt = {}
+            node[k] = nxt
+        elif not isinstance(nxt, dict):
+            path_so_far = ".".join(keys[: i + 1])
+            raise ValueError(
+                f"Cannot set '{dotted_key}': '{path_so_far}' exists as {type(nxt).__name__}, expected mapping"
+            )
+        node = nxt
+    node[keys[-1]] = value
 
 
 def _get_nested(d: dict, dotted_key: str, default: Any = None) -> Any:
@@ -95,6 +127,15 @@ def update_config(updates: Dict[str, Any]) -> Dict[str, str]:
     if blocked:
         raise ValueError(f"Cannot edit protected keys: {', '.join(blocked)}")
 
+    disallowed = [
+        k for k in updates
+        if not any(k.startswith(p) for p in ALLOWED_EDIT_PREFIXES)
+    ]
+    if disallowed:
+        raise ValueError(
+            "Disallowed keys (not in editable allowlist): " + ", ".join(disallowed)
+        )
+
     data = _load_raw()
     applied = {}
     for key, value in updates.items():
@@ -102,7 +143,17 @@ def update_config(updates: Dict[str, Any]) -> Dict[str, str]:
         applied[key] = "updated"
 
     _save(data)
+    _publish_change("config", list(applied.keys()))
     return applied
+
+
+def _publish_change(channel_key: str, keys: list) -> None:
+    """Best-effort publish of a config-change event to Redis pub/sub."""
+    try:
+        from events_bus import publish_sync  # lazy import to avoid cycles
+        publish_sync(channel_key, {"keys": keys})
+    except Exception as exc:
+        logger.debug("config publish skipped: %s", exc)
 
 
 def reload_config() -> None:

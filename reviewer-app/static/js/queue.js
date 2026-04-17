@@ -170,7 +170,7 @@ export async function loadQueue(withSummaries = true, statusFilter, append = fal
         const itemIndex = existingCount + index;
         li.innerHTML = [
           `<div class="queue-item-top">`,
-          canBatchSelect ? `<input type="checkbox" class="queue-item-check" data-session-id="${escapeHtml(sid)}" onclick="event.stopPropagation()" />` : "",
+          canBatchSelect ? `<input type="checkbox" class="queue-item-check" data-session-id="${escapeHtml(sid)}" data-stop-propagation="1" />` : "",
           `  ${idDisplay}`,
           `  <span class="queue-item-meta">${statusBadge}${passIcon}</span>`,
           `</div>`,
@@ -190,7 +190,10 @@ export async function loadQueue(withSummaries = true, statusFilter, append = fal
         if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelectTask(sid); }
       });
       const cb = li.querySelector(".queue-item-check");
-      if (cb) cb.addEventListener("change", _updateBatchBar);
+      if (cb) {
+        cb.addEventListener("click", (e) => e.stopPropagation());
+        cb.addEventListener("change", _updateBatchBar);
+      }
       if (listEl) listEl.appendChild(li);
     });
 

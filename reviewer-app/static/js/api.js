@@ -149,7 +149,9 @@ function _showUpdateModal() {
   if (oldBtn) {
     const newBtn = oldBtn.cloneNode(true);
     newBtn.classList.remove("hidden");
-    newBtn.textContent = "Update";
+    const lbl = newBtn.querySelector(".update-indicator-label");
+    if (lbl) lbl.textContent = "Update";
+    else newBtn.textContent = "Update";
     newBtn.addEventListener("click", () => { overlay.hidden = false; });
     oldBtn.replaceWith(newBtn);
   }
@@ -163,7 +165,9 @@ const _reviewerVc = createReviewerAutoModalVersionCheck({
     const btn = document.getElementById("reviewerUpdateIndicator");
     if (btn) {
       btn.classList.remove("hidden");
-      btn.textContent = "Update queued...";
+      const lbl = btn.querySelector(".update-indicator-label");
+      if (lbl) lbl.textContent = "Update queued...";
+      else btn.textContent = "Update queued...";
       btn.onclick = null;
     }
   },

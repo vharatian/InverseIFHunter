@@ -9,6 +9,83 @@
 import { VERSION_CHECK_INTERVAL } from './config.js';
 import { escapeHtml } from './utils.js';
 import { createIndicatorClickVersionCheck } from '../js/updates/version-check.mjs';
+import { createFocusTrap } from './focusTrap.js';
+
+// ============== Unified fetch wrapper with trace-id propagation ==============
+
+/**
+ * Error raised by apiFetch when the response is not ok.
+ * Carries the server-side trace id when present so toasts can surface it.
+ */
+export class ApiError extends Error {
+    constructor(message, { status, traceId, body, url } = {}) {
+        super(message);
+        this.name = 'ApiError';
+        this.status = status;
+        this.traceId = traceId || '';
+        this.body = body;
+        this.url = url;
+    }
+}
+
+function _extractTraceId(response) {
+    try {
+        return response.headers.get('X-Trace-Id') || '';
+    } catch {
+        return '';
+    }
+}
+
+async function _readBodySafe(response) {
+    try {
+        const text = await response.text();
+        if (!text) return null;
+        try {
+            return JSON.parse(text);
+        } catch {
+            return text;
+        }
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Thin fetch wrapper.
+ *   - Throws ApiError with `.traceId` on non-2xx responses.
+ *   - Returns the original Response on success (caller calls .json()/.text()).
+ *   - Surfaces network errors as ApiError with status=0.
+ *
+ * NEW code should prefer apiFetch over raw fetch so showError can render
+ * the trace id chip automatically.
+ */
+export async function apiFetch(input, init) {
+    let response;
+    try {
+        response = await fetch(input, init);
+    } catch (err) {
+        throw new ApiError(err?.message || 'Network request failed', {
+            status: 0,
+            traceId: '',
+            url: typeof input === 'string' ? input : input?.url,
+        });
+    }
+    if (!response.ok) {
+        const traceId = _extractTraceId(response);
+        const body = await _readBodySafe(response);
+        const detail =
+            (body && typeof body === 'object' && (body.error?.message || body.detail)) ||
+            (typeof body === 'string' && body) ||
+            `HTTP ${response.status}`;
+        throw new ApiError(String(detail), {
+            status: response.status,
+            traceId,
+            body,
+            url: response.url,
+        });
+    }
+    return response;
+}
 
 /**
  * Centered modal with blurred backdrop. Use instead of alert/confirm for consistent UX.
@@ -20,6 +97,9 @@ export function showAppModal(options) {
         const { title, message, buttons } = options;
         const overlay = document.createElement('div');
         overlay.className = 'app-modal-overlay';
+        overlay.setAttribute('role', 'dialog');
+        overlay.setAttribute('aria-modal', 'true');
+        overlay.setAttribute('aria-label', title || 'Dialog');
         overlay.style.cssText = `
             position: fixed;
             top: 0; left: 0; right: 0; bottom: 0;
@@ -49,20 +129,25 @@ export function showAppModal(options) {
             <div class="app-modal-buttons" style="display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap;"></div>
         `;
         const btnContainer = dialog.querySelector('.app-modal-buttons');
+        const closeWith = (value) => {
+            try { trap.release(); } catch { /* ignore */ }
+            overlay.remove();
+            resolve(value);
+        };
         buttons.forEach((b) => {
             const btn = document.createElement('button');
             btn.textContent = b.label;
             btn.style.cssText = b.primary
                 ? `background: var(--primary, #2563eb); color: #fff; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600;`
                 : `background: transparent; color: var(--text-secondary, #aaa); border: 1px solid var(--border, #555); padding: 10px 20px; border-radius: 8px; cursor: pointer; font-size: 14px;`;
-            btn.onclick = () => {
-                overlay.remove();
-                resolve(b.value);
-            };
+            btn.onclick = () => closeWith(b.value);
             btnContainer.appendChild(btn);
         });
         overlay.appendChild(dialog);
         document.body.appendChild(overlay);
+        // Focus trap: traps Tab inside, Escape resolves with undefined
+        // (caller treats undefined as cancel), restores focus on close.
+        const trap = createFocusTrap(dialog, { onEscape: () => closeWith(undefined) });
     });
 }
 
@@ -76,6 +161,9 @@ export function showPasswordPrompt(options) {
         const { title, message } = options || {};
         const overlay = document.createElement('div');
         overlay.className = 'app-modal-overlay';
+        overlay.setAttribute('role', 'dialog');
+        overlay.setAttribute('aria-modal', 'true');
+        overlay.setAttribute('aria-label', title || 'Enter password');
         overlay.style.cssText = `
             position: fixed;
             top: 0; left: 0; right: 0; bottom: 0;
@@ -120,6 +208,7 @@ export function showPasswordPrompt(options) {
         const submitBtn = dialog.querySelector('#adminPasswordSubmit');
         const cancelBtn = dialog.querySelector('#adminPasswordCancel');
         const cleanup = () => {
+            try { trap.release(); } catch { /* ignore */ }
             overlay.remove();
         };
         submitBtn.onclick = () => {
@@ -134,14 +223,18 @@ export function showPasswordPrompt(options) {
             if (e.key === 'Enter') {
                 cleanup();
                 resolve(input.value.trim());
-            } else if (e.key === 'Escape') {
-                cleanup();
-                resolve(null);
             }
+            // Escape is handled by the focus trap → onEscape below.
         };
         overlay.appendChild(dialog);
         document.body.appendChild(overlay);
-        input.focus();
+        const trap = createFocusTrap(dialog, {
+            initialFocus: input,
+            onEscape: () => {
+                cleanup();
+                resolve(null);
+            },
+        });
     });
 }
 

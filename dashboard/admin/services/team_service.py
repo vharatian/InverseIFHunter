@@ -49,7 +49,11 @@ def _save(data: Dict[str, Any]) -> None:
         reload()
     except Exception as e:
         logger.warning("team_config.reload() failed: %s", e)
-    # No need to notify other apps — team_config auto-detects file changes via mtime
+    try:
+        from events_bus import publish_sync
+        publish_sync("team", {"file": "team.yaml"})
+    except Exception as e:
+        logger.debug("team publish skipped: %s", e)
 
 
 def _norm(email: str) -> str:

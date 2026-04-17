@@ -8,26 +8,37 @@ import { escapeHtml } from './utils.js';
 const POLL_INTERVAL = 15000;
 let _poller = null;
 let _onNavigate = null;
+let _inited = false;
+let _docClickHandler = null;
 
 export function initNotifications({ onNavigateToTask } = {}) {
     _onNavigate = onNavigateToTask || null;
+    if (_inited) return;
     const bell = document.getElementById('notifBell');
     if (!bell) return;
+    _inited = true;
 
     bell.addEventListener('click', _togglePanel);
 
-    document.addEventListener('click', (e) => {
+    _docClickHandler = (e) => {
         const panel = document.getElementById('notifPanel');
         if (panel && !panel.hidden && !panel.contains(e.target) && !bell.contains(e.target)) {
             panel.hidden = true;
         }
-    });
+    };
+    document.addEventListener('click', _docClickHandler);
 
     const markAllBtn = document.getElementById('notifMarkAllRead');
     if (markAllBtn) markAllBtn.addEventListener('click', _markAllRead);
 
     _poller = createPoller(_fetchAndRender, POLL_INTERVAL);
     _fetchAndRender();
+}
+
+export function stopNotifications() {
+    if (_poller) { _poller(); _poller = null; }
+    if (_docClickHandler) { document.removeEventListener('click', _docClickHandler); _docClickHandler = null; }
+    _inited = false;
 }
 
 function _getEmail() {

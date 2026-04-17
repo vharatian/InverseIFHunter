@@ -101,11 +101,16 @@ async def create_session(
     *,
     review_status: str = "draft",
     current_turn: int = 1,
+    created_at: Optional[str] = None,
 ) -> None:
-    """Create a new session with all initial keys."""
+    """Create a new session with all initial keys.
+
+    If `created_at` is provided (restore path), it is used verbatim. Otherwise the current
+    timestamp is used only when the key is not already present, so restores never clobber
+    the original creation time.
+    """
     from datetime import datetime, timezone
     r = await get_redis()
-    pipe = r.pipeline()
 
     try:
         ct0 = max(1, int(current_turn or 1))
@@ -113,17 +118,30 @@ async def create_session(
         ct0 = 1
 
     rs = review_status if review_status in REVIEW_STATUS_VALUES else "draft"
+
+    # Decide the created_at value without clobbering an existing one.
+    meta_key = _key(session_id, "meta")
+    if created_at and isinstance(created_at, str) and created_at.strip():
+        created_at_value = created_at.strip()
+    else:
+        existing_created_at = await r.hget(meta_key, "created_at")
+        if existing_created_at:
+            created_at_value = existing_created_at
+        else:
+            created_at_value = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    pipe = r.pipeline()
     pipe.set(_key(session_id, "config"), config.model_dump_json())
     pipe.set(_key(session_id, "notebook"), notebook.model_dump_json())
     pipe.set(_key(session_id, "status"), HuntStatus.PENDING.value)
-    pipe.hset(_key(session_id, "meta"), mapping={
+    pipe.hset(meta_key, mapping={
         "total_hunts": 0,
         "completed_hunts": 0,
         "breaks_found": 0,
         "passes_found": 0,
         "accumulated_hunt_count": 0,
         "current_turn": ct0,
-        "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "created_at": created_at_value,
     })
     pipe.set(_key(session_id, "history"), "[]")
     pipe.set(_key(session_id, "reviews"), "{}")
@@ -161,12 +179,19 @@ async def save_full_session(
     if sqlite_workflow and isinstance(sqlite_workflow.get("review_status"), str):
         rs = str(sqlite_workflow["review_status"]).strip().lower() or rs
 
+    created_at = None
+    if workflow_metadata and isinstance(workflow_metadata.get("created_at"), str):
+        created_at = workflow_metadata["created_at"].strip() or None
+    if not created_at and sqlite_workflow and isinstance(sqlite_workflow.get("created_at"), str):
+        created_at = sqlite_workflow["created_at"].strip() or None
+
     await create_session(
         session.session_id,
         notebook,
         session.config,
         review_status=rs,
         current_turn=session.current_turn or 1,
+        created_at=created_at,
     )
 
     # Update status
@@ -222,6 +247,13 @@ async def snapshot_workflow_for_pg(session_id: str) -> Dict[str, Any]:
         out["review_round"] = rr
     except (TypeError, ValueError):
         pass
+
+    ca = meta.get("created_at")
+    if isinstance(ca, str) and ca.strip():
+        out["created_at"] = ca.strip()
+    te = meta.get("trainer_email")
+    if isinstance(te, str) and te.strip():
+        out["trainer_email"] = te.strip()
 
     if await get_qc_done(session_id):
         out["qc_done"] = True
@@ -298,6 +330,14 @@ async def apply_workflow_metadata_to_redis(session_id: str, meta: Dict[str, Any]
     ack = meta.get("acknowledged_at")
     if isinstance(ack, str) and ack.strip():
         await set_meta_field(session_id, "acknowledged_at", ack.strip())
+
+    te = meta.get("trainer_email")
+    if isinstance(te, str) and te.strip():
+        await set_trainer_email(session_id, te.strip())
+
+    # Note: created_at is handled by `create_session` via the `created_at=` kwarg passed
+    # from `save_full_session`. Do not repeat that logic here or we risk restoring a stale
+    # value over a freshly-materialized one.
 
     fb = meta.get("review_feedback")
     if fb and isinstance(fb, (dict, list)):
@@ -537,15 +577,29 @@ if current ~= ARGV[1] then return current end
 redis.call('SET', KEYS[1], ARGV[2])
 redis.call('EXPIRE', KEYS[1], tonumber(ARGV[3]))
 redis.call('HINCRBY', KEYS[3], 'version', 1)
+local bump = tonumber(ARGV[4] or '0')
+if bump == 1 then
+    redis.call('HINCRBY', KEYS[3], 'review_round', 1)
+end
+redis.call('EXPIRE', KEYS[3], tonumber(ARGV[3]))
 return 1
 """
 
 
-async def cas_review_status(session_id: str, expected: str, new_status: str) -> tuple[bool, str]:
+async def cas_review_status(
+    session_id: str,
+    expected: str,
+    new_status: str,
+    *,
+    bump_review_round: bool = False,
+) -> tuple[bool, str]:
     """
     Atomic compare-and-swap for review_status.
     Returns (True, new_status) on success, (False, actual_status) on mismatch.
     Raises ValueError if session not found.
+
+    When `bump_review_round` is True, the review_round counter in `meta` is incremented
+    inside the same Lua script so the transition and the round counter advance together.
     """
     if new_status not in REVIEW_STATUS_VALUES:
         raise ValueError(f"Invalid review_status: {new_status}")
@@ -555,7 +609,7 @@ async def cas_review_status(session_id: str, expected: str, new_status: str) -> 
         _key(session_id, "review_status"),
         _key(session_id, "status"),
         _key(session_id, "meta"),
-        expected, new_status, str(SESSION_TTL),
+        expected, new_status, str(SESSION_TTL), "1" if bump_review_round else "0",
     )
     if result == -1:
         raise ValueError(f"Session {session_id} not found")
@@ -717,24 +771,24 @@ async def clear_all_results(session_id: str) -> None:
     await r.delete(_key(session_id, "all_results"))
 
 
-async def set_results(session_id: str, results: List[HuntResult]) -> None:
-    """Replace the current run's results list (e.g. when restoring session from storage)."""
+async def _replace_result_list(session_id: str, field: str, results: List[HuntResult]) -> None:
+    """Atomically replace a Redis list of HuntResult JSONs for a given session field."""
     r = await get_redis()
-    key = _key(session_id, "results")
+    key = _key(session_id, field)
     await r.delete(key)
     if results:
         await r.rpush(key, *[res.model_dump_json() for res in results])
     await r.expire(key, SESSION_TTL)
+
+
+async def set_results(session_id: str, results: List[HuntResult]) -> None:
+    """Replace the current run's results list (e.g. when restoring session from storage)."""
+    await _replace_result_list(session_id, "results", results)
 
 
 async def set_all_results(session_id: str, results: List[HuntResult]) -> None:
     """Replace the accumulated all_results list (e.g. when restoring session from storage)."""
-    r = await get_redis()
-    key = _key(session_id, "all_results")
-    await r.delete(key)
-    if results:
-        await r.rpush(key, *[res.model_dump_json() for res in results])
-    await r.expire(key, SESSION_TTL)
+    await _replace_result_list(session_id, "all_results", results)
 
 
 async def incr_completed_hunts(session_id: str) -> int:
@@ -871,6 +925,17 @@ def _get_task_id_fields() -> list:
     return [primary, "TaskID", "task_id"]
 
 
+def task_id_from_metadata(meta: Optional[Dict[str, Any]]) -> str:
+    """Extract the human-readable task ID from a metadata dict using configured fields."""
+    if not isinstance(meta, dict):
+        return ""
+    for key in _get_task_id_fields():
+        val = meta.get(key)
+        if val is not None and str(val).strip():
+            return str(val).strip()
+    return ""
+
+
 def _extract_task_display_id(notebook_json: str | None) -> str:
     """Extract the human-readable task ID from notebook metadata JSON using configured fields."""
     if not notebook_json:
@@ -880,13 +945,7 @@ def _extract_task_display_id(notebook_json: str | None) -> str:
     except (json.JSONDecodeError, TypeError):
         return ""
     meta = notebook.get("metadata") if isinstance(notebook, dict) else None
-    if not isinstance(meta, dict):
-        return ""
-    for key in _get_task_id_fields():
-        val = meta.get(key)
-        if val is not None and str(val).strip():
-            return str(val).strip()
-    return ""
+    return task_id_from_metadata(meta)
 
 
 def count_submitted_reviews(human_reviews: dict) -> int:
@@ -926,23 +985,6 @@ def _count_reviews_from_json(reviews_json: str | None) -> int:
     except (json.JSONDecodeError, TypeError):
         return 0
     return count_submitted_reviews(reviews)
-
-
-def _extract_prompt_preview(notebook_json: str | None, max_len: int = 120) -> str:
-    """Extract a short prompt preview from notebook JSON."""
-    if not notebook_json:
-        return ""
-    try:
-        nb = json.loads(notebook_json)
-    except (json.JSONDecodeError, TypeError):
-        return ""
-    if not isinstance(nb, dict):
-        return ""
-    prompt = nb.get("prompt", "")
-    if isinstance(prompt, str) and prompt.strip():
-        text = prompt.strip().replace("\n", " ")
-        return text[:max_len] + ("…" if len(text) > max_len else "")
-    return ""
 
 
 def _get_production_start() -> Optional[str]:
@@ -1009,7 +1051,7 @@ async def list_all_sessions_summary() -> List[Dict[str, Any]]:
             "current_turn": int(meta.get("current_turn", 1)),
             "review_count": _count_reviews_from_json(reviews_raw),
             "qc_done": qc_done_val == "1",
-            "prompt_preview": _extract_prompt_preview(notebook_raw),
+            "prompt_preview": prompt_preview_from_notebook_json(notebook_raw, max_len=120),
             "review_feedback": feedback,
             "trainer_email": meta.get("trainer_email", ""),
         })
