@@ -85,26 +85,11 @@ export class MhConnectionBanner extends LitElement {
     }
 
     render() {
-        const visible = !this._online || this._pending > 0;
-        const text = !this._online
-            ? "You're offline — changes will sync when you reconnect"
-            : this._pending > 0
-                ? 'Reconnected — syncing queued changes'
-                : '';
-        const badge = this._pending > 0 ? `${this._pending} pending` : '';
-        return html`
-            <div
-                id="offlineBanner"
-                class=${`offline-banner ${visible ? '' : 'offline-banner--hidden'}`}
-                role="status"
-                aria-live="polite"
-                ?hidden=${!visible}
-            >
-                <span class="offline-banner__icon" aria-hidden="true">${this._online ? '↻' : '⚡'}</span>
-                <span class="offline-banner__text">${text || nothing}</span>
-                <span class="offline-banner__badge" id="offlinePendingBadge">${badge || nothing}</span>
-            </div>
-        `;
+        // Banner intentionally disabled: offline detection produced false
+        // positives (reachability probe failing while the app is online).
+        // Keep the component mounted so offlineQueue pubsub wiring stays
+        // intact, but render nothing.
+        return nothing;
     }
 }
 
