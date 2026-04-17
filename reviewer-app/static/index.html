@@ -55,16 +55,79 @@
     </section>
 
     <main id="main" class="main main--reviewer-slim" hidden>
-      <section class="fetch-card reviewer-fetch-card" aria-label="Load notebook">
-        <label class="gate-label" for="task-fetch-input">Colab or Drive notebook link</label>
-        <div class="reviewer-fetch-row">
-          <input type="text" id="task-fetch-input" class="reviewer-fetch-input" placeholder="https://colab.research.google.com/drive/..." autocomplete="off" />
-          <button type="button" id="btn-fetch-task" class="btn-fetch-task">Fetch</button>
+
+      <section id="home-panel" class="home-panel" aria-label="Home">
+        <div class="home-hero">
+          <div class="home-hero-left">
+            <span class="home-hero-eyebrow" id="home-role-eyebrow">Reviewer</span>
+            <h2 class="home-hero-title" id="home-hero-title">Welcome back</h2>
+            <p class="home-hero-sub" id="home-hero-sub">Tasks from your assigned trainers will appear here as they&rsquo;re submitted.</p>
+          </div>
+          <div class="home-hero-right">
+            <div class="home-stat home-stat--submitted">
+              <span class="home-stat-value" id="stat-submitted">0</span>
+              <span class="home-stat-label">Pending</span>
+            </div>
+            <div class="home-stat home-stat--returned">
+              <span class="home-stat-value" id="stat-returned">0</span>
+              <span class="home-stat-label">Returned</span>
+            </div>
+            <div class="home-stat home-stat--approved">
+              <span class="home-stat-value" id="stat-approved">0</span>
+              <span class="home-stat-label">Approved</span>
+            </div>
+            <div class="home-stat home-stat--escalated">
+              <span class="home-stat-value" id="stat-escalated">0</span>
+              <span class="home-stat-label">Escalated</span>
+            </div>
+          </div>
         </div>
-        <p id="fetch-status" class="fetch-status" hidden role="status"></p>
+
+        <div class="home-grid">
+          <section class="home-queue-card">
+            <header class="home-queue-head">
+              <div class="home-queue-title-wrap">
+                <h3 class="home-queue-title">Incoming tasks</h3>
+                <span class="home-queue-sub" id="home-queue-sub">Submitted by trainers mapped to you</span>
+              </div>
+              <div class="home-queue-tools">
+                <input type="search" id="home-queue-filter" class="home-queue-filter" placeholder="Filter by task ID, trainer, domain&hellip;" aria-label="Filter tasks" />
+                <button type="button" id="home-queue-refresh" class="home-queue-refresh" title="Refresh">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15A9 9 0 1 1 5.64 5.64L23 10"/></svg>
+                </button>
+              </div>
+            </header>
+            <div class="home-queue-tabs" role="tablist" id="home-queue-tabs">
+              <button type="button" class="home-queue-tab active" role="tab" data-status="submitted" aria-selected="true">Pending <span class="home-tab-count" data-count-for="submitted">0</span></button>
+              <button type="button" class="home-queue-tab" role="tab" data-status="returned" aria-selected="false">Returned <span class="home-tab-count" data-count-for="returned">0</span></button>
+              <button type="button" class="home-queue-tab" role="tab" data-status="approved" aria-selected="false">Approved <span class="home-tab-count" data-count-for="approved">0</span></button>
+              <button type="button" class="home-queue-tab" role="tab" data-status="escalated" aria-selected="false">Escalated <span class="home-tab-count" data-count-for="escalated">0</span></button>
+              <button type="button" class="home-queue-tab" role="tab" data-status="all" aria-selected="false">All</button>
+            </div>
+            <div class="home-queue-list" id="home-queue-list" aria-live="polite" aria-busy="false"></div>
+          </section>
+
+          <section class="home-paste-card" aria-label="Load by link">
+            <div class="home-paste-head">
+              <h3 class="home-paste-title">Or load any notebook by link</h3>
+              <p class="home-paste-sub">Paste a Colab, Drive, or raw GitHub notebook URL</p>
+            </div>
+            <div class="reviewer-fetch-row">
+              <input type="text" id="task-fetch-input" class="reviewer-fetch-input" placeholder="https://colab.research.google.com/drive/..." autocomplete="off" />
+              <button type="button" id="btn-fetch-task" class="btn-fetch-task">Fetch</button>
+            </div>
+            <p id="fetch-status" class="fetch-status" hidden role="status"></p>
+          </section>
+        </div>
       </section>
 
       <section id="task-panel" class="task-panel" hidden aria-label="Task">
+        <div class="task-topbar">
+          <button type="button" id="btn-back-home" class="btn-back-home" title="Back to incoming">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+            Back to incoming
+          </button>
+        </div>
         <div class="task-view-header task-view-header--slim">
           <div class="task-identity">
             <h2><span id="task-display-id-label">Task ID</span>: <span id="task-display-id" class="task-display-id-value"></span></h2>

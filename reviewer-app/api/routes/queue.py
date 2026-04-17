@@ -5,16 +5,39 @@ from fastapi import APIRouter, Depends, Query
 
 from api.deps import require_reviewer
 from config import get_task_identity_config
+from config.settings import ensure_agentic_path
 from services.redis_client import list_sessions_for_review, list_sessions
 from services.queue_service import get_queue_with_summaries, get_queue_status_counts
+
+ensure_agentic_path()
+from agentic_reviewer.team_config import (  # noqa: E402
+    get_role,
+    get_pod_for_email,
+    get_trainers_mapped_to_reviewer,
+    get_trainer_emails_in_pod,
+)
 
 router = APIRouter(prefix="/api", tags=["queue"])
 
 
 @router.get("/auth/session")
 async def auth_session(_reviewer: Annotated[str, Depends(require_reviewer)]):
-    """Allowlist check only (no Redis queue scan). Used for reviewer sign-in."""
-    return {"ok": True, "reviewer": _reviewer}
+    """Allowlist check + identity summary (role, pod, assigned trainers). Used on sign-in."""
+    role = get_role(_reviewer) or "reviewer"
+    pod_id = get_pod_for_email(_reviewer)
+    if role == "pod_lead" and pod_id:
+        assigned = get_trainer_emails_in_pod(pod_id)
+    elif role == "reviewer":
+        assigned = get_trainers_mapped_to_reviewer(_reviewer)
+    else:
+        assigned = []
+    return {
+        "ok": True,
+        "reviewer": _reviewer,
+        "role": role,
+        "pod_id": pod_id,
+        "assigned_trainers": assigned,
+    }
 
 
 @router.get("/queue")

@@ -1,0 +1,47 @@
+/* ── Reviewer Home: paste-URL sidebar card + back-to-home button ─ */
+
+.home-paste-card {
+  background: var(--bg-card, #1a1a1a);
+  border: 1px solid var(--border, #262626);
+  border-radius: 16px;
+  padding: 1.1rem 1.2rem;
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  position: sticky;
+  top: 1rem;
+}
+
+.home-paste-head { display: flex; flex-direction: column; gap: 0.2rem; }
+.home-paste-title {
+  font-size: 0.95rem; font-weight: 700; margin: 0;
+  color: var(--text-primary, #ececec);
+}
+.home-paste-sub { font-size: 0.72rem; color: var(--text-muted, #606060); margin: 0; }
+
+/* ── Back-to-home button on task panel ──────────────── */
+
+.task-topbar {
+  display: flex;
+  align-items: center;
+  padding: 0 0 0.5rem;
+}
+
+.btn-back-home {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  background: transparent;
+  border: 1px solid var(--border, #262626);
+  color: var(--text-secondary, #a0a0a0);
+  padding: 0.4rem 0.75rem;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.78rem; font-weight: 600;
+  transition: all 0.15s ease;
+}
+.btn-back-home:hover {
+  color: var(--accent-primary, #3b82f6);
+  border-color: var(--accent-primary, #3b82f6);
+  background: var(--accent-glow, rgba(59,130,246,0.12));
+}
+.btn-back-home:active { transform: scale(0.97); }

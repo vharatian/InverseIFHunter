@@ -145,6 +145,7 @@ async def get_queue_with_summaries(
             notebook_json = meta_results[i * 2 + 1]
             item["trainer_email"] = (meta.get("trainer_email") or "").strip()
             item["submitted_at"] = (meta.get("submitted_at") or meta.get("submit_time") or "").strip()
+            item["colab_url"] = (meta.get("colab_url") or meta.get("notebook_url") or meta.get("url") or "").strip()
             # Extract domain from notebook metadata
             domain = ""
             if notebook_json:
