@@ -19,7 +19,7 @@ from services.turn_dedupe import dedupe_turns_to_models
 
 logger = logging.getLogger(__name__)
 
-from services.redis_session import REVIEW_STATUS_VALUES as _REVIEW_STATUS_PG  # noqa: E402
+_REVIEW_STATUS_PG = ("draft", "submitted", "returned", "approved", "rejected", "escalated")
 
 
 def _normalize_pg_review_status(raw: Optional[str]) -> str:
