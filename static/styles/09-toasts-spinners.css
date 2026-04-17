@@ -1,0 +1,248 @@
+/* Alerts */
+.alert {
+    padding: 1rem;
+    border-radius: var(--radius-md);
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+}
+
+.alert-success {
+    background: var(--success-bg);
+    border: 1px solid var(--success);
+    color: var(--success);
+}
+
+.alert-error {
+    background: var(--danger-bg);
+    border: 1px solid var(--danger);
+    color: var(--danger);
+}
+
+.alert-warning {
+    background: var(--warning-bg);
+    border: 1px solid var(--warning);
+    color: var(--warning);
+}
+
+/* Singleton toasts: [hidden] must win over .mh-toast display */
+#mh-toast-singleton[hidden],
+#mh-toast-retry-singleton[hidden],
+#mh-toast-error-trace-singleton[hidden],
+#mh-toast-undo-singleton[hidden] {
+    display: none !important;
+}
+
+/* Compact glass toasts (celebrations.js) — width hugs message */
+.mh-toast {
+    pointer-events: auto;
+    display: inline-flex;
+    align-items: stretch;
+    gap: 0.5rem;
+    padding: 0.45rem 0.65rem;
+    border-radius: 10px;
+    background: rgba(30, 30, 42, 0.88);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    font-size: 0.8125rem;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
+    width: max-content;
+    max-width: min(400px, calc(100vw - 2rem));
+}
+.mh-toast__bar {
+    width: 3px;
+    border-radius: 3px;
+    flex-shrink: 0;
+    align-self: stretch;
+    min-height: 1.1em;
+}
+.mh-toast--success .mh-toast__bar {
+    background: var(--success);
+    box-shadow: 0 0 8px rgba(52, 211, 153, 0.45);
+}
+.mh-toast--error .mh-toast__bar {
+    background: var(--danger);
+    box-shadow: 0 0 8px rgba(248, 113, 113, 0.4);
+}
+.mh-toast--warning .mh-toast__bar {
+    background: var(--warning);
+    box-shadow: 0 0 8px rgba(251, 191, 36, 0.35);
+}
+.mh-toast--info .mh-toast__bar {
+    background: var(--accent-primary, #60a5fa);
+    box-shadow: 0 0 8px rgba(96, 165, 250, 0.35);
+}
+.mh-toast__msg {
+    align-self: center;
+    color: var(--text-primary);
+    text-align: left;
+    word-break: break-word;
+}
+.mh-toast__body {
+    align-self: center;
+    flex: 1;
+    min-width: 0;
+}
+
+[data-theme="light"] .mh-toast {
+    background: rgba(255, 255, 255, 0.92);
+    border-color: rgba(0, 0, 0, 0.1);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.12);
+}
+
+/* P7: Toast with Retry button */
+.toast-with-retry.mh-toast {
+    align-items: stretch;
+}
+.toast-with-retry .toast-retry-content {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    flex: 1;
+    min-width: 0;
+}
+.toast-with-retry .toast-hint {
+    font-size: 0.85em;
+    opacity: 0.9;
+}
+.toast-with-retry .toast-retry-btn {
+    align-self: flex-start;
+    margin-top: 0.25rem;
+}
+
+/* Error toast with trace id chip */
+.mh-toast--with-trace {
+    align-items: stretch;
+    max-width: min(520px, calc(100vw - 2rem));
+}
+.mh-toast--with-trace .mh-toast__body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+.mh-toast--with-trace .mh-toast__msg {
+    align-self: flex-start;
+}
+.mh-toast--with-trace .mh-toast__hint {
+    font-size: 0.85em;
+    opacity: 0.9;
+    color: var(--text-secondary);
+}
+.mh-toast--with-trace .mh-toast__hint[hidden] {
+    display: none;
+}
+.mh-toast--with-trace .mh-toast__actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-top: 0.15rem;
+}
+.mh-toast__trace-chip {
+    appearance: none;
+    border: 1px solid var(--border, rgba(255, 255, 255, 0.18));
+    background: rgba(0, 0, 0, 0.28);
+    color: var(--text-secondary, #cbd5e1);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.75rem;
+    padding: 0.2rem 0.5rem;
+    border-radius: 6px;
+    cursor: pointer;
+    user-select: all;
+    line-height: 1.2;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.mh-toast__trace-chip:hover {
+    background: rgba(0, 0, 0, 0.45);
+    color: var(--text-primary, #fff);
+    border-color: var(--accent-primary, #60a5fa);
+}
+.mh-toast__trace-chip:focus-visible {
+    outline: 2px solid var(--accent-primary, #60a5fa);
+    outline-offset: 2px;
+}
+.mh-toast__trace-chip[hidden] {
+    display: none;
+}
+.mh-toast__retry[hidden] {
+    display: none;
+}
+[data-theme="light"] .mh-toast__trace-chip {
+    background: rgba(0, 0, 0, 0.04);
+    border-color: rgba(0, 0, 0, 0.12);
+}
+[data-theme="light"] .mh-toast__trace-chip:hover {
+    background: rgba(0, 0, 0, 0.08);
+}
+
+/* Undo toast (destructive action with 5s window) */
+.mh-toast--with-undo {
+    align-items: stretch;
+    max-width: min(440px, calc(100vw - 2rem));
+}
+.mh-toast--with-undo .mh-toast__body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+.mh-toast--with-undo .mh-toast__actions {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    margin-top: 0.15rem;
+}
+.mh-toast__countdown {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.75rem;
+    color: var(--text-muted, #888);
+    min-width: 2.2em;
+    text-align: right;
+}
+
+/* ==========================================================================
+   A11y — baseline :focus-visible ring.
+   Applies only to keyboard navigation (not mouse clicks) per CSS spec.
+   Intentionally uses outline (not border) so it does not fight existing
+   component-specific focus rules that change border-color.
+   Component rules that explicitly set `outline: none;` still win.
+   ========================================================================== */
+a:focus-visible,
+button:focus-visible,
+[role="button"]:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+summary:focus-visible,
+[tabindex]:not([tabindex="-1"]):focus-visible {
+    outline: 2px solid var(--accent-primary, #3b82f6);
+    outline-offset: 2px;
+    border-radius: inherit;
+}
+
+/* Modal/slideout containers get focus via focus trap fallback — hide the ring
+   there since the ring would surround the whole dialog. */
+[role="dialog"]:focus-visible,
+.modal:focus-visible,
+.response-slideout:focus-visible,
+.grading-slideout:focus-visible {
+    outline: none;
+}
+
+/* Spinner */
+.spinner {
+    width: 20px;
+    height: 20px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent-primary);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+

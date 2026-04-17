@@ -1,0 +1,161 @@
+/* Masked Content for Blind Review */
+.masked-section {
+    opacity: 1;
+}
+
+.masked-content {
+    background: var(--bg-tertiary);
+    border: 2px dashed var(--border);
+    border-radius: 8px;
+    padding: 1rem;
+    text-align: center;
+}
+
+.masked-badge {
+    display: inline-block;
+    background: linear-gradient(135deg, #4a5568, #2d3748);
+    color: #a0aec0;
+    padding: 0.5rem 1rem;
+    border-radius: 20px;
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+/* Human Review Buttons */
+.btn-success {
+    background: linear-gradient(135deg, var(--success), #059669);
+    color: white;
+    border: none;
+}
+
+.btn-success:hover {
+    background: linear-gradient(135deg, #059669, #047857);
+    transform: translateY(-1px);
+}
+
+.btn-success.active {
+    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.4);
+    transform: scale(1.02);
+}
+
+.btn-danger {
+    background: linear-gradient(135deg, var(--danger), #dc2626);
+    color: white;
+    border: none;
+}
+
+.btn-danger:hover {
+    background: linear-gradient(135deg, #dc2626, #b91c1c);
+    transform: translateY(-1px);
+}
+
+.btn-danger.active {
+    box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.4);
+    transform: scale(1.02);
+}
+
+/* Slot Split-Panel Interface */
+.slot-split-container {
+    width: 100%;
+    margin-top: 0.5rem;
+    display: flex;
+    gap: 1.5rem;
+    align-items: flex-start;
+}
+
+.slot-response-panel {
+    flex: 1.2;
+    min-width: 0;
+}
+
+.slot-response-panel .response-content {
+    background: var(--bg-primary);
+    padding: 1rem;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+}
+
+.slot-grading-panel {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+.slot-grade-section {
+    flex: 1;
+    min-height: 0;
+}
+
+.slot-explanation-section {
+    flex-shrink: 0;
+}
+
+.slot-reasoning-section {
+    width: 100%;
+}
+
+.reasoning-toggle-btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-hover);
+}
+
+.reasoning-content {
+    animation: fadeIn 0.2s ease-in;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(5px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Responsive: Stack on smaller screens */
+@media (max-width: 1024px) {
+    .slot-split-container {
+        flex-direction: column;
+        gap: 1rem;
+    }
+    
+    .slot-response-panel {
+        flex: none;
+    }
+    
+    .slot-grading-panel {
+        flex: none;
+    }
+}
+
+.criterion-row:hover {
+    border-color: var(--border-hover);
+    background: var(--bg-hover);
+    transform: translateX(2px);
+}
+
+.criterion-pass.active,
+.criterion-pass:hover {
+    background: var(--success) !important;
+    color: white !important;
+    transform: scale(1.05);
+    box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+}
+
+.criterion-fail.active,
+.criterion-fail:hover {
+    background: var(--danger) !important;
+    color: white !important;
+    transform: scale(1.05);
+    box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3);
+}
+
+
+
+
+
+

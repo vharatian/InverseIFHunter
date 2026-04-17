@@ -1011,7 +1011,7 @@ function refreshAll() {
 
 // ============== Initialize ==============
 
-document.addEventListener('DOMContentLoaded', () => {
+function _initDashboard() {
     const te = document.getElementById('trainerEmailsFilter');
     if (te) {
         const saved = localStorage.getItem(TRAINER_EMAILS_STORAGE_KEY);
@@ -1087,7 +1087,18 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.getElementById('lastUpdate').textContent = fmtTime(new Date());
-});
+}
+
+// dashboard.js is injected dynamically at the bottom of index.html, so it
+// may run AFTER DOMContentLoaded has already fired. In that case attaching
+// a DOMContentLoaded listener is a no-op and tab/button click handlers
+// never get wired, leaving the UI unresponsive. Run init now if the DOM
+// is already parsed; otherwise wait for the event.
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _initDashboard);
+} else {
+    _initDashboard();
+}
 
 // ============== Live stream (SSE) ==============
 

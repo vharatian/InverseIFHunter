@@ -1,0 +1,185 @@
+
+/* Model Mismatch Warning */
+.model-mismatch-warning {
+    padding: 0.75rem 1rem;
+    background: var(--danger-bg);
+    border: var(--border-width) solid var(--danger);
+    border-radius: var(--radius-md);
+    color: var(--danger);
+    font-size: 0.85rem;
+    margin-top: 0.5rem;
+    line-height: 1.5;
+}
+
+.model-mismatch-warning strong {
+    font-weight: 600;
+}
+
+
+/* Responsive: Hide sidebar on small screens */
+@media (max-width: 1024px) {
+    .metadata-sidebar {
+        display: none !important;
+    }
+    
+    .main-content-with-sidebar {
+        margin-left: 0;
+    }
+    
+    body.sidebar-visible .container {
+        margin-left: auto;
+    }
+}
+
+.card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.65rem;
+}
+
+.card-title {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+.card-title-icon {
+    font-size: 1rem;
+}
+
+/* Collapsible Breaking Results Card */
+.collapsible-card-header {
+    cursor: pointer;
+    user-select: none;
+    margin-bottom: 0;
+}
+.collapsible-card-header:hover {
+    opacity: 0.9;
+}
+.collapse-toggle-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 0.35rem 0.6rem;
+    cursor: pointer;
+    color: var(--text-secondary);
+    transition: all var(--transition-fast);
+}
+.collapse-toggle-btn:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+.collapse-toggle-icon {
+    display: inline-block;
+    transition: transform var(--transition-fast);
+    font-size: 0.75rem;
+}
+#selectionSectionCard.collapsed .collapse-toggle-icon {
+    transform: rotate(-90deg);
+}
+.collapsible-summary {
+    display: none;
+    padding: 0.75rem 1rem;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    margin-top: 0.5rem;
+    cursor: pointer;
+}
+#selectionSectionCard.collapsed .collapsible-summary {
+    display: block;
+}
+#selectionSectionCard.collapsed .collapsible-card-body {
+    display: none;
+}
+
+/* Buttons — Minimal */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    padding: 0.4rem 0.85rem;
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    font-family: var(--font-body);
+    font-size: 0.82rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    white-space: nowrap;
+}
+
+.btn-primary {
+    background: var(--accent-primary);
+    color: #fff;
+    border-color: var(--accent-primary);
+}
+
+.btn-primary:hover {
+    background: var(--accent-secondary);
+    border-color: var(--accent-secondary);
+}
+
+.btn-primary:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.btn-secondary {
+    background: transparent;
+    color: var(--text-secondary);
+    border-color: var(--border);
+}
+
+.btn-secondary:hover {
+    border-color: var(--border-hover);
+    color: var(--text-primary);
+    background: var(--bg-hover);
+}
+
+/* Solid secondary-style control (e.g. refresh alignment) — avoids washed-out transparent look */
+.btn-refresh-alignment {
+    background: rgba(var(--accent-primary-rgb), 0.22);
+    color: var(--text-primary);
+    border: 1px solid var(--accent-primary);
+    font-weight: 600;
+}
+
+.btn-refresh-alignment:hover:not(:disabled) {
+    background: rgba(var(--accent-primary-rgb), 0.32);
+    border-color: var(--accent-secondary);
+}
+
+.btn-refresh-alignment:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.btn-success {
+    background: var(--success);
+    color: #fff;
+    border-color: var(--success);
+}
+
+.btn-danger {
+    background: var(--danger);
+    color: #fff;
+    border-color: var(--danger);
+}
+
+.btn-sm {
+    padding: 0.25rem 0.55rem;
+    font-size: 0.72rem;
+}
+
+.btn-lg {
+    padding: 0.55rem 1.1rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+

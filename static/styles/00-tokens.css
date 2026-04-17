@@ -1,0 +1,106 @@
+/* Model Hunter — Notion-Minimal Theme */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+    /* Dark theme (default) — high contrast */
+    --bg-primary: #0f0f0f;
+    --bg-secondary: #161616;
+    --bg-tertiary: #1c1c1c;
+    --bg-card: #1a1a1a;
+    --bg-surface: #212121;
+    --bg-hover: #272727;
+    --bg-active: #333333;
+
+    --text-primary: #ececec;
+    --text-secondary: #a0a0a0;
+    --text-muted: #606060;
+
+    --accent-primary: #3b82f6;
+    --accent-secondary: #2563eb;
+    --accent-glow: rgba(59, 130, 246, 0.12);
+    --accent-gradient: #3b82f6;
+    --accent-primary-rgb: 59, 130, 246;
+
+    --gold: #eab308;
+    --gold-dark: #ca8a04;
+
+    --success: #22c55e;
+    --success-bg: rgba(34, 197, 94, 0.08);
+    --danger: #ef4444;
+    --danger-bg: rgba(239, 68, 68, 0.08);
+    --warning: #eab308;
+    --warning-bg: rgba(234, 179, 8, 0.08);
+
+    --border: #262626;
+    --border-subtle: #1f1f1f;
+    --border-hover: #383838;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.3);
+    --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.4);
+    --shadow-vintage: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-glow-blue: 0 0 20px rgba(59, 130, 246, 0.15);
+    --shadow-glow-green: 0 0 20px rgba(34, 197, 94, 0.15);
+    --shadow-glow-red: 0 0 20px rgba(239, 68, 68, 0.15);
+
+    --glass: rgba(255, 255, 255, 0.02);
+    --glass-border: rgba(59, 130, 246, 0.08);
+
+    --transition-fast: 0.15s ease;
+    --transition-normal: 0.2s ease;
+    --transition-slow: 0.3s ease;
+
+    --radius-sm: 6px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --radius-xl: 16px;
+
+    --border-width: 1px;
+
+    /* Fonts — Inter everywhere */
+    --font-heading: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+
+    /* Turn color system (formerly a separate :root block — consolidated here). */
+    --turn-1: #2383e2;
+    --turn-2: #9065e0;
+    --turn-3: #e8a441;
+    --turn-4: #eb5757;
+    --turn-5: #4dab9a;
+    --turn-6: #3b82f6;
+}
+
+[data-theme="light"] {
+    /* Light theme — high contrast */
+    --bg-primary: #fafafa;
+    --bg-secondary: #ffffff;
+    --bg-tertiary: #f5f5f5;
+    --bg-card: #ffffff;
+    --bg-surface: #f8f8f8;
+    --bg-hover: #f0f0f0;
+    --bg-active: #e8e8e8;
+
+    --text-primary: #18181b;
+    --text-secondary: #71717a;
+    --text-muted: #a1a1aa;
+
+    --accent-primary: #3b82f6;
+    --accent-secondary: #2563eb;
+    --accent-glow: rgba(59, 130, 246, 0.1);
+    --accent-gradient: #3b82f6;
+
+    --border: #e4e4e7;
+    --border-subtle: #f0f0f0;
+    --border-hover: #d4d4d8;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+    --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.1);
+    --shadow-vintage: 0 1px 2px rgba(0, 0, 0, 0.05);
+
+    --glass: rgba(255, 255, 255, 0.95);
+    --glass-border: rgba(59, 130, 246, 0.1);
+}
+

@@ -806,8 +806,6 @@ async function _applyTurnAdvance(apiData, selectedResp, completedPrompt, complet
 
     validatePromptLength();
 
-    const { hideTurn1TestPromptPanel } = await import('./notebook.js');
-    hideTurn1TestPromptPanel();
     enableNavTestbedButton();
 
     state.referenceValidated = false;

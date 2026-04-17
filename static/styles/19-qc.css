@@ -1,0 +1,715 @@
+/* ========== Quality Check Overlay (full-screen, live QA) ========== */
+
+.qc-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10001;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    padding: 1.5rem;
+    overflow-y: auto;
+}
+
+.qc-panel {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-lg);
+    max-width: 960px;
+    width: 100%;
+    max-height: 90vh;
+    overflow-y: auto;
+    padding: 1.5rem 1.75rem;
+}
+
+.qc-panel-inline {
+    max-height: none;
+    box-shadow: none;
+}
+
+.qc-header {
+    margin-bottom: 1.25rem;
+}
+
+.qc-title {
+    margin: 0 0 0.35rem 0;
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.qc-subtitle {
+    margin: 0;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    line-height: 1.45;
+}
+
+.qc-progress-wrap {
+    margin-top: 1rem;
+}
+
+.qc-progress-bar {
+    height: 6px;
+    background: var(--bg-tertiary);
+    border-radius: 3px;
+    overflow: hidden;
+    margin-bottom: 0.5rem;
+}
+
+.qc-progress-fill {
+    height: 100%;
+    background: var(--accent-primary);
+    width: 0%;
+    transition: width 0.3s ease;
+}
+
+.qc-progress-text {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+}
+
+/* QC Tabs (overlay + persistent section) */
+.qc-tabs-container {
+    margin-top: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+.qc-tab-bar {
+    display: flex;
+    gap: 0;
+    border-bottom: 2px solid var(--border);
+    overflow-x: auto;
+    flex-shrink: 0;
+}
+
+.qc-tab-btn {
+    padding: 0.6rem 1rem;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: color 0.2s, border-color 0.2s;
+}
+
+.qc-tab-btn:hover {
+    color: var(--text-secondary);
+}
+
+.qc-tab-btn.active {
+    color: var(--accent-primary);
+    border-bottom-color: var(--accent-primary);
+}
+
+.qc-tab-panes {
+    padding: 1rem 0;
+    min-height: 120px;
+}
+
+.qc-tab-pane {
+    display: none;
+}
+
+.qc-tab-pane.active {
+    display: block;
+}
+
+.qc-collapsible {
+    margin-top: 0.5rem;
+}
+
+.qc-collapsible-summary {
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    user-select: none;
+}
+
+.qc-collapsible-summary:hover {
+    color: var(--text-primary);
+}
+
+.qc-rules {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.qc-rule-card {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1rem 1.15rem;
+}
+
+.qc-rule-card .qc-rule-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.qc-rule-card .qc-rule-title {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--text-primary);
+}
+
+.qc-rule-status {
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.qc-status-running {
+    color: var(--text-muted);
+}
+
+.qc-status-pass {
+    color: var(--success);
+}
+
+.qc-status-fail {
+    color: var(--danger);
+}
+
+.qc-rule-desc {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    margin-top: 0.35rem;
+}
+
+.qc-content-checked {
+    margin-top: 0.75rem;
+    padding: 0.65rem 0.85rem;
+    background: rgba(0, 0, 0, 0.15);
+    border-radius: var(--radius-md);
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
+.qc-content-check,
+.qc-content-models,
+.qc-content-slots,
+.qc-content-criteria,
+.qc-content-prompt {
+    margin-bottom: 0.35rem;
+}
+
+.qc-content-check:last-child,
+.qc-content-models:last-child,
+.qc-content-slots:last-child,
+.qc-content-criteria:last-child,
+.qc-content-prompt:last-child {
+    margin-bottom: 0;
+}
+
+.qc-rationale {
+    margin-top: 0.5rem;
+    font-size: 0.82rem;
+    color: var(--text-primary);
+}
+
+.qc-issue-message {
+    margin-top: 0.35rem;
+    font-size: 0.82rem;
+    color: var(--danger);
+}
+
+.qc-issue-hint {
+    margin-top: 0.25rem;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}
+
+.qc-council-votes {
+    margin-top: 0.75rem;
+}
+
+.qc-council-title {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 0.4rem;
+}
+
+.qc-council-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+
+.qc-council-list.qc-council-with-explanations {
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.qc-council-list.qc-council-waiting {
+    color: var(--text-muted);
+    font-size: 0.82rem;
+}
+
+.qc-council-model-block {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    background: rgba(0, 0, 0, 0.12);
+    border-radius: var(--radius-sm);
+    padding: 0.5rem 0.75rem;
+    border-left: 3px solid var(--accent-primary);
+    min-width: 200px;
+}
+
+.qc-council-model-name {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--accent-primary);
+}
+
+.qc-council-model-reasoning {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 120px;
+    overflow-y: auto;
+}
+
+.qc-vote-pending {
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.qc-vote {
+    padding: 0.25rem 0.5rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.78rem;
+    font-weight: 500;
+}
+
+.qc-vote-pass {
+    background: var(--success-bg);
+    color: var(--success);
+}
+
+.qc-vote-fail {
+    background: var(--danger-bg);
+    color: var(--danger);
+}
+
+.qc-vote-unclear {
+    background: var(--bg-tertiary);
+    color: var(--text-muted);
+}
+
+.qc-chairman-section {
+    margin-top: 1rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+}
+
+.qc-chairman-rationale {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin: 0.4rem 0 0.5rem;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.qc-chairman-verdict {
+    display: inline-block;
+    margin-top: 0.25rem;
+}
+
+/* Council: prompt + live model reasoning */
+.qc-council-section {
+    margin-top: 1rem;
+}
+
+.qc-council-prompt {
+    margin-bottom: 1rem;
+}
+
+.qc-council-prompt-title {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 0.4rem;
+}
+
+.qc-council-prompt-body {
+    background: rgba(0, 0, 0, 0.2);
+    padding: 0.75rem 1rem;
+    border-radius: var(--radius-md);
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 180px;
+    overflow-y: auto;
+    margin: 0;
+}
+
+.qc-council-models {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.qc-council-model-card {
+    background: rgba(0, 0, 0, 0.15);
+    border-radius: var(--radius-md);
+    padding: 0.75rem 1rem;
+    border-left: 3px solid var(--accent-primary);
+}
+
+.qc-council-model-header {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--accent-primary);
+    margin-bottom: 0.4rem;
+}
+
+.qc-council-model-response {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    min-height: 1em;
+}
+
+.qc-council-model-verdict {
+    margin-top: 0.5rem;
+    font-size: 0.8rem;
+}
+
+.qc-council-model-verdict.qc-verdict-visible .qc-vote {
+    display: inline-block;
+}
+
+/* Evaluation section (what failed, slot-by-slot) — inline in modal */
+.qc-eval-wrap {
+    margin-top: 1.25rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--border);
+}
+
+.qc-eval-section {
+    background: rgba(0, 0, 0, 0.15);
+    border-radius: var(--radius-lg);
+    padding: 1rem 1.25rem;
+    border-left: 4px solid var(--danger);
+}
+
+.qc-eval-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 0.75rem;
+}
+
+.qc-eval-issues {
+    margin: 0 0 1rem 0;
+    padding-left: 1.25rem;
+}
+
+.qc-eval-issue {
+    margin-bottom: 0.5rem;
+    font-size: 0.9rem;
+    color: var(--text-primary);
+    line-height: 1.5;
+}
+
+.qc-eval-hint {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+}
+
+.qc-eval-subtitle {
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin: 1rem 0 0.5rem 0;
+}
+
+.qc-eval-subtitle:first-of-type {
+    margin-top: 0;
+}
+
+.qc-eval-council {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+
+.qc-eval-desc {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    margin: 0 0 0.75rem 0;
+}
+
+.qc-eval-slot {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 0.85rem 1rem;
+    margin-bottom: 0.75rem;
+}
+
+.qc-eval-slot.has-disagreement {
+    border-color: var(--danger);
+    background: rgba(235, 87, 87, 0.08);
+}
+
+.qc-eval-slot-header {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--accent-primary);
+    margin-bottom: 0.5rem;
+}
+
+.qc-eval-mismatch-badge {
+    font-size: 0.75rem;
+    color: var(--danger);
+    font-weight: 500;
+    margin-left: 0.5rem;
+}
+
+.qc-eval-slot-criteria {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+}
+
+.qc-eval-crit {
+    padding: 0.2rem 0.45rem;
+    border-radius: 4px;
+    font-size: 0.78rem;
+}
+
+.qc-eval-crit.pass {
+    background: var(--success-bg);
+    color: var(--success);
+}
+
+.qc-eval-crit.fail {
+    background: var(--danger-bg);
+    color: var(--danger);
+}
+
+.qc-eval-crit.mismatch {
+    background: rgba(232, 164, 65, 0.2);
+    color: var(--warning);
+    border: 1px dashed var(--warning);
+}
+
+.qc-eval-slot-explanation {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    margin-top: 0.5rem;
+    line-height: 1.5;
+}
+
+.qc-eval-prompt {
+    background: rgba(0, 0, 0, 0.2);
+    padding: 0.65rem 0.85rem;
+    border-radius: var(--radius-md);
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    max-height: 120px;
+    overflow-y: auto;
+    margin: 0;
+}
+
+.qc-eval-empty {
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.qc-summary {
+    margin-top: 1.25rem;
+    padding: 0.85rem 1rem;
+    border-radius: var(--radius-md);
+    font-size: 0.9rem;
+    font-weight: 500;
+}
+
+.qc-summary-pass {
+    background: var(--success-bg);
+    color: var(--success);
+}
+
+.qc-summary-fail {
+    background: var(--danger-bg);
+    color: var(--danger);
+}
+
+.qc-actions {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: flex-end;
+    margin-top: 1.25rem;
+}
+
+.qc-btn {
+    padding: 0.6rem 1.2rem;
+    border-radius: var(--radius-md);
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    font-family: inherit;
+    transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+.qc-btn-primary {
+    background: var(--accent-primary);
+    color: #fff;
+}
+
+.qc-btn-primary:hover {
+    background: var(--accent-secondary);
+}
+
+.qc-btn-secondary {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+}
+
+.qc-btn-secondary:hover {
+    background: var(--bg-hover);
+}
+
+.qc-btn-ghost {
+    background: transparent;
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+}
+
+.qc-btn-ghost:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.qc-eval-issue-block {
+    margin-bottom: 1rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.qc-eval-issue-block:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+    padding-bottom: 0;
+}
+
+.qc-eval-issue-header {
+    margin-bottom: 0.35rem;
+}
+
+.qc-eval-issue-message {
+    font-size: 0.9rem;
+    color: var(--text-primary);
+}
+
+.qc-eval-council-inline {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+}
+
+.qc-eval-count {
+    font-weight: 500;
+    color: var(--text-muted);
+}
+
+.qc-eval-details .qc-eval-prompt {
+    margin-top: 0.5rem;
+}
+
+.qc-eval-criteria {
+    margin-top: 0.5rem;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.qc-model-reasoning .qc-council-model-response {
+    margin-top: 0.5rem;
+}
+
+/* QC Persistent Section (below gradings, stays visible after overlay closes) */
+.qc-persistent-parent {
+    margin-top: 1.5rem;
+}
+
+.qc-persistent-section {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1rem 1.25rem;
+}
+
+.qc-persistent-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+}
+
+.qc-persistent-title {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.qc-persistent-icon {
+    margin-right: 0.35rem;
+}
+
+.qc-persistent-hint {
+    margin: 0.5rem 0 0 0;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.qc-rules-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.qc-eval-details-pane {
+    max-height: 280px;
+    overflow-y: auto;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   Trainer Queue — Phase 4 Homepage
+   ═══════════════════════════════════════════════════════════════ */
+
+.tq-view {
+    padding-top: 2.5rem;
+    padding-bottom: 2rem;
+}
+

@@ -6,7 +6,7 @@ Every **[heading]** written to or read from .ipynb notebooks.
 Used by:
   WRITERS (save to notebook):
     - services/notebook_parser.py     (export_notebook, export_multi_turn_notebook)
-    - static/modules/notebook.js      (_makeCell, _buildTurnCells, submitToColab)
+    - static/modules/notebook/submit-colab.js  (_makeCell, submitToColab)
     - helpers/notebook_helpers.py      (find_or_create_cell_by_heading)
 
   READERS (parse from notebook):

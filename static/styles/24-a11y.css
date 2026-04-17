@@ -1,0 +1,45 @@
+/* ========================================================================== */
+/* A11y — Skip link + global prefers-reduced-motion.                          */
+/* ========================================================================== */
+
+.mh-skip-link {
+    position: absolute;
+    top: 0;
+    left: 0;
+    background: var(--accent-primary, #3b82f6);
+    color: #fff;
+    padding: 0.6rem 1rem;
+    border-radius: 0 0 8px 0;
+    z-index: 10003;
+    font-weight: 600;
+    text-decoration: none;
+    transform: translateY(-120%);
+    transition: transform 160ms ease-out;
+}
+.mh-skip-link:focus,
+.mh-skip-link:focus-visible {
+    transform: translateY(0);
+    outline: 2px solid #fff;
+    outline-offset: -4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    /*
+     * Respect user preference: remove purely decorative motion globally.
+     * Individual components that rely on a transition for state conveyance
+     * should scope their overrides to that transition only.
+     */
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001ms !important;
+        scroll-behavior: auto !important;
+    }
+    .aurora-blob,
+    .mh-skip-link {
+        animation: none !important;
+        transition: none !important;
+    }
+}

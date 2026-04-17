@@ -24,10 +24,10 @@ import {
     runProceedToQualityCheck,
     saveCurrentCellsToColab,
     syncTurnStatusFromBackend,
-    initTurn1TestPromptListeners,
     updateAdminModeIndicator,
     refreshValidationState,
-    submitToColab
+    submitToColab,
+    judgeReferenceResponse
 } from './modules/notebook.js?v=43';
 import { 
     closeResponseSlideout,
@@ -98,7 +98,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Back button: Hunt Config → Notebook Preview
         document.getElementById('huntBackBtn')?.addEventListener('click', goBackToNotebook);
         
-        initTurn1TestPromptListeners();
         initOfflineQueue();
         initAutosave();
         initNextTurnAutosave();
@@ -357,8 +356,9 @@ function initEventListeners() {
     elements.humanJudgeSkip?.addEventListener('click', () => handleHumanJudgment(null));
     elements.nextHuntBtn?.addEventListener('click', showNextBlindJudge);
     
-    // Reference Judging — handled by Testbed
-    
+    document.getElementById('judgeReferenceBtn')?.addEventListener('click', (e) => judgeReferenceResponse(e));
+    document.getElementById('judgeBeforeHuntBtn')?.addEventListener('click', (e) => judgeReferenceResponse(e));
+
     // Selection & Reveal (use getElementById as fallback - elements may be null if DOM not ready at module load)
     const confirmBtn = document.getElementById('confirmSelectionBtn') || elements.confirmSelectionBtn;
     if (confirmBtn) confirmBtn.addEventListener('click', confirmSelection);

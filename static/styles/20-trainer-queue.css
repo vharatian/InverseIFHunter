@@ -1,0 +1,446 @@
+/* Greeting + New Task row */
+.tq-top-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+.tq-greeting {
+    flex: 1;
+}
+.tq-greeting-text {
+    font-size: 1.6rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0 0 0.25rem;
+    letter-spacing: -0.01em;
+}
+.tq-greeting-sub {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    margin: 0;
+    min-height: 1.3em;
+}
+
+/* Focus card */
+.tq-focus-card {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem 1.25rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--accent-primary);
+    border-radius: var(--radius-lg);
+    margin-bottom: 1.5rem;
+    box-shadow: 0 0 0 1px rgba(var(--accent-primary-rgb), 0.08);
+    transition: box-shadow var(--transition-normal);
+}
+.tq-focus-card:hover {
+    box-shadow: 0 0 0 2px rgba(var(--accent-primary-rgb), 0.15);
+}
+.tq-focus-icon {
+    font-size: 1.8rem;
+    flex-shrink: 0;
+    width: 2.5rem;
+    text-align: center;
+}
+.tq-focus-body {
+    flex: 1;
+    min-width: 0;
+}
+.tq-focus-title {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--text-primary);
+    margin-bottom: 0.15rem;
+}
+.tq-focus-detail {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.tq-focus-btn {
+    flex-shrink: 0;
+    padding: 0.45rem 1.2rem;
+    font-size: 0.85rem;
+}
+
+/* Momentum strip */
+.tq-momentum {
+    display: flex;
+    gap: 1.25rem;
+    margin-bottom: 1.5rem;
+    padding: 0.6rem 0;
+    border-bottom: 1px solid var(--border);
+}
+.tq-momentum-item {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+/* Tabs */
+.tq-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 1rem;
+}
+.tq-tabs.hidden {
+    display: none;
+}
+.tq-tab {
+    padding: 0.55rem 1rem;
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    transition: color var(--transition-fast), border-color var(--transition-fast);
+    white-space: nowrap;
+}
+.tq-tab:hover {
+    color: var(--text-primary);
+}
+.tq-tab-active {
+    color: var(--text-primary);
+    border-bottom-color: var(--accent-primary);
+    font-weight: 600;
+}
+.tq-tab-count {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-left: 0.25rem;
+}
+.tq-tab-active .tq-tab-count {
+    color: var(--accent-primary);
+}
+
+/* Tab panels */
+.tq-panel {
+    min-height: 4rem;
+}
+.tq-panel.hidden {
+    display: none;
+}
+.tq-panel-empty {
+    padding: 2rem 0;
+    text-align: center;
+    font-size: 0.88rem;
+    color: var(--text-muted);
+}
+.tq-panel-empty.hidden {
+    display: none;
+}
+
+/* Task list */
+.tq-task-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+/* Task card */
+.tq-task-card {
+    padding: 0.75rem 1rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+.tq-task-card[style*="pointer"]:hover {
+    border-color: var(--border-hover);
+    background: var(--bg-hover);
+}
+.tq-card-returned {
+    border-left: 3px solid var(--warning);
+}
+.tq-card-approved {
+    border-left: 3px solid var(--success);
+}
+.tq-card-rejected {
+    border-left: 3px solid var(--danger);
+    opacity: 0.7;
+}
+
+.tq-card-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.2rem;
+}
+.tq-card-delete {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0.2rem;
+    border-radius: 4px;
+    color: var(--text-muted);
+    opacity: 0;
+    transition: opacity 0.15s, color 0.15s;
+}
+.tq-task-card:hover .tq-card-delete { opacity: 1; }
+.tq-card-delete:hover { color: var(--danger); }
+.tq-card-label {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.tq-card-prompt {
+    display: block;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 0.3rem;
+}
+.tq-card-feedback {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-top: 0.35rem;
+    padding: 0.4rem 0.6rem;
+    background: var(--warning-bg);
+    border-radius: var(--radius-sm);
+}
+
+/* Status badges */
+.tq-badge {
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    padding: 0.15rem 0.5rem;
+    border-radius: 3px;
+    flex-shrink: 0;
+}
+.tq-badge-draft     { background: var(--bg-tertiary);  color: var(--text-secondary); }
+.tq-badge-submitted { background: rgba(var(--accent-primary-rgb), 0.12); color: var(--accent-primary); }
+.tq-badge-returned  { background: var(--warning-bg);   color: var(--warning); }
+.tq-badge-approved  { background: var(--success-bg);   color: var(--success); }
+.tq-badge-rejected  { background: var(--danger-bg);    color: var(--danger); }
+
+/* Journey trail (mini progress) */
+.tq-journey {
+    display: flex;
+    align-items: center;
+    gap: 0.15rem;
+    margin-top: 0.4rem;
+    flex-wrap: wrap;
+}
+.tq-step {
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    padding: 0.1rem 0.3rem;
+    border-radius: 2px;
+    transition: color var(--transition-fast);
+}
+.tq-step-done {
+    color: var(--success);
+}
+.tq-step-current {
+    color: var(--accent-primary);
+    font-weight: 600;
+    background: rgba(var(--accent-primary-rgb), 0.08);
+}
+.tq-step-dot {
+    color: var(--text-muted);
+    font-size: 0.6rem;
+    opacity: 0.5;
+}
+
+/* Empty state */
+.tq-empty {
+    text-align: center;
+    padding: 3rem 1rem;
+}
+.tq-empty.hidden {
+    display: none;
+}
+.tq-empty-icon {
+    font-size: 2.5rem;
+    margin-bottom: 0.75rem;
+}
+.tq-empty-text {
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+    margin: 0;
+}
+
+/* New task button (top-right) */
+.tq-new-task-btn {
+    flex-shrink: 0;
+    margin-top: 0.15rem;
+}
+
+/* Back button (in top navbar) */
+.tq-back-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.3rem 0.7rem;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    white-space: nowrap;
+    margin-right: auto;
+}
+.tq-back-btn:hover {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+    border-color: var(--border-hover);
+}
+.tq-back-btn.hidden {
+    display: none;
+}
+
+/* Task view hidden state */
+.tq-task-view.hidden {
+    display: none;
+}
+
+/* Smooth view transitions */
+.tq-view,
+.tq-task-view {
+    animation: tqFadeIn 0.2s ease;
+}
+@keyframes tqFadeIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ═══ Update Indicator ═══ */
+.update-indicator {
+    display: inline-flex; align-items: center; gap: 5px;
+    background: none; border: 1px solid rgba(251,191,36,0.4); border-radius: 999px;
+    padding: 4px 10px 4px 8px; cursor: pointer; color: #fbbf24;
+    font-size: 0.75rem; font-weight: 600; transition: all 0.2s ease;
+    animation: updatePulse 2s ease-in-out infinite;
+}
+.update-indicator:hover {
+    background: rgba(251,191,36,0.12); border-color: rgba(251,191,36,0.6);
+}
+.update-indicator.hidden { display: none; }
+.update-indicator-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #fbbf24; flex-shrink: 0;
+    box-shadow: 0 0 6px rgba(251,191,36,0.6);
+}
+@keyframes updatePulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+/* ═══ Notifications ═══ */
+.notif-bell-wrapper { position: relative; display: inline-flex; }
+.notif-bell {
+    background: none; border: none; cursor: pointer; color: var(--text-secondary);
+    padding: 8px; border-radius: var(--radius-sm, 6px); transition: all 0.15s ease;
+    display: flex; align-items: center; justify-content: center; position: relative;
+}
+.notif-bell:hover { background: var(--bg-hover, rgba(255,255,255,0.06)); color: var(--text-primary); }
+.notif-badge {
+    position: absolute; top: 2px; right: 0; min-width: 16px; height: 16px;
+    background: var(--accent, #3b82f6); color: #fff; font-size: 0.65rem; font-weight: 700;
+    border-radius: 999px; display: flex; align-items: center; justify-content: center;
+    padding: 0 4px; line-height: 1; pointer-events: none;
+}
+.notif-panel {
+    position: absolute; top: calc(100% + 8px); right: 0; width: 340px; max-height: 420px;
+    background: var(--bg-card, #1a1a1a); border: 1px solid var(--border, #333);
+    border-radius: var(--radius-lg, 12px); box-shadow: 0 12px 40px rgba(0,0,0,0.4);
+    z-index: 1000; display: flex; flex-direction: column; overflow: hidden;
+}
+.notif-panel[hidden] { display: none; }
+.notif-panel-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 12px 16px; border-bottom: 1px solid var(--border, #333);
+    font-size: 0.85rem; color: var(--text-primary);
+}
+.notif-mark-all {
+    background: none; border: none; cursor: pointer; color: var(--accent, #3b82f6);
+    font-size: 0.75rem; padding: 0;
+}
+.notif-mark-all:hover { text-decoration: underline; }
+.notif-list {
+    list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1;
+    max-height: 360px;
+}
+.notif-item {
+    display: flex; gap: 10px; padding: 10px 16px; cursor: pointer;
+    border-bottom: 1px solid var(--border, #333); transition: background 0.15s ease;
+}
+.notif-item:hover { background: var(--bg-hover, rgba(255,255,255,0.04)); }
+.notif-item:last-child { border-bottom: none; }
+.notif-unread { background: rgba(59, 130, 246, 0.06); }
+.notif-read { opacity: 0.7; }
+.notif-icon { font-size: 1.1rem; flex-shrink: 0; margin-top: 2px; }
+.notif-body { flex: 1; min-width: 0; }
+.notif-message { font-size: 0.8rem; color: var(--text-primary); line-height: 1.4; }
+.notif-task-id {
+    font-weight: 600; font-size: 0.75rem; color: var(--accent, #3b82f6);
+    margin-right: 4px;
+}
+.notif-time { font-size: 0.7rem; color: var(--text-muted, #888); margin-top: 2px; }
+.notif-empty {
+    padding: 24px 16px; text-align: center; color: var(--text-muted, #888);
+    font-size: 0.8rem;
+}
+
+/* ═══ Section Locking (revision flags) ═══ */
+.section-locked {
+    position: relative;
+    opacity: 0.6;
+    pointer-events: none;
+    user-select: none;
+}
+.section-locked .lock-indicator {
+    pointer-events: auto;
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 12px; margin-bottom: 8px;
+    background: rgba(234, 179, 8, 0.1); border: 1px solid rgba(234, 179, 8, 0.3);
+    border-radius: 6px; font-size: 0.75rem; color: #eab308;
+    font-weight: 500;
+}
+
+/* Config section lock when only judgement is flagged (prompt / model ref / judge) */
+.config-section-locked input,
+.config-section-locked textarea,
+.config-section-locked select,
+.config-section-locked button {
+    opacity: 0.7;
+    pointer-events: none;
+}
+.config-section-reviewer-feedback {
+    margin-bottom: 0.75rem;
+    padding: 0.75rem 1rem;
+    background: var(--bg-tertiary, #1e293b);
+    border-left: 3px solid var(--accent-primary, #6366f1);
+    border-radius: 6px;
+    font-size: 0.9rem;
+}
+.config-section-reviewer-feedback-label {
+    font-weight: 600;
+    margin-bottom: 0.35rem;
+    color: var(--text-secondary);
+}
+.config-section-reviewer-feedback-text {
+    white-space: pre-wrap;
+    line-height: 1.5;
+}
+

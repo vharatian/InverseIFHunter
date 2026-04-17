@@ -1,0 +1,539 @@
+/* ================================================================
+   MULTI-TURN UX REDESIGN — Turn Journey Bar, Thread, Decision Fork
+   ================================================================ */
+
+/* --- Turn Color System tokens live in the top-level :root block. --- */
+
+/* --- Turn Badge — Outline style --- */
+.turn-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    padding: 0.08rem 0.45rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.68rem;
+    font-weight: 600;
+    font-family: var(--font-body);
+    color: var(--turn-1);
+    border: 1.5px solid var(--turn-1);
+    background: transparent;
+    white-space: nowrap;
+    transition: all var(--transition-fast);
+}
+.turn-badge.turn-color-1 { color: var(--turn-1); border-color: var(--turn-1); }
+.turn-badge.turn-color-2 { color: var(--turn-2); border-color: var(--turn-2); }
+.turn-badge.turn-color-3 { color: var(--turn-3); border-color: var(--turn-3); }
+.turn-badge.turn-color-4 { color: var(--turn-4); border-color: var(--turn-4); }
+.turn-badge.turn-color-5 { color: var(--turn-5); border-color: var(--turn-5); }
+.turn-badge.turn-color-6 { color: var(--turn-6); border-color: var(--turn-6); }
+
+
+/* ================================================================
+   TURN JOURNEY BAR — Sticky horizontal stepper
+   ================================================================ */
+.turn-journey-bar {
+    width: 100%;
+    box-sizing: border-box;
+    z-index: 1;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
+    padding: 0.5rem 1.25rem;
+    display: none;
+    align-items: center;
+    gap: 0;
+    overflow-x: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+    -webkit-overflow-scrolling: touch;
+    min-height: 42px;
+}
+.turn-journey-bar.visible {
+    display: flex;
+    justify-content: center;
+}
+
+/* <mh-turn-journey> is a custom element wrapper; let its children participate
+   directly in the .turn-journey-bar flex row so nodes + connectors align
+   horizontally instead of stacking. */
+.turn-journey-bar mh-turn-journey {
+    display: contents;
+}
+
+.journey-step {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    flex-shrink: 0;
+}
+
+.journey-node {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.15rem;
+    cursor: pointer;
+    transition: opacity var(--transition-fast);
+    position: relative;
+    min-width: 48px;
+}
+.journey-node:hover {
+    opacity: 0.8;
+}
+
+.journey-circle {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.6rem;
+    font-weight: 700;
+    border: 1.5px solid var(--border);
+    background: transparent;
+    color: var(--text-muted);
+    transition: all var(--transition-fast);
+}
+.journey-node.completed .journey-circle {
+    background: var(--accent-primary);
+    border-color: var(--accent-primary);
+    color: #fff;
+}
+.journey-node.active .journey-circle {
+    background: var(--accent-primary);
+    border-color: var(--accent-primary);
+    color: #fff;
+}
+.journey-node.future .journey-circle {
+    border-style: dashed;
+    border-color: var(--text-muted);
+    background: transparent;
+}
+
+.journey-label {
+    font-size: 0.58rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    white-space: nowrap;
+    max-width: 70px;
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.journey-node.active .journey-label {
+    color: var(--accent-primary);
+}
+.journey-node.completed .journey-label {
+    color: var(--text-secondary);
+}
+
+.journey-connector {
+    width: 24px;
+    height: 1.5px;
+    background: var(--border);
+    flex-shrink: 0;
+    position: relative;
+    top: -5px;
+    transition: background var(--transition-fast);
+}
+.journey-connector.completed {
+    background: var(--accent-primary);
+}
+.journey-connector.dashed {
+    background: none;
+    border-top: 1.5px dashed var(--text-muted);
+}
+
+
+/* ================================================================
+   TWO-COLUMN LAYOUT — Active during multi-turn
+   ================================================================ */
+.container.multi-turn-layout {
+    display: flex;
+    justify-content: center;
+    gap: 0;
+    max-width: 100%;
+    width: 100%;
+    padding: 0;
+    box-sizing: border-box;
+}
+.container.multi-turn-layout .main-content-area {
+    flex: 0 1 auto;
+    min-width: 0;
+    padding: 0 2rem 2rem 2rem;
+    max-width: 1200px;
+    width: 100%;
+}
+
+/* When multi-turn layout is active, hide sidebar to avoid overlap */
+body.sidebar-visible .container.multi-turn-layout {
+    margin-left: 0;
+}
+.container.multi-turn-layout .metadata-sidebar {
+    display: none !important;
+}
+
+
+/* ================================================================
+   DECISION FORK — Asymmetric action cards
+   ================================================================ */
+.decision-fork {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin: 1rem 0;
+}
+
+.decision-card {
+    padding: 0.85rem;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border);
+    background: transparent;
+    transition: border-color var(--transition-fast);
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+.decision-card:hover {
+    border-color: var(--border-hover);
+}
+
+.decision-card.destructive {
+    border-color: var(--danger);
+}
+.decision-card.destructive:hover {
+    border-color: var(--danger);
+}
+
+.decision-card.primary {
+    border-color: var(--accent-primary);
+    background: rgba(var(--accent-primary-rgb), 0.04);
+}
+.decision-card.primary:hover {
+    border-color: var(--accent-primary);
+}
+
+.decision-card-heading {
+    font-size: 0.95rem;
+    font-weight: 700;
+    font-family: var(--font-heading);
+}
+.decision-card.destructive .decision-card-heading {
+    color: var(--danger);
+}
+.decision-card.primary .decision-card-heading {
+    color: var(--accent-primary);
+}
+
+.decision-card-desc {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    flex: 1;
+}
+
+.decision-card .btn {
+    align-self: stretch;
+    margin-top: auto;
+}
+
+.decision-summary {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 0.75rem;
+    padding: 0.75rem 1rem;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.decision-summary-stat {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-weight: 600;
+}
+
+.decision-tip {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    padding: 0.6rem 0.75rem;
+    background: rgba(var(--accent-primary-rgb), 0.04);
+    border-radius: var(--radius-sm);
+    border-left: 3px solid var(--accent-primary);
+    margin-top: 0.5rem;
+}
+
+/* ================================================================
+   INSIGHT TIPS — Contextual data-driven tips throughout the UI
+   ================================================================ */
+.insight-tip {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    padding: 0.55rem 0.75rem;
+    background: rgba(var(--accent-primary-rgb), 0.04);
+    border-radius: var(--radius-sm);
+    border-left: 3px solid var(--accent-primary);
+    margin-top: 0.75rem;
+    line-height: 1.5;
+    transition: opacity 0.3s ease, max-height 0.3s ease;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.insight-tip .tip-content {
+    flex: 1;
+    min-width: 0;
+}
+.insight-tip .tip-controls {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+.insight-tip .tip-dismiss-btn,
+.insight-tip .tip-pause-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    padding: 0.15rem 0.35rem;
+    border-radius: 4px;
+    transition: color 0.2s, background 0.2s;
+}
+.insight-tip .tip-dismiss-btn:hover,
+.insight-tip .tip-pause-btn:hover {
+    color: var(--text-primary);
+    background: rgba(0,0,0,0.08);
+}
+.insight-tip .tip-dismiss-btn {
+    font-size: 1rem;
+    line-height: 1;
+    padding: 0 0.25rem;
+}
+.insight-tip .tip-icon {
+    margin-right: 0.3rem;
+    opacity: 0.7;
+}
+.insight-tip strong {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+.insight-tip.tip-success {
+    border-left-color: var(--success);
+    background: rgba(var(--success-rgb, 68, 163, 104), 0.05);
+}
+.insight-tip.tip-warning {
+    border-left-color: var(--warning);
+    background: rgba(var(--warning-rgb, 203, 145, 47), 0.05);
+}
+.insight-tip.tip-fade-in {
+    animation: tipFadeIn 0.4s ease forwards;
+}
+@keyframes tipFadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+.btn-destructive-outline {
+    background: transparent;
+    border: 1px solid var(--danger);
+    color: var(--danger);
+    font-weight: 500;
+    padding: 0.4rem 0.85rem;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    font-size: 0.82rem;
+    font-family: var(--font-body);
+}
+.btn-destructive-outline:hover:not(:disabled) {
+    background: var(--danger-bg);
+}
+.btn-destructive-outline:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    border-color: var(--text-muted);
+    color: var(--text-muted);
+}
+
+.review-readiness-warning {
+    background: rgba(255, 193, 7, 0.12);
+    border: 1px solid rgba(255, 193, 7, 0.4);
+    border-radius: var(--radius-md);
+    padding: 0.75rem 1rem;
+    margin-bottom: 1rem;
+    color: var(--warning);
+    font-size: 0.9rem;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+}
+
+.btn-continue-primary {
+    background: var(--accent-primary);
+    border: 1px solid var(--accent-primary);
+    color: #fff;
+    font-weight: 600;
+    padding: 0.5rem 1rem;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    font-size: 0.85rem;
+    font-family: var(--font-body);
+}
+.btn-continue-primary:hover {
+    background: var(--accent-secondary);
+    border-color: var(--accent-secondary);
+}
+
+
+/* ================================================================
+   TURN-AWARE SECTION HEADERS
+   ================================================================ */
+.section-turn-badge {
+    display: none; /* hidden until multi-turn */
+    margin-left: 0.5rem;
+    vertical-align: middle;
+}
+.multi-turn-active .section-turn-badge {
+    display: inline-flex;
+}
+
+
+/* ================================================================
+   TURN TRANSITION ANIMATIONS
+   ================================================================ */
+@keyframes turnSlideIn {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+@keyframes turnFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+@keyframes progressReset {
+    from { width: var(--prev-width, 100%); }
+    to { width: 0%; }
+}
+.turn-transition-in {
+    animation: turnSlideIn 0.4s ease-out;
+}
+
+/* ================================================================
+   PER-TURN PROGRESS ENHANCEMENTS
+   ================================================================ */
+.progress-turn-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.35rem;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}
+.progress-turn-info .turn-scope {
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+.progress-turn-info .cumulative {
+    font-size: 0.72rem;
+}
+
+
+/* ================================================================
+   RESPONSE PICKER WITH CONVERSATION PREVIEW
+   ================================================================ */
+.response-picker-context {
+    margin-bottom: 1rem;
+    padding: 0.75rem;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    max-height: 200px;
+    overflow-y: auto;
+    font-size: 0.82rem;
+}
+
+.context-message {
+    padding: 0.4rem 0.6rem;
+    margin-bottom: 0.35rem;
+    border-radius: var(--radius-sm);
+}
+.context-message.user {
+    border-left: 3px solid var(--accent-primary);
+    background: rgba(var(--accent-primary-rgb), 0.04);
+}
+.context-message.assistant {
+    border-left: 3px solid var(--success);
+    background: rgba(16, 185, 129, 0.04);
+    margin-left: 0.5rem;
+}
+.context-message-role {
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+    margin-bottom: 0.15rem;
+}
+.context-message-text {
+    color: var(--text-secondary);
+    line-height: 1.4;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+}
+
+
+/* ================================================================
+   MOBILE RESPONSIVE — Thread drawer, journey scroll
+   ================================================================ */
+@media (max-width: 900px) {
+    .turn-journey-bar {
+        padding: 0.5rem 0.75rem;
+        min-height: 42px;
+        justify-content: flex-start;
+    }
+    .journey-node {
+        min-width: 52px;
+    }
+    .journey-connector {
+        width: 20px;
+    }
+
+    .container.multi-turn-layout {
+        flex-direction: column;
+    }
+    .container.multi-turn-layout .main-content-area {
+        padding: 0 1rem 1rem 1rem;
+    }
+
+    .decision-fork {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 600px) {
+    .turn-journey-bar {
+        padding: 0.4rem 0.5rem;
+    }
+    .journey-node {
+        min-width: 44px;
+    }
+    .journey-circle {
+        width: 24px;
+        height: 24px;
+        font-size: 0.6rem;
+    }
+    .journey-label {
+        font-size: 0.55rem;
+    }
+    .journey-connector {
+        width: 14px;
+    }
+}
+

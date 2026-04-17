@@ -1,0 +1,702 @@
+/* Hunt Config — Back Button */
+.hunt-back-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.35rem 0.75rem;
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: color 0.15s, background 0.15s, border-color 0.15s;
+    white-space: nowrap;
+}
+.hunt-back-btn:hover {
+    color: var(--text-primary);
+    background: var(--bg-tertiary);
+    border-color: var(--border-strong);
+}
+.hunt-back-btn svg {
+    flex-shrink: 0;
+}
+
+/* ── Navbar Testbed Button ───────────────────────────────────────────────── */
+.nav-testbed-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.4rem 0.9rem;
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: color var(--transition-fast), background var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast);
+    white-space: nowrap;
+}
+.nav-testbed-btn:not(:disabled):hover {
+    color: var(--accent-primary);
+    background: var(--accent-glow);
+    border-color: var(--accent-primary);
+}
+.nav-testbed-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* ── Testbed Turn Picker ─────────────────────────────────────────────────── */
+.tb-turn-picker {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.55rem 1.75rem;
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    flex-wrap: wrap;
+}
+.tb-turn-picker-label {
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+.tb-turn-picker-tabs {
+    display: flex;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+}
+.tb-turn-tab {
+    padding: 0.28rem 0.7rem;
+    font-size: 0.78rem;
+    font-weight: 500;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    white-space: nowrap;
+}
+.tb-turn-tab:hover {
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+    background: var(--accent-glow);
+}
+.tb-turn-tab-active {
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+    background: var(--accent-glow);
+    font-weight: 600;
+}
+.tb-turn-tab-current {
+    border-style: dashed;
+}
+.tb-turn-picker-hint {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-left: auto;
+    white-space: nowrap;
+}
+
+/* ── Testbed Save Footer ─────────────────────────────────────────────────── */
+.tb-save-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.75rem 1.75rem;
+    border-top: 1px solid var(--border);
+    background: var(--bg-secondary);
+    flex-shrink: 0;
+    flex-wrap: wrap;
+}
+.tb-save-footer-center {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+}
+.tb-save-footer-center .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+.tb-save-footer-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex: 0 0 auto;
+}
+.tb-save-footer-actions > .btn {
+    width: fit-content;
+    max-width: 100%;
+}
+.tb-save-dropdown-wrap {
+    position: relative;
+    display: flex;
+    align-items: stretch;
+}
+.tb-save-btn {
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+    border-right: none;
+}
+.tb-save-dropdown-toggle {
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+    padding: 0 0.5rem;
+    font-size: 0.75rem;
+}
+.tb-save-dropdown {
+    position: absolute;
+    bottom: calc(100% + 4px);
+    right: 0;
+    min-width: 200px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+    z-index: 200;
+    overflow: hidden;
+}
+.tb-save-dropdown-item {
+    display: block;
+    width: 100%;
+    padding: 0.5rem 0.875rem;
+    font-size: 0.83rem;
+    color: var(--text-primary);
+    background: transparent;
+    border: none;
+    text-align: left;
+    cursor: pointer;
+    transition: background var(--transition-fast);
+}
+.tb-save-dropdown-item:hover {
+    background: var(--bg-hover);
+}
+.tb-save-dropdown-item-current {
+    color: var(--accent-primary);
+    font-weight: 500;
+}
+
+
+/* ── Prior Conversation Banner ───────────────────────────────────────────── */
+.pcb-banner {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    margin-bottom: 1.25rem;
+    overflow: hidden;
+}
+.pcb-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    cursor: pointer;
+    user-select: none;
+    transition: background var(--transition-fast);
+}
+.pcb-header:hover {
+    background: var(--bg-hover);
+}
+.pcb-icon {
+    font-size: 1rem;
+}
+.pcb-title {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    flex: 1;
+}
+.pcb-chevron {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+}
+.pcb-body {
+    padding: 0 1rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.875rem;
+}
+.pcb-turn {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 0.75rem;
+}
+.pcb-turn-recent {
+    border-color: var(--success);
+    background: rgba(34, 197, 94, 0.04);
+}
+.pcb-turn-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.6rem;
+}
+.pcb-turn-badge {
+    display: inline-block;
+    padding: 0.18rem 0.55rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border-radius: var(--radius-sm);
+    background: var(--bg-surface);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+}
+.pcb-badge-recent {
+    background: rgba(34, 197, 94, 0.12);
+    color: var(--success);
+    border-color: var(--success);
+}
+.pcb-recent-tag {
+    font-size: 0.72rem;
+    color: var(--success);
+    font-weight: 500;
+}
+.pcb-turn-body {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+}
+@media (max-width: 700px) {
+    .pcb-turn-body { grid-template-columns: 1fr; }
+}
+.pcb-section-label {
+    font-size: 0.73rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-bottom: 0.35rem;
+}
+.pcb-prose {
+    font-size: 0.83rem;
+    color: var(--text-secondary);
+    line-height: 1.55;
+    max-height: 180px;
+    overflow-y: auto;
+}
+.pcb-prose p { margin: 0 0 0.4em; }
+.pcb-prose p:last-child { margin-bottom: 0; }
+.pcb-empty {
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   AURORA AMBIENT BACKGROUND
+   Fixed overlay, pointer-events: none — purely decorative.
+   Activated via #auroraCanvas.hunting, brief green flash via .complete.
+───────────────────────────────────────────────────────────────────────────── */
+
+#auroraCanvas {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    overflow: hidden;
+    opacity: 0;
+    transition: opacity 1.8s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#auroraCanvas.hunting {
+    opacity: 1;
+}
+
+#auroraCanvas.complete {
+    opacity: 1;
+    animation: aurora-complete-fade 2.4s ease forwards;
+}
+
+@keyframes aurora-complete-fade {
+    0%   { opacity: 1; }
+    40%  { opacity: 0.85; }
+    100% { opacity: 0; }
+}
+
+.aurora-blob {
+    position: absolute;
+    border-radius: 50%;
+    will-change: transform;
+}
+
+/* Blob 1 — warm amber, top-left drift */
+.aurora-blob-1 {
+    width: 700px;
+    height: 700px;
+    background: radial-gradient(circle at 40% 40%, rgba(255, 149, 0, 0.18) 0%, transparent 65%);
+    top: -180px;
+    left: -160px;
+    animation: aurora-drift-1 28s ease-in-out infinite;
+}
+
+/* Blob 2 — soft purple, bottom-right drift */
+.aurora-blob-2 {
+    width: 580px;
+    height: 580px;
+    background: radial-gradient(circle at 60% 60%, rgba(191, 90, 242, 0.12) 0%, transparent 65%);
+    bottom: -120px;
+    right: -120px;
+    animation: aurora-drift-2 34s ease-in-out infinite;
+}
+
+/* Blob 3 — ember orange, center slow pulse */
+.aurora-blob-3 {
+    width: 480px;
+    height: 480px;
+    background: radial-gradient(circle at 50% 50%, rgba(255, 107, 53, 0.10) 0%, transparent 65%);
+    top: 35%;
+    left: 38%;
+    transform: translate(-50%, -50%);
+    animation: aurora-drift-3 22s ease-in-out infinite;
+}
+
+/* On complete — green tint overlaid via filter on canvas */
+#auroraCanvas.complete .aurora-blob-1 {
+    background: radial-gradient(circle at 40% 40%, rgba(48, 209, 88, 0.20) 0%, transparent 65%);
+}
+#auroraCanvas.complete .aurora-blob-2 {
+    background: radial-gradient(circle at 60% 60%, rgba(52, 170, 220, 0.14) 0%, transparent 65%);
+}
+#auroraCanvas.complete .aurora-blob-3 {
+    background: radial-gradient(circle at 50% 50%, rgba(48, 209, 88, 0.12) 0%, transparent 65%);
+}
+
+@keyframes aurora-drift-1 {
+    0%   { transform: translate(0px,   0px)   scale(1.00); }
+    25%  { transform: translate(90px,  60px)  scale(1.08); }
+    50%  { transform: translate(40px,  130px) scale(0.96); }
+    75%  { transform: translate(-50px, 70px)  scale(1.04); }
+    100% { transform: translate(0px,   0px)   scale(1.00); }
+}
+
+@keyframes aurora-drift-2 {
+    0%   { transform: translate(0px,    0px)   scale(1.00); }
+    30%  { transform: translate(-80px, -50px)  scale(1.06); }
+    60%  { transform: translate(60px,  -90px)  scale(0.97); }
+    85%  { transform: translate(-30px,  40px)  scale(1.03); }
+    100% { transform: translate(0px,    0px)   scale(1.00); }
+}
+
+@keyframes aurora-drift-3 {
+    0%   { transform: translate(-50%, -50%) scale(1.00) rotate(0deg);   }
+    33%  { transform: translate(-50%, -50%) scale(1.15) rotate(12deg);  }
+    66%  { transform: translate(-50%, -50%) scale(0.92) rotate(-8deg);  }
+    100% { transform: translate(-50%, -50%) scale(1.00) rotate(0deg);   }
+}
+
+/* Light theme — slightly more opaque since white bg needs more contrast */
+[data-theme="light"] .aurora-blob-1 {
+    background: radial-gradient(circle at 40% 40%, rgba(255, 149, 0, 0.10) 0%, transparent 65%);
+}
+[data-theme="light"] .aurora-blob-2 {
+    background: radial-gradient(circle at 60% 60%, rgba(191, 90, 242, 0.07) 0%, transparent 65%);
+}
+[data-theme="light"] .aurora-blob-3 {
+    background: radial-gradient(circle at 50% 50%, rgba(255, 107, 53, 0.06) 0%, transparent 65%);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   HUNT CONFIG: SEGMENTED CONTROL, PILL GRIDS, STEPPER
+───────────────────────────────────────────────────────────────────────────── */
+
+/* Segmented control (API Provider) */
+.hc-seg {
+    display: flex;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    background: var(--bg-tertiary);
+}
+.hc-seg-btn {
+    flex: 1;
+    padding: 0.42rem 0.6rem;
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition: background var(--transition-fast), color var(--transition-fast);
+    white-space: nowrap;
+}
+.hc-seg-btn.active {
+    background: var(--accent-primary);
+    color: #fff;
+    font-weight: 600;
+}
+.hc-seg-btn:not(.active):hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+.hc-seg.hc-locked {
+    opacity: 0.45;
+    pointer-events: none;
+}
+
+/* Pill grids (Hunt Model, Evaluation Model) */
+.hc-pill-grid,
+.hc-pill-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    overflow: visible;
+}
+.hc-pill {
+    padding: 0.28rem 0.65rem;
+    font-size: 0.81rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    cursor: pointer;
+    transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+    white-space: nowrap;
+    user-select: none;
+    position: relative;
+}
+.hc-pill:hover {
+    border-color: var(--accent-primary);
+    color: var(--text-primary);
+}
+.hc-pill.active {
+    background: rgba(var(--accent-primary-rgb), 0.12);
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+    font-weight: 600;
+}
+.hc-pill.hc-pill-disabled,
+.hc-pill-grid.hc-locked .hc-pill,
+.hc-pill-row.hc-locked .hc-pill {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+/* Smaller pills for evaluation model */
+.hc-pill-grid-sm .hc-pill {
+    font-size: 0.76rem;
+    padding: 0.22rem 0.55rem;
+}
+
+/* Tooltip on hunt mode pills */
+.hc-tooltip {
+    position: absolute;
+    bottom: calc(100% + 7px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    font-size: 0.74rem;
+    font-weight: 400;
+    padding: 0.28rem 0.6rem;
+    border-radius: var(--radius-sm);
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+    z-index: 200;
+    box-shadow: var(--shadow-md);
+}
+.hc-pill:hover .hc-tooltip {
+    opacity: 1;
+}
+
+/* Stepper (Min Breaking Hunt(s)) */
+.hc-stepper {
+    display: inline-flex;
+    align-items: stretch;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    background: var(--bg-tertiary);
+}
+.hc-step-btn {
+    width: 32px;
+    padding: 0;
+    font-size: 1.15rem;
+    font-weight: 400;
+    color: var(--text-secondary);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition: background var(--transition-fast), color var(--transition-fast);
+    line-height: 1;
+}
+.hc-step-btn:hover:not(:disabled) {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+.hc-step-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+.hc-step-val {
+    min-width: 30px;
+    padding: 0.42rem 0.5rem;
+    text-align: center;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    border-left: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+    user-select: none;
+}
+.hc-stepper.hc-locked {
+    opacity: 0.45;
+    pointer-events: none;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   TESTBED COPY BUTTONS
+───────────────────────────────────────────────────────────────────────────── */
+
+/* Flex row: label + copy button */
+.tb-label-row {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-bottom: 0.35rem;
+}
+.tb-label-row .tb-label {
+    margin-bottom: 0;
+}
+
+/* Flex row: collapsible collapse-btn + copy button */
+.tb-collapsible-hdr {
+    display: flex;
+    align-items: stretch;
+    gap: 5px;
+}
+.tb-collapsible-hdr .tb-judge-collapse-btn {
+    flex: 1;
+    min-width: 0;
+}
+
+/* Flex row: reasoning collapse-btn + copy button */
+.tb-reasoning-hdr {
+    display: flex;
+    align-items: stretch;
+    gap: 5px;
+}
+.tb-reasoning-hdr .tb-reasoning-collapse-btn {
+    flex: 1;
+    min-width: 0;
+}
+
+/* The copy button itself */
+.tb-copy-btn {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: color var(--transition-fast), background var(--transition-fast), border-color var(--transition-fast);
+    line-height: 1;
+}
+.tb-copy-btn:hover {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+    border-color: var(--border);
+}
+.tb-copy-btn.tb-copy-done {
+    color: var(--success);
+    background: var(--success-bg);
+    border-color: var(--success);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   HUNT ELAPSED TIMER
+───────────────────────────────────────────────────────────────────────────── */
+
+.hunt-elapsed-wrap {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.35rem;
+    margin-left: 8px;
+    flex-wrap: wrap;
+    vertical-align: middle;
+}
+
+.hunt-elapsed-total {
+    font-size: 0.65rem;
+    font-weight: 400;
+    color: var(--text-muted);
+    opacity: 0.8;
+    white-space: nowrap;
+    max-width: 9rem;
+}
+
+.hunt-elapsed-timer {
+    display: none;
+    font-size: 0.75rem;
+    font-variant-numeric: tabular-nums;
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 1px 7px;
+    margin-left: 0;
+    letter-spacing: 0.02em;
+    vertical-align: middle;
+    transition: color 0.3s ease;
+}
+
+.hunt-elapsed-timer.visible {
+    display: inline-block;
+}
+
+.hunt-elapsed-timer.frozen {
+    color: var(--text-secondary);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   CRITERIA COUNT LIVE BADGE
+───────────────────────────────────────────────────────────────────────────── */
+
+.tb-criteria-count {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 6px;
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    transition: color 0.25s ease;
+    user-select: none;
+}
+
+.tb-criteria-count.count-ok {
+    color: var(--success);
+}
+
+.tb-criteria-count.count-warn {
+    color: var(--warning);
+}
+
+.tb-criteria-count-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    flex-shrink: 0;
+    transition: background 0.25s ease;
+}
+
