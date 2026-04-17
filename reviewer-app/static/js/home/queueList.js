@@ -2,7 +2,7 @@
 import { escapeHtml } from "../task.js";
 import { homeState } from "./state.js";
 import { renderQueueItem } from "./queueItem.js";
-import { renderCounts } from "./stats.js";
+import { renderCounts, bucketFor } from "./stats.js";
 import { fetchQueueSummaries } from "./api.js";
 
 const LIST_ID = "home-queue-list";
@@ -49,15 +49,13 @@ export function renderList() {
 
 function _filteredItems() {
   const q = (homeState.filter || "").trim().toLowerCase();
-  const status = homeState.activeStatus;
-  return homeState.items.filter((it) => _matchesStatus(it, status) && _matchesQuery(it, q));
+  const bucket = homeState.activeBucket;
+  return homeState.items.filter((it) => _matchesBucket(it, bucket) && _matchesQuery(it, q));
 }
 
-function _matchesStatus(it, status) {
-  if (!status || status === "all") return true;
-  const s = String(it.review_status || "").toLowerCase();
-  if (status === "escalated") return s === "escalated" || s === "rejected";
-  return s === status;
+function _matchesBucket(it, bucket) {
+  if (!bucket) return true;
+  return bucketFor(it.review_status) === bucket;
 }
 
 function _matchesQuery(it, q) {
@@ -75,11 +73,27 @@ function _openBySid(sid) {
 }
 
 function _emptyStateHtml() {
-  const isFiltered = homeState.filter || homeState.activeStatus !== "submitted";
-  const title = isFiltered ? "No tasks match these filters" : "You're all caught up";
-  const body = isFiltered
-    ? "Try another tab or clear the filter."
-    : "Nothing pending for you right now. Check back soon, or paste a notebook link on the right to review ad-hoc.";
+  const bucket = homeState.activeBucket;
+  const isFiltered = !!homeState.filter || bucket !== "in_queue";
+  const defaultsByBucket = {
+    in_queue: {
+      title: "You're all caught up",
+      body: "Nothing pending for you right now. Check back soon, or paste a notebook link on the right to review ad-hoc.",
+    },
+    in_progress: {
+      title: "No tasks in progress",
+      body: "Open a task from 'In queue' to start reviewing. It'll show up here while you work on it.",
+    },
+    completed: {
+      title: "Nothing completed yet",
+      body: "Finish a QC run on an in-progress task and it'll land here.",
+    },
+  };
+  const d = defaultsByBucket[bucket] || defaultsByBucket.in_queue;
+  const title = homeState.filter ? "No tasks match these filters" : d.title;
+  const body = homeState.filter ? "Try another tab or clear the filter." : d.body;
+  // Unused guard retained for parity with previous UX.
+  void isFiltered;
   return `
     <div class="home-queue-empty">
       <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>

@@ -1,4 +1,225 @@
-/* Greeting + New Task row */
+/* ═══════════════════════════════════════════════════════════════
+   TRAINER HOME — hero, stat tiles, grid, new-task side card
+   ═══════════════════════════════════════════════════════════════ */
+.tq-home {
+    --tq-card-bg: var(--bg-secondary);
+    --tq-card-border: var(--border);
+    --tq-card-radius: var(--radius-lg, 14px);
+}
+
+/* Hero banner */
+.tq-hero {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+    align-items: center;
+    gap: 1.5rem;
+    padding: 1.6rem 1.75rem;
+    border-radius: var(--tq-card-radius);
+    background:
+      radial-gradient(1200px 260px at 0% 0%, rgba(var(--accent-primary-rgb), 0.14), transparent 60%),
+      linear-gradient(135deg, var(--bg-secondary), var(--bg-tertiary, var(--bg-secondary)));
+    border: 1px solid var(--tq-card-border);
+    overflow: hidden;
+    margin-bottom: 1.25rem;
+}
+.tq-hero::after {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    pointer-events: none;
+    border-radius: inherit;
+    background: linear-gradient(120deg, rgba(var(--accent-primary-rgb), 0.35), transparent 40%);
+    opacity: 0.18;
+    mix-blend-mode: plus-lighter;
+}
+.tq-hero-left { min-width: 0; position: relative; z-index: 1; }
+.tq-hero-eyebrow {
+    display: inline-block;
+    font-size: 0.66rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    font-weight: 700;
+    padding: 0.22rem 0.55rem;
+    border-radius: 999px;
+    background: rgba(var(--accent-primary-rgb), 0.12);
+    color: var(--accent-primary);
+    margin-bottom: 0.55rem;
+}
+.tq-hero-title {
+    font-size: 1.65rem;
+    font-weight: 700;
+    letter-spacing: -0.015em;
+    color: var(--text-primary);
+    margin: 0 0 0.3rem;
+    line-height: 1.1;
+}
+.tq-hero-sub {
+    font-size: 0.88rem;
+    color: var(--text-secondary);
+    margin: 0;
+    line-height: 1.45;
+    max-width: 46ch;
+}
+.tq-hero-right {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(88px, 1fr));
+    gap: 0.5rem;
+    position: relative;
+    z-index: 1;
+}
+.tq-stat {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 0.15rem;
+    padding: 0.7rem 0.5rem;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--tq-card-border);
+    border-radius: 12px;
+    backdrop-filter: blur(6px);
+    transition: transform 0.15s ease, border-color 0.15s ease;
+}
+.tq-stat:hover { transform: translateY(-1px); border-color: rgba(var(--accent-primary-rgb), 0.35); }
+.tq-stat-value {
+    font-size: 1.45rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1;
+}
+.tq-stat-label {
+    font-size: 0.62rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted, var(--text-secondary));
+    font-weight: 600;
+}
+.tq-stat--progress .tq-stat-value { color: var(--warning, #eab308); }
+.tq-stat--review   .tq-stat-value { color: var(--accent-primary); }
+.tq-stat--done     .tq-stat-value { color: var(--success, #22c55e); }
+
+/* Main grid: queue card + new-task side card */
+.tq-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
+    gap: 1rem;
+    align-items: start;
+}
+@media (max-width: 960px) {
+    .tq-hero { grid-template-columns: 1fr; }
+    .tq-hero-right { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .tq-grid { grid-template-columns: 1fr; }
+}
+
+.tq-queue-card {
+    background: var(--tq-card-bg);
+    border: 1px solid var(--tq-card-border);
+    border-radius: var(--tq-card-radius);
+    padding: 1rem 1rem 0.5rem;
+    min-height: 260px;
+}
+.tq-queue-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 0.4rem;
+    padding: 0.1rem 0.25rem;
+}
+.tq-queue-title {
+    font-size: 1rem;
+    font-weight: 700;
+    margin: 0;
+    color: var(--text-primary);
+    letter-spacing: -0.005em;
+}
+.tq-queue-sub {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    margin: 0.1rem 0 0;
+}
+
+/* New-task side card */
+.tq-new-card {
+    position: relative;
+    background: var(--tq-card-bg);
+    border: 1px solid var(--tq-card-border);
+    border-radius: var(--tq-card-radius);
+    overflow: hidden;
+    min-height: 260px;
+    display: flex;
+    flex-direction: column;
+}
+.tq-new-card-accent {
+    position: absolute;
+    top: -60px; right: -60px;
+    width: 180px; height: 180px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(var(--accent-primary-rgb), 0.28), transparent 65%);
+    pointer-events: none;
+}
+.tq-new-card-body {
+    position: relative;
+    padding: 1.15rem 1.2rem 1.2rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+    flex: 1;
+}
+.tq-new-card-icon {
+    width: 38px; height: 38px;
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(var(--accent-primary-rgb), 0.14);
+    color: var(--accent-primary);
+    margin-bottom: 0.1rem;
+}
+.tq-new-card-title {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 0;
+    letter-spacing: -0.01em;
+}
+.tq-new-card-sub {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    margin: 0 0 0.2rem;
+}
+.tq-new-card-btn {
+    align-self: flex-start;
+    padding: 0.55rem 1.1rem;
+    font-size: 0.88rem;
+    font-weight: 600;
+}
+.tq-new-card-tips {
+    list-style: none;
+    padding: 0;
+    margin: 0.4rem 0 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    font-size: 0.75rem;
+    color: var(--text-muted, var(--text-secondary));
+}
+.tq-new-card-tips li {
+    position: relative;
+    padding-left: 1rem;
+    line-height: 1.4;
+}
+.tq-new-card-tips li::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 0.5rem;
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: var(--accent-primary);
+    opacity: 0.6;
+}
+
+/* Legacy: greeting + New Task row (kept for fallback) */
 .tq-top-row {
     display: flex;
     align-items: flex-start;

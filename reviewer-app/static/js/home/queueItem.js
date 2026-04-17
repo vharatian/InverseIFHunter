@@ -2,14 +2,23 @@
 import { escapeHtml } from "../task.js";
 import { homeState } from "./state.js";
 import { formatRelative } from "./format.js";
+import { bucketFor } from "./stats.js";
+
+const BUCKET_LABELS = {
+  in_queue: "In queue",
+  in_progress: "In progress",
+  completed: "Completed",
+};
 
 export function renderQueueItem(it) {
   const sid = escapeHtml(it.session_id || "");
   const taskId = escapeHtml(it.task_display_id || it.task_id || "—");
   const trainer = escapeHtml(it.trainer_email || "unknown trainer");
   const domain = escapeHtml(it.domain || "");
-  const status = String(it.review_status || "submitted").toLowerCase();
-  const statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
+  const rawStatus = String(it.review_status || "submitted").toLowerCase();
+  const bucket = bucketFor(rawStatus) || "in_queue";
+  const statusLabel = BUCKET_LABELS[bucket] || "In queue";
+  const status = bucket;
   const when = escapeHtml(formatRelative(it.submitted_at));
   const preview = escapeHtml((it.prompt_preview || "").slice(0, 180));
   const trainerShort = trainer.split("@")[0] || trainer;

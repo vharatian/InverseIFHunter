@@ -4,7 +4,7 @@ export const homeState = {
   role: "reviewer",
   podId: null,
   assignedTrainers: [],
-  activeStatus: "submitted",
+  activeBucket: "in_queue",
   filter: "",
   items: [],
   counts: {},

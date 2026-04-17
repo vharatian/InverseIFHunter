@@ -140,6 +140,9 @@ export function handleEvent(evt, slotsEl, summaryEl, detailEl) {
         : `<span class="council-summary-fail">${passCount}/${total} passed</span> — ${issues.length} issue${issues.length > 1 ? "s" : ""} found`;
     }
     _notifyUpdateSystem();
+    try {
+      window.dispatchEvent(new CustomEvent("reviewer:council-complete", { detail: { passed, issues } }));
+    } catch { /* ignore */ }
   }
   else if (type === "overall_start") {
     const container = slotsEl || document.getElementById("council-slots");

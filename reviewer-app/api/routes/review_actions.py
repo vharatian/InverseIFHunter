@@ -84,6 +84,62 @@ async def _validated_reviewable_session(session_id: str, reviewer_email: str = "
     )
 
 
+@router.post("/tasks/{session_id}/mark-in-progress")
+async def mark_in_progress(
+    session_id: str,
+    _reviewer: Annotated[str, Depends(require_reviewer)],
+):
+    """
+    Idempotent: transition a submitted task into 'in_progress' when a reviewer opens it.
+    - submitted -> in_progress (and audit).
+    - in_progress / completed / approved -> no-op (returns current status).
+    - any other state -> 409.
+    """
+    current = await get_review_status(session_id)
+    if current in ("in_progress", "completed", "approved"):
+        return {"ok": True, "review_status": current, "changed": False}
+    if current != "submitted":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Task is '{current}'. Only submitted tasks can be opened for review.",
+        )
+    ok, actual = await cas_review_status(session_id, "submitted", "in_progress")
+    if not ok:
+        return {"ok": True, "review_status": actual, "changed": False}
+    await append_audit(session_id, "opened_for_review", _reviewer, {})
+    return {"ok": True, "review_status": "in_progress", "changed": True}
+
+
+@router.post("/tasks/{session_id}/mark-completed")
+async def mark_completed(
+    session_id: str,
+    _reviewer: Annotated[str, Depends(require_reviewer)],
+):
+    """
+    Idempotent: transition a submitted/in-progress task into 'completed' once the QC run has finished.
+    - submitted / in_progress -> completed (and audit + trainer notification).
+    - completed / approved -> no-op.
+    - any other state -> 409.
+    """
+    current = await get_review_status(session_id)
+    if current in ("completed", "approved"):
+        return {"ok": True, "review_status": current, "changed": False}
+    if current not in ("submitted", "in_progress"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Task is '{current}'. Only submitted or in-progress tasks can be completed.",
+        )
+    ok, actual = await cas_review_status(session_id, current, "completed")
+    if not ok:
+        return {"ok": True, "review_status": actual, "changed": False}
+    await append_audit(session_id, "completed", _reviewer, {})
+    await safe_notify(
+        _notify_trainer(session_id, "task_completed", "Your task has been reviewed and marked completed."),
+        context=f"complete notification for {session_id}",
+    )
+    return {"ok": True, "review_status": "completed", "changed": True}
+
+
 @router.post("/tasks/{session_id}/approve")
 async def approve_task(
     session_id: str,

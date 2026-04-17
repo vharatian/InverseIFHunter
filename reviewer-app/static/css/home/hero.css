@@ -71,7 +71,7 @@
 
 .home-hero-right {
   display: grid;
-  grid-template-columns: repeat(4, minmax(78px, 1fr));
+  grid-template-columns: repeat(3, minmax(86px, 1fr));
   gap: 0.5rem;
   align-items: stretch;
   position: relative;
@@ -110,10 +110,9 @@
   color: var(--text-muted, #606060);
 }
 
-.home-stat--submitted .home-stat-value { color: var(--accent-primary, #3b82f6); }
-.home-stat--returned  .home-stat-value { color: var(--warning, #eab308); }
-.home-stat--approved  .home-stat-value { color: var(--success, #22c55e); }
-.home-stat--escalated .home-stat-value { color: var(--danger, #ef4444); }
+.home-stat--queue     .home-stat-value { color: var(--accent-primary, #3b82f6); }
+.home-stat--progress  .home-stat-value { color: var(--warning, #eab308); }
+.home-stat--completed .home-stat-value { color: var(--success, #22c55e); }
 
 .home-grid {
   display: grid;

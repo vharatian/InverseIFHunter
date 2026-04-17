@@ -28,14 +28,15 @@ function cacheDom() {
         taskView:         id('trainerTaskView'),
         greeting:         id('tqGreeting'),
         greetingSub:      id('tqGreetingSub'),
+        eyebrow:          id('tqEyebrow'),
         focusCard:        id('tqFocusCard'),
         focusIcon:        id('tqFocusIcon'),
         focusTitle:       id('tqFocusTitle'),
         focusDetail:      id('tqFocusDetail'),
         focusBtn:         id('tqFocusBtn'),
-        momentumInProgress: id('tqMomentumInProgress'),
-        momentumCompleted:  id('tqMomentumCompleted'),
-        momentum:         id('tqMomentum'),
+        statInProgress:   id('tqStatInProgress'),
+        statUnderReview:  id('tqStatUnderReview'),
+        statDone:         id('tqStatDone'),
         tabs:             id('tqTabs'),
         empty:            id('tqEmpty'),
         newTaskBtn:       id('tqNewTaskBtn'),
@@ -154,23 +155,25 @@ export function showTaskView() {
 
 function render(data) {
     const sessions = data.sessions || [];
-    renderGreeting(sessions);
-    renderMomentum(sessions);
 
-    const returned  = sessions.filter(s => s.review_status === 'returned');
-    const rejected  = sessions.filter(s => s.review_status === 'rejected');
-    const drafts    = sessions.filter(s => s.review_status === 'draft');
-    const submitted = sessions.filter(s => s.review_status === 'submitted');
-    const approved  = sessions.filter(s => s.review_status === 'approved');
+    const drafts       = sessions.filter(s => s.review_status === 'draft');
+    const submitted    = sessions.filter(s => s.review_status === 'submitted');
+    const inProgressRv = sessions.filter(s => s.review_status === 'in_progress');
+    const completed    = sessions.filter(s => s.review_status === 'completed' || s.review_status === 'approved');
+    const awaiting     = [...submitted, ...inProgressRv].sort((a, b) => _sessionSortKey(b) - _sessionSortKey(a));
+    const sentOut      = [...awaiting, ...completed].sort((a, b) => _sessionSortKey(b) - _sessionSortKey(a));
 
-    renderFocusCard(returned, drafts, submitted, approved);
+    renderGreeting(sessions, drafts.length, awaiting.length, completed.length);
+    renderStats(drafts.length, awaiting.length, completed.length);
 
-    const inProgress = [...returned, ...drafts].sort((a, b) => _sessionSortKey(b) - _sessionSortKey(a));
-    renderPanel('drafts',    inProgress, true);
-    renderPanel('completed', submitted, false);
+    renderFocusCard(drafts, submitted, completed);
+
+    const draftsSorted = [...drafts].sort((a, b) => _sessionSortKey(b) - _sessionSortKey(a));
+    renderPanel('drafts',    draftsSorted, true);
+    renderPanel('completed', sentOut, false);
 
     // Auto-select first non-empty tab if current tab is empty
-    const counts = { drafts: inProgress.length, completed: submitted.length };
+    const counts = { drafts: draftsSorted.length, completed: sentOut.length };
     if (counts[_activeTab] === 0) {
         const first = Object.keys(counts).find(k => counts[k] > 0);
         if (first) switchTab(first);
@@ -179,49 +182,47 @@ function render(data) {
     const hasAny = sessions.length > 0;
     toggle(els.empty, !hasAny);
     toggle(els.tabs, hasAny);
-    toggle(els.momentum, hasAny);
 }
 
 // ── Greeting ────────────────────────────────────────────────────
 
-function renderGreeting(sessions) {
+function renderGreeting(sessions, draftsN, awaitingN, completedN) {
     const name = localStorage.getItem('trainer_name') || '';
     const hour = new Date().getHours();
     let timeWord = 'Good evening';
     if (hour < 12)      timeWord = 'Good morning';
     else if (hour < 17) timeWord = 'Good afternoon';
 
-    const display = name ? `${timeWord}, ${name}` : timeWord;
+    const display = name ? `${timeWord}, ${name} 👋` : `${timeWord} 👋`;
     if (els.greeting) els.greeting.textContent = display;
 
-    const approvedCount = sessions.filter(s => s.review_status === 'approved').length;
-    const returnedCount = sessions.filter(s => s.review_status === 'returned').length;
-    let sub = '';
-    if (approvedCount > 0 && returnedCount > 0) {
-        sub = `${approvedCount} task${approvedCount !== 1 ? 's' : ''} approved · ${returnedCount} need${returnedCount !== 1 ? '' : 's'} a revision`;
-    } else if (approvedCount > 0) {
-        sub = `${approvedCount} task${approvedCount !== 1 ? 's' : ''} approved. Nice work.`;
-    } else if (returnedCount > 0) {
-        sub = `${returnedCount} task${returnedCount !== 1 ? 's' : ''} returned with feedback`;
+    if (els.eyebrow) els.eyebrow.textContent = name ? `Trainer · ${name}` : 'Trainer';
+
+    let sub = 'Load a notebook, run the hunt, and submit for review.';
+    if (completedN > 0 && draftsN > 0) {
+        sub = `${completedN} task${completedN !== 1 ? 's' : ''} completed · ${draftsN} in progress. Keep going.`;
+    } else if (completedN > 0) {
+        sub = `${completedN} task${completedN !== 1 ? 's' : ''} completed. Nice work.`;
+    } else if (awaitingN > 0) {
+        sub = `${awaitingN} task${awaitingN !== 1 ? 's' : ''} with your reviewer. Start another while you wait.`;
+    } else if (draftsN > 0) {
+        sub = `${draftsN} draft${draftsN !== 1 ? 's' : ''} in progress — pick up where you left off.`;
     }
     if (els.greetingSub) els.greetingSub.textContent = sub;
+
+    void sessions;
+}
+
+function renderStats(draftsN, awaitingN, completedN) {
+    if (els.statInProgress) els.statInProgress.textContent = String(draftsN);
+    if (els.statUnderReview) els.statUnderReview.textContent = String(awaitingN);
+    if (els.statDone) els.statDone.textContent = String(completedN);
 }
 
 // ── Focus card ──────────────────────────────────────────────────
 
-function renderFocusCard(returned, drafts, submitted, approved) {
-    if (returned.length > 0) {
-        const t = returned[0];
-        const comment = t.review_feedback?.overall_comment || '';
-        const preview = comment.length > 90 ? comment.slice(0, 90) + '…' : comment;
-        setFocusCard(
-            'feedback',
-            `Feedback on ${taskLabel(t)}`,
-            preview || 'Reviewer returned this task — take a look',
-            t.session_id,
-            'Review feedback',
-        );
-    } else if (drafts.length > 0) {
+function renderFocusCard(drafts, submitted, completed) {
+    if (drafts.length > 0) {
         const t = drafts[0];
         setFocusCard(
             'draft',
@@ -232,8 +233,8 @@ function renderFocusCard(returned, drafts, submitted, approved) {
         );
     } else if (submitted.length > 0) {
         setFocusCard('waiting', 'Tasks with reviewer', `${submitted.length} task${submitted.length !== 1 ? 's' : ''} under review`, null, null);
-    } else if (approved.length > 0) {
-        setFocusCard('approved', 'All caught up', 'Everything is approved. Nice work.', null, null);
+    } else if (completed.length > 0) {
+        setFocusCard('approved', 'All caught up', 'Everything is completed. Nice work.', null, null);
     } else {
         toggle(els.focusCard, false);
         return;
@@ -258,19 +259,6 @@ function setFocusCard(iconType, title, detail, sessionId, btnLabel) {
         els.focusBtn.textContent = btnLabel || 'Open';
         els.focusBtn.onclick = sessionId ? () => openTask(sessionId) : null;
     }
-}
-
-// ── Momentum strip ──────────────────────────────────────────────
-
-function renderMomentum(sessions) {
-    const submitted = sessions.filter(s => s.review_status === 'submitted').length;
-    const inProgress = sessions.filter(s => s.review_status === 'draft' || s.review_status === 'returned').length;
-
-    const svgEdit = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`;
-    const svgDone = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>`;
-
-    if (els.momentumInProgress) els.momentumInProgress.innerHTML = `${svgEdit}<span>${inProgress}</span><span class="tq-momentum-label">in progress</span>`;
-    if (els.momentumCompleted)  els.momentumCompleted.innerHTML  = `${svgDone}<span>${submitted}</span><span class="tq-momentum-label">completed</span>`;
 }
 
 // ── Tab switching ───────────────────────────────────────────────
@@ -361,11 +349,10 @@ const JOURNEY_STEPS = ['Load', 'Hunt', 'Select', 'Review', 'Submit'];
 function buildTaskCard(t, showJourney) {
     const card = document.createElement('div');
     card.className = 'tq-task-card';
-    if (t.review_status === 'returned') card.classList.add('tq-card-returned');
-    if (t.review_status === 'approved') card.classList.add('tq-card-approved');
-    if (t.review_status === 'rejected') card.classList.add('tq-card-rejected');
+    if (t.review_status === 'completed' || t.review_status === 'approved') card.classList.add('tq-card-approved');
+    if (t.review_status === 'in_progress') card.classList.add('tq-card-in-progress');
 
-    const isActionable = t.review_status === 'draft' || t.review_status === 'returned';
+    const isActionable = t.review_status === 'draft';
     card.style.cursor = isActionable ? 'pointer' : 'default';
     if (isActionable) card.addEventListener('click', () => openTask(t.session_id));
 
@@ -386,15 +373,7 @@ function buildTaskCard(t, showJourney) {
         journeyHtml = `<div class="tq-journey">${buildJourneyTrail(t)}</div>`;
     }
 
-    let feedbackHtml = '';
-    if (t.review_status === 'returned' && t.review_feedback?.overall_comment) {
-        const fb = t.review_feedback.overall_comment;
-        const preview = fb.length > 100 ? fb.slice(0, 100) + '…' : fb;
-        feedbackHtml = `<div class="tq-card-feedback">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-            ${esc(preview)}
-        </div>`;
-    }
+    const feedbackHtml = '';
 
     const deleteBtn = state.adminMode
         ? `<button class="tq-card-delete" title="Delete session" data-sid="${t.session_id}">
@@ -429,11 +408,11 @@ function buildTaskCard(t, showJourney) {
 
 function buildStatusBadge(status) {
     const map = {
-        draft:     ['Draft',        'tq-badge-draft'],
-        submitted: ['Under review', 'tq-badge-submitted'],
-        returned:  ['Returned',     'tq-badge-returned'],
-        approved:  ['Approved',     'tq-badge-approved'],
-        rejected:  ['Rejected',     'tq-badge-rejected'],
+        draft:       ['Draft',          'tq-badge-draft'],
+        submitted:   ['Awaiting review', 'tq-badge-submitted'],
+        in_progress: ['Being reviewed', 'tq-badge-in-progress'],
+        completed:   ['Completed',      'tq-badge-approved'],
+        approved:    ['Completed',      'tq-badge-approved'],
     };
     const [text, cls] = map[status] || [status, ''];
     return `<span class="tq-badge ${cls}">${text}</span>`;

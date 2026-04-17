@@ -52,7 +52,16 @@ def _key(session_id: str, field: str) -> str:
     return f"{KEY_PREFIX}:{session_id}:{field}"
 
 
-REVIEW_STATUS_VALUES = ("draft", "submitted", "returned", "approved", "rejected", "escalated")
+REVIEW_STATUS_VALUES = (
+    "draft",
+    "submitted",
+    "in_progress",
+    "completed",
+    "returned",
+    "approved",
+    "rejected",
+    "escalated",
+)
 
 def _session_keys(session_id: str) -> List[str]:
     """All Redis keys belonging to a session (for TTL refresh / deletion)."""

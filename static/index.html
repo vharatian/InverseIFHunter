@@ -196,15 +196,29 @@
     <main class="container" id="mainContainer">
         <div class="main-content-area" id="mainContentArea">
 
-            <!-- ═══ TRAINER QUEUE (Phase 4 homepage) ═══ -->
-            <section id="trainerQueueView" class="tq-view">
-                <!-- Top row: greeting + new task -->
-                <div class="tq-top-row">
-                    <div class="tq-greeting">
-                        <h1 class="tq-greeting-text" id="tqGreeting">Good morning</h1>
-                        <p class="tq-greeting-sub" id="tqGreetingSub"></p>
+            <!-- ═══ TRAINER HOME (Phase 4 homepage) ═══ -->
+            <section id="trainerQueueView" class="tq-view tq-home">
+                <!-- Hero banner: greeting + stat tiles -->
+                <div class="tq-hero">
+                    <div class="tq-hero-left">
+                        <span class="tq-hero-eyebrow" id="tqEyebrow">Trainer</span>
+                        <h1 class="tq-hero-title" id="tqGreeting">Good morning</h1>
+                        <p class="tq-hero-sub" id="tqGreetingSub">Load a notebook, run the hunt, and submit for review.</p>
                     </div>
-                    <button class="btn btn-primary tq-new-task-btn" id="tqNewTaskBtn">+ New Task</button>
+                    <div class="tq-hero-right">
+                        <div class="tq-stat tq-stat--progress">
+                            <span class="tq-stat-value" id="tqStatInProgress">0</span>
+                            <span class="tq-stat-label">In progress</span>
+                        </div>
+                        <div class="tq-stat tq-stat--review">
+                            <span class="tq-stat-value" id="tqStatUnderReview">0</span>
+                            <span class="tq-stat-label">With reviewer</span>
+                        </div>
+                        <div class="tq-stat tq-stat--done">
+                            <span class="tq-stat-value" id="tqStatDone">0</span>
+                            <span class="tq-stat-label">Completed</span>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Focus card (smart next action) -->
@@ -217,38 +231,58 @@
                     <button class="btn btn-primary tq-focus-btn" id="tqFocusBtn">Open</button>
                 </div>
 
-                <!-- Momentum strip -->
-                <div class="tq-momentum" id="tqMomentum">
-                    <span class="tq-momentum-item" id="tqMomentumInProgress" title="Drafts and tasks needing your attention"></span>
-                    <span class="tq-momentum-item" id="tqMomentumCompleted" title="Submitted to reviewer"></span>
-                </div>
-
-                <!-- Tab bar -->
-                <div class="tq-tabs" id="tqTabs">
-                    <button class="tq-tab tq-tab-active" data-tab="drafts">In progress <span class="tq-tab-count" id="tqTabCountDrafts"></span></button>
-                    <button class="tq-tab" data-tab="completed">Completed <span class="tq-tab-count" id="tqTabCountCompleted"></span></button>
-                </div>
-
-                <!-- Tab panels -->
-                <div class="tq-panel" id="tqPanelDrafts">
-                    <div class="tq-task-list" id="tqDraftsList"></div>
-                    <div class="tq-panel-empty hidden" id="tqPanelDraftsEmpty">No drafts in progress.</div>
-                </div>
-                <div class="tq-panel hidden" id="tqPanelCompleted">
-                    <div class="tq-task-list" id="tqCompletedList"></div>
-                    <div class="tq-panel-empty hidden" id="tqPanelCompletedEmpty">No completed tasks yet.</div>
-                </div>
-
-                <!-- Empty state -->
-                <div class="tq-empty hidden" id="tqEmpty">
-                    <div class="tq-empty-icon">
-                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" opacity="0.4"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+                <!-- Main grid: queue card (left) + new-task side card (right) -->
+                <div class="tq-grid">
+                    <div class="tq-queue-card">
+                        <div class="tq-queue-head">
+                            <div>
+                                <h2 class="tq-queue-title">Your tasks</h2>
+                                <p class="tq-queue-sub" id="tqQueueSub">Drafts you're still working on, plus ones you've already submitted.</p>
+                            </div>
+                        </div>
+                        <div class="tq-tabs" id="tqTabs">
+                            <button class="tq-tab tq-tab-active" data-tab="drafts">
+                                In progress <span class="tq-tab-count" id="tqTabCountDrafts"></span>
+                            </button>
+                            <button class="tq-tab" data-tab="completed">
+                                Completed <span class="tq-tab-count" id="tqTabCountCompleted"></span>
+                            </button>
+                        </div>
+                        <div class="tq-panel" id="tqPanelDrafts">
+                            <div class="tq-task-list" id="tqDraftsList"></div>
+                            <div class="tq-panel-empty hidden" id="tqPanelDraftsEmpty">No drafts in progress.</div>
+                        </div>
+                        <div class="tq-panel hidden" id="tqPanelCompleted">
+                            <div class="tq-task-list" id="tqCompletedList"></div>
+                            <div class="tq-panel-empty hidden" id="tqPanelCompletedEmpty">No completed tasks yet.</div>
+                        </div>
+                        <div class="tq-empty hidden" id="tqEmpty">
+                            <div class="tq-empty-icon">
+                                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" opacity="0.4"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+                            </div>
+                            <p class="tq-empty-text">No tasks yet. Start a new one to get going.</p>
+                        </div>
                     </div>
-                    <p class="tq-empty-text">No tasks yet. Load a notebook to get started.</p>
-                </div>
 
+                    <aside class="tq-new-card">
+                        <div class="tq-new-card-accent" aria-hidden="true"></div>
+                        <div class="tq-new-card-body">
+                            <div class="tq-new-card-icon" aria-hidden="true">
+                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                            </div>
+                            <h3 class="tq-new-card-title">Start a new task</h3>
+                            <p class="tq-new-card-sub">Paste a Colab notebook to kick off a fresh hunt. We'll walk you through load → hunt → select → submit.</p>
+                            <button class="btn btn-primary tq-new-card-btn" id="tqNewTaskBtn">+ New Task</button>
+                            <ul class="tq-new-card-tips">
+                                <li>Use Colab or Drive links only.</li>
+                                <li>We save drafts automatically — resume anytime.</li>
+                                <li>Submitted tasks land with your pod reviewer.</li>
+                            </ul>
+                        </div>
+                    </aside>
+                </div>
             </section>
-            <!-- ═══ END TRAINER QUEUE ═══ -->
+            <!-- ═══ END TRAINER HOME ═══ -->
 
             <!-- Task view wrapper (all existing workflow sections) -->
             <div id="trainerTaskView" class="tq-task-view hidden">

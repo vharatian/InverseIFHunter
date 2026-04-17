@@ -17,7 +17,9 @@ import {
   initHome,
   hydrateTaskIdentity,
   setOpenSessionHandler,
+  refreshQueue,
 } from "./js/home/index.js";
+import { markSessionInProgress, markSessionCompleted } from "./js/home/api.js";
 import { initGate, bootstrapAuthState } from "./js/auth/gate.js";
 import { hydrateGateCouncilFooter } from "./js/auth/councilFooter.js";
 import { initFetchCard } from "./js/notebook/fetchCard.js";
@@ -50,6 +52,16 @@ setOpenSessionHandler(async (item) => {
   const input = document.getElementById("task-fetch-input");
   if (input) input.value = url;
   await loadNotebookOnly(url, { sessionId: item.session_id });
+  const res = await markSessionInProgress(item.session_id);
+  if (res?.changed) refreshQueue();
+});
+
+window.addEventListener("reviewer:council-complete", () => {
+  const sid = getCurrentSessionId();
+  if (!sid) return;
+  markSessionCompleted(sid).then((res) => {
+    if (res?.changed) refreshQueue();
+  });
 });
 hydrateTaskIdentity();
 

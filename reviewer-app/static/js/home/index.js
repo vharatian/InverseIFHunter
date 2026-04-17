@@ -63,8 +63,8 @@ function _wireFilter() {
 function _wireTabs() {
   document.querySelectorAll(".home-queue-tab").forEach((tab) => {
     tab.addEventListener("click", () => {
-      const status = tab.getAttribute("data-status") || "submitted";
-      homeState.activeStatus = status;
+      const bucket = tab.getAttribute("data-bucket") || "in_queue";
+      homeState.activeBucket = bucket;
       document.querySelectorAll(".home-queue-tab").forEach((t) => {
         const on = t === tab;
         t.classList.toggle("active", on);

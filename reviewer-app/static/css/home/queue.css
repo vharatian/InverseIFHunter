@@ -153,10 +153,9 @@
   background: var(--accent-glow, rgba(59,130,246,0.12));
   color: var(--accent-primary, #3b82f6);
 }
-.queue-item-badge[data-status="returned"]  { background: rgba(234, 179, 8, 0.12);  color: var(--warning, #eab308); }
-.queue-item-badge[data-status="approved"]  { background: rgba(34, 197, 94, 0.12);  color: var(--success, #22c55e); }
-.queue-item-badge[data-status="escalated"] { background: rgba(239, 68, 68, 0.12);  color: var(--danger, #ef4444); }
-.queue-item-badge[data-status="rejected"]  { background: rgba(239, 68, 68, 0.12);  color: var(--danger, #ef4444); }
+.queue-item-badge[data-status="in_queue"]    { background: rgba(59, 130, 246, 0.12); color: var(--accent-primary, #3b82f6); }
+.queue-item-badge[data-status="in_progress"] { background: rgba(234, 179, 8, 0.12);  color: var(--warning, #eab308); }
+.queue-item-badge[data-status="completed"]   { background: rgba(34, 197, 94, 0.12);  color: var(--success, #22c55e); }
 
 .queue-item-body { min-width: 0; display: flex; flex-direction: column; gap: 0.2rem; }
 
@@ -200,10 +199,9 @@
   background: var(--accent-glow, rgba(59,130,246,0.12));
   color: var(--accent-primary, #3b82f6);
 }
-.queue-status-pill[data-status="returned"]  { background: rgba(234, 179, 8, 0.14);  color: var(--warning, #eab308); }
-.queue-status-pill[data-status="approved"]  { background: rgba(34, 197, 94, 0.14);  color: var(--success, #22c55e); }
-.queue-status-pill[data-status="escalated"] { background: rgba(239, 68, 68, 0.14);  color: var(--danger, #ef4444); }
-.queue-status-pill[data-status="draft"]     { background: rgba(255,255,255,0.05); color: var(--text-muted, #606060); }
+.queue-status-pill[data-status="in_queue"]    { background: rgba(59, 130, 246, 0.14); color: var(--accent-primary, #3b82f6); }
+.queue-status-pill[data-status="in_progress"] { background: rgba(234, 179, 8, 0.14);  color: var(--warning, #eab308); }
+.queue-status-pill[data-status="completed"]   { background: rgba(34, 197, 94, 0.14);  color: var(--success, #22c55e); }
 
 .queue-item-arrow {
   opacity: 0.35;

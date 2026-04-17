@@ -16,3 +16,29 @@ export async function fetchQueueSummaries() {
 export async function fetchTaskIdentityConfig() {
   return await api("/api/task-identity-config", {}, { timeoutMs: 10_000, retries: 0 });
 }
+
+export async function markSessionInProgress(sessionId) {
+  if (!sessionId) return null;
+  try {
+    return await api(
+      `/api/tasks/${encodeURIComponent(sessionId)}/mark-in-progress`,
+      { method: "POST" },
+      { timeoutMs: 10_000, retries: 0 },
+    );
+  } catch {
+    return null;
+  }
+}
+
+export async function markSessionCompleted(sessionId) {
+  if (!sessionId) return null;
+  try {
+    return await api(
+      `/api/tasks/${encodeURIComponent(sessionId)}/mark-completed`,
+      { method: "POST" },
+      { timeoutMs: 10_000, retries: 0 },
+    );
+  } catch {
+    return null;
+  }
+}

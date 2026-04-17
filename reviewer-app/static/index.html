@@ -64,21 +64,17 @@
             <p class="home-hero-sub" id="home-hero-sub">Tasks from your assigned trainers will appear here as they&rsquo;re submitted.</p>
           </div>
           <div class="home-hero-right">
-            <div class="home-stat home-stat--submitted">
-              <span class="home-stat-value" id="stat-submitted">0</span>
-              <span class="home-stat-label">Pending</span>
+            <div class="home-stat home-stat--queue">
+              <span class="home-stat-value" id="stat-in-queue">0</span>
+              <span class="home-stat-label">In queue</span>
             </div>
-            <div class="home-stat home-stat--returned">
-              <span class="home-stat-value" id="stat-returned">0</span>
-              <span class="home-stat-label">Returned</span>
+            <div class="home-stat home-stat--progress">
+              <span class="home-stat-value" id="stat-in-progress">0</span>
+              <span class="home-stat-label">In progress</span>
             </div>
-            <div class="home-stat home-stat--approved">
-              <span class="home-stat-value" id="stat-approved">0</span>
-              <span class="home-stat-label">Approved</span>
-            </div>
-            <div class="home-stat home-stat--escalated">
-              <span class="home-stat-value" id="stat-escalated">0</span>
-              <span class="home-stat-label">Escalated</span>
+            <div class="home-stat home-stat--completed">
+              <span class="home-stat-value" id="stat-completed">0</span>
+              <span class="home-stat-label">Completed</span>
             </div>
           </div>
         </div>
@@ -98,11 +94,9 @@
               </div>
             </header>
             <div class="home-queue-tabs" role="tablist" id="home-queue-tabs">
-              <button type="button" class="home-queue-tab active" role="tab" data-status="submitted" aria-selected="true">Pending <span class="home-tab-count" data-count-for="submitted">0</span></button>
-              <button type="button" class="home-queue-tab" role="tab" data-status="returned" aria-selected="false">Returned <span class="home-tab-count" data-count-for="returned">0</span></button>
-              <button type="button" class="home-queue-tab" role="tab" data-status="approved" aria-selected="false">Approved <span class="home-tab-count" data-count-for="approved">0</span></button>
-              <button type="button" class="home-queue-tab" role="tab" data-status="escalated" aria-selected="false">Escalated <span class="home-tab-count" data-count-for="escalated">0</span></button>
-              <button type="button" class="home-queue-tab" role="tab" data-status="all" aria-selected="false">All</button>
+              <button type="button" class="home-queue-tab active" role="tab" data-bucket="in_queue" aria-selected="true">In queue <span class="home-tab-count" data-count-for="in_queue">0</span></button>
+              <button type="button" class="home-queue-tab" role="tab" data-bucket="in_progress" aria-selected="false">In progress <span class="home-tab-count" data-count-for="in_progress">0</span></button>
+              <button type="button" class="home-queue-tab" role="tab" data-bucket="completed" aria-selected="false">Completed <span class="home-tab-count" data-count-for="completed">0</span></button>
             </div>
             <div class="home-queue-list" id="home-queue-list" aria-live="polite" aria-busy="false"></div>
           </section>
