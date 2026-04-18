@@ -496,7 +496,8 @@ async function _confirmDeleteSession(sessionId, label, cardEl) {
  * that only draft sessions can be removed through this path.
  */
 async function _confirmDeleteDraftAsTrainer(sessionId, label, cardEl) {
-    if (!confirm(`Delete draft "${label}"?\n\nThis removes it permanently from the backend.`)) return;
+    const ok = await _showDeleteConfirmModal(label);
+    if (!ok) return;
 
     const prevDisplay = cardEl ? cardEl.style.display : '';
     if (cardEl) cardEl.style.display = 'none';
@@ -509,6 +510,92 @@ async function _confirmDeleteDraftAsTrainer(sessionId, label, cardEl) {
         if (cardEl) cardEl.style.display = prevDisplay;
         showError(err, { operation: 'Delete draft' });
     }
+}
+
+/**
+ * Themed confirm dialog for destructive draft deletion. Returns a Promise
+ * that resolves to true on confirm, false on cancel / escape / backdrop click.
+ */
+function _showDeleteConfirmModal(label) {
+    return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.className = 'tq-confirm-overlay';
+        const safeLabel = _escForHtml(label);
+        overlay.innerHTML = `
+            <div class="tq-confirm-modal" role="dialog" aria-modal="true" aria-labelledby="tqConfirmTitle">
+                <div class="tq-confirm-icon" aria-hidden="true">
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                        <line x1="12" y1="9" x2="12" y2="13"/>
+                        <line x1="12" y1="17" x2="12.01" y2="17"/>
+                    </svg>
+                </div>
+                <h3 id="tqConfirmTitle" class="tq-confirm-title">Delete this draft?</h3>
+                <p class="tq-confirm-desc">
+                    <span class="tq-confirm-label">"${safeLabel}"</span>
+                    will be removed from your in-progress tasks.
+                </p>
+                <p class="tq-confirm-warning">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                    This action cannot be undone.
+                </p>
+                <div class="tq-confirm-actions">
+                    <button type="button" class="tq-confirm-btn tq-confirm-cancel" id="tqConfirmCancel">Cancel</button>
+                    <button type="button" class="tq-confirm-btn tq-confirm-delete" id="tqConfirmDelete">Delete draft</button>
+                </div>
+            </div>`;
+        document.body.appendChild(overlay);
+
+        const cancelBtn = overlay.querySelector('#tqConfirmCancel');
+        const deleteBtn = overlay.querySelector('#tqConfirmDelete');
+        const prevFocus = document.activeElement;
+
+        requestAnimationFrame(() => {
+            overlay.classList.add('tq-confirm-visible');
+            deleteBtn?.focus();
+        });
+
+        let settled = false;
+        const close = (result) => {
+            if (settled) return;
+            settled = true;
+            overlay.classList.remove('tq-confirm-visible');
+            document.removeEventListener('keydown', onKey, true);
+            setTimeout(() => {
+                overlay.remove();
+                if (prevFocus && typeof prevFocus.focus === 'function') {
+                    try { prevFocus.focus(); } catch { /* ignore */ }
+                }
+                resolve(result);
+            }, 180);
+        };
+        const onKey = (e) => {
+            if (e.key === 'Escape') { e.preventDefault(); close(false); }
+            else if (e.key === 'Enter') { e.preventDefault(); close(true); }
+            else if (e.key === 'Tab') {
+                const focusables = [cancelBtn, deleteBtn].filter(Boolean);
+                if (!focusables.length) return;
+                const i = focusables.indexOf(document.activeElement);
+                const next = e.shiftKey
+                    ? focusables[(i - 1 + focusables.length) % focusables.length]
+                    : focusables[(i + 1) % focusables.length];
+                e.preventDefault();
+                next.focus();
+            }
+        };
+
+        cancelBtn.addEventListener('click', () => close(false));
+        deleteBtn.addEventListener('click', () => close(true));
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
+        document.addEventListener('keydown', onKey, true);
+    });
+}
+
+function _escForHtml(s) {
+    if (s == null) return '';
+    return String(s).replace(/[&<>"']/g, (c) => (
+        { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    ));
 }
 
 // ── Helpers ─────────────────────────────────────────────────────

@@ -682,3 +682,134 @@
     line-height: 1.5;
 }
 
+/* ─── Draft delete confirm modal ─────────────────────────────────────────── */
+
+.tq-confirm-overlay {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.25rem;
+    background: rgba(4, 6, 12, 0.55);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    opacity: 0;
+    transition: opacity 180ms ease;
+    z-index: 10000;
+}
+.tq-confirm-overlay.tq-confirm-visible { opacity: 1; }
+
+.tq-confirm-modal {
+    position: relative;
+    width: min(440px, 100%);
+    padding: 1.75rem 1.6rem 1.4rem;
+    background:
+        radial-gradient(680px 260px at 50% -40%, rgba(239, 68, 68, 0.18), transparent 60%),
+        linear-gradient(160deg, var(--bg-secondary, #1a1f2e), var(--bg-tertiary, #11151f));
+    border: 1px solid rgba(239, 68, 68, 0.35);
+    border-radius: 18px;
+    box-shadow:
+        0 24px 60px -20px rgba(0, 0, 0, 0.65),
+        0 0 0 1px rgba(255, 255, 255, 0.03) inset,
+        0 -1px 0 rgba(255, 255, 255, 0.04) inset;
+    color: var(--text-primary, #e6e8ef);
+    text-align: center;
+    transform: translateY(8px) scale(0.97);
+    transition: transform 220ms cubic-bezier(.2, .9, .3, 1.1);
+}
+.tq-confirm-overlay.tq-confirm-visible .tq-confirm-modal {
+    transform: translateY(0) scale(1);
+}
+
+.tq-confirm-icon {
+    width: 56px;
+    height: 56px;
+    margin: 0 auto 0.9rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: radial-gradient(circle at 30% 30%, rgba(239, 68, 68, 0.28), rgba(239, 68, 68, 0.10) 70%);
+    color: #fca5a5;
+    box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.25) inset;
+}
+
+.tq-confirm-title {
+    margin: 0 0 0.4rem;
+    font-size: 1.12rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: var(--text-primary, #f1f5f9);
+}
+
+.tq-confirm-desc {
+    margin: 0 0 0.85rem;
+    font-size: 0.9rem;
+    line-height: 1.5;
+    color: var(--text-secondary, #a9b0c0);
+}
+.tq-confirm-label {
+    color: var(--text-primary, #f1f5f9);
+    font-weight: 600;
+    word-break: break-word;
+}
+
+.tq-confirm-warning {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin: 0 auto 1.15rem;
+    padding: 0.4rem 0.75rem;
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    color: #fca5a5;
+    background: rgba(239, 68, 68, 0.10);
+    border: 1px solid rgba(239, 68, 68, 0.28);
+    border-radius: 999px;
+}
+.tq-confirm-warning svg { flex: 0 0 auto; }
+
+.tq-confirm-actions {
+    display: flex;
+    gap: 0.6rem;
+    justify-content: center;
+}
+
+.tq-confirm-btn {
+    min-width: 120px;
+    padding: 0.6rem 1.1rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    border-radius: 10px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: background 140ms ease, border-color 140ms ease, transform 80ms ease, box-shadow 140ms ease;
+}
+.tq-confirm-btn:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.35);
+}
+.tq-confirm-btn:active { transform: translateY(1px); }
+
+.tq-confirm-cancel {
+    background: transparent;
+    border-color: var(--border, rgba(255, 255, 255, 0.12));
+    color: var(--text-secondary, #c4c9d4);
+}
+.tq-confirm-cancel:hover {
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text-primary, #f1f5f9);
+}
+
+.tq-confirm-delete {
+    background: linear-gradient(180deg, #ef4444, #dc2626);
+    color: #fff;
+    box-shadow: 0 6px 16px -6px rgba(239, 68, 68, 0.6);
+}
+.tq-confirm-delete:hover {
+    background: linear-gradient(180deg, #f05252, #c81e1e);
+    box-shadow: 0 8px 22px -6px rgba(239, 68, 68, 0.75);
+}
+
