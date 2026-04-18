@@ -236,9 +236,50 @@ async function loadRealtimeStats() {
         document.getElementById('rtHuntsInProgress').textContent = data.hunts_in_progress || 0;
         document.getElementById('rtRecentBreaks').textContent = data.recent_breaks || 0;
         document.getElementById('activeTrainers').textContent = data.active_trainers || 0;
+        renderActiveTrainersDropdown(data.active_trainer_emails || []);
     } catch (error) {
         console.error('Error loading realtime stats:', error);
     }
+}
+
+function renderActiveTrainersDropdown(emails) {
+    const menu = document.getElementById('activeTrainersMenu');
+    if (!menu) return;
+    if (!emails.length) {
+        menu.innerHTML = '<li class="realtime-dropdown-empty">No active trainers in the last 5 min</li>';
+        return;
+    }
+    menu.innerHTML = emails.map((e) => {
+        const safe = String(e).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        return `<li role="option" class="realtime-dropdown-item" title="${safe}">
+            <span class="realtime-dropdown-dot"></span>
+            <span class="realtime-dropdown-email">${safe}</span>
+        </li>`;
+    }).join('');
+}
+
+function initActiveTrainersDropdown() {
+    const btn = document.getElementById('activeTrainersBtn');
+    const menu = document.getElementById('activeTrainersMenu');
+    if (!btn || !menu) return;
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const open = !menu.classList.contains('hidden');
+        menu.classList.toggle('hidden', open);
+        btn.setAttribute('aria-expanded', String(!open));
+    });
+    document.addEventListener('click', (e) => {
+        if (!menu.contains(e.target) && e.target !== btn) {
+            menu.classList.add('hidden');
+            btn.setAttribute('aria-expanded', 'false');
+        }
+    });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            menu.classList.add('hidden');
+            btn.setAttribute('aria-expanded', 'false');
+        }
+    });
 }
 
 async function loadTimeline() {
@@ -1057,6 +1098,7 @@ function _initDashboard() {
         if (btn) toggleCollapse(btn);
     });
     _initTabKeyboardNav('.tab-nav');
+    initActiveTrainersDropdown();
 
     const tzBtn = document.getElementById('tzToggle');
     if (tzBtn) {

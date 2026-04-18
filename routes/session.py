@@ -166,6 +166,34 @@ async def admin_delete_session(
     return {"deleted": True, "session_id": session_id, "redis_keys_removed": redis_deleted, "pg_removed": pg_deleted}
 
 
+@router.delete("/trainer/session/{session_id}")
+async def trainer_delete_draft(session_id: str):
+    """Trainer-initiated delete for a draft session (Redis + PostgreSQL).
+
+    Only drafts can be removed here; anything already submitted/under review
+    must go through the admin endpoint to prevent accidental loss of work
+    that the reviewer pipeline already depends on.
+    """
+    review_status = (await redis_store.get_review_status(session_id) or "").strip().lower()
+    if review_status and review_status != "draft":
+        raise HTTPException(
+            409,
+            f"Only draft sessions can be deleted from the trainer app (status={review_status!r}).",
+        )
+
+    redis_deleted = await redis_store.delete_all_session_keys(session_id)
+    pg_deleted = await delete_session_pg(session_id)
+    logger.info(
+        f"Trainer deleted draft session {session_id}: redis_keys={redis_deleted}, pg={pg_deleted}"
+    )
+    return {
+        "deleted": True,
+        "session_id": session_id,
+        "redis_keys_removed": redis_deleted,
+        "pg_removed": pg_deleted,
+    }
+
+
 @router.get("/trainer-queue")
 async def trainer_queue(
     x_trainer_email: Annotated[str | None, Header(alias="X-Trainer-Email")] = None,

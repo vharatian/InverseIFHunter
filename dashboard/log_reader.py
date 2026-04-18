@@ -1176,6 +1176,7 @@ class EnhancedLogReader:
 
         active_sessions = set()
         active_trainers = set()
+        active_trainer_emails: Set[str] = set()
         started_keys: Set[tuple] = set()
         completed_keys: Set[tuple] = set()
         recent_breaks = 0
@@ -1200,6 +1201,12 @@ class EnhancedLogReader:
                 )
                 if tid:
                     active_trainers.add(tid)
+                email = (
+                    (ctx.get(session_id) or {}).get("trainer_email")
+                    or (data.get("trainer_email") or "")
+                ).strip().lower()
+                if email and "@" in email:
+                    active_trainer_emails.add(email)
 
             if event_type == "hunt_start":
                 key = _hunt_key(session_id, data)
@@ -1223,6 +1230,7 @@ class EnhancedLogReader:
         return {
             "active_sessions": len(active_sessions),
             "active_trainers": len(active_trainers),
+            "active_trainer_emails": sorted(active_trainer_emails),
             "hunts_in_progress": hunts_in_progress,
             "recent_breaks": recent_breaks,
             "last_updated": datetime.utcnow().isoformat() + "Z",

@@ -409,6 +409,23 @@
 }
 .tq-task-card:hover .tq-card-delete { opacity: 1; }
 .tq-card-delete:hover { color: var(--danger); }
+
+/* Trainer-facing cross (×) on draft cards: always visible, clearly actionable */
+.tq-card-delete-x {
+    opacity: 0.55;
+    color: var(--text-muted);
+    width: 22px;
+    height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+}
+.tq-task-card:hover .tq-card-delete-x { opacity: 1; }
+.tq-card-delete-x:hover {
+    background: rgba(239, 68, 68, 0.12);
+    color: var(--danger);
+}
 .tq-card-label {
     font-size: 0.9rem;
     font-weight: 600;

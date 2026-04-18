@@ -375,11 +375,18 @@ function buildTaskCard(t, showJourney) {
 
     const feedbackHtml = '';
 
-    const deleteBtn = state.adminMode
-        ? `<button class="tq-card-delete" title="Delete session" data-sid="${t.session_id}">
+    // Admin users: trash icon to delete any session.
+    // All trainers: cross (×) to delete their own drafts in progress.
+    let deleteBtn = '';
+    if (state.adminMode) {
+        deleteBtn = `<button class="tq-card-delete" title="Delete session" data-sid="${t.session_id}" data-mode="admin">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-          </button>`
-        : '';
+          </button>`;
+    } else if (t.review_status === 'draft') {
+        deleteBtn = `<button class="tq-card-delete tq-card-delete-x" title="Delete draft" aria-label="Delete draft" data-sid="${t.session_id}" data-mode="trainer">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>`;
+    }
 
     card.innerHTML = `
         <div class="tq-card-top">
@@ -399,7 +406,11 @@ function buildTaskCard(t, showJourney) {
     if (delEl) {
         delEl.addEventListener('click', (e) => {
             e.stopPropagation();
-            _confirmDeleteSession(t.session_id, label, card);
+            if (delEl.dataset.mode === 'trainer') {
+                _confirmDeleteDraftAsTrainer(t.session_id, label, card);
+            } else {
+                _confirmDeleteSession(t.session_id, label, card);
+            }
         });
     }
 
@@ -477,6 +488,27 @@ async function _confirmDeleteSession(sessionId, label, cardEl) {
             showError(err, { operation: 'Delete session' });
         },
     });
+}
+
+/**
+ * Trainer-initiated delete for a draft card: confirm() dialog then hard
+ * delete via the trainer endpoint (no admin password). Backend enforces
+ * that only draft sessions can be removed through this path.
+ */
+async function _confirmDeleteDraftAsTrainer(sessionId, label, cardEl) {
+    if (!confirm(`Delete draft "${label}"?\n\nThis removes it permanently from the backend.`)) return;
+
+    const prevDisplay = cardEl ? cardEl.style.display : '';
+    if (cardEl) cardEl.style.display = 'none';
+
+    try {
+        await apiFetch(`api/trainer/session/${sessionId}`, { method: 'DELETE' });
+        showToast(`Deleted draft "${label}"`, 'success');
+        refreshQueue();
+    } catch (err) {
+        if (cardEl) cardEl.style.display = prevDisplay;
+        showError(err, { operation: 'Delete draft' });
+    }
 }
 
 // ── Helpers ─────────────────────────────────────────────────────
