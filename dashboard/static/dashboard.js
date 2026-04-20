@@ -877,10 +877,12 @@ async function loadModels() {
 
     const brkCanvas = document.getElementById('modelBreakChart');
     const brkCtx = brkCanvas.getContext('2d');
-    if (modelBreakChart) modelBreakChart.destroy();
+    if (modelBreakChart) { modelBreakChart.destroy(); modelBreakChart = null; }
     if (top.length === 0) {
+        brkCanvas.style.display = 'none';
         _ensureEmptyState(brkCanvas.parentElement, 'No model data in this period');
     } else {
+        brkCanvas.style.display = 'block';
         _clearEmptyState(brkCanvas.parentElement);
         const xBR  = top.map(m => (m.break_rate || 0) * 100);
         const errL = top.map(m => (m.break_rate - m.ci_lo) * 100);
@@ -953,11 +955,13 @@ async function loadModels() {
     // Usage share: horizontal bar (readable, ordered, doughnut-free).
     const usageCanvas = document.getElementById('modelUsageChart');
     const usageCtx = usageCanvas.getContext('2d');
-    if (modelUsageChart) modelUsageChart.destroy();
+    if (modelUsageChart) { modelUsageChart.destroy(); modelUsageChart = null; }
     const byHunts = [...chartable].sort((a, b) => b.hunts - a.hunts).slice(0, 10).reverse();
     if (byHunts.length === 0) {
+        usageCanvas.style.display = 'none';
         _ensureEmptyState(usageCanvas.parentElement, 'No model usage yet');
     } else {
+        usageCanvas.style.display = 'block';
         _clearEmptyState(usageCanvas.parentElement);
         const totalHunts = byHunts.reduce((s, m) => s + (m.hunts || 0), 0) || 1;
         modelUsageChart = new Chart(usageCtx, {
@@ -1034,11 +1038,13 @@ async function loadReviewerStats() {
     const decisionCanvas = document.getElementById('reviewerDecisionsChart');
     if (decisionCanvas) {
         const decisionCtx = decisionCanvas.getContext('2d');
-        if (reviewerDecisionsChart) reviewerDecisionsChart.destroy();
+        if (reviewerDecisionsChart) { reviewerDecisionsChart.destroy(); reviewerDecisionsChart = null; }
         const entries = Object.entries(data.decisions || {}).sort((a, b) => b[1] - a[1]);
         if (entries.length === 0) {
+            decisionCanvas.style.display = 'none';
             _ensureEmptyState(decisionCanvas.parentElement, 'No reviewer decisions yet');
         } else {
+            decisionCanvas.style.display = 'block';
             _clearEmptyState(decisionCanvas.parentElement);
             const colorFor = (k) => ({
                 approved: theme.hunt, returned: theme.err, escalated: theme.brk, completed: theme.session,
@@ -1071,11 +1077,13 @@ async function loadReviewerStats() {
     const cmCanvas = document.getElementById('councilModelsChart');
     if (cmCanvas) {
         const cmCtx = cmCanvas.getContext('2d');
-        if (councilModelsChart) councilModelsChart.destroy();
+        if (councilModelsChart) { councilModelsChart.destroy(); councilModelsChart = null; }
         const models = (data.council_models || []).slice(0, 10).reverse();
         if (models.length === 0) {
+            cmCanvas.style.display = 'none';
             _ensureEmptyState(cmCanvas.parentElement, 'No council votes yet');
         } else {
+            cmCanvas.style.display = 'block';
             _clearEmptyState(cmCanvas.parentElement);
             councilModelsChart = new Chart(cmCtx, {
                 type: 'bar',
@@ -1150,7 +1158,7 @@ async function loadTrainerWorkflow() {
     const funnelCanvas = document.getElementById('workflowFunnelChart');
     if (funnelCanvas) {
         const fCtx = funnelCanvas.getContext('2d');
-        if (workflowFunnelChart) workflowFunnelChart.destroy();
+        if (workflowFunnelChart) { workflowFunnelChart.destroy(); workflowFunnelChart = null; }
         const stages = [
             { label: 'Trainers registered', value: data.trainers_registered || 0, color: theme.palette[0] },
             { label: 'Human reviews submitted', value: data.human_reviews || 0, color: theme.palette[1] },
@@ -1159,8 +1167,10 @@ async function loadTrainerWorkflow() {
         ];
         const total = stages[0].value || 1;
         if (stages.every(s => s.value === 0)) {
+            funnelCanvas.style.display = 'none';
             _ensureEmptyState(funnelCanvas.parentElement, 'No workflow events in this period');
         } else {
+            funnelCanvas.style.display = 'block';
             _clearEmptyState(funnelCanvas.parentElement);
             workflowFunnelChart = new Chart(fCtx, {
                 type: 'bar',
