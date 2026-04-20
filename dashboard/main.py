@@ -434,6 +434,30 @@ async def get_weekday_activity(
     )
 
 
+@api_router.get("/activity_heatmap")
+async def get_activity_heatmap(
+    hours: int = Query(default=168, ge=1, le=720),
+    trainer_emails: Optional[List[str]] = Query(default=None),
+):
+    """Hunt results bucketed by weekday x hour-of-day (7x24 grid)."""
+    log_reader = get_log_reader()
+    return log_reader.get_activity_heatmap(
+        hours=hours, trainer_emails=trainer_emails
+    )
+
+
+@api_router.get("/latency_distribution")
+async def get_latency_distribution(
+    hours: int = Query(default=24, ge=1, le=720),
+    trainer_emails: Optional[List[str]] = Query(default=None),
+):
+    """API-call latency percentiles + log-spaced histogram."""
+    log_reader = get_log_reader()
+    return log_reader.get_latency_distribution(
+        hours=hours, trainer_emails=trainer_emails
+    )
+
+
 @api_router.get("/realtime")
 async def get_realtime_stats():
     """

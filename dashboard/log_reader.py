@@ -1161,6 +1161,94 @@ class EnhancedLogReader:
             "hunt_results": counts,
         }
     
+    def get_activity_heatmap(
+        self, hours: int = 168, trainer_emails: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """Hunt-result counts bucketed by (weekday, hour_of_day) — a 7×24 grid.
+        Much more informative than a weekday-only bar when the window is >= a few days.
+        """
+        since = datetime.utcnow() - timedelta(hours=hours)
+        events = self._read_events(since=since)
+        events = self._filter_events_by_trainer_emails(events, trainer_emails)
+        # grid[day_idx][hour] — Mon=0 .. Sun=6
+        grid = [[0] * 24 for _ in range(7)]
+        total = 0
+        for event in events:
+            if event.get("type") != "hunt_result":
+                continue
+            ts = event.get("_ts")
+            if not ts:
+                continue
+            grid[ts.weekday()][ts.hour] += 1
+            total += 1
+        return {
+            "time_window_hours": hours,
+            "days": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+            "hours": list(range(24)),
+            "grid": grid,
+            "total": total,
+        }
+
+    def get_latency_distribution(
+        self, hours: int = 24, trainer_emails: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """API-call latency distribution: percentiles + histogram.
+        Returns ms percentiles (p50/p90/p95/p99), mean, count, and histogram
+        bins (log-spaced from 100ms to 60s) suited to LLM call latency.
+        """
+        since = datetime.utcnow() - timedelta(hours=hours)
+        events = self._read_events(since=since)
+        events = self._filter_events_by_trainer_emails(events, trainer_emails)
+        latencies: List[float] = []
+        for event in events:
+            if event.get("type") != "api_call_end":
+                continue
+            v = (event.get("data") or {}).get("latency_ms")
+            try:
+                f = float(v)
+            except (TypeError, ValueError):
+                continue
+            if f >= 0:
+                latencies.append(f)
+
+        def _pct(xs: List[float], q: float) -> float:
+            if not xs:
+                return 0.0
+            s = sorted(xs)
+            k = (len(s) - 1) * q
+            f_i = int(k)
+            c = min(f_i + 1, len(s) - 1)
+            return s[f_i] + (s[c] - s[f_i]) * (k - f_i)
+
+        # Log-spaced edges in ms: 100, 200, 500, 1k, 2k, 5k, 10k, 20k, 60k
+        edges = [0, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 60000]
+        labels = ["<0.1s", "0.1-0.2s", "0.2-0.5s", "0.5-1s", "1-2s", "2-5s", "5-10s", "10-20s", "20-60s"]
+        hist = [0] * len(labels)
+        for v in latencies:
+            placed = False
+            for i in range(1, len(edges)):
+                if v < edges[i]:
+                    hist[i - 1] += 1
+                    placed = True
+                    break
+            if not placed:
+                hist[-1] += 1
+        n = len(latencies)
+        mean = (sum(latencies) / n) if n else 0.0
+        return {
+            "time_window_hours": hours,
+            "count": n,
+            "mean_ms": mean,
+            "p50_ms": _pct(latencies, 0.50),
+            "p90_ms": _pct(latencies, 0.90),
+            "p95_ms": _pct(latencies, 0.95),
+            "p99_ms": _pct(latencies, 0.99),
+            "min_ms": min(latencies) if latencies else 0.0,
+            "max_ms": max(latencies) if latencies else 0.0,
+            "hist_labels": labels,
+            "hist_counts": hist,
+        }
+
     def get_realtime_stats(self) -> Dict[str, Any]:
         """Real-time stats (last 5 minutes).
 

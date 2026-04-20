@@ -138,19 +138,34 @@
                 </div>
             </div>
 
-            <!-- Charts -->
+            <!-- Charts: activity timeline + hour x weekday heatmap -->
             <div class="charts-row">
-                <div class="chart-container">
-                    <h3>Activity breakdown</h3>
+                <div class="chart-container wide">
+                    <h3>Activity over time <span class="chart-hint">stacked counts · 3-bucket rolling mean</span></h3>
                     <div class="chart-wrapper">
                         <canvas id="timelineChart"></canvas>
                     </div>
                 </div>
                 <div class="chart-container">
-                    <h3>Hunts by weekday</h3>
-                    <div class="chart-wrapper">
-                        <canvas id="weekdayChart"></canvas>
-                    </div>
+                    <h3>When trainers work <span class="chart-hint">hour × weekday · hunt results</span></h3>
+                    <div class="chart-wrapper" id="heatmapChart"></div>
+                </div>
+            </div>
+
+            <!-- Latency distribution -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h3>API latency distribution <span class="chart-hint" style="font-size:0.72rem; font-weight:500; color:var(--text-muted); margin-left:0.5rem;">percentiles + log-scale histogram</span></h3>
+                    <span id="latencyCount" class="chart-hint" style="color:var(--text-muted);"></span>
+                </div>
+                <div class="lat-strip">
+                    <div class="lat-pill lat-pill--p50"><span class="lat-pill-label">p50 median</span><span class="lat-pill-value" id="latP50">--</span></div>
+                    <div class="lat-pill lat-pill--p90"><span class="lat-pill-label">p90</span><span class="lat-pill-value" id="latP90">--</span></div>
+                    <div class="lat-pill lat-pill--p95"><span class="lat-pill-label">p95</span><span class="lat-pill-value" id="latP95">--</span></div>
+                    <div class="lat-pill lat-pill--p99"><span class="lat-pill-label">p99 tail</span><span class="lat-pill-value" id="latP99">--</span></div>
+                </div>
+                <div class="chart-wrapper sm">
+                    <canvas id="latencyHist"></canvas>
                 </div>
             </div>
 
@@ -234,8 +249,8 @@
 
             <div class="charts-row">
                 <div class="chart-container full">
-                    <h3>Criteria fail rate (higher = harder)</h3>
-                    <div id="criteriaChart"></div>
+                    <h3>Criteria fail rate <span class="chart-hint">95% Wilson CI error bars · Pareto overlay (cumulative % of all failures)</span></h3>
+                    <div class="chart-wrapper lg" id="criteriaChart"></div>
                 </div>
             </div>
 
@@ -267,12 +282,16 @@
 
             <div class="charts-row">
                 <div class="chart-container">
-                    <h3>Break Rate by Model</h3>
-                    <canvas id="modelBreakChart"></canvas>
+                    <h3>Break rate by model <span class="chart-hint">95% Wilson CI · sorted by lower bound</span></h3>
+                    <div class="chart-wrapper lg">
+                        <canvas id="modelBreakChart"></canvas>
+                    </div>
                 </div>
                 <div class="chart-container">
-                    <h3>Usage Distribution</h3>
-                    <canvas id="modelUsageChart"></canvas>
+                    <h3>Usage share <span class="chart-hint">hunts per model · horizontal bar</span></h3>
+                    <div class="chart-wrapper lg">
+                        <canvas id="modelUsageChart"></canvas>
+                    </div>
                 </div>
             </div>
 

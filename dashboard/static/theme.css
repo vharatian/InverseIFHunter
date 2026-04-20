@@ -1,33 +1,35 @@
-/* Design tokens shared between the dashboard and the admin panel.
-   Import before the app-specific stylesheet so app rules can override tokens.
+/* Shared design tokens for the dashboard + admin panel.
+   --mth-* variable names are kept stable so the admin panel (which loads
+   this file first) keeps working unchanged. Palette re-aligned to the
+   reviewer-app's charcoal/blue language for a cohesive product feel.
 */
 :root {
-    /* Base surfaces */
-    --mth-bg: #0b1121;
-    --mth-bg-2: #0f172a;
-    --mth-surface: #1e293b;
-    --mth-surface-2: #263447;
-    --mth-surface-raised: #334155;
-    --mth-border: #334155;
-    --mth-border-soft: #1e293b;
-    --mth-overlay: rgba(15, 23, 42, 0.72);
+    /* Base surfaces — deep charcoal with subtle cool undertone */
+    --mth-bg: #0e0e12;
+    --mth-bg-2: #141419;
+    --mth-surface: #1a1a20;
+    --mth-surface-2: #202028;
+    --mth-surface-raised: #2a2a33;
+    --mth-border: #2a2a33;
+    --mth-border-soft: #1f1f26;
+    --mth-overlay: rgba(12, 12, 16, 0.78);
 
     /* Accents */
-    --mth-primary: #6366f1;
-    --mth-primary-strong: #4f46e5;
+    --mth-primary: #3b82f6;
+    --mth-primary-strong: #2563eb;
     --mth-accent: #8b5cf6;
-    --mth-success: #10b981;
-    --mth-warn: #f59e0b;
+    --mth-success: #22c55e;
+    --mth-warn: #eab308;
     --mth-danger: #ef4444;
     --mth-info: #38bdf8;
 
     /* Typography */
-    --mth-text: #f8fafc;
-    --mth-text-muted: #cbd5e1;
-    --mth-text-dim: #94a3b8;
-    --mth-text-subtle: #64748b;
-    --mth-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-    --mth-font-mono: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+    --mth-text: #ececec;
+    --mth-text-muted: #c4c4cc;
+    --mth-text-dim: #8a8a96;
+    --mth-text-subtle: #5e5e6a;
+    --mth-font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    --mth-font-mono: "SFMono-Regular", ui-monospace, Menlo, Monaco, Consolas, monospace;
 
     /* Spacing */
     --mth-space-0: 0;
@@ -41,20 +43,37 @@
     --mth-space-10: 2.5rem;
 
     /* Radii + shadows */
-    --mth-radius-sm: 4px;
-    --mth-radius-md: 8px;
-    --mth-radius-lg: 12px;
+    --mth-radius-sm: 6px;
+    --mth-radius-md: 10px;
+    --mth-radius-lg: 14px;
+    --mth-radius-xl: 18px;
     --mth-radius-pill: 999px;
-    --mth-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
-    --mth-shadow-md: 0 6px 16px rgba(0, 0, 0, 0.28);
-    --mth-shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.35);
+    --mth-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --mth-shadow-md: 0 6px 18px rgba(0, 0, 0, 0.35);
+    --mth-shadow-lg: 0 18px 44px rgba(0, 0, 0, 0.42);
 
     /* Motion */
-    --mth-transition-fast: 120ms ease;
-    --mth-transition-base: 200ms ease;
+    --mth-transition-fast: 140ms cubic-bezier(0.4, 0, 0.2, 1);
+    --mth-transition-base: 220ms cubic-bezier(0.4, 0, 0.2, 1);
 
     /* Focus ring */
-    --mth-focus: 0 0 0 2px rgba(99, 102, 241, 0.45);
+    --mth-focus: 0 0 0 2px rgba(59, 130, 246, 0.45);
+
+    /* Chart palette — categorical (stats-friendly, 8 hues, evenly separated in hue) */
+    --mth-c1: #60a5fa; /* blue */
+    --mth-c2: #34d399; /* emerald */
+    --mth-c3: #f472b6; /* pink */
+    --mth-c4: #fbbf24; /* amber */
+    --mth-c5: #a78bfa; /* violet */
+    --mth-c6: #22d3ee; /* cyan */
+    --mth-c7: #f87171; /* red */
+    --mth-c8: #84cc16; /* lime */
+
+    /* Semantic chart accents */
+    --mth-c-hunt: #34d399;
+    --mth-c-break: #f87171;
+    --mth-c-session: #60a5fa;
+    --mth-c-error: #fbbf24;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -94,8 +113,8 @@
 .mth-empty {
     color: var(--mth-text-dim);
     text-align: center;
-    padding: var(--mth-space-8) var(--mth-space-4);
-    font-size: 0.95rem;
+    padding: var(--mth-space-6) var(--mth-space-4);
+    font-size: 0.9rem;
     border: 1px dashed var(--mth-border);
     border-radius: var(--mth-radius-md);
     background: var(--mth-surface);
@@ -114,18 +133,19 @@
     background: var(--mth-surface);
     color: var(--mth-text);
     border: 1px solid var(--mth-border);
-    padding: 0.35rem 0.6rem;
+    padding: 0.35rem 0.65rem;
     border-radius: var(--mth-radius-sm);
-    font-size: 0.8rem;
+    font-size: 0.78rem;
+    font-weight: 600;
     cursor: pointer;
-    transition: background var(--mth-transition-fast);
+    transition: background var(--mth-transition-fast), border-color var(--mth-transition-fast);
 }
 .tz-toggle[aria-pressed="true"] {
     background: var(--mth-primary-strong);
     border-color: var(--mth-primary-strong);
     color: #fff;
 }
-.tz-toggle:hover { background: var(--mth-surface-raised); }
+.tz-toggle:hover { background: var(--mth-surface-raised); border-color: var(--mth-border); }
 
 /* Responsive dashboard header */
 @media (max-width: 900px) {

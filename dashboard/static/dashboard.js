@@ -38,11 +38,84 @@ function setTzMode(mode) {
 }
 const TRAINER_EMAILS_STORAGE_KEY = 'dashboard_trainer_emails';
 let timelineChart = null;
-let weekdayChart = null;
+let latencyHistChart = null;
 let modelBreakChart = null;
 let modelUsageChart = null;
 let refreshInterval = null;
 let fullRefreshInterval = null;
+
+// ============== Stats helpers ==============
+
+/** Wilson score 95% CI for a proportion (binomial) — robust for small n. */
+function wilsonCI(successes, total, z = 1.96) {
+    const n = Number(total) || 0;
+    if (n <= 0) return { p: 0, lo: 0, hi: 0 };
+    const p = (Number(successes) || 0) / n;
+    const z2 = z * z;
+    const denom = 1 + z2 / n;
+    const center = (p + z2 / (2 * n)) / denom;
+    const half = (z * Math.sqrt((p * (1 - p) + z2 / (4 * n)) / n)) / denom;
+    return { p, lo: Math.max(0, center - half), hi: Math.min(1, center + half) };
+}
+
+function fmtMs(ms) {
+    const v = Number(ms) || 0;
+    if (v < 1000) return `${v.toFixed(0)}ms`;
+    if (v < 10000) return `${(v / 1000).toFixed(2)}s`;
+    return `${(v / 1000).toFixed(1)}s`;
+}
+
+/** Chart.js theme defaults derived from CSS tokens. */
+function chartTheme() {
+    const cs = getComputedStyle(document.documentElement);
+    const get = (name, fallback) => (cs.getPropertyValue(name).trim() || fallback);
+    return {
+        text:   get('--mth-text', '#ececec'),
+        muted:  get('--mth-text-dim', '#8a8a96'),
+        grid:   get('--mth-border-soft', '#1f1f26'),
+        accent: get('--mth-primary', '#3b82f6'),
+        hunt:   get('--mth-c-hunt', '#34d399'),
+        brk:    get('--mth-c-break', '#f87171'),
+        session:get('--mth-c-session', '#60a5fa'),
+        err:    get('--mth-c-error', '#fbbf24'),
+        surface:get('--mth-surface', '#1a1a20'),
+        border: get('--mth-border', '#2a2a33'),
+        palette: [
+            get('--mth-c1', '#60a5fa'), get('--mth-c2', '#34d399'),
+            get('--mth-c3', '#f472b6'), get('--mth-c4', '#fbbf24'),
+            get('--mth-c5', '#a78bfa'), get('--mth-c6', '#22d3ee'),
+            get('--mth-c7', '#f87171'), get('--mth-c8', '#84cc16'),
+        ],
+    };
+}
+
+function chartTooltip(theme) {
+    return {
+        backgroundColor: theme.surface,
+        titleColor: theme.text,
+        bodyColor: theme.text,
+        borderColor: theme.border,
+        borderWidth: 1,
+        padding: 10,
+        cornerRadius: 8,
+        displayColors: true,
+        boxPadding: 4,
+        titleFont: { size: 11, weight: '700' },
+        bodyFont: { size: 11 },
+    };
+}
+
+function plotlyLayoutBase(theme, overrides = {}) {
+    return Object.assign({
+        paper_bgcolor: 'transparent',
+        plot_bgcolor: 'transparent',
+        font: { family: 'Inter, -apple-system, sans-serif', size: 11, color: theme.muted },
+        margin: { t: 10, b: 36, l: 52, r: 16 },
+        hoverlabel: { bgcolor: theme.surface, bordercolor: theme.border, font: { color: theme.text, size: 11 } },
+        xaxis: { gridcolor: theme.grid, zerolinecolor: theme.grid, tickfont: { color: theme.muted } },
+        yaxis: { gridcolor: theme.grid, zerolinecolor: theme.grid, tickfont: { color: theme.muted } },
+    }, overrides);
+}
 // Tracks in-flight requests per endpoint so rapid filter/tab switches
 // can cancel older fetches and avoid stale UI overwrites.
 const _inflight = new Map();
@@ -121,7 +194,8 @@ function loadSectionData(sectionId) {
         case 'overview':
             loadOverview();
             loadTimeline();
-            loadWeekdayActivity();
+            loadActivityHeatmap();
+            loadLatencyDistribution();
             loadEvents();
             break;
         case 'trainers':
@@ -223,8 +297,8 @@ async function loadOverview() {
     document.getElementById('totalHunts').textContent = data.total_hunts || 0;
     document.getElementById('breaksFound').textContent = data.breaks_found || 0;
     document.getElementById('apiCalls').textContent = data.total_api_calls || 0;
-    document.getElementById('avgLatency').textContent = data.avg_latency_ms ? 
-        `${(data.avg_latency_ms / 1000).toFixed(1)}s` : '--';
+    document.getElementById('avgLatency').textContent = data.avg_latency_ms
+        ? fmtMs(data.avg_latency_ms) : '--';
 }
 
 async function loadRealtimeStats() {
@@ -282,42 +356,40 @@ function initActiveTrainersDropdown() {
     });
 }
 
+function _ensureEmptyState(wrap, msg) {
+    let el = wrap.querySelector('.empty-state');
+    if (!el) {
+        el = document.createElement('div');
+        el.className = 'empty-state';
+        wrap.appendChild(el);
+    }
+    el.textContent = msg;
+}
+
+function _clearEmptyState(wrap) {
+    const el = wrap.querySelector('.empty-state');
+    if (el) el.remove();
+}
+
 async function loadTimeline() {
     const data = await fetchAPI('timeline');
+    const canvas = document.getElementById('timelineChart');
+    if (!canvas) return;
+    const wrap = canvas.parentElement;
+
     if (!data || !data.timestamps || data.timestamps.length === 0) {
-        // Show empty state message
-        const container = document.getElementById('timelineChart').parentElement;
-        const canvas = document.getElementById('timelineChart');
-        if (timelineChart) {
-            timelineChart.destroy();
-            timelineChart = null;
-        }
-        // Create or update empty state message
-        let emptyMsg = container.querySelector('.empty-state');
-        if (!emptyMsg) {
-            emptyMsg = document.createElement('div');
-            emptyMsg.className = 'empty-state';
-            emptyMsg.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;color:#64748b;font-size:14px;';
-            container.appendChild(emptyMsg);
-        }
-        emptyMsg.textContent = 'No activity data for this time period';
+        if (timelineChart) { timelineChart.destroy(); timelineChart = null; }
         canvas.style.display = 'none';
+        _ensureEmptyState(wrap, 'No activity in this time window');
         return;
     }
-    
-    // Restore canvas if it was hidden
-    const canvas = document.getElementById('timelineChart');
     canvas.style.display = 'block';
-    const emptyMsg = canvas.parentElement.querySelector('.empty-state');
-    if (emptyMsg) emptyMsg.remove();
-    
+    _clearEmptyState(wrap);
+
+    const theme = chartTheme();
     const ctx = canvas.getContext('2d');
-    
-    if (timelineChart) {
-        timelineChart.destroy();
-    }
-    
-    // Format labels to show date when day changes
+    if (timelineChart) timelineChart.destroy();
+
     let lastDate = null;
     const labels = data.timestamps.map(t => {
         const d = new Date(t);
@@ -326,186 +398,154 @@ async function loadTimeline() {
         if (_tzMode === 'utc') { dOpts.timeZone = 'UTC'; tOpts.timeZone = 'UTC'; }
         const dateStr = d.toLocaleDateString([], dOpts);
         const timeStr = d.toLocaleTimeString([], tOpts);
-        
-        if (lastDate !== dateStr) {
-            lastDate = dateStr;
-            return `${dateStr}\n${timeStr}`;
-        }
+        if (lastDate !== dateStr) { lastDate = dateStr; return `${dateStr}  ${timeStr}`; }
         return timeStr;
     });
-    
-    // Use stacked bar chart - much cleaner for time-bucketed activity data
+
+    const sessions = data.sessions || data.hunts.map(() => 0);
+    const totals = data.hunts.map((h, i) => (h || 0) + (data.breaks[i] || 0) + (sessions[i] || 0));
+    // 3-bucket rolling mean for a smooth signal line.
+    const win = 3;
+    const rolling = totals.map((_, i) => {
+        const lo = Math.max(0, i - Math.floor(win / 2));
+        const hi = Math.min(totals.length, lo + win);
+        const slice = totals.slice(lo, hi);
+        return slice.reduce((a, b) => a + b, 0) / (slice.length || 1);
+    });
+
     timelineChart = new Chart(ctx, {
-        type: 'bar',
         data: {
-            labels: labels,
+            labels,
             datasets: [
-                {
-                    label: 'Breaks',
-                    data: data.breaks,
-                    backgroundColor: '#ef4444',
-                    borderRadius: 2,
-                    stack: 'activity'
-                },
-                {
-                    label: 'Hunts',
-                    data: data.hunts,
-                    backgroundColor: '#10b981',
-                    borderRadius: 2,
-                    stack: 'activity'
-                },
-                {
-                    label: 'Sessions',
-                    data: data.sessions || data.hunts.map(() => 0),
-                    backgroundColor: '#6366f1',
-                    borderRadius: 2,
-                    stack: 'activity'
-                }
+                { type: 'bar', label: 'Breaks',   data: data.breaks,  backgroundColor: theme.brk,    borderRadius: 3, stack: 'activity', barPercentage: 0.9, categoryPercentage: 0.85 },
+                { type: 'bar', label: 'Hunts',    data: data.hunts,   backgroundColor: theme.hunt,   borderRadius: 3, stack: 'activity', barPercentage: 0.9, categoryPercentage: 0.85 },
+                { type: 'bar', label: 'Sessions', data: sessions,     backgroundColor: theme.session,borderRadius: 3, stack: 'activity', barPercentage: 0.9, categoryPercentage: 0.85 },
+                { type: 'line', label: 'Rolling mean (3)', data: rolling,
+                  borderColor: theme.accent, backgroundColor: 'transparent', borderWidth: 2,
+                  tension: 0.35, pointRadius: 0, pointHoverRadius: 3, borderDash: [4, 3] },
             ]
         },
         options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            animation: false,
-            interaction: {
-                mode: 'index',
-                intersect: false
-            },
+            responsive: true, maintainAspectRatio: false, animation: false,
+            interaction: { mode: 'index', intersect: false },
             plugins: {
-                legend: {
-                    position: 'bottom',
-                    labels: { 
-                        color: '#94a3b8',
-                        usePointStyle: true,
-                        pointStyle: 'rectRounded',
-                        padding: 15
-                    }
-                },
+                legend: { position: 'bottom', labels: { color: theme.muted, usePointStyle: true, pointStyle: 'rectRounded', padding: 12, font: { size: 11 } } },
                 tooltip: {
-                    backgroundColor: '#1e293b',
-                    titleColor: '#f8fafc',
-                    bodyColor: '#cbd5e1',
-                    borderColor: '#334155',
-                    borderWidth: 1,
-                    padding: 12,
-                    displayColors: true,
+                    ...chartTooltip(theme),
                     callbacks: {
-                        title: function(tooltipItems) {
-                            const idx = tooltipItems[0].dataIndex;
-                            const ts = data.timestamps[idx];
-                            return fmtDateTime(ts, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-                        }
+                        title: (items) => fmtDateTime(data.timestamps[items[0].dataIndex], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
                     }
                 }
             },
             scales: {
-                x: {
-                    stacked: true,
-                    ticks: { 
-                        color: '#94a3b8',
-                        maxRotation: 45,
-                        minRotation: 0,
-                        font: { size: 10 }
-                    },
-                    grid: { 
-                        display: false
-                    }
-                },
-                y: {
-                    stacked: true,
-                    beginAtZero: true,
-                    ticks: { 
-                        color: '#94a3b8',
-                        stepSize: 5
-                    },
-                    grid: { 
-                        color: '#334155',
-                        drawBorder: false
-                    },
-                    title: {
-                        display: true,
-                        text: 'Count',
-                        color: '#64748b',
-                        font: { size: 11 }
-                    }
-                }
+                x: { stacked: true, ticks: { color: theme.muted, maxRotation: 0, font: { size: 10 }, autoSkipPadding: 12 }, grid: { display: false } },
+                y: { stacked: true, beginAtZero: true, ticks: { color: theme.muted, precision: 0 }, grid: { color: theme.grid, drawBorder: false } },
             }
         }
     });
 }
 
-async function loadWeekdayActivity() {
-    const data = await fetchAPI('weekday_activity');
-    if (!data || !data.days || !data.hunt_results) return;
+async function loadActivityHeatmap() {
+    const el = document.getElementById('heatmapChart');
+    if (!el) return;
+    const data = await fetchAPI('activity_heatmap');
+    if (window.Plotly) { try { Plotly.purge(el); } catch (_) {} }
+    if (!data || !data.grid || !data.total) {
+        _ensureEmptyState(el, 'No hunt results in this period');
+        return;
+    }
+    _clearEmptyState(el);
+    const theme = chartTheme();
+    // Bin hours into 3h buckets for a cuter, less noisy heatmap.
+    const hourBuckets = ['0-3', '3-6', '6-9', '9-12', '12-15', '15-18', '18-21', '21-24'];
+    const z = data.grid.map(row => {
+        const out = new Array(hourBuckets.length).fill(0);
+        for (let h = 0; h < 24; h++) out[Math.floor(h / 3)] += row[h] || 0;
+        return out;
+    });
+    const trace = {
+        type: 'heatmap',
+        x: hourBuckets,
+        y: data.days,
+        z,
+        colorscale: [
+            [0,   'rgba(59,130,246,0.00)'],
+            [0.2, 'rgba(59,130,246,0.18)'],
+            [0.5, 'rgba(96,165,250,0.55)'],
+            [0.8, 'rgba(167,139,250,0.85)'],
+            [1,   'rgba(244,114,182,1.00)'],
+        ],
+        showscale: false,
+        xgap: 2, ygap: 2,
+        hovertemplate: '%{y} · %{x}h<br>%{z} hunt results<extra></extra>',
+    };
+    const layout = plotlyLayoutBase(theme, {
+        margin: { t: 6, b: 30, l: 38, r: 6 },
+        xaxis: { tickfont: { color: theme.muted, size: 10 }, showgrid: false, zeroline: false, fixedrange: true },
+        yaxis: { tickfont: { color: theme.muted, size: 10 }, showgrid: false, zeroline: false, autorange: 'reversed', fixedrange: true },
+    });
+    const cfg = { displayModeBar: false, responsive: true };
+    Plotly.newPlot(el, [trace], layout, cfg);
+}
 
-    const canvas = document.getElementById('weekdayChart');
+async function loadLatencyDistribution() {
+    const canvas = document.getElementById('latencyHist');
     if (!canvas) return;
     const wrap = canvas.parentElement;
-    let emptyMsg = wrap.querySelector('.empty-state');
-    const total = data.hunt_results.reduce((a, b) => a + b, 0);
-    if (total === 0) {
-        if (weekdayChart) {
-            weekdayChart.destroy();
-            weekdayChart = null;
-        }
+    const data = await fetchAPI('latency_distribution');
+    const setPill = (id, ms) => { const el = document.getElementById(id); if (el) el.textContent = fmtMs(ms); };
+    const setCount = (n) => { const el = document.getElementById('latencyCount'); if (el) el.textContent = n ? `${n.toLocaleString()} calls` : ''; };
+    if (!data || !data.count) {
+        if (latencyHistChart) { latencyHistChart.destroy(); latencyHistChart = null; }
         canvas.style.display = 'none';
-        if (!emptyMsg) {
-            emptyMsg = document.createElement('div');
-            emptyMsg.className = 'empty-state';
-            emptyMsg.style.cssText =
-                'display:flex;align-items:center;justify-content:center;height:100%;color:#64748b;font-size:14px;';
-            wrap.appendChild(emptyMsg);
-        }
-        emptyMsg.textContent = 'No hunt results in this period';
+        _ensureEmptyState(wrap, 'No API calls in this period');
+        ['latP50','latP90','latP95','latP99'].forEach(id => setPill(id, 0));
+        setCount(0);
         return;
     }
     canvas.style.display = 'block';
-    if (emptyMsg) emptyMsg.remove();
+    _clearEmptyState(wrap);
+    setPill('latP50', data.p50_ms);
+    setPill('latP90', data.p90_ms);
+    setPill('latP95', data.p95_ms);
+    setPill('latP99', data.p99_ms);
+    setCount(data.count);
 
+    const theme = chartTheme();
     const ctx = canvas.getContext('2d');
-    if (weekdayChart) weekdayChart.destroy();
-
-    weekdayChart = new Chart(ctx, {
+    if (latencyHistChart) latencyHistChart.destroy();
+    // Color bars by bucket position — cool for fast, warm for slow.
+    const palette = [theme.hunt, theme.hunt, theme.session, theme.session, theme.accent, theme.palette[4], theme.err, theme.err, theme.brk];
+    latencyHistChart = new Chart(ctx, {
         type: 'bar',
         data: {
-            labels: data.days,
+            labels: data.hist_labels,
             datasets: [{
-                label: 'Hunt results',
-                data: data.hunt_results,
-                backgroundColor: '#6366f1',
-                borderRadius: 4
+                label: 'API calls',
+                data: data.hist_counts,
+                backgroundColor: data.hist_labels.map((_, i) => palette[i] || theme.accent),
+                borderRadius: 4,
+                borderSkipped: false,
             }]
         },
         options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            animation: false,
+            responsive: true, maintainAspectRatio: false, animation: false,
             plugins: {
                 legend: { display: false },
-                tooltip: {
-                    backgroundColor: '#1e293b',
-                    titleColor: '#f8fafc',
-                    bodyColor: '#cbd5e1',
-                    borderColor: '#334155',
-                    borderWidth: 1
-                }
+                tooltip: { ...chartTooltip(theme),
+                    callbacks: {
+                        title: (i) => i[0].label,
+                        label: (ctx) => {
+                            const n = ctx.parsed.y;
+                            const pct = data.count ? (100 * n / data.count).toFixed(1) : '0';
+                            return `${n.toLocaleString()} calls · ${pct}%`;
+                        }
+                    }
+                },
             },
             scales: {
-                x: {
-                    ticks: { color: '#94a3b8' },
-                    grid: { display: false }
-                },
-                y: {
-                    beginAtZero: true,
-                    ticks: { color: '#94a3b8', precision: 0 },
-                    grid: { color: '#334155' },
-                    title: {
-                        display: true,
-                        text: 'Count',
-                        color: '#64748b',
-                        font: { size: 11 }
-                    }
-                }
+                x: { ticks: { color: theme.muted, font: { size: 10 } }, grid: { display: false } },
+                y: { beginAtZero: true, ticks: { color: theme.muted, precision: 0 }, grid: { color: theme.grid } },
             }
         }
     });
@@ -639,147 +679,253 @@ async function loadTrainers() {
 
 async function loadCriteria() {
     const data = await fetchAPI('criteria');
-    if (!data) return;
-    
-    const criteria = data.criteria || [];
-    
-    // Update chart
-    const chartData = criteria.slice(0, 15);
     const chartDiv = document.getElementById('criteriaChart');
-
-    if (chartDiv && window.Plotly) {
-        try { Plotly.purge(chartDiv); } catch (_) {}
-    }
-
-    Plotly.newPlot(chartDiv, [{
-        type: 'bar',
-        orientation: 'h',
-        y: chartData.map(c => c.criteria_id),
-        x: chartData.map(c => c.fail_rate),
-        marker: {
-            color: chartData.map(c => c.difficulty_score),
-            colorscale: [[0, '#f59e0b'], [1, '#ef4444']]
-        },
-        text: chartData.map(c => `${(c.fail_rate * 100).toFixed(1)}%`),
-        textposition: 'outside'
-    }], {
-        paper_bgcolor: 'transparent',
-        plot_bgcolor: 'transparent',
-        margin: { t: 20, b: 40, l: 80, r: 60 },
-        xaxis: {
-            title: 'Fail Rate',
-            tickformat: '.0%',
-            tickfont: { color: '#94a3b8' },
-            gridcolor: '#334155'
-        },
-        yaxis: {
-            tickfont: { color: '#94a3b8' },
-            autorange: 'reversed'
-        }
-    }, {responsive: true});
-    
-    // Update table
+    if (chartDiv && window.Plotly) { try { Plotly.purge(chartDiv); } catch (_) {} }
+    if (!data) return;
+    const criteria = data.criteria || [];
     const tbody = document.querySelector('#criteriaTable tbody');
+
+    if (criteria.length === 0) {
+        if (chartDiv) _ensureEmptyState(chartDiv, 'No criteria evaluations in this period');
+        if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="loading">No data</td></tr>';
+        return;
+    }
+    if (chartDiv) _clearEmptyState(chartDiv);
+
+    const theme = chartTheme();
+    // Top 15 by fail rate (already sorted by difficulty_score desc on server).
+    const top = criteria.slice(0, 15).map(c => {
+        const ci = wilsonCI(c.fail_count, c.total_evaluations);
+        return { ...c, lo: ci.lo, hi: ci.hi };
+    });
+    // Pareto denominator: total fails across ALL criteria (not just top-15).
+    const totalFails = criteria.reduce((s, c) => s + (c.fail_count || 0), 0) || 1;
+    let cum = 0;
+    const paretoPct = top.map(c => { cum += (c.fail_count || 0); return (cum / totalFails) * 100; });
+
+    // Reverse for horizontal display (highest at top).
+    const y = top.map(c => c.criteria_id);
+    const xFail = top.map(c => (c.fail_rate || 0) * 100);
+    const errLo = top.map((c, i) => xFail[i] - c.lo * 100);
+    const errHi = top.map((c, i) => c.hi * 100 - xFail[i]);
+    const n = top.map(c => c.total_evaluations || 0);
+
+    const barTrace = {
+        type: 'bar', orientation: 'h', x: xFail, y, name: 'Fail rate',
+        marker: {
+            color: top.map(c => c.difficulty_score || 0),
+            colorscale: [[0, theme.palette[3]], [0.5, theme.err], [1, theme.brk]],
+            showscale: false,
+            line: { width: 0 },
+        },
+        error_x: { type: 'data', symmetric: false, array: errHi, arrayminus: errLo, color: theme.muted, thickness: 1.2, width: 4 },
+        text: xFail.map((v, i) => `${v.toFixed(1)}%  (n=${n[i]})`),
+        textposition: 'outside', textfont: { color: theme.text, size: 10 },
+        hovertemplate: '<b>%{y}</b><br>Fail rate: %{x:.1f}%<br>95% CI: [%{customdata[0]:.1f}%, %{customdata[1]:.1f}%]<br>n = %{customdata[2]}<extra></extra>',
+        customdata: top.map(c => [c.lo * 100, c.hi * 100, c.total_evaluations]),
+    };
+    const paretoTrace = {
+        type: 'scatter', mode: 'lines+markers',
+        x: paretoPct, y, xaxis: 'x2',
+        name: 'Cumulative % of all failures',
+        line: { color: theme.accent, width: 2, dash: 'dot' },
+        marker: { color: theme.accent, size: 6 },
+        hovertemplate: '<b>%{y}</b><br>Cumulative: %{x:.1f}%<extra></extra>',
+    };
+    const layout = plotlyLayoutBase(theme, {
+        margin: { t: 10, b: 44, l: 110, r: 60 },
+        showlegend: true,
+        legend: { orientation: 'h', x: 0, y: -0.18, font: { color: theme.muted, size: 10 }, bgcolor: 'transparent' },
+        xaxis: { title: { text: 'Fail rate (%)', font: { color: theme.muted, size: 10 } },
+                 gridcolor: theme.grid, tickfont: { color: theme.muted }, range: [0, 115] },
+        xaxis2: { overlaying: 'x', side: 'top', range: [0, 105], showgrid: false, tickfont: { color: theme.accent, size: 9 }, ticksuffix: '%' },
+        yaxis: { tickfont: { color: theme.muted }, autorange: 'reversed', automargin: true },
+    });
+    Plotly.newPlot(chartDiv, [barTrace, paretoTrace], layout, { responsive: true, displayModeBar: false });
+
     tbody.innerHTML = criteria.map(c => {
         const diff = Math.max(0, Math.min(1, Number(c.difficulty_score) || 0));
+        const ci = wilsonCI(c.fail_count, c.total_evaluations);
         return `
         <tr>
             <td>${escapeHtml(c.criteria_id || '')}</td>
             <td>${escapeHtml(String(c.total_evaluations ?? 0))}</td>
             <td>${escapeHtml(String(c.pass_count ?? 0))}</td>
             <td>${escapeHtml(String(c.fail_count ?? 0))}</td>
-            <td>${((Number(c.fail_rate) || 0) * 100).toFixed(1)}%</td>
-            <td>
-                <div style="width: 100px; height: 8px; background: #1e293b; border-radius: 4px; overflow: hidden;">
-                    <div style="width: ${diff * 100}%; height: 100%; background: linear-gradient(90deg, #f59e0b, #ef4444);"></div>
-                </div>
+            <td title="95% Wilson CI: ${(ci.lo*100).toFixed(1)}% – ${(ci.hi*100).toFixed(1)}%">
+                ${((Number(c.fail_rate) || 0) * 100).toFixed(1)}%
+                <span style="color:var(--text-muted); font-size:0.72rem;">
+                    &nbsp;[${(ci.lo*100).toFixed(0)}–${(ci.hi*100).toFixed(0)}]
+                </span>
             </td>
-        </tr>
-        `;
+            <td>
+                <span class="bar-inline">
+                    <span class="bar-inline-track"><span class="bar-inline-fill" style="width:${diff*100}%"></span></span>
+                </span>
+            </td>
+        </tr>`;
     }).join('');
 }
 
 async function loadModels() {
     const data = await fetchAPI('models');
     if (!data || !data.models) return;
-    
-    const models = Object.entries(data.models).map(([name, stats]) => ({
-        name: name.split('/').pop(),
-        fullName: name,
-        ...stats
-    })).sort((a, b) => b.break_rate - a.break_rate);
-    
-    // Break rate chart
-    const ctx1 = document.getElementById('modelBreakChart').getContext('2d');
+    const theme = chartTheme();
+
+    // Enrich with Wilson CI and sort by conservative (lower-bound) ranking.
+    let models = Object.entries(data.models).map(([name, stats]) => {
+        const ci = wilsonCI(stats.breaks, stats.hunts);
+        return {
+            name: name.split('/').pop(),
+            fullName: name,
+            ...stats,
+            ci_lo: ci.lo, ci_hi: ci.hi,
+        };
+    });
+
+    // Hide models with zero hunts from charts (they aren't meaningfully comparable).
+    const chartable = models.filter(m => (m.hunts || 0) > 0);
+    chartable.sort((a, b) => (b.ci_lo - a.ci_lo) || (b.break_rate - a.break_rate));
+    // Top 10 for chart readability; table still shows everything.
+    const top = chartable.slice(0, 10).reverse(); // reverse so best stays on top in horizontal bar
+
+    const brkCanvas = document.getElementById('modelBreakChart');
+    const brkCtx = brkCanvas.getContext('2d');
     if (modelBreakChart) modelBreakChart.destroy();
-    
-    modelBreakChart = new Chart(ctx1, {
-        type: 'bar',
-        data: {
-            labels: models.map(m => m.name),
-            datasets: [{
-                label: 'Break Rate',
-                data: models.map(m => m.break_rate * 100),
-                backgroundColor: '#ef4444'
-            }]
-        },
-        options: {
-            responsive: true,
-            animation: false,
-            plugins: {
-                legend: { display: false }
+    if (top.length === 0) {
+        _ensureEmptyState(brkCanvas.parentElement, 'No model data in this period');
+    } else {
+        _clearEmptyState(brkCanvas.parentElement);
+        const xBR  = top.map(m => (m.break_rate || 0) * 100);
+        const errL = top.map(m => (m.break_rate - m.ci_lo) * 100);
+        const errH = top.map(m => (m.ci_hi - m.break_rate) * 100);
+        modelBreakChart = new Chart(brkCtx, {
+            type: 'bar',
+            data: {
+                labels: top.map(m => m.name),
+                datasets: [{
+                    label: 'Break rate',
+                    data: xBR,
+                    backgroundColor: top.map(m => (m.break_rate > 0.1 ? theme.brk : theme.palette[3])),
+                    borderRadius: 4,
+                    borderSkipped: false,
+                    errorBars: { lo: errL, hi: errH }, // custom, used by plugin below
+                }]
             },
-            scales: {
-                y: {
-                    beginAtZero: true,
-                    ticks: { color: '#94a3b8', callback: v => v + '%' },
-                    grid: { color: '#334155' }
+            options: {
+                indexAxis: 'y',
+                responsive: true, maintainAspectRatio: false, animation: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { ...chartTooltip(theme),
+                        callbacks: {
+                            label: (c) => {
+                                const m = top[c.dataIndex];
+                                return [
+                                    `Break rate: ${(m.break_rate*100).toFixed(1)}%`,
+                                    `95% CI: [${(m.ci_lo*100).toFixed(1)}%, ${(m.ci_hi*100).toFixed(1)}%]`,
+                                    `n = ${m.hunts} hunts, ${m.breaks} breaks`,
+                                ];
+                            }
+                        }
+                    },
                 },
-                x: {
-                    ticks: { color: '#94a3b8' },
-                    grid: { display: false }
+                scales: {
+                    x: { beginAtZero: true, ticks: { color: theme.muted, callback: v => v + '%' }, grid: { color: theme.grid } },
+                    y: { ticks: { color: theme.text, font: { size: 11 } }, grid: { display: false } },
                 }
-            }
-        }
-    });
-    
-    // Usage chart
-    const ctx2 = document.getElementById('modelUsageChart').getContext('2d');
-    if (modelUsageChart) modelUsageChart.destroy();
-    
-    modelUsageChart = new Chart(ctx2, {
-        type: 'doughnut',
-        data: {
-            labels: models.map(m => m.name),
-            datasets: [{
-                data: models.map(m => m.hunts),
-                backgroundColor: ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6']
+            },
+            plugins: [{
+                id: 'ciErrorBars',
+                afterDatasetsDraw(chart) {
+                    const ctx = chart.ctx;
+                    const ds = chart.data.datasets[0];
+                    const eb = ds.errorBars || {};
+                    if (!eb.lo || !eb.hi) return;
+                    ctx.save();
+                    ctx.strokeStyle = theme.muted;
+                    ctx.lineWidth = 1.25;
+                    const meta = chart.getDatasetMeta(0);
+                    meta.data.forEach((bar, i) => {
+                        const val = ds.data[i];
+                        const xLo = chart.scales.x.getPixelForValue(Math.max(0, val - eb.lo[i]));
+                        const xHi = chart.scales.x.getPixelForValue(val + eb.hi[i]);
+                        const y = bar.y;
+                        const cap = 4;
+                        ctx.beginPath();
+                        ctx.moveTo(xLo, y); ctx.lineTo(xHi, y);
+                        ctx.moveTo(xLo, y - cap); ctx.lineTo(xLo, y + cap);
+                        ctx.moveTo(xHi, y - cap); ctx.lineTo(xHi, y + cap);
+                        ctx.stroke();
+                    });
+                    ctx.restore();
+                }
             }]
-        },
-        options: {
-            responsive: true,
-            animation: false,
-            plugins: {
-                legend: {
-                    position: 'bottom',
-                    labels: { color: '#94a3b8' }
+        });
+    }
+
+    // Usage share: horizontal bar (readable, ordered, doughnut-free).
+    const usageCanvas = document.getElementById('modelUsageChart');
+    const usageCtx = usageCanvas.getContext('2d');
+    if (modelUsageChart) modelUsageChart.destroy();
+    const byHunts = [...chartable].sort((a, b) => b.hunts - a.hunts).slice(0, 10).reverse();
+    if (byHunts.length === 0) {
+        _ensureEmptyState(usageCanvas.parentElement, 'No model usage yet');
+    } else {
+        _clearEmptyState(usageCanvas.parentElement);
+        const totalHunts = byHunts.reduce((s, m) => s + (m.hunts || 0), 0) || 1;
+        modelUsageChart = new Chart(usageCtx, {
+            type: 'bar',
+            data: {
+                labels: byHunts.map(m => m.name),
+                datasets: [{
+                    label: 'Hunts',
+                    data: byHunts.map(m => m.hunts),
+                    backgroundColor: byHunts.map((_, i) => theme.palette[i % theme.palette.length]),
+                    borderRadius: 4,
+                    borderSkipped: false,
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true, maintainAspectRatio: false, animation: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { ...chartTooltip(theme),
+                        callbacks: {
+                            label: (c) => {
+                                const m = byHunts[c.dataIndex];
+                                const share = (100 * m.hunts / totalHunts).toFixed(1);
+                                return `${m.hunts.toLocaleString()} hunts · ${share}% share`;
+                            }
+                        }
+                    },
+                },
+                scales: {
+                    x: { beginAtZero: true, ticks: { color: theme.muted, precision: 0 }, grid: { color: theme.grid } },
+                    y: { ticks: { color: theme.text, font: { size: 11 } }, grid: { display: false } },
                 }
             }
-        }
-    });
-    
-    // Table
+        });
+    }
+
+    // Table — keep all models, sorted by hunts desc.
     const tbody = document.querySelector('#modelTable tbody');
-    tbody.innerHTML = models.map(m => `
+    models.sort((a, b) => (b.hunts || 0) - (a.hunts || 0));
+    tbody.innerHTML = models.map(m => {
+        const ciTxt = m.hunts > 0
+            ? `<span style="color:var(--text-muted); font-size:0.72rem;">&nbsp;[${(m.ci_lo*100).toFixed(0)}–${(m.ci_hi*100).toFixed(0)}]</span>`
+            : '';
+        return `
         <tr>
             <td title="${escapeHtml(m.fullName || '')}">${escapeHtml(m.name || '')}</td>
             <td>${escapeHtml(String(m.hunts ?? 0))}</td>
             <td>${escapeHtml(String(m.breaks ?? 0))}</td>
-            <td>${((Number(m.break_rate) || 0) * 100).toFixed(1)}%</td>
+            <td>${((Number(m.break_rate) || 0) * 100).toFixed(1)}%${ciTxt}</td>
             <td>${m.avg_latency_ms ? (m.avg_latency_ms / 1000).toFixed(1) + 's' : '--'}</td>
             <td>${((Number(m.success_rate) || 0) * 100).toFixed(1)}%</td>
-        </tr>
-    `).join('');
+        </tr>`;
+    }).join('');
 }
 
 async function loadCosts() {
