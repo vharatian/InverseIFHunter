@@ -38,9 +38,11 @@ function setTzMode(mode) {
 }
 const TRAINER_EMAILS_STORAGE_KEY = 'dashboard_trainer_emails';
 let timelineChart = null;
-let latencyHistChart = null;
 let modelBreakChart = null;
 let modelUsageChart = null;
+let reviewerDecisionsChart = null;
+let councilModelsChart = null;
+let workflowFunnelChart = null;
 let refreshInterval = null;
 let fullRefreshInterval = null;
 
@@ -206,6 +208,12 @@ function loadSectionData(sectionId) {
             break;
         case 'models':
             loadModels();
+            break;
+        case 'reviewers':
+            loadReviewerStats();
+            break;
+        case 'workflow':
+            loadTrainerWorkflow();
             break;
         case 'costs':
             loadCosts();
@@ -489,22 +497,19 @@ async function loadActivityHeatmap() {
 }
 
 async function loadLatencyDistribution() {
-    const canvas = document.getElementById('latencyHist');
-    if (!canvas) return;
-    const wrap = canvas.parentElement;
+    const el = document.getElementById('latencyEcdf');
+    if (!el) return;
     const data = await fetchAPI('latency_distribution');
-    const setPill = (id, ms) => { const el = document.getElementById(id); if (el) el.textContent = fmtMs(ms); };
-    const setCount = (n) => { const el = document.getElementById('latencyCount'); if (el) el.textContent = n ? `${n.toLocaleString()} calls` : ''; };
-    if (!data || !data.count) {
-        if (latencyHistChart) { latencyHistChart.destroy(); latencyHistChart = null; }
-        canvas.style.display = 'none';
-        _ensureEmptyState(wrap, 'No API calls in this period');
+    const setPill = (id, ms) => { const node = document.getElementById(id); if (node) node.textContent = fmtMs(ms); };
+    const setCount = (n) => { const node = document.getElementById('latencyCount'); if (node) node.textContent = n ? `${n.toLocaleString()} calls` : ''; };
+    if (window.Plotly) { try { Plotly.purge(el); } catch (_) {} }
+    if (!data || !data.count || !(data.ecdf_xs_ms || []).length) {
+        _ensureEmptyState(el, 'No API calls in this period');
         ['latP50','latP90','latP95','latP99'].forEach(id => setPill(id, 0));
         setCount(0);
         return;
     }
-    canvas.style.display = 'block';
-    _clearEmptyState(wrap);
+    _clearEmptyState(el);
     setPill('latP50', data.p50_ms);
     setPill('latP90', data.p90_ms);
     setPill('latP95', data.p95_ms);
@@ -512,43 +517,72 @@ async function loadLatencyDistribution() {
     setCount(data.count);
 
     const theme = chartTheme();
-    const ctx = canvas.getContext('2d');
-    if (latencyHistChart) latencyHistChart.destroy();
-    // Color bars by bucket position — cool for fast, warm for slow.
-    const palette = [theme.hunt, theme.hunt, theme.session, theme.session, theme.accent, theme.palette[4], theme.err, theme.err, theme.brk];
-    latencyHistChart = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: data.hist_labels,
-            datasets: [{
-                label: 'API calls',
-                data: data.hist_counts,
-                backgroundColor: data.hist_labels.map((_, i) => palette[i] || theme.accent),
-                borderRadius: 4,
-                borderSkipped: false,
-            }]
-        },
-        options: {
-            responsive: true, maintainAspectRatio: false, animation: false,
-            plugins: {
-                legend: { display: false },
-                tooltip: { ...chartTooltip(theme),
-                    callbacks: {
-                        title: (i) => i[0].label,
-                        label: (ctx) => {
-                            const n = ctx.parsed.y;
-                            const pct = data.count ? (100 * n / data.count).toFixed(1) : '0';
-                            return `${n.toLocaleString()} calls · ${pct}%`;
-                        }
-                    }
-                },
-            },
-            scales: {
-                x: { ticks: { color: theme.muted, font: { size: 10 } }, grid: { display: false } },
-                y: { beginAtZero: true, ticks: { color: theme.muted, precision: 0 }, grid: { color: theme.grid } },
-            }
+    // Convert ms → seconds for the x axis (ECDF is clearer in seconds).
+    const xs = data.ecdf_xs_ms.map(ms => Math.max(ms, 1) / 1000);
+    const ys = data.ecdf_ys.map(y => y * 100);
+    const customMs = data.ecdf_xs_ms;
+
+    const curve = {
+        type: 'scatter', mode: 'lines',
+        x: xs, y: ys,
+        line: { color: theme.accent, width: 2, shape: 'hv' },
+        fill: 'tozeroy', fillcolor: 'rgba(59,130,246,0.12)',
+        name: 'Cumulative %',
+        hovertemplate: '≤ %{x:.2f}s<br>%{y:.1f}% of calls<br>(%{customdata} ms)<extra></extra>',
+        customdata: customMs.map(v => v.toFixed(0)),
+    };
+    // Percentile guide lines with labels.
+    const pcts = [
+        { p: 50, ms: data.p50_ms, color: theme.hunt },
+        { p: 90, ms: data.p90_ms, color: theme.session },
+        { p: 95, ms: data.p95_ms, color: theme.err },
+        { p: 99, ms: data.p99_ms, color: theme.brk },
+    ];
+    const minX = Math.max(xs[0] || 0.1, 0.05);
+    const maxX = xs[xs.length - 1] || 60;
+    // Log scale needs > 1 decade of data to be informative. Fall back to
+    // linear for narrow distributions (e.g. "all calls 20-30s").
+    const useLog = (maxX / Math.max(minX, 0.05)) >= 10;
+    const xaxisCfg = useLog
+        ? {
+            type: 'log',
+            title: { text: 'latency (seconds, log scale)', font: { color: theme.muted, size: 10 } },
+            range: [Math.log10(Math.max(0.05, minX)), Math.log10(Math.max(maxX, 1))],
         }
+        : {
+            type: 'linear',
+            title: { text: 'latency (seconds)', font: { color: theme.muted, size: 10 } },
+            range: [0, Math.max(maxX * 1.05, 1)],
+        };
+    const shapes = pcts.map(pc => ({
+        type: 'line', xref: 'x', yref: 'y',
+        x0: pc.ms / 1000, x1: pc.ms / 1000, y0: 0, y1: pc.p,
+        line: { color: pc.color, width: 1.2, dash: 'dot' },
+    }));
+    const annots = pcts.map(pc => ({
+        x: pc.ms / 1000, y: pc.p,
+        xref: 'x', yref: 'y',
+        text: `p${pc.p}`, showarrow: false,
+        font: { color: pc.color, size: 10, family: 'Inter, sans-serif' },
+        bgcolor: 'rgba(0,0,0,0.35)', bordercolor: pc.color, borderwidth: 1,
+        borderpad: 2, xshift: 6, yshift: 0,
+    }));
+    const layout = plotlyLayoutBase(theme, {
+        margin: { t: 10, b: 40, l: 48, r: 18 },
+        xaxis: {
+            ...xaxisCfg,
+            gridcolor: theme.grid, zerolinecolor: theme.grid,
+            tickfont: { color: theme.muted, size: 10 },
+        },
+        yaxis: {
+            title: { text: '% of calls ≤ X', font: { color: theme.muted, size: 10 } },
+            gridcolor: theme.grid, zerolinecolor: theme.grid,
+            tickfont: { color: theme.muted, size: 10 },
+            range: [0, 105], ticksuffix: '%',
+        },
+        shapes, annotations: annots, showlegend: false,
     });
+    Plotly.newPlot(el, [curve], layout, { responsive: true, displayModeBar: false });
 }
 
 async function loadEvents() {
@@ -610,7 +644,24 @@ function getEventTypeMarker(type) {
         hunt_result: 'HR',
         api_call_start: 'A+',
         api_call_end: 'A−',
-        judge_call: 'JG'
+        judge_call: 'JG',
+        // Trainer app
+        trainer_registered: 'TR',
+        trainer_heartbeat: 'TH',
+        human_review_submitted: 'HV',
+        task_completed: 'TC',
+        results_viewed: 'RV',
+        // Reviewer app
+        reviewer_signed_in: 'RS',
+        task_opened: 'TO',
+        task_claimed: 'TK',
+        reviewer_decision: 'RD',
+        feedback_submitted: 'FB',
+        council_started: 'C▶',
+        council_completed: 'C✓',
+        council_model_responded: 'CM',
+        notebook_fetched: 'NB',
+        notebook_fetch_failed: 'N!',
     };
     const key = String(type || '');
     return abbrev[key] || (key ? key.slice(0, 2).toUpperCase() : '??');
@@ -618,6 +669,7 @@ function getEventTypeMarker(type) {
 
 function formatEventDetails(event) {
     const data = event.data || {};
+    const rev = data.reviewer_email ? ` · <span class="trainer-email">${escapeHtml(data.reviewer_email)}</span>` : '';
     try {
         switch(event.type) {
             case 'session_created':
@@ -628,6 +680,40 @@ function formatEventDetails(event) {
             }
             case 'api_call_end':
                 return `${escapeHtml(String(data.provider ?? ''))} | ${escapeHtml(String(data.latency_ms ?? ''))}ms | ${data.success ? 'OK' : 'Failed'}`;
+            case 'trainer_registered':
+                return `Registered: ${escapeHtml(data.trainer_email || '')}`;
+            case 'human_review_submitted':
+                return `${escapeHtml(String(data.total_reviews ?? ''))} reviews · ${escapeHtml(String(data.reviews_with_judgment ?? ''))} judged`;
+            case 'task_completed':
+                return `Completed via ${escapeHtml(data.save_method || 'unknown')}${data.session_id ? ' · ' + escapeHtml(data.session_id) : ''}`;
+            case 'results_viewed':
+                return `${escapeHtml(String(data.total_results ?? 0))} results · ${escapeHtml(String(data.breaking_results ?? 0))} breaks`;
+            case 'reviewer_signed_in':
+                return `${escapeHtml(data.role || 'reviewer')}${data.pod_id ? ' · pod ' + escapeHtml(data.pod_id) : ''}${rev}`;
+            case 'task_opened':
+                return `${escapeHtml(data.task_display_id || data.session_id || '')} · ${escapeHtml(data.review_status || '')}${rev}`;
+            case 'task_claimed':
+                return `${escapeHtml(data.session_id || '')}${rev}`;
+            case 'reviewer_decision':
+                return `<strong>${escapeHtml(String(data.decision || '').toUpperCase())}</strong> · ${escapeHtml(data.session_id || '')}${rev}`;
+            case 'feedback_submitted':
+                return `on ${escapeHtml(data.action || '')} · ${escapeHtml(data.session_id || '')}${rev}`;
+            case 'council_started':
+                return `session ${escapeHtml(data.session_id || '')}${rev}`;
+            case 'council_completed': {
+                const ok = data.passed ? 'PASS' : 'FAIL';
+                const dur = data.duration_ms ? ` · ${(data.duration_ms/1000).toFixed(1)}s` : '';
+                const rules = data.total_rules ? ` · ${data.pass_count ?? 0}/${data.total_rules} rules` : '';
+                return `<strong>${ok}</strong>${rules}${dur}${rev}`;
+            }
+            case 'council_model_responded': {
+                const mid = (data.model_id || '').split('/').pop();
+                return `${escapeHtml(mid)} voted <strong>${escapeHtml(data.vote || '')}</strong> · ${escapeHtml(data.rule_id || '')}`;
+            }
+            case 'notebook_fetched':
+                return `${escapeHtml(String(data.slots ?? 0))} slots · ${escapeHtml(String(data.cells_scanned ?? 0))} cells${rev}`;
+            case 'notebook_fetch_failed':
+                return `<span class="criteria-fail">Failed</span> · ${escapeHtml(String(data.error || '').slice(0, 120))}${rev}`;
             default:
                 return escapeHtml(JSON.stringify(data));
         }
@@ -926,6 +1012,238 @@ async function loadModels() {
             <td>${((Number(m.success_rate) || 0) * 100).toFixed(1)}%</td>
         </tr>`;
     }).join('');
+}
+
+async function loadReviewerStats() {
+    const data = await fetchAPI('reviewer_stats');
+    if (!data) return;
+    const theme = chartTheme();
+    const setTxt = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+
+    const c = data.council || {};
+    setTxt('rvActive', data.active_reviewers ?? 0);
+    setTxt('rvDecisions', data.decisions_total ?? 0);
+    setTxt('rvCouncil', c.completed ?? 0);
+    const decided = (c.passed || 0) + (c.failed || 0);
+    setTxt('rvCouncilPass', decided ? `${(c.pass_rate * 100).toFixed(1)}%` : '--');
+    const nb = data.notebook_fetch || {};
+    setTxt('rvNotebook', `${nb.success || 0}✓ / ${nb.failed || 0}✗`);
+    setTxt('rvCouncilP95', c.duration_p95_ms ? fmtMs(c.duration_p95_ms) : '--');
+
+    // Decisions breakdown (bar)
+    const decisionCanvas = document.getElementById('reviewerDecisionsChart');
+    if (decisionCanvas) {
+        const decisionCtx = decisionCanvas.getContext('2d');
+        if (reviewerDecisionsChart) reviewerDecisionsChart.destroy();
+        const entries = Object.entries(data.decisions || {}).sort((a, b) => b[1] - a[1]);
+        if (entries.length === 0) {
+            _ensureEmptyState(decisionCanvas.parentElement, 'No reviewer decisions yet');
+        } else {
+            _clearEmptyState(decisionCanvas.parentElement);
+            const colorFor = (k) => ({
+                approved: theme.hunt, returned: theme.err, escalated: theme.brk, completed: theme.session,
+            })[k] || theme.accent;
+            reviewerDecisionsChart = new Chart(decisionCtx, {
+                type: 'bar',
+                data: {
+                    labels: entries.map(([k]) => k),
+                    datasets: [{
+                        label: 'Decisions',
+                        data: entries.map(([, v]) => v),
+                        backgroundColor: entries.map(([k]) => colorFor(k)),
+                        borderRadius: 4, borderSkipped: false,
+                    }],
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true, maintainAspectRatio: false, animation: false,
+                    plugins: { legend: { display: false }, tooltip: chartTooltip(theme) },
+                    scales: {
+                        x: { beginAtZero: true, ticks: { color: theme.muted, precision: 0 }, grid: { color: theme.grid } },
+                        y: { ticks: { color: theme.text }, grid: { display: false } },
+                    }
+                }
+            });
+        }
+    }
+
+    // Council model agreement (stacked horizontal: PASS/FAIL/unclear)
+    const cmCanvas = document.getElementById('councilModelsChart');
+    if (cmCanvas) {
+        const cmCtx = cmCanvas.getContext('2d');
+        if (councilModelsChart) councilModelsChart.destroy();
+        const models = (data.council_models || []).slice(0, 10).reverse();
+        if (models.length === 0) {
+            _ensureEmptyState(cmCanvas.parentElement, 'No council votes yet');
+        } else {
+            _clearEmptyState(cmCanvas.parentElement);
+            councilModelsChart = new Chart(cmCtx, {
+                type: 'bar',
+                data: {
+                    labels: models.map(m => String(m.model_id).split('/').pop()),
+                    datasets: [
+                        { label: 'PASS',    data: models.map(m => m.pass),    backgroundColor: theme.hunt, stack: 's', borderRadius: 3 },
+                        { label: 'FAIL',    data: models.map(m => m.fail),    backgroundColor: theme.brk,  stack: 's', borderRadius: 3 },
+                        { label: 'Unclear', data: models.map(m => m.unclear), backgroundColor: theme.muted,stack: 's', borderRadius: 3 },
+                    ]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true, maintainAspectRatio: false, animation: false,
+                    plugins: {
+                        legend: { position: 'bottom', labels: { color: theme.muted, usePointStyle: true, pointStyle: 'rectRounded', padding: 12, font: { size: 11 } } },
+                        tooltip: { ...chartTooltip(theme),
+                            callbacks: {
+                                label: (c) => {
+                                    const m = models[c.dataIndex];
+                                    const pct = m.total ? (100 * c.parsed.x / m.total).toFixed(1) : '0';
+                                    return `${c.dataset.label}: ${c.parsed.x} (${pct}%)`;
+                                }
+                            }
+                        },
+                    },
+                    scales: {
+                        x: { stacked: true, beginAtZero: true, ticks: { color: theme.muted, precision: 0 }, grid: { color: theme.grid } },
+                        y: { stacked: true, ticks: { color: theme.text, font: { size: 11 } }, grid: { display: false } },
+                    }
+                }
+            });
+        }
+    }
+
+    // Leaderboard table
+    const tbody = document.querySelector('#reviewerTable tbody');
+    if (tbody) {
+        const rows = data.leaderboard || [];
+        if (rows.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="10" class="loading">No reviewer activity in this period</td></tr>';
+        } else {
+            tbody.innerHTML = rows.map(r => `
+                <tr>
+                    <td>${escapeHtml(r.reviewer_email || '')}</td>
+                    <td><strong>${escapeHtml(String(r.decisions ?? 0))}</strong></td>
+                    <td>${escapeHtml(String(r.approved ?? 0))}</td>
+                    <td>${escapeHtml(String(r.returned ?? 0))}</td>
+                    <td>${escapeHtml(String(r.escalated ?? 0))}</td>
+                    <td>${escapeHtml(String(r.completed ?? 0))}</td>
+                    <td>${((r.approval_rate || 0) * 100).toFixed(1)}%</td>
+                    <td>${escapeHtml(String(r.council_runs ?? 0))}</td>
+                    <td>${escapeHtml(String(r.tasks_opened ?? 0))}</td>
+                    <td>${escapeHtml(fmtDateTime(r.last_seen))}</td>
+                </tr>`).join('');
+        }
+    }
+}
+
+async function loadTrainerWorkflow() {
+    const data = await fetchAPI('trainer_workflow');
+    if (!data) return;
+    const theme = chartTheme();
+    const setTxt = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+
+    setTxt('wfRegistered', data.trainers_registered ?? 0);
+    setTxt('wfHumanReviews', data.human_reviews ?? 0);
+    setTxt('wfCompleted', data.tasks_completed ?? 0);
+    setTxt('wfResultsViewed', data.results_viewed ?? 0);
+
+    // Funnel: stacked horizontal showing absolute counts per stage.
+    const funnelCanvas = document.getElementById('workflowFunnelChart');
+    if (funnelCanvas) {
+        const fCtx = funnelCanvas.getContext('2d');
+        if (workflowFunnelChart) workflowFunnelChart.destroy();
+        const stages = [
+            { label: 'Trainers registered', value: data.trainers_registered || 0, color: theme.palette[0] },
+            { label: 'Human reviews submitted', value: data.human_reviews || 0, color: theme.palette[1] },
+            { label: 'Tasks completed', value: data.tasks_completed || 0, color: theme.palette[2] },
+            { label: 'Results viewed', value: data.results_viewed || 0, color: theme.palette[3] },
+        ];
+        const total = stages[0].value || 1;
+        if (stages.every(s => s.value === 0)) {
+            _ensureEmptyState(funnelCanvas.parentElement, 'No workflow events in this period');
+        } else {
+            _clearEmptyState(funnelCanvas.parentElement);
+            workflowFunnelChart = new Chart(fCtx, {
+                type: 'bar',
+                data: {
+                    labels: stages.map(s => s.label),
+                    datasets: [{
+                        label: 'Count',
+                        data: stages.map(s => s.value),
+                        backgroundColor: stages.map(s => s.color),
+                        borderRadius: 4, borderSkipped: false,
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true, maintainAspectRatio: false, animation: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: { ...chartTooltip(theme),
+                            callbacks: {
+                                label: (c) => {
+                                    const v = c.parsed.x;
+                                    const pct = total ? (100 * v / total).toFixed(1) : '0';
+                                    return `${v.toLocaleString()} events · ${pct}% of registered`;
+                                }
+                            }
+                        },
+                    },
+                    scales: {
+                        x: { beginAtZero: true, ticks: { color: theme.muted, precision: 0 }, grid: { color: theme.grid } },
+                        y: { ticks: { color: theme.text, font: { size: 11 } }, grid: { display: false } },
+                    }
+                }
+            });
+        }
+    }
+
+    // Save method breakdown (Plotly bar)
+    const smEl = document.getElementById('saveMethodChart');
+    if (smEl && window.Plotly) {
+        try { Plotly.purge(smEl); } catch (_) {}
+        const methods = Object.entries(data.completed_methods || {});
+        if (methods.length === 0) {
+            _ensureEmptyState(smEl, 'No task completions yet');
+        } else {
+            _clearEmptyState(smEl);
+            methods.sort((a, b) => b[1] - a[1]);
+            const trace = {
+                type: 'bar', orientation: 'h',
+                y: methods.map(m => m[0]),
+                x: methods.map(m => m[1]),
+                marker: { color: methods.map((_, i) => theme.palette[i % theme.palette.length]) },
+                text: methods.map(m => String(m[1])),
+                textposition: 'outside',
+                textfont: { color: theme.text, size: 10 },
+                hovertemplate: '<b>%{y}</b><br>%{x} completions<extra></extra>',
+            };
+            const layout = plotlyLayoutBase(theme, {
+                margin: { t: 10, b: 36, l: 120, r: 40 },
+                xaxis: { gridcolor: theme.grid, tickfont: { color: theme.muted } },
+                yaxis: { tickfont: { color: theme.muted }, automargin: true, autorange: 'reversed' },
+            });
+            Plotly.newPlot(smEl, [trace], layout, { responsive: true, displayModeBar: false });
+        }
+    }
+
+    // Per-trainer table
+    const tbody = document.querySelector('#workflowTable tbody');
+    if (tbody) {
+        const rows = (data.by_trainer || []).slice(0, 50);
+        if (rows.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" class="loading">No trainer workflow activity</td></tr>';
+        } else {
+            tbody.innerHTML = rows.map(r => `
+                <tr>
+                    <td>${escapeHtml(r.trainer_email || '')}</td>
+                    <td>${r.registered ? '✓' : '—'}</td>
+                    <td>${escapeHtml(String(r.human_reviews ?? 0))}</td>
+                    <td><strong>${escapeHtml(String(r.tasks_completed ?? 0))}</strong></td>
+                    <td>${escapeHtml(String(r.results_viewed ?? 0))}</td>
+                    <td>${escapeHtml(fmtDateTime(r.last_seen))}</td>
+                </tr>`).join('');
+        }
+    }
 }
 
 async function loadCosts() {

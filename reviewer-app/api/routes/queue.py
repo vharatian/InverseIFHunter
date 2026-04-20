@@ -16,6 +16,7 @@ from agentic_reviewer.team_config import (  # noqa: E402
     get_trainers_mapped_to_reviewer,
     get_trainer_emails_in_pod,
 )
+from modules.review.telemetry import log_reviewer_event  # noqa: E402
 
 router = APIRouter(prefix="/api", tags=["queue"])
 
@@ -31,6 +32,11 @@ async def auth_session(_reviewer: Annotated[str, Depends(require_reviewer)]):
         assigned = get_trainers_mapped_to_reviewer(_reviewer)
     else:
         assigned = []
+    log_reviewer_event("reviewer_signed_in", _reviewer, {
+        "role": role,
+        "pod_id": pod_id,
+        "assigned_trainer_count": len(assigned or []),
+    })
     return {
         "ok": True,
         "reviewer": _reviewer,

@@ -21,6 +21,7 @@ _repo_root = str(Path(__file__).resolve().parents[3])
 if _repo_root not in sys.path:
     sys.path.insert(0, _repo_root)
 from notebook_headings import TASK_ALIASES, METADATA_KEYS, HIDDEN_FROM_REVIEWER
+from modules.review.telemetry import log_reviewer_event
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["notebook_preview"])
@@ -68,9 +69,18 @@ async def notebook_preview(
         nb_json = await _fetch_notebook_json(url)
     except Exception as e:
         logger.warning("Notebook fetch failed for %s: %s", url, e)
+        log_reviewer_event("notebook_fetch_failed", _reviewer, {
+            "url": url[:200], "error": str(e)[:200],
+        })
         raise HTTPException(status_code=400, detail=f"Could not fetch notebook: {e}")
 
     result = _extract_preview(nb_json)
+    log_reviewer_event("notebook_fetched", _reviewer, {
+        "url": url[:200],
+        "cells_scanned": result.get("cells_scanned", 0),
+        "slots": len(result.get("slots") or []),
+        "has_structured_content": bool(result.get("has_structured_content")),
+    })
     return NotebookPreviewResponse(**result)
 
 

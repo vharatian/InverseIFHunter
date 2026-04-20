@@ -552,7 +552,10 @@ class EnhancedLogReader:
         if event_type:
             events = [e for e in raw_events if e.get("type") == event_type]
         else:
-            events = raw_events
+            # Heartbeats are chatty (every 60s per trainer) — drop from the
+            # default live feed. They still power realtime active-trainer
+            # counting via `get_realtime_stats`.
+            events = [e for e in raw_events if e.get("type") != "trainer_heartbeat"]
 
         ctx = self._load_session_context()
         ctx = self._merge_session_created_from_events(raw_events, ctx)
@@ -1192,9 +1195,13 @@ class EnhancedLogReader:
     def get_latency_distribution(
         self, hours: int = 24, trainer_emails: Optional[List[str]] = None
     ) -> Dict[str, Any]:
-        """API-call latency distribution: percentiles + histogram.
-        Returns ms percentiles (p50/p90/p95/p99), mean, count, and histogram
-        bins (log-spaced from 100ms to 60s) suited to LLM call latency.
+        """API-call latency as an Empirical CDF (scale-free).
+
+        Returns percentile pills (p50/p90/p95/p99), mean/min/max, and an
+        ECDF curve (xs_ms, ys) — the fraction of calls completing at or under
+        each latency. ECDF is scale-free (works equally well whether calls
+        take 500ms or 30s) and has no binning artifacts, unlike a histogram.
+        Large sample sizes are downsampled to ~200 points for plot efficiency.
         """
         since = datetime.utcnow() - timedelta(hours=hours)
         events = self._read_events(since=since)
@@ -1211,6 +1218,129 @@ class EnhancedLogReader:
             if f >= 0:
                 latencies.append(f)
 
+        def _pct(xs_sorted: List[float], q: float) -> float:
+            if not xs_sorted:
+                return 0.0
+            k = (len(xs_sorted) - 1) * q
+            f_i = int(k)
+            c = min(f_i + 1, len(xs_sorted) - 1)
+            return xs_sorted[f_i] + (xs_sorted[c] - xs_sorted[f_i]) * (k - f_i)
+
+        sorted_lat = sorted(latencies)
+        n = len(sorted_lat)
+        mean = (sum(sorted_lat) / n) if n else 0.0
+
+        # ECDF points: (value, rank/n) for each sample. Downsample to ~200
+        # evenly-spaced indices for plot efficiency, always including endpoints.
+        xs_ms: List[float] = []
+        ys: List[float] = []
+        if n:
+            target = min(n, 200)
+            if n <= target:
+                idxs = list(range(n))
+            else:
+                step = (n - 1) / (target - 1)
+                idxs = sorted({int(round(i * step)) for i in range(target)})
+                if idxs[-1] != n - 1:
+                    idxs.append(n - 1)
+            for i in idxs:
+                xs_ms.append(sorted_lat[i])
+                ys.append((i + 1) / n)
+        return {
+            "time_window_hours": hours,
+            "count": n,
+            "mean_ms": mean,
+            "p50_ms": _pct(sorted_lat, 0.50),
+            "p90_ms": _pct(sorted_lat, 0.90),
+            "p95_ms": _pct(sorted_lat, 0.95),
+            "p99_ms": _pct(sorted_lat, 0.99),
+            "min_ms": sorted_lat[0] if sorted_lat else 0.0,
+            "max_ms": sorted_lat[-1] if sorted_lat else 0.0,
+            "ecdf_xs_ms": xs_ms,
+            "ecdf_ys": ys,
+        }
+
+    def get_reviewer_stats(
+        self, hours: int = 168, limit: int = 20
+    ) -> Dict[str, Any]:
+        """Reviewer-app telemetry aggregates: decisions, council runs, activity."""
+        since = datetime.utcnow() - timedelta(hours=hours)
+        events = self._read_events(since=since)
+
+        decisions = defaultdict(int)  # decision -> count
+        council = {
+            "started": 0,
+            "completed": 0,
+            "passed": 0,
+            "failed": 0,
+            "errored": 0,
+            "durations_ms": [],
+        }
+        council_votes = defaultdict(lambda: {"PASS": 0, "FAIL": 0, "unclear": 0})
+        notebook_fetch = {"success": 0, "failed": 0}
+        by_reviewer: Dict[str, Dict[str, Any]] = defaultdict(lambda: {
+            "decisions": 0,
+            "approved": 0,
+            "returned": 0,
+            "escalated": 0,
+            "completed": 0,
+            "council_runs": 0,
+            "tasks_opened": 0,
+            "tasks_claimed": 0,
+            "last_seen": None,
+        })
+        active_reviewers: Set[str] = set()
+
+        for event in events:
+            etype = event.get("type", "")
+            data = event.get("data") or {}
+            reviewer = (data.get("reviewer_email") or "").strip().lower()
+            if not reviewer:
+                continue
+            ts = event.get("ts")
+            r = by_reviewer[reviewer]
+            if ts and (not r["last_seen"] or ts > r["last_seen"]):
+                r["last_seen"] = ts
+            active_reviewers.add(reviewer)
+
+            if etype == "reviewer_decision":
+                d = (data.get("decision") or "").lower()
+                decisions[d] += 1
+                r["decisions"] += 1
+                if d in ("approved", "returned", "escalated", "completed"):
+                    r[d] += 1
+            elif etype == "task_opened":
+                r["tasks_opened"] += 1
+            elif etype == "task_claimed":
+                r["tasks_claimed"] += 1
+            elif etype == "council_started":
+                council["started"] += 1
+                r["council_runs"] += 1
+            elif etype == "council_completed":
+                council["completed"] += 1
+                if data.get("error"):
+                    council["errored"] += 1
+                elif data.get("passed"):
+                    council["passed"] += 1
+                else:
+                    council["failed"] += 1
+                try:
+                    dur = float(data.get("duration_ms") or 0)
+                    if dur > 0:
+                        council["durations_ms"].append(dur)
+                except (TypeError, ValueError):
+                    pass
+            elif etype == "council_model_responded":
+                mid = str(data.get("model_id") or "unknown")
+                vote = (data.get("vote") or "unclear")
+                if vote not in ("PASS", "FAIL", "unclear"):
+                    vote = "unclear"
+                council_votes[mid][vote] += 1
+            elif etype == "notebook_fetched":
+                notebook_fetch["success"] += 1
+            elif etype == "notebook_fetch_failed":
+                notebook_fetch["failed"] += 1
+
         def _pct(xs: List[float], q: float) -> float:
             if not xs:
                 return 0.0
@@ -1220,33 +1350,151 @@ class EnhancedLogReader:
             c = min(f_i + 1, len(s) - 1)
             return s[f_i] + (s[c] - s[f_i]) * (k - f_i)
 
-        # Log-spaced edges in ms: 100, 200, 500, 1k, 2k, 5k, 10k, 20k, 60k
-        edges = [0, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 60000]
-        labels = ["<0.1s", "0.1-0.2s", "0.2-0.5s", "0.5-1s", "1-2s", "2-5s", "5-10s", "10-20s", "20-60s"]
-        hist = [0] * len(labels)
-        for v in latencies:
-            placed = False
-            for i in range(1, len(edges)):
-                if v < edges[i]:
-                    hist[i - 1] += 1
-                    placed = True
-                    break
-            if not placed:
-                hist[-1] += 1
-        n = len(latencies)
-        mean = (sum(latencies) / n) if n else 0.0
+        dur = council["durations_ms"]
+        # Pass rate excludes errored runs (pass/(pass+fail)) — a run that
+        # never finished shouldn't be counted as a FAIL for QC purposes.
+        decided = council["passed"] + council["failed"]
+        council_out = {
+            "started": council["started"],
+            "completed": council["completed"],
+            "passed": council["passed"],
+            "failed": council["failed"],
+            "errored": council["errored"],
+            "pass_rate": (council["passed"] / decided) if decided else 0.0,
+            "duration_p50_ms": _pct(dur, 0.50),
+            "duration_p95_ms": _pct(dur, 0.95),
+            "duration_mean_ms": (sum(dur) / len(dur)) if dur else 0.0,
+        }
+
+        leaderboard = []
+        for email, s in by_reviewer.items():
+            total = s["decisions"]
+            if total == 0 and s["council_runs"] == 0 and s["tasks_opened"] == 0:
+                continue
+            leaderboard.append({
+                "reviewer_email": email,
+                "decisions": total,
+                "approved": s["approved"],
+                "returned": s["returned"],
+                "escalated": s["escalated"],
+                "completed": s["completed"],
+                "approval_rate": (s["approved"] / total) if total else 0.0,
+                "council_runs": s["council_runs"],
+                "tasks_opened": s["tasks_opened"],
+                "tasks_claimed": s["tasks_claimed"],
+                "last_seen": s["last_seen"],
+            })
+        leaderboard.sort(key=lambda x: (x["decisions"], x["council_runs"]), reverse=True)
+
+        # Council model performance: vote distribution per model.
+        council_models = []
+        for mid, v in council_votes.items():
+            total = v["PASS"] + v["FAIL"] + v["unclear"]
+            council_models.append({
+                "model_id": mid,
+                "total": total,
+                "pass": v["PASS"],
+                "fail": v["FAIL"],
+                "unclear": v["unclear"],
+                "pass_rate": (v["PASS"] / total) if total else 0.0,
+                "fail_rate": (v["FAIL"] / total) if total else 0.0,
+            })
+        council_models.sort(key=lambda x: x["total"], reverse=True)
+
         return {
             "time_window_hours": hours,
-            "count": n,
-            "mean_ms": mean,
-            "p50_ms": _pct(latencies, 0.50),
-            "p90_ms": _pct(latencies, 0.90),
-            "p95_ms": _pct(latencies, 0.95),
-            "p99_ms": _pct(latencies, 0.99),
-            "min_ms": min(latencies) if latencies else 0.0,
-            "max_ms": max(latencies) if latencies else 0.0,
-            "hist_labels": labels,
-            "hist_counts": hist,
+            "active_reviewers": len(active_reviewers),
+            "decisions": dict(decisions),
+            "decisions_total": sum(decisions.values()),
+            "council": council_out,
+            "council_models": council_models[:limit],
+            "notebook_fetch": notebook_fetch,
+            "leaderboard": leaderboard[:limit],
+        }
+
+    def get_trainer_workflow(
+        self, hours: int = 168, trainer_emails: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """Trainer-app workflow funnel: registered → reviews submitted → tasks completed → results viewed."""
+        since = datetime.utcnow() - timedelta(hours=hours)
+        events = self._read_events(since=since)
+        events = self._filter_events_by_trainer_emails(events, trainer_emails)
+
+        registered_emails: Set[str] = set()
+        human_reviews = 0
+        tasks_completed = 0
+        results_viewed = 0
+        completed_methods = defaultdict(int)
+        per_trainer: Dict[str, Dict[str, Any]] = defaultdict(lambda: {
+            "human_reviews": 0,
+            "tasks_completed": 0,
+            "results_viewed": 0,
+            "registered": False,
+            "last_seen": None,
+        })
+
+        ctx = self._load_session_context()
+        ctx = self._merge_session_created_from_events(events, ctx)
+
+        for event in events:
+            etype = event.get("type", "")
+            data = event.get("data") or {}
+            ts = event.get("ts")
+            email = (data.get("trainer_email") or "").strip().lower()
+            if not email:
+                sid = data.get("session_id")
+                if sid:
+                    email = (ctx.get(sid) or {}).get("trainer_email", "").strip().lower()
+
+            if etype == "trainer_registered":
+                if email:
+                    registered_emails.add(email)
+                    per_trainer[email]["registered"] = True
+                    if ts and (not per_trainer[email]["last_seen"] or ts > per_trainer[email]["last_seen"]):
+                        per_trainer[email]["last_seen"] = ts
+            elif etype == "human_review_submitted":
+                human_reviews += 1
+                if email:
+                    per_trainer[email]["human_reviews"] += 1
+                    if ts and (not per_trainer[email]["last_seen"] or ts > per_trainer[email]["last_seen"]):
+                        per_trainer[email]["last_seen"] = ts
+            elif etype == "task_completed":
+                tasks_completed += 1
+                completed_methods[str(data.get("save_method") or "unknown")] += 1
+                if email:
+                    per_trainer[email]["tasks_completed"] += 1
+                    if ts and (not per_trainer[email]["last_seen"] or ts > per_trainer[email]["last_seen"]):
+                        per_trainer[email]["last_seen"] = ts
+            elif etype == "results_viewed":
+                results_viewed += 1
+                if email:
+                    per_trainer[email]["results_viewed"] += 1
+                    if ts and (not per_trainer[email]["last_seen"] or ts > per_trainer[email]["last_seen"]):
+                        per_trainer[email]["last_seen"] = ts
+
+        by_trainer = []
+        for email, s in per_trainer.items():
+            total = s["human_reviews"] + s["tasks_completed"] + s["results_viewed"]
+            if total == 0 and not s["registered"]:
+                continue
+            by_trainer.append({
+                "trainer_email": email,
+                "registered": s["registered"],
+                "human_reviews": s["human_reviews"],
+                "tasks_completed": s["tasks_completed"],
+                "results_viewed": s["results_viewed"],
+                "last_seen": s["last_seen"],
+            })
+        by_trainer.sort(key=lambda x: x["tasks_completed"], reverse=True)
+
+        return {
+            "time_window_hours": hours,
+            "trainers_registered": len(registered_emails),
+            "human_reviews": human_reviews,
+            "tasks_completed": tasks_completed,
+            "results_viewed": results_viewed,
+            "completed_methods": dict(completed_methods),
+            "by_trainer": by_trainer,
         }
 
     def get_realtime_stats(self) -> Dict[str, Any]:

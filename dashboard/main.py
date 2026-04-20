@@ -451,9 +451,31 @@ async def get_latency_distribution(
     hours: int = Query(default=24, ge=1, le=720),
     trainer_emails: Optional[List[str]] = Query(default=None),
 ):
-    """API-call latency percentiles + log-spaced histogram."""
+    """API-call latency percentiles + empirical CDF (scale-free)."""
     log_reader = get_log_reader()
     return log_reader.get_latency_distribution(
+        hours=hours, trainer_emails=trainer_emails
+    )
+
+
+@api_router.get("/reviewer_stats")
+async def get_reviewer_stats(
+    hours: int = Query(default=168, ge=1, le=720),
+    limit: int = Query(default=20, ge=1, le=100),
+):
+    """Reviewer-app activity: decisions, council runs, per-reviewer leaderboard."""
+    log_reader = get_log_reader()
+    return log_reader.get_reviewer_stats(hours=hours, limit=limit)
+
+
+@api_router.get("/trainer_workflow")
+async def get_trainer_workflow(
+    hours: int = Query(default=168, ge=1, le=720),
+    trainer_emails: Optional[List[str]] = Query(default=None),
+):
+    """Trainer-app workflow funnel: registrations, human reviews, tasks completed, results viewed."""
+    log_reader = get_log_reader()
+    return log_reader.get_trainer_workflow(
         hours=hours, trainer_emails=trainer_emails
     )
 

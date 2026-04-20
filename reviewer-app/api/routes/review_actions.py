@@ -15,6 +15,7 @@ from agentic_reviewer.notifications import (
     notify_user,
 )
 from agentic_reviewer.resilience import safe_notify
+from modules.review.telemetry import log_reviewer_event
 
 router = APIRouter(prefix="/api", tags=["review_actions"])
 
@@ -43,6 +44,10 @@ async def _set_status_with_feedback(
     """Save optional feedback, CAS status, audit, notify. Returns {ok, review_status} or raises."""
     if body is not None:
         await set_feedback(session_id, body)
+        log_reviewer_event("feedback_submitted", reviewer_email, {
+            "session_id": session_id,
+            "action": audit_action,
+        })
     if clear_qc:
         await clear_qc_done(session_id)
     ok, actual = await cas_review_status(session_id, current, target)
@@ -52,6 +57,12 @@ async def _set_status_with_feedback(
             detail=f"Conflict: task status changed to '{actual}' before your action completed. Refresh and try again.",
         )
     await append_audit(session_id, audit_action, reviewer_email, {})
+    log_reviewer_event("reviewer_decision", reviewer_email, {
+        "session_id": session_id,
+        "decision": target,
+        "from_status": current,
+        "audit_action": audit_action,
+    })
     await safe_notify(
         _notify_trainer(session_id, notif_type, notif_message),
         context=f"{audit_action} notification for {session_id}",
@@ -107,6 +118,7 @@ async def mark_in_progress(
     if not ok:
         return {"ok": True, "review_status": actual, "changed": False}
     await append_audit(session_id, "opened_for_review", _reviewer, {})
+    log_reviewer_event("task_claimed", _reviewer, {"session_id": session_id})
     return {"ok": True, "review_status": "in_progress", "changed": True}
 
 
@@ -133,6 +145,12 @@ async def mark_completed(
     if not ok:
         return {"ok": True, "review_status": actual, "changed": False}
     await append_audit(session_id, "completed", _reviewer, {})
+    log_reviewer_event("reviewer_decision", _reviewer, {
+        "session_id": session_id,
+        "decision": "completed",
+        "from_status": current,
+        "audit_action": "completed",
+    })
     await safe_notify(
         _notify_trainer(session_id, "task_completed", "Your task has been reviewed and marked completed."),
         context=f"complete notification for {session_id}",
@@ -161,7 +179,17 @@ async def approve_task(
         feedback = await get_feedback(session_id)
         feedback.approval_comment = (body["comment"] or "").strip()
         await set_feedback(session_id, feedback)
+        log_reviewer_event("feedback_submitted", _reviewer, {
+            "session_id": session_id,
+            "action": "approved",
+        })
     await append_audit(session_id, "approved", _reviewer, {})
+    log_reviewer_event("reviewer_decision", _reviewer, {
+        "session_id": session_id,
+        "decision": "approved",
+        "from_status": current,
+        "audit_action": "approved",
+    })
     await safe_notify(
         _notify_trainer(session_id, "task_approved", "Your task has been approved by the reviewer."),
         context=f"approve notification for {session_id}",

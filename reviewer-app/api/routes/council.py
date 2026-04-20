@@ -14,6 +14,7 @@ from api.deps import require_reviewer
 from api.ih_pg import insert_reviewer_council_run
 from services import get_session_dict
 from services.audit_store import append_audit
+from modules.review.telemetry import log_reviewer_event
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,10 @@ async def council_stream(
 
     from agentic_reviewer.stream import stream_review_events
 
+    log_reviewer_event("council_started", reviewer, {"session_id": session_id})
+    import time as _time
+    _t0 = _time.time()
+
     async def agen():
         yield ": " + (" " * 2040) + "\n\n"
         rule_dones: list = []
@@ -69,14 +74,43 @@ async def council_stream(
                 t = payload.get("type")
                 if t == "rule_done":
                     rule_dones.append(payload)
+                    votes = payload.get("council_votes") or []
+                    for v in votes:
+                        log_reviewer_event("council_model_responded", reviewer, {
+                            "session_id": session_id,
+                            "rule_id": payload.get("rule_id"),
+                            "model_id": v.get("model_id") or v.get("model"),
+                            "vote": v.get("vote"),
+                        })
                 elif t == "complete":
                     complete_payload = payload
         except Exception as e:
             logger.exception("Council stream error")
+            log_reviewer_event("council_completed", reviewer, {
+                "session_id": session_id,
+                "passed": False,
+                "error": str(e)[:200],
+                "duration_ms": int((_time.time() - _t0) * 1000),
+            })
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
             return
 
-        if complete_payload is not None:
+        if complete_payload is None:
+            log_reviewer_event("council_completed", reviewer, {
+                "session_id": session_id,
+                "passed": False,
+                "error": "no_complete_event",
+                "duration_ms": int((_time.time() - _t0) * 1000),
+            })
+        else:
+            log_reviewer_event("council_completed", reviewer, {
+                "session_id": session_id,
+                "passed": bool(complete_payload.get("passed")),
+                "total_rules": complete_payload.get("total_rules"),
+                "pass_count": complete_payload.get("pass_count"),
+                "fail_count": len(complete_payload.get("issues") or []),
+                "duration_ms": int((_time.time() - _t0) * 1000),
+            })
             merged = {
                 "complete": complete_payload,
                 "rule_results": rule_dones,

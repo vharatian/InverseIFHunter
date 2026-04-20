@@ -69,6 +69,8 @@
         <button type="button" class="tab-btn" role="tab" aria-selected="false" tabindex="-1" aria-controls="section-trainers" id="tab-trainers" data-section="trainers">Trainers</button>
         <button type="button" class="tab-btn" role="tab" aria-selected="false" tabindex="-1" aria-controls="section-criteria" id="tab-criteria" data-section="criteria">Criteria</button>
         <button type="button" class="tab-btn" role="tab" aria-selected="false" tabindex="-1" aria-controls="section-models" id="tab-models" data-section="models">Models</button>
+        <button type="button" class="tab-btn" role="tab" aria-selected="false" tabindex="-1" aria-controls="section-reviewers" id="tab-reviewers" data-section="reviewers">Reviewers</button>
+        <button type="button" class="tab-btn" role="tab" aria-selected="false" tabindex="-1" aria-controls="section-workflow" id="tab-workflow" data-section="workflow">Workflow</button>
         <button type="button" class="tab-btn" role="tab" aria-selected="false" tabindex="-1" aria-controls="section-costs" id="tab-costs" data-section="costs">Costs</button>
         <button type="button" class="tab-btn" role="tab" aria-selected="false" tabindex="-1" aria-controls="section-details" id="tab-details" data-section="details">Details</button>
     </nav>
@@ -152,10 +154,10 @@
                 </div>
             </div>
 
-            <!-- Latency distribution -->
+            <!-- Latency distribution (ECDF) -->
             <div class="panel">
                 <div class="panel-header">
-                    <h3>API latency distribution <span class="chart-hint" style="font-size:0.72rem; font-weight:500; color:var(--text-muted); margin-left:0.5rem;">percentiles + log-scale histogram</span></h3>
+                    <h3>API latency ECDF <span class="chart-hint" style="font-size:0.72rem; font-weight:500; color:var(--text-muted); margin-left:0.5rem;">% of calls finishing under X seconds · log-x axis</span></h3>
                     <span id="latencyCount" class="chart-hint" style="color:var(--text-muted);"></span>
                 </div>
                 <div class="lat-strip">
@@ -164,9 +166,7 @@
                     <div class="lat-pill lat-pill--p95"><span class="lat-pill-label">p95</span><span class="lat-pill-value" id="latP95">--</span></div>
                     <div class="lat-pill lat-pill--p99"><span class="lat-pill-label">p99 tail</span><span class="lat-pill-value" id="latP99">--</span></div>
                 </div>
-                <div class="chart-wrapper sm">
-                    <canvas id="latencyHist"></canvas>
-                </div>
+                <div class="chart-wrapper sm" id="latencyEcdf"></div>
             </div>
 
             <!-- Live Feed -->
@@ -182,9 +182,34 @@
                     <h3>Live event feed</h3>
                     <select id="eventFilter">
                         <option value="">All Events</option>
-                        <option value="hunt_result">Hunt Results</option>
-                        <option value="session_created">Sessions</option>
-                        <option value="api_call_end">API Calls</option>
+                        <optgroup label="Hunts">
+                            <option value="hunt_start">Hunt Start</option>
+                            <option value="hunt_complete">Hunt Complete</option>
+                            <option value="hunt_result">Hunt Results</option>
+                        </optgroup>
+                        <optgroup label="Trainer App">
+                            <option value="session_created">Sessions Created</option>
+                            <option value="trainer_registered">Trainer Registered</option>
+                            <option value="human_review_submitted">Human Reviews Submitted</option>
+                            <option value="task_completed">Tasks Completed</option>
+                            <option value="results_viewed">Results Viewed</option>
+                        </optgroup>
+                        <optgroup label="Reviewer App">
+                            <option value="reviewer_signed_in">Reviewer Signed In</option>
+                            <option value="task_opened">Task Opened</option>
+                            <option value="task_claimed">Task Claimed</option>
+                            <option value="reviewer_decision">Reviewer Decisions</option>
+                            <option value="feedback_submitted">Feedback Submitted</option>
+                            <option value="council_started">Council Started</option>
+                            <option value="council_completed">Council Completed</option>
+                            <option value="council_model_responded">Council Model Votes</option>
+                            <option value="notebook_fetched">Notebook Fetched</option>
+                            <option value="notebook_fetch_failed">Notebook Fetch Failed</option>
+                        </optgroup>
+                        <optgroup label="API">
+                            <option value="api_call_end">API Calls</option>
+                            <option value="judge_call">Judge Calls</option>
+                        </optgroup>
                     </select>
                 </div>
                 <div class="event-list" id="eventList">
@@ -305,6 +330,162 @@
                             <th>Break Rate</th>
                             <th>Avg Latency</th>
                             <th>Success Rate</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td colspan="6" class="loading">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Reviewers Section -->
+        <section id="section-reviewers" class="section">
+            <div class="section-header">
+                <h2>Reviewer activity</h2>
+                <p>Decisions, council runs, notebook fetches — per reviewer</p>
+            </div>
+
+            <div class="overview-cards">
+                <div class="card">
+                    <div class="card-icon card-icon-muted" aria-hidden="true">R</div>
+                    <div class="card-content">
+                        <div class="card-value" id="rvActive">--</div>
+                        <div class="card-label">Active Reviewers</div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-icon card-icon-accent" aria-hidden="true">D</div>
+                    <div class="card-content">
+                        <div class="card-value" id="rvDecisions">--</div>
+                        <div class="card-label">Decisions</div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-icon" aria-hidden="true">C</div>
+                    <div class="card-content">
+                        <div class="card-value" id="rvCouncil">--</div>
+                        <div class="card-label">Council Runs</div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-icon" aria-hidden="true">%</div>
+                    <div class="card-content">
+                        <div class="card-value" id="rvCouncilPass">--</div>
+                        <div class="card-label">Council Pass Rate</div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-icon" aria-hidden="true">NB</div>
+                    <div class="card-content">
+                        <div class="card-value" id="rvNotebook">--</div>
+                        <div class="card-label">Notebook Fetches</div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-icon" aria-hidden="true">ms</div>
+                    <div class="card-content">
+                        <div class="card-value" id="rvCouncilP95">--</div>
+                        <div class="card-label">Council p95</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="charts-row">
+                <div class="chart-container">
+                    <h3>Decisions breakdown <span class="chart-hint">approved / returned / escalated / completed</span></h3>
+                    <div class="chart-wrapper"><canvas id="reviewerDecisionsChart"></canvas></div>
+                </div>
+                <div class="chart-container">
+                    <h3>Council model agreement <span class="chart-hint">PASS vs FAIL votes per council model</span></h3>
+                    <div class="chart-wrapper"><canvas id="councilModelsChart"></canvas></div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h3>Per-reviewer leaderboard <span class="chart-hint">decisions + council activity</span></h3>
+                <table class="data-table" id="reviewerTable">
+                    <thead>
+                        <tr>
+                            <th>Reviewer</th>
+                            <th>Decisions</th>
+                            <th>Approved</th>
+                            <th>Returned</th>
+                            <th>Escalated</th>
+                            <th>Completed</th>
+                            <th>Approval Rate</th>
+                            <th>Council Runs</th>
+                            <th>Tasks Opened</th>
+                            <th>Last Seen</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td colspan="10" class="loading">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Workflow Section -->
+        <section id="section-workflow" class="section">
+            <div class="section-header">
+                <h2>Trainer workflow funnel</h2>
+                <p>Registered → human reviews → tasks completed → results viewed</p>
+            </div>
+
+            <div class="overview-cards">
+                <div class="card">
+                    <div class="card-icon card-icon-muted" aria-hidden="true">T</div>
+                    <div class="card-content">
+                        <div class="card-value" id="wfRegistered">--</div>
+                        <div class="card-label">Trainers Registered</div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-icon" aria-hidden="true">HR</div>
+                    <div class="card-content">
+                        <div class="card-value" id="wfHumanReviews">--</div>
+                        <div class="card-label">Human Reviews</div>
+                    </div>
+                </div>
+                <div class="card highlight">
+                    <div class="card-icon card-icon-accent" aria-hidden="true">TC</div>
+                    <div class="card-content">
+                        <div class="card-value" id="wfCompleted">--</div>
+                        <div class="card-label">Tasks Completed</div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-icon" aria-hidden="true">RV</div>
+                    <div class="card-content">
+                        <div class="card-value" id="wfResultsViewed">--</div>
+                        <div class="card-label">Results Viewed</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="charts-row">
+                <div class="chart-container wide">
+                    <h3>Workflow funnel <span class="chart-hint">conversion between stages</span></h3>
+                    <div class="chart-wrapper"><canvas id="workflowFunnelChart"></canvas></div>
+                </div>
+                <div class="chart-container">
+                    <h3>Save method <span class="chart-hint">how trainers finalize tasks</span></h3>
+                    <div class="chart-wrapper" id="saveMethodChart"></div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h3>Per-trainer activity</h3>
+                <table class="data-table" id="workflowTable">
+                    <thead>
+                        <tr>
+                            <th>Trainer</th>
+                            <th>Registered</th>
+                            <th>Human Reviews</th>
+                            <th>Tasks Completed</th>
+                            <th>Results Viewed</th>
+                            <th>Last Seen</th>
                         </tr>
                     </thead>
                     <tbody>
