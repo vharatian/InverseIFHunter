@@ -67,6 +67,13 @@ function fmtMs(ms) {
     return `${(v / 1000).toFixed(1)}s`;
 }
 
+/** Agreement helper: "1 hunt" vs "2 hunts". Optional irregular plural. */
+function plural(n, singular, pluralForm) {
+    const v = Number(n) || 0;
+    const word = v === 1 ? singular : (pluralForm || singular + 's');
+    return `${v.toLocaleString()} ${word}`;
+}
+
 /** Chart.js theme defaults derived from CSS tokens. */
 function chartTheme() {
     const cs = getComputedStyle(document.documentElement);
@@ -317,7 +324,10 @@ async function loadRealtimeStats() {
         document.getElementById('rtActiveSessions').textContent = data.active_sessions || 0;
         document.getElementById('rtHuntsInProgress').textContent = data.hunts_in_progress || 0;
         document.getElementById('rtRecentBreaks').textContent = data.recent_breaks || 0;
-        document.getElementById('activeTrainers').textContent = data.active_trainers || 0;
+        const at = Number(data.active_trainers) || 0;
+        document.getElementById('activeTrainers').textContent = at;
+        const atLabel = document.getElementById('activeTrainersLabel');
+        if (atLabel) atLabel.textContent = at === 1 ? 'active trainer' : 'active trainers';
         renderActiveTrainersDropdown(data.active_trainer_emails || []);
     } catch (error) {
         console.error('Error loading realtime stats:', error);
@@ -501,7 +511,7 @@ async function loadLatencyDistribution() {
     if (!el) return;
     const data = await fetchAPI('latency_distribution');
     const setPill = (id, ms) => { const node = document.getElementById(id); if (node) node.textContent = fmtMs(ms); };
-    const setCount = (n) => { const node = document.getElementById('latencyCount'); if (node) node.textContent = n ? `${n.toLocaleString()} calls` : ''; };
+    const setCount = (n) => { const node = document.getElementById('latencyCount'); if (node) node.textContent = n ? plural(n, 'call') : ''; };
     if (window.Plotly) { try { Plotly.purge(el); } catch (_) {} }
     if (!data || !data.count || !(data.ecdf_xs_ms || []).length) {
         _ensureEmptyState(el, 'No API calls in this period');
@@ -683,11 +693,11 @@ function formatEventDetails(event) {
             case 'trainer_registered':
                 return `Registered: ${escapeHtml(data.trainer_email || '')}`;
             case 'human_review_submitted':
-                return `${escapeHtml(String(data.total_reviews ?? ''))} reviews · ${escapeHtml(String(data.reviews_with_judgment ?? ''))} judged`;
+                return `${escapeHtml(plural(data.total_reviews ?? 0, 'review'))} · ${escapeHtml(String(data.reviews_with_judgment ?? 0))} judged`;
             case 'task_completed':
                 return `Completed via ${escapeHtml(data.save_method || 'unknown')}${data.session_id ? ' · ' + escapeHtml(data.session_id) : ''}`;
             case 'results_viewed':
-                return `${escapeHtml(String(data.total_results ?? 0))} results · ${escapeHtml(String(data.breaking_results ?? 0))} breaks`;
+                return `${escapeHtml(plural(data.total_results ?? 0, 'result'))} · ${escapeHtml(plural(data.breaking_results ?? 0, 'break'))}`;
             case 'reviewer_signed_in':
                 return `${escapeHtml(data.role || 'reviewer')}${data.pod_id ? ' · pod ' + escapeHtml(data.pod_id) : ''}${rev}`;
             case 'task_opened':
@@ -703,7 +713,7 @@ function formatEventDetails(event) {
             case 'council_completed': {
                 const ok = data.passed ? 'PASS' : 'FAIL';
                 const dur = data.duration_ms ? ` · ${(data.duration_ms/1000).toFixed(1)}s` : '';
-                const rules = data.total_rules ? ` · ${data.pass_count ?? 0}/${data.total_rules} rules` : '';
+                const rules = data.total_rules ? ` · ${data.pass_count ?? 0}/${data.total_rules} ${data.total_rules === 1 ? 'rule' : 'rules'}` : '';
                 return `<strong>${ok}</strong>${rules}${dur}${rev}`;
             }
             case 'council_model_responded': {
@@ -711,7 +721,7 @@ function formatEventDetails(event) {
                 return `${escapeHtml(mid)} voted <strong>${escapeHtml(data.vote || '')}</strong> · ${escapeHtml(data.rule_id || '')}`;
             }
             case 'notebook_fetched':
-                return `${escapeHtml(String(data.slots ?? 0))} slots · ${escapeHtml(String(data.cells_scanned ?? 0))} cells${rev}`;
+                return `${escapeHtml(plural(data.slots ?? 0, 'slot'))} · ${escapeHtml(plural(data.cells_scanned ?? 0, 'cell'))}${rev}`;
             case 'notebook_fetch_failed':
                 return `<span class="criteria-fail">Failed</span> · ${escapeHtml(String(data.error || '').slice(0, 120))}${rev}`;
             default:
@@ -740,7 +750,7 @@ async function loadTrainers() {
         const name = document.querySelector(`#podium${n} .podium-name`);
         const stat = document.querySelector(`#podium${n} .podium-stat`);
         if (name) name.textContent = p.trainer_id || '--';
-        if (stat) stat.textContent = `${p.total_breaks ?? 0} breaks`;
+        if (stat) stat.textContent = plural(p.total_breaks ?? 0, 'break');
     });
     
     // Update table
@@ -912,7 +922,7 @@ async function loadModels() {
                                 return [
                                     `Break rate: ${(m.break_rate*100).toFixed(1)}%`,
                                     `95% CI: [${(m.ci_lo*100).toFixed(1)}%, ${(m.ci_hi*100).toFixed(1)}%]`,
-                                    `n = ${m.hunts} hunts, ${m.breaks} breaks`,
+                                    `n = ${plural(m.hunts, 'hunt')}, ${plural(m.breaks, 'break')}`,
                                 ];
                             }
                         }
@@ -986,7 +996,7 @@ async function loadModels() {
                             label: (c) => {
                                 const m = byHunts[c.dataIndex];
                                 const share = (100 * m.hunts / totalHunts).toFixed(1);
-                                return `${m.hunts.toLocaleString()} hunts · ${share}% share`;
+                                return `${plural(m.hunts, 'hunt')} · ${share}% share`;
                             }
                         }
                     },
@@ -1193,7 +1203,7 @@ async function loadTrainerWorkflow() {
                                 label: (c) => {
                                     const v = c.parsed.x;
                                     const pct = total ? (100 * v / total).toFixed(1) : '0';
-                                    return `${v.toLocaleString()} events · ${pct}% of registered`;
+                                    return `${plural(v, 'event')} · ${pct}% of registered`;
                                 }
                             }
                         },
@@ -1481,7 +1491,7 @@ async function performSearch() {
     container.replaceChildren();
     const header = document.createElement('p');
     header.style.marginBottom = '1rem';
-    header.textContent = `Found ${data.count} results for "${query}"`;
+    header.textContent = `Found ${plural(data.count, 'result')} for "${query}"`;
     container.appendChild(header);
     for (const r of data.results) {
         const row = document.createElement('div');
