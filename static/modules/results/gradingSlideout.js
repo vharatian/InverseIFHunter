@@ -21,6 +21,7 @@ import { createFocusTrap } from '../focusTrap.js';
 import { isResultBreaking } from './resultModel.js';
 import { renderJudgeExplanation } from './clearAndFormat.js';
 import { updateReviewProgress } from './selectionConfirmAndProgress.js';
+import { enqueue, isOnline } from '../offlineQueue.js';
 
 const GRADING_SPLIT_STORAGE_KEY = 'modelhunter_grading_split_percent';
 
@@ -386,17 +387,73 @@ export async function submitGradingReview(huntId, result, slotIndex, rowNumber) 
         submitted: true
     };
 
+    // Persist with explicit ok-check, keepalive to survive slideout-close /
+    // pagehide, rollback of the optimistic `submitted: true` on failure, and
+    // offline-queue retry so a silent network blip can never again leave the
+    // trainer believing their feedback was saved when it wasn't.
+    const url = `api/save-reviews/${state.sessionId}`;
+    const fetchOptions = {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            reviews: { [rowKey]: state.humanReviews[rowKey] },
+            auto_save: true,
+        }),
+        keepalive: true,
+    };
+
+    let persisted = false;
+    let lastError = null;
     try {
-        await fetch(`api/save-reviews/${state.sessionId}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                reviews: { [rowKey]: state.humanReviews[rowKey] },
-                auto_save: true,
-            }),
-        });
+        const resp = await fetch(url, fetchOptions);
+        if (resp.ok) {
+            persisted = true;
+        } else {
+            lastError = new Error(`save-reviews failed: ${resp.status} ${resp.statusText}`);
+        }
     } catch (err) {
-        console.warn(`Failed to persist review for ${rowKey}:`, err);
+        lastError = err;
+    }
+
+    if (!persisted) {
+        // Roll back the optimistic "submitted" flag so progress/alignment UI
+        // don't treat this slot as done.
+        if (state.humanReviews[huntId]) {
+            state.humanReviews[huntId] = { ...state.humanReviews[huntId], submitted: false };
+        }
+        if (state.humanReviews[rowKey]) {
+            state.humanReviews[rowKey] = { ...state.humanReviews[rowKey], submitted: false };
+        }
+
+        let queued = false;
+        try {
+            await enqueue({
+                type: 'save-reviews',
+                url,
+                options: fetchOptions,
+                sessionId: state.sessionId,
+            });
+            queued = true;
+        } catch (qerr) {
+            console.error('Failed to enqueue review for offline retry:', qerr);
+        }
+
+        const onlineNow = isOnline();
+        const msg = queued
+            ? (onlineNow
+                ? 'Could not save your review to the server. Saved locally and will retry automatically.'
+                : 'You appear to be offline. Review saved locally and will send when you reconnect.')
+            : 'Could not save your review. Please check your connection and try again.';
+        showToast(msg, 'error');
+        console.error('submitGradingReview failed:', lastError);
+
+        const statusElFail = document.querySelector(`.grading-status[data-hunt-id="${huntId}"]`);
+        if (statusElFail) {
+            statusElFail.innerHTML = queued
+                ? '<span style="color: var(--warning);">Save pending — will retry</span>'
+                : '<span style="color: var(--danger);">Save failed — please retry</span>';
+        }
+        return;
     }
 
     const statusEl = document.querySelector(`.grading-status[data-hunt-id="${huntId}"]`);

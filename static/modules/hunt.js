@@ -575,8 +575,27 @@ export async function startHunt() {
     
     state.isHunting = true;
     state.results = [];
+
+    // Keep client accumulation in lock-step with the backend contract
+    // (routes/session.py update_config):
+    //   hunt_offset == 0  → backend clears all_results; client must too, or
+    //                       selected_row_numbers indices will reference rows
+    //                       the backend no longer has and get clamped to the
+    //                       new (smaller) length on rehydrate.
+    //   hunt_offset > 0   → backend keeps all_results; client keeps its array
+    //                       so positional indices stay valid across runs.
+    // Either way, any pre-existing "selection confirmed" state is invalid for
+    // a new hunt run and must be cleared so the trainer can re-select against
+    // the post-run superset (and the UI won't stay locked).
+    if (huntOffset === 0) {
+        state.allResponses = [];
+        state.huntResponseData = {};
+    }
+    state.selectedRowNumbers = [];
+    state.selectionConfirmed = false;
+
     setActivePhase('hunting');
-    
+
     // Store the offset for this run (used in initProgressUI)
     state.currentRunStartOffset = huntOffset;
     

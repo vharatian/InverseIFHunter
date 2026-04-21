@@ -272,9 +272,40 @@ async def update_config(session_id: str, config: HuntConfig):
         HuntStatus.STOPPED_BUDGET,
         HuntStatus.NEEDS_ATTENTION,
     ):
+        # `hunt_offset` is the contract the frontend uses to say "append to this
+        # turn's accumulated results" (offset > 0) vs "start fresh" (offset == 0).
+        # Truncating `all_results` while the client still holds rowNumbers
+        # indexed into the pre-truncation array produces the "1 slot shows,
+        # selection locked" bug: trainer_ui.selected_row_numbers get clamped
+        # to the post-truncation length on rehydrate (see
+        # static/modules/alignment.js#applyTrainerUiAfterHydrate).
+        hunt_offset = int(getattr(config, "hunt_offset", 0) or 0)
+        is_fresh_run = hunt_offset == 0
+
         await redis_store.set_status(session_id, HuntStatus.PENDING)
+        # The current-run results list always resets — it represents one run,
+        # not the accumulation.
         await redis_store.clear_results(session_id)
-        await redis_store.clear_all_results(session_id)
+        session.status = HuntStatus.PENDING
+        session.results = []
+
+        if is_fresh_run:
+            # Caller is starting from zero (new turn before any hunt ran, or
+            # explicit restart). Safe to wipe accumulation.
+            await redis_store.clear_all_results(session_id)
+            session.all_results = []
+            session.accumulated_hunt_count = 0
+        else:
+            # Append mode: keep accumulated results; only align the hunt_id
+            # cursor with the offset the client sent so the next run's
+            # hunt_ids continue from where the client thinks we are.
+            session.accumulated_hunt_count = hunt_offset
+
+        await redis_store.set_accumulated_hunt_count(
+            session_id, session.accumulated_hunt_count
+        )
+
+        # Counters are per-run (this run's progress bar), reset either way.
         await redis_store.set_hunt_counters(
             session_id,
             total_hunts=config.parallel_workers,
@@ -282,18 +313,9 @@ async def update_config(session_id: str, config: HuntConfig):
             breaks_found=0,
             passes_found=0,
         )
-        # Keep accumulated_hunt_count aligned with config.hunt_offset so the next run's
-        # hunt_ids don't overlap or jump relative to the list we just cleared.
-        await redis_store.set_accumulated_hunt_count(
-            session_id, getattr(config, "hunt_offset", 0) or 0
-        )
-        session.status = HuntStatus.PENDING
-        session.results = []
-        session.all_results = []
         session.completed_hunts = 0
         session.breaks_found = 0
         session.passes_found = 0
-        session.accumulated_hunt_count = getattr(config, "hunt_offset", 0) or 0
 
     try:
         await save_session_pg(session)
