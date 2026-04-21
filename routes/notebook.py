@@ -165,9 +165,12 @@ async def upload_notebook(request: Request, file: UploadFile = File(...), force_
         trainer_name = request.headers.get("X-Trainer-Name", request.query_params.get("trainer_name", ""))
         trainer_info = _extract_trainer_info_from_request(request, trainer_email, trainer_name)
         
-        if trainer_email:
-            await redis_store.set_trainer_email(session.session_id, trainer_email)
-        
+        await redis_store.set_session_identity(
+            session.session_id,
+            trainer_email=trainer_email,
+            trainer_name=trainer_name,
+        )
+
         # Telemetry
         _log_telemetry_safe("session_created", {
             "session_id": session.session_id,
@@ -275,9 +278,13 @@ async def fetch_notebook(http_request: Request, request: NotebookURLRequest):
         trainer_name = request.trainer_name or ""
         trainer_info = _extract_trainer_info_from_request(http_request, trainer_email, trainer_name)
         
-        if trainer_email:
-            await redis_store.set_trainer_email(session.session_id, trainer_email)
-        
+        await redis_store.set_session_identity(
+            session.session_id,
+            trainer_email=trainer_email,
+            trainer_name=trainer_name,
+            colab_url=request.url,
+        )
+
         # Telemetry
         _log_telemetry_safe("session_created", {
             "session_id": session.session_id,
@@ -373,8 +380,12 @@ async def create_notebook(http_request: Request, request: CreateNotebookRequest)
         trainer_name = request.trainer_name or ""
         trainer_info = _extract_trainer_info_from_request(http_request, trainer_email, trainer_name)
 
-        if trainer_email:
-            await redis_store.set_trainer_email(session.session_id, trainer_email)
+        await redis_store.set_session_identity(
+            session.session_id,
+            trainer_email=trainer_email,
+            trainer_name=trainer_name,
+            colab_url=notebook_url,
+        )
 
         _log_telemetry_safe("session_created", {
             "session_id": session.session_id,

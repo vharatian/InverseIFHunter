@@ -468,4 +468,11 @@ export function resetAllStatuses() {
         el.style.cursor = '';
         el.title = 'Saved';
     });
+    // Clear the cached review-status so the next session doesn't inherit
+    // the previous task's lock, and reset the global header indicator —
+    // otherwise "Edits locked" leaks into the new-task view and overlaps
+    // the "Load Notebook" heading in the top navbar.
+    state._reviewStatus = null;
+    state.reviewStatus = null;
+    _setGlobalStatus('saved');
 }

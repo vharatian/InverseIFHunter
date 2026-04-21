@@ -26,6 +26,52 @@ export function resetLoader() {
   loaderState.currentUrl = null;
 }
 
+/**
+ * Shared setup for any flow that opens the reviewer task view for a session.
+ * Hides home, bumps the sequence counter (for race-safe loads), resets the
+ * task panel + council, and returns the elements handle plus the load id.
+ */
+function _beginSession({ sessionId = null, rawUrl = "" } = {}) {
+  hideHome();
+  const seq = ++loaderState.seq;
+  loaderState.currentSessionId = sessionId || null;
+  _hideLookupMatches();
+
+  const els = _collectElements();
+  _prepareTaskPanel(els, rawUrl);
+  resetCouncil();
+  const summaryEl = document.getElementById("council-summary");
+  if (summaryEl) summaryEl.textContent = "";
+
+  return { els, seq };
+}
+
+/**
+ * Open the reviewer task view for a session that has NO Colab/Drive link
+ * attached. We still bind the sessionId (so council + review actions work)
+ * and paint a soft inline notice where the notebook preview would appear.
+ */
+export function openSessionWithoutNotebook(opts = {}) {
+  const { els } = _beginSession({ sessionId: opts.sessionId, rawUrl: "" });
+  loaderState.currentUrl = null;
+
+  if (els.taskContent) {
+    els.taskContent.classList.remove("loading-placeholder");
+    els.taskContent.setAttribute("aria-busy", "false");
+    els.taskContent.textContent = "";
+  }
+  if (els.banner) {
+    els.banner.hidden = false;
+    els.banner.className = "notebook-only-banner notebook-only-banner--warn";
+    els.banner.textContent = "No Colab link attached to this task.";
+  }
+  setFetchStatus("No Colab link attached — opened without a notebook preview.", false);
+  if (els.fetchBtn) {
+    els.fetchBtn.disabled = false;
+    els.fetchBtn.setAttribute("aria-busy", "false");
+  }
+}
+
 export async function loadNotebookOnly(url, opts = {}) {
   const raw = (url || "").trim();
   if (!raw) {
@@ -37,17 +83,8 @@ export async function loadNotebookOnly(url, opts = {}) {
     return;
   }
 
-  hideHome();
-  const loadId = ++loaderState.seq;
   loaderState.isLoading = true;
-  _hideLookupMatches();
-  loaderState.currentSessionId = opts.sessionId || null;
-
-  const els = _collectElements();
-  _prepareTaskPanel(els, raw);
-  resetCouncil();
-  const summaryEl = document.getElementById("council-summary");
-  if (summaryEl) summaryEl.textContent = "";
+  const { els, seq: loadId } = _beginSession({ sessionId: opts.sessionId, rawUrl: raw });
   loaderState.currentUrl = raw;
 
   try {

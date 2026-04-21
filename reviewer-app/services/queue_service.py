@@ -144,6 +144,7 @@ async def get_queue_with_summaries(
             meta = meta_results[i * 2] or {}
             notebook_json = meta_results[i * 2 + 1]
             item["trainer_email"] = (meta.get("trainer_email") or "").strip()
+            item["trainer_name"] = (meta.get("trainer_name") or "").strip()
             item["submitted_at"] = (meta.get("submitted_at") or meta.get("submit_time") or "").strip()
             item["colab_url"] = (meta.get("colab_url") or meta.get("notebook_url") or meta.get("url") or "").strip()
             # Extract domain from notebook metadata
@@ -157,6 +158,39 @@ async def get_queue_with_summaries(
                 except Exception:
                     pass
             item["domain"] = domain
+
+        # Fallback for sessions predating Redis-meta persistence of colab_url /
+        # trainer_name: pull from PG `sessions.metadata` (the trainer-app write
+        # path has always stored them there). Only sessions missing the fields
+        # trigger a lookup — new sessions hit the Redis path above with zero
+        # extra round trips.
+        missing = [
+            item for item in out
+            if not item.get("colab_url") or not item.get("trainer_name")
+        ]
+        if missing:
+            try:
+                from api.ih_pg import _pg_session
+                pg = _pg_session()
+                for item in missing:
+                    try:
+                        pg_meta = await pg.get_session_metadata_pg(item["session_id"]) or {}
+                    except Exception:
+                        pg_meta = {}
+                    if not item.get("colab_url"):
+                        item["colab_url"] = str(
+                            pg_meta.get("colab_url")
+                            or pg_meta.get("url")
+                            or pg_meta.get("notebook_url")
+                            or ""
+                        ).strip()
+                    if not item.get("trainer_name"):
+                        item["trainer_name"] = str(pg_meta.get("trainer_name") or "").strip()
+                    if not item.get("trainer_email"):
+                        item["trainer_email"] = str(pg_meta.get("trainer_email") or "").strip()
+            except Exception:
+                # PG unavailable — leave fields empty; frontend handles missing values.
+                pass
 
     if per_page and per_page > 0:
         start = (max(page, 1) - 1) * per_page

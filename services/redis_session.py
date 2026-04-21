@@ -263,6 +263,12 @@ async def snapshot_workflow_for_pg(session_id: str) -> Dict[str, Any]:
     te = meta.get("trainer_email")
     if isinstance(te, str) and te.strip():
         out["trainer_email"] = te.strip()
+    tn = meta.get("trainer_name")
+    if isinstance(tn, str) and tn.strip():
+        out["trainer_name"] = tn.strip()
+    cu = meta.get("colab_url") or meta.get("url")
+    if isinstance(cu, str) and cu.strip():
+        out["colab_url"] = cu.strip()
 
     if await get_qc_done(session_id):
         out["qc_done"] = True
@@ -340,9 +346,15 @@ async def apply_workflow_metadata_to_redis(session_id: str, meta: Dict[str, Any]
     if isinstance(ack, str) and ack.strip():
         await set_meta_field(session_id, "acknowledged_at", ack.strip())
 
-    te = meta.get("trainer_email")
-    if isinstance(te, str) and te.strip():
-        await set_trainer_email(session_id, te.strip())
+    # Restore trainer + notebook identity so the reviewer queue can surface
+    # real trainer name and the notebook link even for sessions rehydrated
+    # from PG (these aren't written by create_session).
+    await set_session_identity(
+        session_id,
+        trainer_email=meta.get("trainer_email"),
+        trainer_name=meta.get("trainer_name"),
+        colab_url=meta.get("colab_url") or meta.get("url"),
+    )
 
     # Note: created_at is handled by `create_session` via the `created_at=` kwarg passed
     # from `save_full_session`. Do not repeat that logic here or we risk restoring a stale
@@ -477,6 +489,38 @@ async def set_trainer_email(session_id: str, email: str) -> None:
         return
     r = await get_redis()
     await r.hset(_key(session_id, "meta"), "trainer_email", email.strip().lower())
+
+
+async def set_session_identity(
+    session_id: str,
+    *,
+    trainer_email: Any = None,
+    trainer_name: Any = None,
+    colab_url: Any = None,
+) -> None:
+    """Idempotently persist trainer + notebook-URL identity into session meta.
+
+    Blank, non-string, or None values are silently skipped, so callers can pass
+    raw request fields straight through. `colab_url` is written under both
+    ``colab_url`` and ``url`` because different readers use different keys.
+
+    Single pipelined HSET + one TTL refresh — cheaper than multiple
+    ``set_meta_field`` round trips and keeps identity fields consistent.
+    """
+    mapping: Dict[str, str] = {}
+    if isinstance(trainer_email, str) and trainer_email.strip():
+        mapping["trainer_email"] = trainer_email.strip().lower()
+    if isinstance(trainer_name, str) and trainer_name.strip():
+        mapping["trainer_name"] = trainer_name.strip()
+    if isinstance(colab_url, str) and colab_url.strip():
+        cu = colab_url.strip()
+        mapping["colab_url"] = cu
+        mapping["url"] = cu
+    if not mapping:
+        return
+    r = await get_redis()
+    await r.hset(_key(session_id, "meta"), mapping=mapping)
+    await _refresh_ttl(r, session_id)
 
 
 async def get_results(session_id: str) -> List[HuntResult]:

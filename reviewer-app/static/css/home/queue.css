@@ -166,6 +166,17 @@
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .queue-item-taskid { font-family: var(--font-mono, monospace); font-size: 0.78rem; }
+.queue-item-colab-url {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--accent-primary, #3b82f6);
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .queue-item-sid {
   font-family: var(--font-mono, monospace);
   font-size: 0.64rem; color: var(--text-muted, #606060);

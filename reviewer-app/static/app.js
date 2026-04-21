@@ -10,7 +10,6 @@
  *   - version checker
  */
 import { initVersionCheck, setCouncilRunningCheck } from "./js/api.js";
-import { showToast } from "./js/dom.js";
 import { initCouncil, setNotebookUrl, getCouncilState } from "./js/council.js";
 
 import {
@@ -25,6 +24,7 @@ import { hydrateGateCouncilFooter } from "./js/auth/councilFooter.js";
 import { initFetchCard } from "./js/notebook/fetchCard.js";
 import {
   loadNotebookOnly,
+  openSessionWithoutNotebook,
   getCurrentSessionId,
   getCurrentNotebookUrl,
   resetLoader,
@@ -41,17 +41,16 @@ initFetchCard();
 
 initHome({ onBackToHome: () => resetLoader() });
 setOpenSessionHandler(async (item) => {
-  const url = item?.colab_url || "";
-  if (!url) {
-    showToast(
-      "This session has no notebook URL attached yet. Ask the trainer to resubmit with a Colab/Drive link.",
-      "error",
-    );
-    return;
-  }
+  const url = (item?.colab_url || "").trim();
   const input = document.getElementById("task-fetch-input");
   if (input) input.value = url;
-  await loadNotebookOnly(url, { sessionId: item.session_id });
+  if (url) {
+    await loadNotebookOnly(url, { sessionId: item.session_id });
+  } else {
+    // Trainer submitted without a Colab link — still open the task and show
+    // an inline notice (no blocking toast, per product decision).
+    openSessionWithoutNotebook({ sessionId: item.session_id });
+  }
   const res = await markSessionInProgress(item.session_id);
   if (res?.changed) refreshQueue();
 });
